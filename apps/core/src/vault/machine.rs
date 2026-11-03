@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::audit::{AuditActor, AuditEntry};
+use super::dynamic::target_guard::{RoleWriter, TargetEgress};
 use super::{now_millis, random_token, sha256_hex, VaultError};
 use crate::plugin_secrets::PluginSecretStore;
 
@@ -203,7 +204,8 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
          );
          CREATE INDEX IF NOT EXISTS vault_tokens_identity ON vault_tokens (identity_id);",
     )
-    .context("initializing machine identity schema")
+    .context("initializing machine identity schema")?;
+    super::machine_egress::ensure_writer_column(conn)
 }
 
 fn is_valid_identity_name(name: &str) -> bool {
@@ -324,14 +326,38 @@ pub(super) fn identity_locked(conn: &Connection, id_or_name: &str) -> Result<Mac
 }
 
 impl PluginSecretStore {
-    /// Create a machine identity. For AppRole, `auth` may carry an empty
-    /// `roleId`; one is generated.
+    /// Create a machine identity as a configuration manager (tests and
+    /// fixtures; the HTTP route records its caller with [`Self::machine_create_as`]).
+    #[cfg(test)]
     pub async fn machine_create(
         &self,
         name: &str,
         auth: AuthMethod,
         policies: Vec<String>,
         token_ttl_secs: Option<i64>,
+        actor: &AuditActor,
+    ) -> Result<MachineIdentity> {
+        self.machine_create_as(
+            name,
+            auth,
+            policies,
+            token_ttl_secs,
+            RoleWriter::Manager,
+            actor,
+        )
+        .await
+    }
+
+    /// Create a machine identity written by `writer`: a delegate's JWKS and
+    /// TokenReview targets are screened ([`super::machine_egress`]). For
+    /// AppRole, `auth` may carry an empty `roleId`; one is generated.
+    pub async fn machine_create_as(
+        &self,
+        name: &str,
+        auth: AuthMethod,
+        policies: Vec<String>,
+        token_ttl_secs: Option<i64>,
+        writer: RoleWriter,
         actor: &AuditActor,
     ) -> Result<MachineIdentity> {
         if !is_valid_identity_name(name) {
@@ -353,6 +379,8 @@ impl PluginSecretStore {
                 other
             }
         };
+        super::machine_egress::precheck(&auth, writer)
+            .map_err(|error| VaultError::Invalid(error.to_string()))?;
         let role_id = match &auth {
             AuthMethod::AppRole { role_id } => Some(role_id.clone()),
             _ => None,
@@ -364,8 +392,8 @@ impl PluginSecretStore {
         let conn = self.conn.lock().await;
         let inserted = conn.execute(
             "INSERT OR IGNORE INTO vault_machine_identities
-                 (id, name, auth, role_id, policies, token_ttl_secs, created_at, created_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (id, name, auth, role_id, policies, token_ttl_secs, created_at, created_by, writer)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 id,
                 name,
@@ -374,7 +402,8 @@ impl PluginSecretStore {
                 serde_json::to_string(&policies)?,
                 ttl,
                 now_millis(),
-                actor.id
+                actor.id,
+                writer.label()
             ],
         )?;
         if inserted == 0 {
@@ -717,7 +746,8 @@ impl PluginSecretStore {
         let AuthMethod::Jwt(config) = &identity.auth else {
             return Err(VaultError::Invalid("identity does not use jwt login".into()).into());
         };
-        if let Err(error) = verify_jwt(config, jwt).await {
+        let egress = self.machine_identity_egress(&identity.name).await?;
+        if let Err(error) = verify_jwt(config, jwt, egress).await {
             self.audit(
                 &AuditEntry::new(
                     &AuditActor::new("machine", Some(&identity.id)),
@@ -833,7 +863,7 @@ fn jwks_cache() -> &'static Mutex<HashMap<String, (Instant, jsonwebtoken::jwk::J
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-async fn jwks(url: &str, refresh: bool) -> Result<jsonwebtoken::jwk::JwkSet> {
+async fn jwks(url: &str, refresh: bool, egress: TargetEgress) -> Result<jsonwebtoken::jwk::JwkSet> {
     // A forced refresh (unknown `kid`) happens before the token's signature
     // is checked, so it is rate-limited per URL: unsigned junk cannot turn
     // every login attempt into an outbound JWKS request.
@@ -850,15 +880,7 @@ async fn jwks(url: &str, refresh: bool) -> Result<jsonwebtoken::jwk::JwkSet> {
     }) {
         return Ok(set);
     }
-    let set: jsonwebtoken::jwk::JwkSet = reqwest::Client::new()
-        .get(url)
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-        .context("parsing JWKS")?;
+    let set = super::machine_egress::fetch_jwks(url, egress).await?;
     if let Ok(mut guard) = jwks_cache().lock() {
         guard.insert(url.to_owned(), (Instant::now(), set.clone()));
     }
@@ -887,7 +909,7 @@ fn claim_matches(claims: &Value, name: &str, allowed: &[String]) -> bool {
 }
 
 /// Verify `jwt` against `config`; returns the claims.
-pub async fn verify_jwt(config: &JwtConfig, jwt: &str) -> Result<Value> {
+pub async fn verify_jwt(config: &JwtConfig, jwt: &str, egress: TargetEgress) -> Result<Value> {
     use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
     let header = decode_header(jwt).map_err(|_| anyhow!("malformed JWT"))?;
     if matches!(
@@ -904,9 +926,9 @@ pub async fn verify_jwt(config: &JwtConfig, jwt: &str) -> Result<Value> {
                 None if set.keys.len() == 1 => set.keys.first().cloned(),
                 None => None,
             };
-            let jwk = match find(&jwks(url, false).await?) {
+            let jwk = match find(&jwks(url, false, egress).await?) {
                 Some(jwk) => jwk,
-                None => find(&jwks(url, true).await?)
+                None => find(&jwks(url, true, egress).await?)
                     .ok_or_else(|| anyhow!("signing key not in JWKS"))?,
             };
             DecodingKey::from_jwk(&jwk)?

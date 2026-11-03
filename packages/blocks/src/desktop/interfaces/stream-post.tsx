@@ -321,7 +321,7 @@ function PostAvatar({
 	const tl = useLiteralMessages();
 	const author = post.author;
 	if (!author) {
-		return <StreamAvatar agent={undefined} name="You" size={36} />;
+		return <StreamAvatar agent={undefined} name={tl("You")} size={36} />;
 	}
 	return (
 		<button

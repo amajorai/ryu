@@ -25,6 +25,10 @@ import {
 	useDiffViewPrefs,
 } from "@/src/hooks/useDiffViewPrefs.ts";
 import {
+	desktopCommandErrorText,
+	desktopCommandRejectionText,
+} from "@/src/lib/desktop-command-error-messages.ts";
+import {
 	countLines,
 	decodeViewerText,
 	excerptLines,
@@ -45,7 +49,8 @@ type ViewerAnnotation =
 type LoadState =
 	| { status: "loading" }
 	| { status: "ready"; text: string }
-	| { status: "error"; message: string };
+	| { status: "error"; message: string }
+	| { status: "failed"; rejection: unknown };
 
 const ASSISTANT_FALLBACK_PREFIX =
 	"Review these notes on a project file and address each one.\n\n";
@@ -105,10 +110,8 @@ export function FileAnnotationViewer({
 			})
 			.catch((error: unknown) => {
 				if (!cancelled) {
-					setLoad({
-						status: "error",
-						message: error instanceof Error ? error.message : String(error),
-					});
+					// Worded at render, so a catalog change does not reload the file.
+					setLoad({ status: "failed", rejection: error });
 				}
 			});
 		return () => {
@@ -254,12 +257,32 @@ export function FileAnnotationViewer({
 				Loading file…
 			</div>
 		);
-	} else if (load.status === "error") {
+	} else if (load.status === "error" || load.status === "failed") {
+		// The native read rejects with a code; raw OS text is only a detail.
+		const coded =
+			load.status === "failed"
+				? desktopCommandErrorText(load.rejection, tl)
+				: null;
+		const message =
+			load.status === "error"
+				? load.message
+				: (coded?.message ?? tl("This file could not be read."));
+		const detail =
+			load.status === "error"
+				? null
+				: coded
+					? coded.detail
+					: desktopCommandRejectionText(load.rejection);
 		body = (
 			<div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center text-xs">
 				<p className="text-muted-foreground" role="alert">
-					{load.message}
+					{message}
 				</p>
+				{detail ? (
+					<p className="break-all text-muted-foreground/70" data-ryu-i18n="off">
+						{detail}
+					</p>
+				) : null}
 				<Button
 					onClick={onOpenExternally}
 					size="xs"

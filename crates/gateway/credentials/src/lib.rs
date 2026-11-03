@@ -1,5 +1,10 @@
 //! Private local Gateway credentials shared by the standalone and Core hosts.
 pub mod config_file;
+mod org_core_relay;
+pub use org_core_relay::{
+    derive_org_core_relay_key, valid_org_core_relay_org, verify_org_core_relay_key,
+    ORG_CORE_RELAY_PREFIX,
+};
 pub mod provider_apply;
 pub use provider_apply::{ProviderApplyErrorCode, ProviderApplyOutcome, ProviderRuntimeEpoch};
 pub mod sdk;

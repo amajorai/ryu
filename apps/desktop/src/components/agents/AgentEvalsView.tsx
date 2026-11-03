@@ -20,6 +20,7 @@ import {
 	type EvaluatorResultRow,
 } from "@ryu/blocks/desktop/agent-edit.tsx";
 import { EvaluatorCatalog } from "@ryu/blocks/desktop/evaluator-catalog.tsx";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -62,7 +63,7 @@ export interface AgentEvalsViewProps {
 }
 
 function pct(value: number): string {
-	return `${Math.round(value * 100)}%`;
+	return formatPercent(value);
 }
 
 function scoreTone(score: number): string {

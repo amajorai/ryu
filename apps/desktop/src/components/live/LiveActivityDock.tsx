@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import type { CSSProperties } from "react";
 import "./LiveActivityDock.css";
 // apps/desktop/src/components/live/LiveActivityDock.tsx
@@ -162,7 +163,7 @@ function ActivityPill({
 			</span>
 			{activity.progress !== undefined && (
 				<span className="text-muted-foreground text-xs tabular-nums">
-					{Math.round(activity.progress * 100)}%
+					{formatPercent(activity.progress)}
 				</span>
 			)}
 			{expanded && (

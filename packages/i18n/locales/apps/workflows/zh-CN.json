@@ -1079,6 +1079,7 @@
   "with": "，参与者：",
   "working": "个工作中",
   "your browser": "浏览器",
+  "{action} → {detail}": "{action} → {detail}",
   "{count} more": "还有 {count} 个",
   "{count} selected": "已选择 {count} 项",
   "{count} selected people": "已选 {count} 人",

@@ -669,6 +669,7 @@
   "network": "rede",
   "node": "nó",
   "none": "nenhum",
+  "not run": "não executado",
   "now": "agora",
   "once": "uma vez",
   "open": "abertas",
@@ -715,5 +716,6 @@
   "{count} more": "Mais {count}",
   "{cueCount} cues copied as {format}.": "{cueCount} legendas copiadas como {format}.",
   "{name} is queued. This runs on your machine, so it takes a while for a long video.": "{name} está na fila. Isso é executado no seu computador, então leva um tempo para um vídeo longo.",
-  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "{translatedCount} de {cueCount} linhas foram traduzidas; o restante manteve o texto original."
+  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "{translatedCount} de {cueCount} linhas foram traduzidas; o restante manteve o texto original.",
+  "{video} → {language}": "{video} → {language}"
 }

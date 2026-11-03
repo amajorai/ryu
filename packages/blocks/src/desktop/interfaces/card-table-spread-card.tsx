@@ -163,7 +163,7 @@ function SpreadCard({
 			<button
 				aria-current={active ? "true" : undefined}
 				aria-label={tl("{title}. {readingLabel}, {cardDetails}. Play card", {
-					cardDetails: [agent?.name ?? "no agent", reading.age]
+					cardDetails: [agent?.name ?? tl("no agent"), reading.age]
 						.filter(Boolean)
 						.join(", "),
 					readingLabel: reading.label,

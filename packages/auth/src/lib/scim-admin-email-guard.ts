@@ -21,6 +21,7 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError } from "better-auth/api";
 import { assertScimEmailOnVerifiedDomain } from "./scim-email-domain-guard.ts";
+import type { OrganizationDomainsLookup } from "./sso-email-domain.ts";
 import { isAdminEmail } from "./waitlist.ts";
 
 export const SCIM_ADMIN_EMAIL_REFUSED = "SCIM_ADMIN_EMAIL_REFUSED";
@@ -93,9 +94,13 @@ function refusal(): APIError {
  * Better Auth plugin that applies the guard to every SCIM user write, together
  * with the verified-domain binding in `scim-email-domain-guard.ts`: a SCIM
  * create, or a SCIM rename to a new address, must land on a DNS-verified SSO
- * domain of the connection's organization.
+ * domain the connection's organization still holds. `findOrganizationDomains`
+ * defaults to the Mongoose read of `verifiedDomains`; tests inject one.
  */
-export function scimAdminEmailGuardPlugin(): BetterAuthPlugin {
+export function scimAdminEmailGuardPlugin(
+	options: { findOrganizationDomains?: OrganizationDomainsLookup } = {}
+): BetterAuthPlugin {
+	const { findOrganizationDomains } = options;
 	return {
 		id: "ryu-scim-admin-email-guard",
 		init: () => ({
@@ -108,7 +113,11 @@ export function scimAdminEmailGuardPlugin(): BetterAuthPlugin {
 									throw refusal();
 								}
 								if (isScimProvisioningPath(ctx?.path)) {
-									await assertScimEmailOnVerifiedDomain(user.email, ctx);
+									await assertScimEmailOnVerifiedDomain(
+										user.email,
+										ctx,
+										findOrganizationDomains
+									);
 								}
 							},
 						},
@@ -118,7 +127,11 @@ export function scimAdminEmailGuardPlugin(): BetterAuthPlugin {
 									throw refusal();
 								}
 								if (scimChangesEmail(ctx?.path, data)) {
-									await assertScimEmailOnVerifiedDomain(data.email, ctx);
+									await assertScimEmailOnVerifiedDomain(
+										data.email,
+										ctx,
+										findOrganizationDomains
+									);
 								}
 							},
 						},

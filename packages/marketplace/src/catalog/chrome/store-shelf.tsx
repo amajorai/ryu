@@ -42,6 +42,9 @@ export default function StoreShelf<T>({
 	title: ReactNode;
 }) {
 	const tl = useLiteralMessages();
+	// A category label is English catalog copy: translate it once, so the
+	// heading and its open button's name read the same words.
+	const shownTitle = isNativeText(title) ? tl(String(title)) : title;
 	const [visibleCount, setVisibleCount] = useState(() =>
 		Math.max(1, initialSize)
 	);
@@ -58,12 +61,12 @@ export default function StoreShelf<T>({
 				description={description}
 				onOpen={onOpenCategory}
 				openLabel={
-					isNativeText(title)
-						? tl("Open {title}", { title: String(title) })
+					isNativeText(shownTitle)
+						? tl("Open {title}", { title: String(shownTitle) })
 						: tl("Open category")
 				}
 			>
-				{title}
+				{shownTitle}
 			</StoreShelfHeading>
 			<StoreCardGrid>
 				{Children.toArray(

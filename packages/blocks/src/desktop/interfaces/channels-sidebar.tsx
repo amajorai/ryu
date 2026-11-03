@@ -247,6 +247,7 @@ export function WorkspaceRail({
 	/** A thread panel is open: give its width back below 1100px. */
 	threadOpen: boolean;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<div
 			className={cn(
@@ -286,7 +287,7 @@ export function WorkspaceRail({
 				className="relative mt-auto flex"
 				role="img"
 			>
-				<ChannelsAvatar name="You" size={36} />
+				<ChannelsAvatar name={tl("You")} size={36} />
 				<PresenceDot active ringClassName="bg-sidebar" />
 			</span>
 		</div>

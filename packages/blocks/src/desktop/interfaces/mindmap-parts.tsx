@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -192,7 +193,7 @@ export function MindmapControls({
 						/>
 					}
 				>
-					{`${Math.round(zoom * 100)}%`}
+					{formatPercent(zoom)}
 				</TooltipTrigger>
 				<TooltipContent side="top">
 					Reset to 100%

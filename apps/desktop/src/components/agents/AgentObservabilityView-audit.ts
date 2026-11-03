@@ -1,5 +1,6 @@
 import { usageProviderLabel } from "@ryu/blocks/desktop/usage-analytics.ts";
 import { formatDurationUnit } from "@ryu/i18n/format-intl";
+import { formatPercent as formatLocalePercent } from "@ryu/i18n/format-percent";
 import {
 	isNativeNumber,
 	isNativeText,
@@ -244,11 +245,11 @@ export function formatCost(microUsd: number): string {
 }
 
 export function formatScore(value: number | null): string {
-	return value === null ? "—" : `${Math.round(value * 100)}%`;
+	return value === null ? "—" : formatLocalePercent(value);
 }
 
 export function formatPercent(value: number | null): string {
-	return value === null ? "—" : `${Math.round(value * 100)}%`;
+	return value === null ? "—" : formatLocalePercent(value);
 }
 
 export const savedObservabilityViewSchema = z.object({

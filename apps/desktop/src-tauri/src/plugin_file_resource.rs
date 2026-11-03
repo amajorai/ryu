@@ -1,18 +1,21 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use std::io::Read;
 
+#[path = "file_resource_error.rs"]
+mod file_resource_error;
+
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
 /// Read byte-preserving content from the file selected by the trusted host.
 pub fn read_binary(path: &str) -> Result<String, String> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)
-        .map_err(|error| error.to_string())?
+        .map_err(|error| file_resource_error::io(&error))?
         .take(MAX_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| file_resource_error::io(&error))?;
     if bytes.len() > MAX_BYTES {
-        return Err("File exceeds the 8 MiB editor limit".to_owned());
+        return Err(file_resource_error::file_too_large());
     }
     Ok(STANDARD.encode(bytes))
 }
@@ -20,13 +23,15 @@ pub fn read_binary(path: &str) -> Result<String, String> {
 /// Validate replacement bytes completely before touching the selected file.
 pub fn write_binary(path: &str, blob: &str) -> Result<(), String> {
     if blob.len() > MAX_BYTES * 3 / 2 {
-        return Err("File exceeds the 8 MiB editor limit".to_owned());
+        return Err(file_resource_error::file_too_large());
     }
-    let bytes = STANDARD.decode(blob).map_err(|error| error.to_string())?;
+    let bytes = STANDARD
+        .decode(blob)
+        .map_err(|error| file_resource_error::invalid_content(&error))?;
     if bytes.len() > MAX_BYTES {
-        return Err("File exceeds the 8 MiB editor limit".to_owned());
+        return Err(file_resource_error::file_too_large());
     }
-    std::fs::write(path, bytes).map_err(|error| error.to_string())
+    std::fs::write(path, bytes).map_err(|error| file_resource_error::io(&error))
 }
 
 #[cfg(test)]
@@ -57,5 +62,25 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), b"original");
         std::fs::write(&path, vec![0_u8; MAX_BYTES + 1]).unwrap();
         assert!(read_binary(&path).is_err());
+    }
+
+    #[test]
+    fn failures_reject_with_codes_not_english_sentences() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let path = file.path().to_string_lossy().into_owned();
+        std::fs::write(&path, vec![0_u8; MAX_BYTES + 1]).unwrap();
+        assert_eq!(read_binary(&path).unwrap_err(), "file_too_large");
+        let oversized = STANDARD.encode(vec![0_u8; MAX_BYTES + 1]);
+        assert_eq!(
+            write_binary(&path, &oversized).unwrap_err(),
+            "file_too_large"
+        );
+        assert!(write_binary(&path, "invalid-base64!")
+            .unwrap_err()
+            .starts_with("invalid_content:"));
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.bin");
+        let error = read_binary(&missing.to_string_lossy()).unwrap_err();
+        assert!(error.starts_with("io:"), "{error}");
     }
 }

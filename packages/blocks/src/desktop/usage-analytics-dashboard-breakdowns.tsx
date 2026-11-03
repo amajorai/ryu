@@ -1,5 +1,6 @@
 "use client";
 
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type ChartConfig,
@@ -262,9 +263,7 @@ export function FeatureMix({
 										</span>
 										<span className="shrink-0 text-muted-foreground tabular-nums">
 											{formatCompact(entry.requests)} ·{" "}
-											{total > 0
-												? `${String(Math.round((entry.requests / total) * 100))}%`
-												: "0%"}
+											{formatPercent(total > 0 ? entry.requests / total : 0)}
 										</span>
 									</div>
 									<div className="h-2.5 overflow-hidden rounded-full bg-muted/70">

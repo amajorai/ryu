@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { formatMessage } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { OutputStyleSummary } from "@/src/lib/api/output-styles.ts";
 import type { Space, SpaceDocument } from "@/src/lib/api/spaces.ts";
 import {
@@ -35,6 +37,18 @@ const document = {
 	id: "page-1",
 	updatedAt: 0,
 } satisfies SpaceDocument;
+
+const english: LiteralMessage = (source, values = {}) =>
+	formatMessage(source, values, "en");
+
+const JA: Record<string, string> = {
+	Page: "ページ",
+	Untitled: "無題",
+	Whiteboard: "ホワイトボード",
+	"{space} · {kind}": "{space} · {kind}",
+};
+const japanese: LiteralMessage = (source, values = {}) =>
+	formatMessage(JA[source] ?? source, values, "ja");
 
 describe("mention resource bridges", () => {
 	test("uses the shared sidebar row and target template for app items", () => {
@@ -76,13 +90,26 @@ describe("mention resource bridges", () => {
 	});
 
 	test("builds routes for Space pages and keeps style metadata searchable", () => {
-		expect(buildSpacePageMentionSources([space], [[document]])).toEqual([
+		expect(
+			buildSpacePageMentionSources([space], [[document]], english)
+		).toEqual([
 			{
 				description: "Planning · Page",
 				id: "space-1:page-1",
 				name: "Launch plan",
 				target: { path: "/spaces/space-1/doc/page-1" },
 			},
+		]);
+
+		const untitled = { ...document, id: "page-2", title: "  " };
+		const board = { ...document, id: "wb-1", kind: "whiteboard" as const };
+		expect(
+			buildSpacePageMentionSources([space], [[untitled, board]], japanese).map(
+				({ description, name }) => ({ description, name })
+			)
+		).toEqual([
+			{ description: "Planning · ページ", name: "無題" },
+			{ description: "Planning · ホワイトボード", name: "Launch plan" },
 		]);
 
 		const style = {

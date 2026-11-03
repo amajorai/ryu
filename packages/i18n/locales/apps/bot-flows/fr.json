@@ -450,6 +450,7 @@
   "No recent updates": "Aucune mise à jour récente",
   "No results": "Aucun résultat",
   "No tabs found.": "Aucun onglet trouvé.",
+  "No.": "N°",
   "None": "Aucun",
   "Normal": "Normal",
   "Note": "Note",
@@ -953,11 +954,13 @@
   "your browser": "votre navigateur",
   "{count} more": "{count} de plus",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {Nœud sélectionné déplacé vers le haut. Nouvelle position, x : {x}, y : {y}} down {Nœud sélectionné déplacé vers le bas. Nouvelle position, x : {x}, y : {y}} left {Nœud sélectionné déplacé vers la gauche. Nouvelle position, x : {x}, y : {y}} right {Nœud sélectionné déplacé vers la droite. Nouvelle position, x : {x}, y : {y}} other {Nœud sélectionné déplacé. Nouvelle position, x : {x}, y : {y}}}",
+  "{label} → {variable}": "{label} → {variable}",
   "{label}:": "{label} :",
   "{label}: next step": "{label} : étape suivante",
   "{name} is typing": "{name} est en train d’écrire",
   "{name} · {op, select, increment {increment} clear {clear} now {current date and time} random_id {random id} result_id {result id} transcript {conversation transcript} other {{op}}}": "{name} · {op, select, increment {incrémenter} clear {effacer} now {date et heure actuelles} random_id {ID aléatoire} result_id {ID du résultat} transcript {transcription de la conversation} other {{op}}}",
   "{name}. Ask how to improve the conversation, fix dead ends, or route answers.": "{name}. Demandez comment améliorer la conversation, corriger les impasses ou orienter les réponses.",
   "{value} of {total} stars": "{value} étoiles sur {total}",
-  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {est égal à {value}} not_equals {est différent de {value}} contains {contient {value}} not_contains {ne contient pas {value}} greater_than {est supérieur à {value}} less_than {est inférieur à {value}} is_set {est définie} is_empty {est vide} starts_with {commence par {value}} ends_with {se termine par {value}} other {{operator} {value}}}"
+  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {est égal à {value}} not_equals {est différent de {value}} contains {contient {value}} not_contains {ne contient pas {value}} greater_than {est supérieur à {value}} less_than {est inférieur à {value}} is_set {est définie} is_empty {est vide} starts_with {commence par {value}} ends_with {se termine par {value}} other {{operator} {value}}}",
+  "→ {group}": "→ {group}"
 }

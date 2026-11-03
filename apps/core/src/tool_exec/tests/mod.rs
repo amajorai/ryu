@@ -10,6 +10,8 @@ mod exa_runtime;
 mod exfiltration_guard_runtime;
 #[path = "firecrawl_runtime_test.rs"]
 mod firecrawl_runtime;
+#[path = "ghost_exfiltration_guard_runtime_test.rs"]
+mod ghost_exfiltration_guard_runtime;
 #[path = "honcho_mutation_runtime_test.rs"]
 mod honcho_mutation_runtime;
 #[path = "honcho_runtime_test.rs"]

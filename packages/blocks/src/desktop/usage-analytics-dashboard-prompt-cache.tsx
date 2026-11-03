@@ -1,5 +1,6 @@
 "use client";
 
+import { formatPercent as formatLocalePercent } from "@ryu/i18n/format-percent";
 import {
 	type ChartConfig,
 	ChartContainer,
@@ -36,7 +37,7 @@ export const CACHE_COLORS = {
 } as const;
 
 export function formatPercent(value: number | null): string {
-	return value === null ? "—" : `${String(Math.round(value * 100))}%`;
+	return value === null ? "—" : formatLocalePercent(value);
 }
 
 /**

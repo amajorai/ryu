@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type {
 	WorkbenchItem,
@@ -24,6 +25,11 @@ import {
 	WorkbenchChromeProvider,
 	type WorkbenchDragBridge,
 } from "./workbench-chrome.tsx";
+import {
+	physicalSide,
+	regionDeltaSign,
+	regionPointerDelta,
+} from "./workbench-direction.ts";
 import {
 	clampRegionSize,
 	RESIZE_DEFAULTS,
@@ -136,6 +142,7 @@ export function WorkbenchLayout({
 	suppressLeftRegion = false,
 }: WorkbenchLayoutProps) {
 	const tl = useLiteralMessages();
+	const readingDirection = useDirection();
 	const { dispatch, state } = useDesktopWorkbench();
 	const [liveSizes, setLiveSizes] = useState<RegionSizes>(state.sizes);
 	const resizeSessionRef = useRef<{
@@ -253,12 +260,12 @@ export function WorkbenchLayout({
 		let settledSize = startSize;
 		let finished = false;
 		const onPointerMove = (pointerEvent: PointerEvent) => {
-			const delta =
-				region === "left"
-					? pointerEvent.clientX - startX
-					: region === "right"
-						? startX - pointerEvent.clientX
-						: startY - pointerEvent.clientY;
+			const delta = regionPointerDelta(
+				region,
+				readingDirection,
+				{ x: startX, y: startY },
+				{ x: pointerEvent.clientX, y: pointerEvent.clientY }
+			);
 			settledSize = clampRegionSize(region, startSize + delta);
 			setLiveSizes((current) => ({ ...current, [region]: settledSize }));
 		};
@@ -302,8 +309,8 @@ export function WorkbenchLayout({
 		}
 	};
 
-	const stepRegion = (region: ResizableRegion, direction: -1 | 1) => {
-		const visualDirection = region === "left" ? direction : -direction;
+	const stepRegion = (region: ResizableRegion, step: -1 | 1) => {
+		const visualDirection = regionDeltaSign(region, readingDirection) * step;
 		const size = clampRegionSize(
 			region,
 			liveSizes[region] + visualDirection * 10
@@ -423,7 +430,9 @@ export function WorkbenchLayout({
 					<>
 						<button
 							aria-label={tl("Close {region}", {
-								region: tl(REGION_LABELS[overlayRegion]),
+								region: tl(
+									REGION_LABELS[physicalSide(overlayRegion, readingDirection)]
+								),
 							})}
 							className="absolute inset-0 z-40 cursor-default bg-black/30 dark:bg-black/50"
 							data-workbench-overlay-scrim={overlayRegion}

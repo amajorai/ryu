@@ -22,7 +22,11 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip";
 
-/** Lock or unlock a lockable field (base scope only). */
+/**
+ * Lock or unlock a lockable field (base scope only). `fieldLabel` is the
+ * field's English title (a message id); it is resolved before it fills the
+ * "Lock {fieldLabel} field" sentence.
+ */
 export function LockToggle({
 	locked,
 	disabled,
@@ -35,6 +39,7 @@ export function LockToggle({
 	onToggle: () => void;
 }) {
 	const tl = useLiteralMessages();
+	const field = tl(fieldLabel);
 	return (
 		<Tooltip>
 			<TooltipTrigger
@@ -42,8 +47,8 @@ export function LockToggle({
 					<Button
 						aria-label={
 							locked
-								? tl("Unlock {fieldLabel} field", { fieldLabel })
-								: tl("Lock {fieldLabel} field", { fieldLabel })
+								? tl("Unlock {fieldLabel} field", { fieldLabel: field })
+								: tl("Lock {fieldLabel} field", { fieldLabel: field })
 						}
 						aria-pressed={locked}
 						disabled={disabled}
@@ -122,7 +127,8 @@ export function TriStateBool({
 	ariaLabel: string;
 	disabled: boolean;
 	id: string;
-	/** Shown in parentheses after Inherit; omit when the value is not known. */
+	/** Shown in parentheses after Inherit, already translated; omit when the
+	 *  value is not known. */
 	inheritedLabel?: string;
 	onChange: (next: boolean | null) => void;
 	value: boolean | null | undefined;
@@ -133,10 +139,10 @@ export function TriStateBool({
 			value: "inherit",
 			label: inheritedLabel
 				? tl("Inherit ({label})", { label: inheritedLabel })
-				: "Inherit",
+				: tl("Inherit"),
 		},
-		{ value: "on", label: "On" },
-		...(addOnly ? [] : [{ value: "off", label: "Off" }]),
+		{ value: "on", label: tl("On") },
+		...(addOnly ? [] : [{ value: "off", label: tl("Off") }]),
 	];
 	return (
 		<Select

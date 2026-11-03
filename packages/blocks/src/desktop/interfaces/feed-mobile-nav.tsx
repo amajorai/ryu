@@ -48,10 +48,10 @@ export function FeedMobileNav({
 							aria-label={
 								badge
 									? tl("{label}, {workingCount} running", {
-											label,
+											label: tl(label),
 											workingCount,
 										})
-									: label
+									: tl(label)
 							}
 							className={cn(
 								"group flex flex-1 items-center justify-center text-foreground outline-none"

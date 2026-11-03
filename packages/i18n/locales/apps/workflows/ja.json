@@ -1079,6 +1079,7 @@
   "with": "参加者:",
   "working": "件が作業中",
   "your browser": "ブラウザ",
+  "{action} → {detail}": "{action} → {detail}",
   "{count} more": "ほか {count} 件",
   "{count} selected": "{count} 件選択済み",
   "{count} selected people": "{count} 人を選択済み",

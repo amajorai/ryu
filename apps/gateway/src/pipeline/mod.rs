@@ -149,6 +149,7 @@ use crate::{
 // crate imports as `crate::pipeline::<item>`.
 pub(crate) use audit::audit_refused;
 pub(crate) use auth::{authenticate, authenticate_for_operation, AuthInputs};
+pub(crate) use auth_identity::box_governance::composio_entity_user;
 pub(crate) use body_shaping::ANTHROPIC_BETA_FIELD;
 pub(crate) use core_proof::{ct_eq, has_core_proof_key};
 pub(crate) use credit_reserve::credit_headroom_micro_usd;
@@ -174,6 +175,8 @@ use budget_charge::*;
 mod core_proof;
 use core_proof::*;
 mod credit_reserve;
+/// Per-org Core relay keys; matched after static keys in `auth_identity`.
+pub(crate) mod org_core_relay;
 use credit_reserve::*;
 mod debit;
 use debit::*;

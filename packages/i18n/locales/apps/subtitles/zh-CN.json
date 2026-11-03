@@ -669,6 +669,7 @@
   "network": "网络",
   "node": "节点",
   "none": "无",
+  "not run": "未运行",
   "now": "立即",
   "once": "一次",
   "open": "条未解决",
@@ -715,5 +716,6 @@
   "{count} more": "还有 {count} 个",
   "{cueCount} cues copied as {format}.": "已将 {cueCount} 条字幕复制为 {format}。",
   "{name} is queued. This runs on your machine, so it takes a while for a long video.": "{name} 已排队。此操作在您的计算机上运行，长视频需要一段时间。",
-  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "已翻译 {cueCount} 行中的 {translatedCount} 行；其余保留原文。"
+  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "已翻译 {cueCount} 行中的 {translatedCount} 行；其余保留原文。",
+  "{video} → {language}": "{video} → {language}"
 }

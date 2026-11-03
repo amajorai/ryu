@@ -25,8 +25,25 @@ pub const PAIRING_APPROVE_MESSAGE: Template = |_| {
 
 pub const TURN_FAILED_MESSAGE: Template =
     |_| format!("Sorry, something went wrong while running that request.");
-pub const TURN_ERROR_MESSAGE: Template =
-    |arg| format!("Sorry, something went wrong: {error}", error = arg("error"));
+/// The direct pipeline refused the turn because a rate limit was hit.
+pub const TURN_RATE_LIMITED_MESSAGE: Template =
+    |_| format!("Too many requests right now. Wait a moment, then try again.");
+/// A spending budget for this assistant is used up.
+pub const TURN_BUDGET_EXCEEDED_MESSAGE: Template = |_| {
+    format!(
+        "This assistant has reached its spending limit. Ask the owner to raise it, then try again."
+    )
+};
+/// The managed credit balance behind this assistant is empty.
+pub const TURN_NO_CREDITS_MESSAGE: Template =
+    |_| format!("This assistant is out of credits. Ask the owner to add credits, then try again.");
+/// No configured provider serves the requested model.
+pub const TURN_NO_PROVIDER_MESSAGE: Template = |arg| {
+    format!(
+        "No provider is available for the model {model}. Ask the owner to check the Gateway's providers.",
+        model = arg("model")
+    )
+};
 pub const NO_RESPONSE_MESSAGE: Template = |_| format!("The agent sent no response.");
 
 // ---- command help (WhatsApp, OpenWA and iMessage have no command menu) -------

@@ -81,6 +81,7 @@ pub(crate) mod security_key_relay;
 pub(crate) mod session_box;
 pub(crate) mod subscription_cloud;
 pub(crate) mod tool_ingress_authority;
+mod workflow_access;
 // The device-registry + TRMNL display HTTP surface moved to the extracted
 // `ryu_hardware` crate (`ryu_hardware::api`); the public pairing ingress + the WS
 // link stay Core-side (kernel ingress that forwards to the crate).
@@ -60453,7 +60454,9 @@ async fn get_workflow(
     match crate::workflow::store::load_workflow(&id) {
         Ok(wf) => (
             StatusCode::OK,
-            Json(json!({ "workflow": crate::workflow::secrets::redact_for_client(wf) })),
+            Json(
+                json!({ "workflow": workflow_access::workflow_view_for_caller(&state, &caller, &id, wf).await }),
+            ),
         ),
         Err(_) => (
             StatusCode::NOT_FOUND,
@@ -61674,7 +61677,8 @@ async fn validate_scheduled_target(
         }
         account_warmup::validate(provider_id, account_id, model.as_deref())?;
     }
-    Ok(())
+    workflow_access::authorize_scheduled_workflow_target(state, caller, target, enabled, current)
+        .await
 }
 
 async fn validate_scheduled_job_input(
@@ -62368,6 +62372,14 @@ async fn run_job_now(
     if !scheduled_job_visible(&job, &caller) {
         return json_error(StatusCode::NOT_FOUND, "job not found".to_owned());
     };
+    // Running a workflow routine runs that workflow: re-check workflow.run now,
+    // since the caller's access may have changed after the routine was saved.
+    if let Err(error) =
+        workflow_access::authorize_scheduled_workflow_target(&state, &caller, &job.target, true, None)
+            .await
+    {
+        return json_error(StatusCode::FORBIDDEN, error);
+    }
     // An app job runs under the scheduler's app-job budget here too, so a run-now
     // never overlaps a scheduled run of the same job or exceeds its app's cap.
     let _budget_slot = match crate::scheduler::admit_manual_run(&job.id, &job.target) {

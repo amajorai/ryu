@@ -1,3 +1,4 @@
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import {
 	type MouseEvent as ReactMouseEvent,
 	useCallback,
@@ -5,13 +6,21 @@ import {
 	useRef,
 	useState,
 } from "react";
+import {
+	type DockDirection,
+	dockResizeDelta,
+} from "./workspace-dock-direction.ts";
 
 // ── Drag resize hook ──────────────────────────────────────────────────────────
 
 export function useResizeHandle(
 	direction: "vertical" | "horizontal",
-	setSize: (updater: (prev: number) => number) => void
+	setSize: (updater: (prev: number) => number) => void,
+	dirOverride?: DockDirection
 ) {
+	// The horizontal dock sits on the inline-end edge, so RTL mirrors the drag.
+	const contextDir = useDirection();
+	const dir = dirOverride ?? contextDir;
 	const resizing = useRef(false);
 	const startPos = useRef(0);
 	const startSize = useRef(0);
@@ -39,7 +48,7 @@ export function useResizeHandle(
 				return;
 			}
 			const pos = direction === "vertical" ? e.clientY : e.clientX;
-			const delta = startPos.current - pos;
+			const delta = dockResizeDelta(direction, dir, startPos.current, pos);
 			setSize(() => Math.max(80, Math.min(800, startSize.current + delta)));
 		};
 		const onUp = () => {
@@ -57,7 +66,7 @@ export function useResizeHandle(
 			document.removeEventListener("mousemove", onMove);
 			document.removeEventListener("mouseup", onUp);
 		};
-	}, [direction, setSize]);
+	}, [direction, dir, setSize]);
 
 	return { onMouseDown, isResizing };
 }

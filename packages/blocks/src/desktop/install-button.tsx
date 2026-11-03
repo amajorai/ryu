@@ -5,6 +5,7 @@
 // through it. The live percent is computed at the call site (via the desktop
 // `useInstallProgress` hook) and passed in.
 
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { Button, type ButtonProps } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { motion, useReducedMotion } from "motion/react";
@@ -80,7 +81,7 @@ function InstallProgressButton({
 					key={known ? "percent" : "installing"}
 					transition={reduceMotion ? { duration: 0 } : { duration: 0.16 }}
 				>
-					{known ? `${Math.round(value)}%` : busyLabel}
+					{known ? formatPercent(value / 100) : busyLabel}
 				</motion.span>
 			</Button>
 		</motion.div>

@@ -10,6 +10,7 @@ import {
 	PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { imageViewerControlClasses } from "@ryu/ui/components/button-variants.ts";
@@ -423,7 +424,7 @@ export function Stage({
 						aria-live="polite"
 						className="min-w-12 text-center font-medium text-sm text-white tabular-nums"
 					>
-						{Math.round(zoom * 100)}%
+						{formatPercent(zoom)}
 					</span>
 					<Button
 						appearance="image-viewer"

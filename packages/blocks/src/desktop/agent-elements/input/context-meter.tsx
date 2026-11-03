@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	HoverCard,
@@ -156,13 +157,15 @@ export function ContextMeter({
 				render={onOpen ? <button type="button" /> : undefined}
 			>
 				<ContextRing pct={pct} />
-				<span>{Math.round(pct)}%</span>
+				<span>{formatPercent(pct / 100)}</span>
 			</HoverCardTrigger>
 			<HoverCardContent className="w-64" typography="compact">
 				<div className="flex flex-col gap-1.5">
 					<div className="flex items-center justify-between gap-6 font-medium">
 						<span>Context window</span>
-						<span className="font-mono tabular-nums">{Math.round(pct)}%</span>
+						<span className="font-mono tabular-nums">
+							{formatPercent(pct / 100)}
+						</span>
 					</div>
 					<div className="my-0.5 h-px bg-border" />
 					{rows.map((row) => (

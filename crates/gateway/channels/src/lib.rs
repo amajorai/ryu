@@ -46,6 +46,7 @@ pub mod pairing;
 pub mod slack;
 pub mod status;
 pub mod telegram;
+pub mod turn_error;
 pub mod voice_call;
 pub mod whatsapp;
 pub mod whatsapp_format;

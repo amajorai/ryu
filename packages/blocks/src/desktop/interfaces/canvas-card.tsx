@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { CircleAlert, MessageSquare, Pin } from "lucide-react";
 import { type FocusEvent, type MouseEvent, memo } from "react";
@@ -48,21 +48,25 @@ const COMPACT_META = {
 const TEXT_BODY = "text-foreground/80";
 const TEXT_META = "text-foreground/65";
 
-function cardLabel(card: CanvasCardModel, open: boolean): string {
-	const title = card.thread.title.trim() || tr("Untitled thread");
+function cardLabel(
+	card: CanvasCardModel,
+	open: boolean,
+	tl: LiteralMessage
+): string {
+	const title = card.thread.title.trim() || tl("Untitled thread");
 	const who = formatNameList(card.agents.map((agent) => agent.name));
 	const values = {
 		open: open ? "yes" : "no",
-		status: threadStatusLabel(card.status),
+		status: threadStatusLabel(card.status, tl),
 		title,
 		who,
 	};
 	return who
-		? tr(
+		? tl(
 				"{title}, {status}, with {who}{open, select, yes {, open} other {}}",
 				values
 			)
-		: tr(
+		: tl(
 				"{title}, {status}, no agent{open, select, yes {, open} other {}}",
 				values
 			);
@@ -362,13 +366,16 @@ export const CanvasCard = memo(function CanvasCardImpl({
 	y,
 	z,
 }: CanvasCardProps) {
+	// Re-renders this memoized sticky when the catalog loads or the language
+	// changes; its props stay the same, so the label would otherwise go stale.
+	const tl = useLiteralMessages();
 	const { thread, status } = card;
-	const title = thread.title.trim() || tr("Untitled thread");
+	const title = thread.title.trim() || tl("Untitled thread");
 	const preview = thread.lastMessage?.trim();
 	const age = compactAge(thread.updatedAt, now);
 	return (
 		<button
-			aria-label={cardLabel(card, open)}
+			aria-label={cardLabel(card, open, tl)}
 			className={cn(
 				"group/card absolute top-0 left-0 cursor-default touch-none select-none text-start outline-none",
 				gliding &&

@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	ClockOptions,
 	InterfaceEvent,
@@ -83,6 +84,7 @@ export function CardTableRoom({
 	snapshot,
 	stage,
 }: CardTableRoomProps) {
+	const tl = useLiteralMessages();
 	const shape = useMemo(
 		() =>
 			islandFor(
@@ -109,7 +111,7 @@ export function CardTableRoom({
 			pileSize={potChipSize(geometry)}
 			running={running}
 			snapshot={snapshot}
-			word={actsOn ? "working" : undefined}
+			word={actsOn ? tl("working") : undefined}
 		/>
 	);
 	// With acts the room's felt holds the chips; its plate is the pot's

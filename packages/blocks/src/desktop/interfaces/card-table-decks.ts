@@ -142,7 +142,13 @@ export function buildDecks(snapshot: InterfaceSnapshot): Deck[] {
 	);
 	if (unassigned.length > 0) {
 		decks.push(
-			deckFrom(UNASSIGNED_DECK, undefined, "Unassigned", unassigned, undefined)
+			deckFrom(
+				UNASSIGNED_DECK,
+				undefined,
+				tr("Unassigned"),
+				unassigned,
+				undefined
+			)
 		);
 	}
 	return decks;

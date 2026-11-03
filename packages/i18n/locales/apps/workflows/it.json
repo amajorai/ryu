@@ -1079,6 +1079,7 @@
   "with": "con",
   "working": "al lavoro",
   "your browser": "il browser",
+  "{action} → {detail}": "{action} → {detail}",
   "{count} more": "Altri {count}",
   "{count} selected": "{count} selezionati",
   "{count} selected people": "{count} persone selezionate",

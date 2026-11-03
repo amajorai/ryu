@@ -97,7 +97,8 @@ export function useViewFocus({
 				: null;
 		(
 			row ??
-			root?.querySelector<HTMLElement>('button[aria-label="Create order"]')
+			// The HUD's one primary action; its aria-label is translated copy.
+			root?.querySelector<HTMLElement>("button.gk-action")
 		)?.focus();
 	}, [viewKey]);
 }

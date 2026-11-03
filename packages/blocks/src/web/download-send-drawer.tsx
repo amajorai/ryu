@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Drawer,
@@ -16,8 +17,6 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { WEBAPP_URL } from "./download-catalog.tsx";
 import {
 	DOWNLOAD_PAGE_PATH,
-	DOWNLOAD_SHARE_TEXT,
-	DOWNLOAD_SHARE_TITLE,
 	downloadPageUrl,
 	emailShareUrl,
 	readMobileVisitorEnv,
@@ -74,30 +73,40 @@ function BrandMark({ origin, slug }: { origin: string; slug: string }) {
 	);
 }
 
-function shareTargets(siteOrigin: string, url: string): ShareTarget[] {
+/** The share title and the line in front of the link, in the UI language. */
+interface ShareCopy {
+	text: string;
+	title: string;
+}
+
+function shareTargets(
+	siteOrigin: string,
+	url: string,
+	copy: ShareCopy
+): ShareTarget[] {
 	const smsPlatform = smsPlatformFor(readMobileVisitorEnv());
 	return [
 		{
 			external: true,
-			href: whatsappShareUrl(DOWNLOAD_SHARE_TEXT, url),
+			href: whatsappShareUrl(copy.text, url),
 			icon: <BrandMark origin={siteOrigin} slug="whatsapp" />,
 			label: "WhatsApp",
 		},
 		{
 			external: true,
-			href: telegramShareUrl(DOWNLOAD_SHARE_TEXT, url),
+			href: telegramShareUrl(copy.text, url),
 			icon: <BrandMark origin={siteOrigin} slug="telegram" />,
 			label: "Telegram",
 		},
 		{
 			external: false,
-			href: smsShareUrl(DOWNLOAD_SHARE_TEXT, url, smsPlatform),
+			href: smsShareUrl(copy.text, url, smsPlatform),
 			icon: <MessageCircle aria-hidden="true" />,
 			label: "Messages",
 		},
 		{
 			external: false,
-			href: emailShareUrl(DOWNLOAD_SHARE_TITLE, DOWNLOAD_SHARE_TEXT, url),
+			href: emailShareUrl(copy.title, copy.text, url),
 			icon: <Mail aria-hidden="true" />,
 			label: "Email",
 		},
@@ -141,6 +150,13 @@ export function DownloadSendDrawer({
 	const [canShare, setCanShare] = useState(false);
 	const [copyState, setCopyState] = useState<CopyState>("idle");
 	const urlFieldRef = useRef<HTMLInputElement>(null);
+	const tl = useLiteralMessages();
+	// The literals stay here so the extractor sees them; the English ids in
+	// `download-share-links.ts` are not enough on their own.
+	const shareCopy: ShareCopy = {
+		text: tl("Download Ryu on your computer:"),
+		title: tl("Download Ryu"),
+	};
 
 	useEffect(() => {
 		setCanShare(typeof navigator.share === "function");
@@ -158,7 +174,7 @@ export function DownloadSendDrawer({
 	// before it spends the user activation and Safari refuses the share.
 	const share = () => {
 		navigator
-			.share({ text: DOWNLOAD_SHARE_TEXT, title: DOWNLOAD_SHARE_TITLE, url })
+			.share({ text: shareCopy.text, title: shareCopy.title, url })
 			.catch(() => {
 				// Closing the share sheet rejects with AbortError; nothing to report.
 			});
@@ -225,7 +241,7 @@ export function DownloadSendDrawer({
 						aria-label="Send the link with"
 						className="grid grid-cols-4 gap-2"
 					>
-						{shareTargets(siteOrigin, url).map((target) => (
+						{shareTargets(siteOrigin, url, shareCopy).map((target) => (
 							<li key={target.label}>
 								<a
 									className="flex flex-col items-center gap-1.5 rounded-2xl py-2 font-medium text-xs outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"

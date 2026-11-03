@@ -2,6 +2,7 @@
 // legend bar, and the mini map's marks and colors. Split from
 // `graph-canvas.tsx`, which owns framing and the React Flow mount.
 
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Popover,
@@ -119,7 +120,7 @@ export function GraphZoomControls({
 						TEXT_META
 					)}
 				>
-					{Math.round(zoom * 100)}%
+					{formatPercent(zoom)}
 				</output>
 				<ControlButton
 					label="Zoom in"

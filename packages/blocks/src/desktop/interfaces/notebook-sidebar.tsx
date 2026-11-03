@@ -200,6 +200,7 @@ export function NotebookSidebar({
 		<nav
 			aria-label="Notebook"
 			className="flex size-full flex-col bg-sidebar text-sidebar-foreground"
+			data-notebook-nav=""
 		>
 			<div className="group/head flex h-12 shrink-0 items-center gap-1 px-2">
 				<div className="flex min-w-0 flex-1 items-center gap-2 px-1.5">

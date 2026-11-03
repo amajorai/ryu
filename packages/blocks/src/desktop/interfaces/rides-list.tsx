@@ -68,7 +68,8 @@ export function RidesList({
 	const tl = useLiteralMessages();
 	const trips = mapTrips(rides);
 	const actTrips = useContext(RidesActTrips);
-	const stageWord = (trip: RideTrip) => tripWord(trip, actTrips?.get(trip.id));
+	const stageWord = (trip: RideTrip) =>
+		tripWord(trip, actTrips?.get(trip.id), tl);
 	const baseId = useId();
 	const button = cn(
 		GAME_FOCUS,
@@ -105,7 +106,7 @@ export function RidesList({
 											row !== null,
 											tl,
 											trip && actTrips
-												? tripWord(trip, actTrips.get(trip.id))
+												? tripWord(trip, actTrips.get(trip.id), tl)
 												: undefined
 										)}
 										className={button}

@@ -450,6 +450,7 @@
   "No recent updates": "कोई हालिया अपडेट नहीं",
   "No results": "कोई परिणाम नहीं",
   "No tabs found.": "कोई टैब नहीं मिला।",
+  "No.": "क्र.",
   "None": "कोई नहीं",
   "Normal": "सामान्य",
   "Note": "नोट",
@@ -953,11 +954,13 @@
   "your browser": "आपके ब्राउज़र",
   "{count} more": "{count} और",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {चुना गया नोड ऊपर ले जाया गया। नई स्थिति, x: {x}, y: {y}} down {चुना गया नोड नीचे ले जाया गया। नई स्थिति, x: {x}, y: {y}} left {चुना गया नोड बाईं ओर ले जाया गया। नई स्थिति, x: {x}, y: {y}} right {चुना गया नोड दाईं ओर ले जाया गया। नई स्थिति, x: {x}, y: {y}} other {चुना गया नोड ले जाया गया। नई स्थिति, x: {x}, y: {y}}}",
+  "{label} → {variable}": "{label} → {variable}",
   "{label}:": "{label}:",
   "{label}: next step": "{label}: अगला चरण",
   "{name} is typing": "{name} टाइप कर रहे हैं",
   "{name} · {op, select, increment {increment} clear {clear} now {current date and time} random_id {random id} result_id {result id} transcript {conversation transcript} other {{op}}}": "{name} · {op, select, increment {बढ़ाएँ} clear {साफ़ करें} now {वर्तमान तारीख और समय} random_id {रैंडम ID} result_id {परिणाम ID} transcript {बातचीत का ट्रांसक्रिप्ट} other {{op}}}",
   "{name}. Ask how to improve the conversation, fix dead ends, or route answers.": "{name}। पूछें कि बातचीत को कैसे बेहतर करें, डेड एंड कैसे ठीक करें या जवाबों को कैसे रूट करें।",
   "{value} of {total} stars": "{total} में से {value} स्टार",
-  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {{value} के बराबर है} not_equals {{value} के बराबर नहीं है} contains {में {value} है} not_contains {में {value} नहीं है} greater_than {{value} से बड़ा है} less_than {{value} से छोटा है} is_set {सेट है} is_empty {ख़ाली है} starts_with {{value} से शुरू होता है} ends_with {{value} पर ख़त्म होता है} other {{operator} {value}}}"
+  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {{value} के बराबर है} not_equals {{value} के बराबर नहीं है} contains {में {value} है} not_contains {में {value} नहीं है} greater_than {{value} से बड़ा है} less_than {{value} से छोटा है} is_set {सेट है} is_empty {ख़ाली है} starts_with {{value} से शुरू होता है} ends_with {{value} पर ख़त्म होता है} other {{operator} {value}}}",
+  "→ {group}": "→ {group}"
 }

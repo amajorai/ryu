@@ -101,6 +101,7 @@ export function HistoryPlaceholder({
 				"flex min-h-0 flex-1 flex-col gap-6 overflow-hidden px-4 py-6",
 				classNames?.messageList
 			)}
+			data-chat-loading=""
 		>
 			<div className="flex justify-end">
 				<Skeleton className="h-9 w-[45%]" />

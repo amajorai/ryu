@@ -129,8 +129,10 @@ pub(super) async fn dispatch_buffered(
                         "managed Composio calls require an authenticated organization".to_owned(),
                     ));
                 }
-                let entity_id =
-                    composio.entity_for_request(ctx.org_id.as_deref(), ctx.user_id.as_deref())?;
+                let entity_id = composio.entity_for_request(
+                    ctx.org_id.as_deref(),
+                    super::auth_identity::box_governance::composio_entity_user(&ctx),
+                )?;
                 // A request header may narrow the operator's Composio grants,
                 // never introduce an action absent from global configuration.
                 let allowed =

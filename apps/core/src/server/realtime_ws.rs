@@ -430,10 +430,13 @@ async fn handle_socket(
     } else {
         None
     };
-    let room_key = application_app_id
-        .as_deref()
-        .map(|app_id| ryu_realtime::application_room_key(app_id, &room_id))
-        .unwrap_or_else(|| room_id.clone());
+    let room_key = match room_registry_key(&join.kind, application_app_id.as_deref(), &room_id) {
+        Ok(key) => key,
+        Err(reason) => {
+            let _ = ws_tx.send(close(CLOSE_POLICY, reason.into())).await;
+            return;
+        }
+    };
 
     // ── Access decision ──────────────────────────────────────────────────────
     let access = match join.kind {
@@ -916,6 +919,32 @@ fn frame_to_message(frame: Frame, include_event_name: bool) -> Message {
 }
 
 /// Build a WS close frame with a code + reason.
+/// The realtime registry key for a join. Each kind gets a disjoint keyspace so a
+/// conversation whose id equals a Space document id can never share that
+/// document's room (its CRDT updates, awareness, resets and presence). The bare
+/// `room_id` still names the access record and the CRDT store entry.
+fn room_registry_key(
+    kind: &RoomKind,
+    app_id: Option<&str>,
+    room_id: &str,
+) -> Result<String, &'static str> {
+    match (kind, app_id) {
+        (RoomKind::Application, Some(app_id)) => {
+            Ok(ryu_realtime::application_room_key(app_id, room_id))
+        }
+        (RoomKind::Application, None) => Err("application-app-id-required"),
+        (RoomKind::Document, _) => Ok(ryu_realtime::document_room_key(room_id)),
+        (RoomKind::Conversation, _) if ryu_realtime::is_reserved_room_id(room_id) => {
+            Err("reserved-room-id")
+        }
+        (RoomKind::Conversation, _) => Ok(room_id.to_owned()),
+    }
+}
+
+#[cfg(test)]
+#[path = "realtime_ws_room_key_tests.rs"]
+mod room_key_tests;
+
 fn close(code: u16, reason: String) -> Message {
     Message::Close(Some(CloseFrame {
         code,

@@ -1,5 +1,6 @@
 // Shared option lists and labels for the guardrail editors.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	GUARDRAIL_ALERT_TIERS,
 	type GuardrailAlertTier,
@@ -17,14 +18,16 @@ export const GUARDRAIL_ACTION_OPTIONS: {
 	{ value: "sanitize", label: "Sanitize: redact detected patterns" },
 ];
 
-/** Short names for firewall actions, for inline copy. */
+/** Short names for firewall actions, for inline copy. English message ids:
+ * resolve them with `tl()` before they reach a sentence or a control. */
 export const GUARDRAIL_ACTION_LABELS = {
 	block: "Block",
 	warn_and_continue: "Warn and continue",
 	sanitize: "Sanitize",
 } satisfies Record<GuardrailFirewallAction, string>;
 
-/** Short tier names, for inline summaries. */
+/** Short tier names, for inline summaries. English message ids: resolve them
+ * with `tl()` before they reach a sentence or a control. */
 export const GUARDRAIL_ALERT_TIER_LABELS = {
 	silent: "Silent",
 	warn: "Warn",
@@ -32,22 +35,26 @@ export const GUARDRAIL_ALERT_TIER_LABELS = {
 	email: "Email",
 } satisfies Record<GuardrailAlertTier, string>;
 
-/** What each tier delivers, as a mid-sentence clause. */
-const ALERT_TIER_DESCRIPTIONS = {
-	silent: "No notification (default)",
-	warn: "In-app notification only",
-	fanout: "Webhook, Telegram, and mobile push",
-	email: "Email recipients only (instead of the fan-out channels)",
-} satisfies Record<GuardrailAlertTier, string>;
-
-/** `Label: clause` options, ascending in severity. */
-export const GUARDRAIL_ALERT_TIER_OPTIONS: {
+/**
+ * `Label: clause` options, ascending in severity. Each option is one whole
+ * literal message, so a catalog translates the tier name and its clause
+ * together instead of leaving a runtime-joined English string.
+ */
+export function guardrailAlertTierOptions(tl: LiteralMessage): {
 	label: string;
 	value: GuardrailAlertTier;
-}[] = GUARDRAIL_ALERT_TIERS.map((tier) => ({
-	value: tier,
-	label: `${GUARDRAIL_ALERT_TIER_LABELS[tier]}: ${ALERT_TIER_DESCRIPTIONS[tier]}`,
-}));
+}[] {
+	const labels = {
+		silent: tl("Silent: no notification (default)"),
+		warn: tl("Warn: in-app notification only"),
+		fanout: tl("Fanout: webhook, Telegram, and mobile push"),
+		email: tl("Email: recipients only (instead of the fan-out channels)"),
+	} satisfies Record<GuardrailAlertTier, string>;
+	return GUARDRAIL_ALERT_TIERS.map((tier) => ({
+		value: tier,
+		label: labels[tier],
+	}));
+}
 
 export const GUARDRAIL_PATTERN_KIND_OPTIONS: {
 	label: string;

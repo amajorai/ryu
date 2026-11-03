@@ -10,6 +10,7 @@ import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { memo, useMemo } from "react";
 import { readPermissionToolFields } from "./permission-contract.ts";
+import { type PermissionI18n, readPermissionI18n } from "./permission-i18n.ts";
 
 export { activePermissionSchema } from "./permission-contract.ts";
 
@@ -72,6 +73,75 @@ function approvalQuestion(title: string, tl: LiteralMessage): string {
 	});
 }
 
+interface PromptCopy {
+	description: string;
+	question: string;
+	tool: string;
+}
+
+/**
+ * The prompt's sentences. Ryu's own prompts carry whole localized sentences
+ * (`toolCall.i18n`); a third-party agent's prompt keeps its own title inside the
+ * localized frame; a prompt with no title gets whole sentences of its own.
+ */
+function promptCopy(
+	i18n: PermissionI18n | null,
+	fields: ReturnType<typeof readPermissionToolFields>,
+	showTechnicalDetails: boolean,
+	tl: LiteralMessage
+): PromptCopy {
+	const withKind = (text: string) =>
+		showTechnicalDetails && fields.kind ? `${fields.kind} · ${text}` : text;
+	if (i18n) {
+		return {
+			description: showTechnicalDetails
+				? tl("The agent is asking for permission to do this.")
+				: tl("Ryu wants to do this. Review the details before it runs."),
+			question: i18n.title,
+			tool: withKind(i18n.title),
+		};
+	}
+	const title = fields.title?.trim();
+	if (!title) {
+		return {
+			description: showTechnicalDetails
+				? tl("The agent is asking to run a tool.")
+				: tl("Ryu wants to run a tool. Review the details before it runs."),
+			question: tl("Can I run this tool?"),
+			tool: showTechnicalDetails && fields.kind ? fields.kind : tl("Tool"),
+		};
+	}
+	return {
+		description: showTechnicalDetails
+			? tl("The agent is asking to {title}.", { title })
+			: tl("Ryu wants to {title}. Review the details before it runs.", {
+					title,
+				}),
+		question: approvalQuestion(title, tl),
+		tool: withKind(title),
+	};
+}
+
+/**
+ * A choice's label: Core's message for Ryu's own prompts, with the one-word
+ * "Deny" catalogued here (Core's extractor skips one-word sources); a
+ * third-party agent's option keeps its own name.
+ */
+function optionLabel(
+	option: AcpPermissionOption,
+	i18n: PermissionI18n | null,
+	tl: LiteralMessage
+): string {
+	if (!i18n) {
+		return option.name;
+	}
+	const label = i18n.optionLabels.get(option.optionId);
+	if (label) {
+		return label;
+	}
+	return option.kind === "reject_once" ? tl("Deny") : option.name;
+}
+
 function toneForKind(kind: string): ToolApprovalChoice["tone"] {
 	if (kind === "allow_once") {
 		return "primary";
@@ -100,33 +170,44 @@ export const PermissionPrompt = memo(function PermissionPrompt({
 		() => readPermissionToolFields(permission.toolCall),
 		[permission.toolCall]
 	);
-	const title = fields.title ?? "run a tool";
+	const i18n = useMemo(
+		() => readPermissionI18n(permission.toolCall, tl),
+		[permission.toolCall, tl]
+	);
+	const copy = promptCopy(i18n, fields, showTechnicalDetails, tl);
 	const command = useMemo(() => toolCommand(fields), [fields]);
 
 	const parameters = useMemo(() => {
+		const endpoint =
+			showTechnicalDetails && i18n?.detail
+				? [{ id: "ryu-endpoint", label: tl("Endpoint"), value: i18n.detail }]
+				: [];
 		const raw = fields.rawInput;
 		if (!raw) {
-			return [];
+			return endpoint;
 		}
-		return Object.entries(raw)
-			.filter(([key]) => !HIDDEN_PARAMETER_KEYS.has(key))
-			.map(([key, value]) => ({
-				id: key,
-				label: key,
-				value: formatParameterValue(value),
-			}))
-			.filter((row) => row.value !== "");
-	}, [fields]);
+		return [
+			...endpoint,
+			...Object.entries(raw)
+				.filter(([key]) => !HIDDEN_PARAMETER_KEYS.has(key))
+				.map(([key, value]) => ({
+					id: key,
+					label: key,
+					value: formatParameterValue(value),
+				}))
+				.filter((row) => row.value !== ""),
+		];
+	}, [fields, i18n, showTechnicalDetails, tl]);
 
 	const choices = useMemo<ToolApprovalChoice[]>(
 		() =>
 			permission.options.map((option) => ({
 				id: option.optionId,
-				label: option.name,
+				label: optionLabel(option, i18n, tl),
 				tone: toneForKind(option.kind),
 				onSelect: () => onRespond(option.optionId),
 			})),
-		[onRespond, permission.options]
+		[i18n, onRespond, permission.options, tl]
 	);
 
 	return (
@@ -139,26 +220,16 @@ export const PermissionPrompt = memo(function PermissionPrompt({
 		>
 			<ToolApproval
 				choices={choices}
-				description={
-					showTechnicalDetails
-						? tl("The agent is asking to {title}.", { title })
-						: tl("Ryu wants to {title}. Review the details before it runs.", {
-								title,
-							})
-				}
+				description={copy.description}
 				parameters={parameters}
-				question={approvalQuestion(title, tl)}
+				question={copy.question}
 				status="pending"
 				title={
 					showTechnicalDetails
-						? "Permission required"
-						: "Ryu wants to take an action"
+						? tl("Permission required")
+						: tl("Ryu wants to take an action")
 				}
-				tool={
-					showTechnicalDetails && fields.kind
-						? `${fields.kind} · ${title}`
-						: title
-				}
+				tool={copy.tool}
 			>
 				{/* Always show the command: it is what the user is approving, and the
 				    title/description above are agent-supplied text. */}

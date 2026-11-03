@@ -284,7 +284,8 @@ pub(super) async fn authenticate_identity(
             }
         }
 
-        for cfg_key in &auth.api_keys {
+        let relay = org_core_relay::org_core_relay_entry(key);
+        for cfg_key in auth.api_keys.iter().chain(&relay) {
             // Constant-time compare (as the master-key branch above already does):
             // a naive `==` short-circuits on the first differing byte, a timing
             // oracle that leaks the key byte-by-byte to a network attacker (the

@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
 import {
 	Select,
@@ -121,7 +122,7 @@ export function SoundSettings() {
 						<FluidSlider
 							aria-label="Volume"
 							disabled={locked || !prefs.enabled}
-							format={(value) => `${Math.round(value)}%`}
+							format={(value) => formatPercent(value / 100)}
 							label=""
 							max={100}
 							min={0}

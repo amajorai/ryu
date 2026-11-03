@@ -1,5 +1,8 @@
 //! The embedded terminal panel's shell execution command.
 
+#[path = "shell_exec_error.rs"]
+mod shell_exec_error;
+
 #[derive(serde::Serialize)]
 pub(crate) struct ShellOutput {
     stdout: String,
@@ -73,16 +76,7 @@ pub(crate) async fn shell_execute(
     let (shell, flag) = resolve_shell(shell.as_deref());
 
     // Canonicalize cwd: reject non-existent paths and resolve symlinks / `..` traversal.
-    let resolved_cwd: Option<std::path::PathBuf> = if let Some(ref dir) = cwd {
-        let canonical =
-            std::fs::canonicalize(dir).map_err(|_| format!("Invalid working directory: {dir}"))?;
-        if !canonical.is_dir() {
-            return Err(format!("Working directory is not a directory: {dir}"));
-        }
-        Some(canonical)
-    } else {
-        None
-    };
+    let resolved_cwd = shell_exec_error::resolve_cwd(cwd.as_deref())?;
 
     let mut cmd = app.shell().command(shell).args([flag, command.as_str()]);
     if let Some(ref dir) = resolved_cwd {
@@ -96,7 +90,7 @@ pub(crate) async fn shell_execute(
                 .is_some_and(|first| first == '_' || first.is_ascii_alphabetic())
                 && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric());
             if !valid {
-                return Err(format!("Invalid environment variable name: {key}"));
+                return Err(shell_exec_error::invalid_env_name(&key));
             }
             cmd = cmd.env(key, value);
         }
@@ -107,7 +101,10 @@ pub(crate) async fn shell_execute(
     // `git diff` and corrupts file contents that contain blank lines. Raw
     // events preserve stdout/stderr exactly while keeping the same async
     // process lifecycle.
-    let (mut events, _child) = cmd.set_raw_out(true).spawn().map_err(|e| e.to_string())?;
+    let (mut events, _child) = cmd
+        .set_raw_out(true)
+        .spawn()
+        .map_err(|e| shell_exec_error::spawn_failed(&e))?;
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let mut code = 1;

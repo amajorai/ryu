@@ -669,6 +669,7 @@
   "network": "الشبكة",
   "node": "عقدة",
   "none": "لا شيء",
+  "not run": "لم يُشغَّل",
   "now": "الآن",
   "once": "مرة واحدة",
   "open": "مفتوحة",
@@ -715,5 +716,6 @@
   "{count} more": "{count} أخرى",
   "{cueCount} cues copied as {format}.": "نُسخ {cueCount} من الترجمات بتنسيق {format}.",
   "{name} is queued. This runs on your machine, so it takes a while for a long video.": "{name} في قائمة الانتظار. تتم المعالجة على جهازك، لذا تستغرق بعض الوقت مع الفيديو الطويل.",
-  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "تُرجم {translatedCount} من أصل {cueCount} سطرًا؛ واحتفظ الباقي بصياغته الأصلية."
+  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "تُرجم {translatedCount} من أصل {cueCount} سطرًا؛ واحتفظ الباقي بصياغته الأصلية.",
+  "{video} → {language}": "{video} ← {language}"
 }

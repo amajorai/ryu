@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::Sha256;
 
+use super::target_guard::{self, TargetEgress};
 use super::Issued;
 
 /// Webhook provider configuration.
@@ -26,6 +27,9 @@ pub struct WebhookConfig {
     pub url: String,
     /// Shared HMAC secret (at least 16 characters).
     pub signing_secret: String,
+    /// How connections are made (set from the role's writer; never stored).
+    #[serde(skip)]
+    pub(crate) egress: TargetEgress,
 }
 
 impl WebhookConfig {
@@ -54,23 +58,21 @@ pub(crate) fn signature(secret: &str, timestamp: &str, body: &str) -> String {
 pub(super) async fn call(config: &WebhookConfig, payload: Value) -> Result<Value> {
     let body = payload.to_string();
     let timestamp = chrono::Utc::now().timestamp().to_string();
-    let response = reqwest::Client::new()
-        .post(&config.url)
-        .timeout(std::time::Duration::from_secs(15))
-        .header("content-type", "application/json")
-        .header("x-ryu-timestamp", &timestamp)
-        .header(
-            "x-ryu-signature",
+    let headers = vec![
+        ("content-type".to_owned(), "application/json".to_owned()),
+        ("x-ryu-timestamp".to_owned(), timestamp.clone()),
+        (
+            "x-ryu-signature".to_owned(),
             signature(&config.signing_secret, &timestamp, &body),
-        )
-        .body(body)
-        .send()
-        .await?;
-    let status = response.status();
-    if !status.is_success() {
+        ),
+    ];
+    // Redirects are never followed (a 3xx is a failure).
+    let (status, answer) =
+        target_guard::post(&config.url, headers, body.into_bytes(), config.egress).await?;
+    if !(200..300).contains(&status) {
         bail!("webhook returned {status}");
     }
-    Ok(response.json().await.unwrap_or(Value::Null))
+    Ok(serde_json::from_slice(&answer).unwrap_or(Value::Null))
 }
 
 pub(super) async fn issue(config: &WebhookConfig, role: &str, ttl_secs: i64) -> Result<Issued> {
@@ -137,6 +139,7 @@ mod tests {
             // Built at runtime: any 16-byte value passes, and a literal here
             // trips repository secret scanners.
             signing_secret: "x".repeat(16),
+            egress: TargetEgress::Trusted,
         };
         ok.validate().unwrap();
         let local = WebhookConfig {

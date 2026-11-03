@@ -384,6 +384,7 @@
   "no encoder available for '{fmt}'": "kein Encoder für '{fmt}' verfügbar",
   "not installed": "nicht installiert",
   "nothing to speak after removing tags": "nach dem Entfernen der Tags ist nichts zum Vorlesen übrig",
+  "pause tags may add at most {maxTotalPauseS}s of silence in total": "Pause-Tags dürfen insgesamt höchstens {maxTotalPauseS} s Stille hinzufügen",
   "required TTS engine '{engineId}' is missing from the registry": "erforderliche TTS-Engine '{engineId}' fehlt in der Registry",
   "synthesis failed in '{engine}': {error}": "Synthese in '{engine}' fehlgeschlagen: {error}",
   "unknown model '{modelName}' for engine '{engine}'": "unbekanntes Modell '{modelName}' für Engine '{engine}'",

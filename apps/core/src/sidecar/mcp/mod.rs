@@ -4756,14 +4756,15 @@ impl McpRegistry {
         connection_action: crate::identity::ConnectionAction,
     ) -> crate::approvals::exfiltration_guard::DataFlow {
         use crate::approvals::exfiltration_guard::{
-            classify_data_flow, provider_tool_flows, AppBackendKind, ToolFlowFacts, ToolOrigin,
+            classify_data_flow, AppBackendKind, ToolFlowFacts, ToolOrigin,
         };
         use crate::plugin_manifest::schema::ToolBackend;
 
         // A provider tool called directly reaches what its verb reaches (a memory
-        // provider's search returns private memory), whether or not its provider
-        // is the selected one. Read from the enabled manifests; when the enabled
-        // set cannot be read, fall back to every loaded manifest (fail closed).
+        // provider's search returns private memory, a screen-capture provider's
+        // unbound read tools return the screen), whether or not its provider is
+        // the selected one. Read from the enabled manifests; when the enabled set
+        // cannot be read, fall back to every loaded manifest (fail closed).
         let provided_verbs = {
             let manifests = match self.enabled_manifests().await {
                 Some(enabled) => enabled,
@@ -4772,16 +4773,7 @@ impl McpRegistry {
                     None => Vec::new(),
                 },
             };
-            let flows = provider_tool_flows(&manifests);
-            [tool_id, gate_id]
-                .into_iter()
-                .filter_map(|id| flows.get(id).copied())
-                .reduce(
-                    |left, right| crate::approvals::exfiltration_guard::DataFlow {
-                        private_source: left.private_source || right.private_source,
-                        egress: left.egress || right.egress,
-                    },
-                )
+            crate::approvals::provider_tool_flow::provider_flow_for(&manifests, &[tool_id, gate_id])
         };
 
         let origin = if gate_id.starts_with("composio.") {

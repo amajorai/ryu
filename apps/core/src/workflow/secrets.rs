@@ -26,7 +26,9 @@
 //! external sender (the editor's reveal/copy control, and
 //! `GET /api/webhooks/:id/secret`), so only the single-workflow GET and the
 //! editor's own save/conflict responses carry it, to callers holding the
-//! workflow's view permission. Bulk and read-only views (`GET /workflows`, a
+//! workflow's edit permission (the single-workflow GET serves a view-only reader
+//! [`redact_for_listing`], because the secret can start the workflow through its
+//! public webhook route). Bulk and read-only views (`GET /workflows`, a
 //! stored version, a restore preview) use [`redact_for_listing`], which also
 //! masks the trigger secret, so a list consumer (a dashboard widget that caches
 //! the list, say) never copies every signing key.

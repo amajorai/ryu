@@ -384,6 +384,7 @@
   "no encoder available for '{fmt}'": "'{fmt}' に使用できるエンコーダーがありません",
   "not installed": "未インストール",
   "nothing to speak after removing tags": "タグを削除すると読み上げる内容がありません",
+  "pause tags may add at most {maxTotalPauseS}s of silence in total": "pause タグで追加できる無音は合計 {maxTotalPauseS} 秒までです",
   "required TTS engine '{engineId}' is missing from the registry": "必須の TTS エンジン '{engineId}' がレジストリにありません",
   "synthesis failed in '{engine}': {error}": "'{engine}' で音声合成に失敗しました: {error}",
   "unknown model '{modelName}' for engine '{engine}'": "エンジン '{engine}' の不明なモデル '{modelName}'",

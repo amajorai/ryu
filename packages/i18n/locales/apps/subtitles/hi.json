@@ -669,6 +669,7 @@
   "network": "नेटवर्क",
   "node": "नोड",
   "none": "कोई नहीं",
+  "not run": "नहीं चलाया गया",
   "now": "अभी",
   "once": "एक बार",
   "open": "खुले",
@@ -715,5 +716,6 @@
   "{count} more": "{count} और",
   "{cueCount} cues copied as {format}.": "{cueCount} उपशीर्षक {format} के रूप में कॉपी किए गए।",
   "{name} is queued. This runs on your machine, so it takes a while for a long video.": "{name} कतार में है। यह आपकी मशीन पर चलता है, इसलिए लंबे वीडियो में कुछ समय लगता है।",
-  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "{cueCount} में से {translatedCount} पंक्तियों का अनुवाद हुआ; बाकी में मूल शब्द रहे।"
+  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "{cueCount} में से {translatedCount} पंक्तियों का अनुवाद हुआ; बाकी में मूल शब्द रहे।",
+  "{video} → {language}": "{video} → {language}"
 }

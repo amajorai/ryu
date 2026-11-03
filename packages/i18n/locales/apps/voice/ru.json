@@ -384,6 +384,7 @@
   "no encoder available for '{fmt}'": "нет доступного кодировщика для '{fmt}'",
   "not installed": "не установлено",
   "nothing to speak after removing tags": "после удаления тегов нечего озвучивать",
+  "pause tags may add at most {maxTotalPauseS}s of silence in total": "теги пауз могут добавить не более {maxTotalPauseS} с тишины в сумме",
   "required TTS engine '{engineId}' is missing from the registry": "обязательный движок TTS '{engineId}' отсутствует в реестре",
   "synthesis failed in '{engine}': {error}": "ошибка синтеза в '{engine}': {error}",
   "unknown model '{modelName}' for engine '{engine}'": "неизвестная модель '{modelName}' для движка '{engine}'",

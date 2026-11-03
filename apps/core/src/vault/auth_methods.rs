@@ -613,7 +613,7 @@ fn check_reviewer_env(env: &str) -> Result<()> {
 /// `scheme://host:port/path` of an API server URL, for comparing a configured
 /// host with the operator's pin. Credentials, queries, and fragments are
 /// refused: the TokenReview path is appended to the host as text.
-fn api_server_origin(host: &str) -> Result<String> {
+pub(super) fn api_server_origin(host: &str) -> Result<String> {
     let url = url::Url::parse(host.trim()).context("host is not a URL")?;
     if url.scheme() != "https" {
         bail!("host must be https");
@@ -713,6 +713,21 @@ pub fn check_token_review(
         bail!("service account `{name}` is not allowed");
     }
     Ok((namespace, name))
+}
+
+/// A delegate-written identity without an operator-pinned reviewer is
+/// screened ([`super::machine_egress`]); every other call is unchanged.
+async fn token_review_as(
+    config: &KubernetesAuthConfig,
+    jwt: &str,
+    egress: super::dynamic::target_guard::TargetEgress,
+) -> Result<Value> {
+    if egress == super::dynamic::target_guard::TargetEgress::Screened
+        && config.reviewer_jwt_env.is_none()
+    {
+        return super::machine_egress::token_review_screened(config, jwt).await;
+    }
+    token_review(config, jwt).await
 }
 
 async fn token_review(config: &KubernetesAuthConfig, jwt: &str) -> Result<Value> {
@@ -965,8 +980,9 @@ impl PluginSecretStore {
                 VaultError::Invalid("identity does not use kubernetes login".into()).into(),
             );
         };
+        let egress = self.machine_identity_egress(&identity.name).await?;
         let checked = async {
-            let review = token_review(config, jwt).await?;
+            let review = token_review_as(config, jwt, egress).await?;
             check_token_review(config, &review)
         }
         .await;

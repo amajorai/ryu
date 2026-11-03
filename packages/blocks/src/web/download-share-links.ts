@@ -10,7 +10,10 @@
 
 export const DOWNLOAD_PAGE_PATH = "/download";
 
-/** The share title and the line that goes in front of the link. */
+/**
+ * The English share title and the line that goes in front of the link. The
+ * drawer sends them translated through literal `tl()` calls of its own.
+ */
 export const DOWNLOAD_SHARE_TITLE = "Download Ryu";
 export const DOWNLOAD_SHARE_TEXT = "Download Ryu on your computer:";
 

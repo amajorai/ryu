@@ -10,6 +10,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
+import { desktopCommandErrorLine } from "@/src/lib/desktop-command-error-messages.ts";
 import {
 	buildGitGraphLogCommand,
 	buildGitGraphRows,
@@ -67,12 +68,12 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 			} catch (cause) {
 				return {
 					code: 1,
-					stderr: cause instanceof Error ? cause.message : String(cause),
+					stderr: desktopCommandErrorLine(cause, tl),
 					stdout: "",
 				};
 			}
 		},
-		[folder, terminalShell]
+		[folder, terminalShell, tl]
 	);
 
 	const refresh = useCallback(async () => {

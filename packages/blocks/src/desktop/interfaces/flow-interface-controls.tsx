@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Logo as RyuLogo } from "@ryu/ui/components/logo";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
@@ -129,7 +130,7 @@ export function FlowZoomToolbar({
 				<Minus aria-hidden="true" className="size-3.5 stroke-[1.75]" />
 			</button>
 			<span className="w-11 border-border border-x text-center text-muted-foreground text-xs tabular-nums leading-[30px]">
-				{Math.round(shown.k * 100)}%
+				{formatPercent(shown.k)}
 			</span>
 			<button
 				aria-label="Zoom in"

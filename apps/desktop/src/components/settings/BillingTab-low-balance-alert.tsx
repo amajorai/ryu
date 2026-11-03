@@ -23,6 +23,7 @@ import {
 	dollarTextToCents,
 	errorText,
 } from "./BillingTab-spend-shared.tsx";
+import { balanceThresholdError } from "./BillingTab-usd-copy.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -121,7 +122,7 @@ export function LowBalanceAlertCard() {
 		async (nextRecipients: CreditAlertRecipients): Promise<boolean> => {
 			const thresholdCents = dollarTextToCents(thresholdText);
 			if (nextRecipients !== "none" && thresholdCents <= 0) {
-				toast.error("Set a balance threshold above $0.");
+				toast.error(balanceThresholdError(tl));
 				return false;
 			}
 			setSaving(true);
@@ -142,7 +143,7 @@ export function LowBalanceAlertCard() {
 				setSaving(false);
 			}
 		},
-		[thresholdText]
+		[thresholdText, tl]
 	);
 
 	const handleRecipientsChange = useCallback(

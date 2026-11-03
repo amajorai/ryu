@@ -8,6 +8,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { terminalErrorLines } from "@/src/lib/desktop-command-error-messages.ts";
 import type { TerminalCommandRequest } from "@/src/store/useDockPanelRequestStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 import panelStyles from "../WorkspacePanels.module.css";
@@ -106,11 +107,11 @@ export function SimpleTerminal({
 				}
 				setLines((prev) => [...prev, ...next]);
 			} catch (e) {
-				setLines((prev) => [...prev, { type: "error", text: String(e) }]);
+				setLines((prev) => [...prev, ...terminalErrorLines(e, tl)]);
 			}
 			setRunning(false);
 		},
-		[currentCwd, terminalShell]
+		[currentCwd, terminalShell, tl]
 	);
 
 	useEffect(() => {

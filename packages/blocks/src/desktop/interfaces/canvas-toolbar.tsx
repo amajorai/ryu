@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -120,7 +121,7 @@ function ZoomMenu({
 	zoom: number;
 }) {
 	const tl = useLiteralMessages();
-	const percent = `${Math.round(zoom * 100)}%`;
+	const percent = formatPercent(zoom);
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger

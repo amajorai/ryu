@@ -197,6 +197,7 @@ pub async fn charge_tool(
             "Core charge organization does not match the relay credential".to_owned(),
         ));
     }
+    crate::pipeline::org_core_relay::require_forwarder_org(&ctx, body.org_id.as_deref())?;
     let tenant_authorization_read = body.authorize_only && ctx.org_id.is_some();
     if !may_accept_tool_charge(&ctx, trusted_forwarder, core_forwarded_dynamic)
         && !tenant_authorization_read

@@ -3,6 +3,7 @@ import {
 	dateFormatter,
 	isEnglishLocale,
 	numberFormatter,
+	translate as tr,
 } from "@ryu/i18n/lite";
 import {
 	Avatar,
@@ -52,7 +53,10 @@ export interface FeedAuthor {
 export const YOU: FeedAuthor = {
 	agent: undefined,
 	handle: "@you",
-	name: "You",
+	// A getter, so the avatar's "Avatar of {name}" reads the active language.
+	get name() {
+		return tr("You");
+	},
 };
 
 export function feedAuthor(agent: InterfaceAgent | undefined): FeedAuthor {

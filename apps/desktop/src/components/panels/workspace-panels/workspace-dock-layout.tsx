@@ -1,6 +1,16 @@
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import type { CSSProperties, ReactNode, RefObject } from "react";
+import type {
+	CSSProperties,
+	MouseEventHandler,
+	ReactNode,
+	RefObject,
+} from "react";
 import panelStyles from "../WorkspacePanels.module.css";
+import {
+	type DockHideTransform,
+	dockHideTransform,
+} from "./workspace-dock-direction.ts";
 import type { WorkspacePanelsProps } from "./workspace-panels-types.ts";
 
 export interface WorkspaceDockStyle extends CSSProperties {
@@ -8,7 +18,7 @@ export interface WorkspaceDockStyle extends CSSProperties {
 	"--workspace-height"?: string;
 	"--workspace-pointer-events"?: "auto" | "none";
 	"--workspace-right"?: string;
-	"--workspace-transform"?: "translateX(0)" | "translateX(100%)";
+	"--workspace-transform"?: "translateX(0)" | DockHideTransform;
 	"--workspace-transition"?: string;
 	"--workspace-width"?: string;
 }
@@ -186,13 +196,13 @@ export function renderWorkspaceDockLayout({
 						"--workspace-display": pinnedDocked ? "block" : "none",
 						"--workspace-transition": rightResizing
 							? "none"
-							: `right 300ms ${DOCK_EASE}`,
+							: `inset-inline-end 300ms ${DOCK_EASE}`,
 					} satisfies WorkspaceDockStyle as WorkspaceDockStyle
 				}
 			>
 				<div
 					className={cn(
-						"h-full overflow-y-auto border-border border-l px-3 pt-6",
+						"h-full overflow-y-auto border-border border-s px-3 pt-6",
 						floatingChrome && "pb-2"
 					)}
 				>
@@ -222,40 +232,24 @@ export function renderWorkspaceDockLayout({
 				</div>
 			)}
 
-			{/* The one right-panel instance — pinned to the right edge, slides via
+			{/* The one right-panel instance — pinned to the inline-end edge, slides via
 			    transform for both docking and hover-peek. It starts BELOW the frosted
 			    titlebar so the full-width bar keeps its right-side panel-toggle
 			    buttons visible and clickable while the panel is open — otherwise this
 			    z-20 layer covers the z-10 titlebar and you can no longer reach the
 			    button that hides it. Floating chrome clears the titlebar's top-2
 			    offset (58px); inset chrome sits flush under h-12. */}
-			<div
-				aria-hidden={!rightVisible}
-				className={cn(
-					"absolute right-0 bottom-0 z-20 flex flex-row",
-					dockTop,
-					panelStyles.rightPanel
-				)}
-				inert={!rightVisible}
+			<RightDockPanel
+				className={dockTop}
 				onMouseEnter={rightOpen || isMobile ? undefined : showRightPeek}
 				onMouseLeave={rightOpen || isMobile ? undefined : hideRightPeek}
-				style={
-					// SAFETY: satisfies validates full React CSSProperties and the finite workspace CSS variable slots; this checked-owner cast only removes fresh-literal metadata.
-					{
-						"--workspace-width": `${rightPanelWidth}px`,
-						"--workspace-transform": rightVisible
-							? "translateX(0)"
-							: "translateX(100%)",
-						"--workspace-pointer-events": rightVisible ? "auto" : "none",
-						"--workspace-transition": rightResizing
-							? "none"
-							: `transform 300ms ${DOCK_EASE}`,
-					} satisfies WorkspaceDockStyle as WorkspaceDockStyle
-				}
+				resizing={rightResizing}
+				visible={rightVisible}
+				width={rightPanelWidth}
 			>
 				{!isMobile && rightResizeHandle}
 				{rightCard(closeRight)}
-			</div>
+			</RightDockPanel>
 
 			{/* Right edge hover-zone: reveals the peek while the panel is closed.
 			    Starts below the titlebar so its z-30 strip never sits over the bar's
@@ -263,11 +257,63 @@ export function renderWorkspaceDockLayout({
 			    where it would also swallow the edge-swipe back gesture. */}
 			{!(rightOpen || isMobile) && (
 				<div
-					className={cn("absolute right-0 bottom-0 z-30 w-2", dockTop)}
+					className={cn("absolute end-0 bottom-0 z-30 w-2", dockTop)}
 					onMouseEnter={showRightPeek}
 					onMouseLeave={hideRightPeek}
 				/>
 			)}
+		</div>
+	);
+}
+
+interface RightDockPanelProps {
+	children: ReactNode;
+	className: string;
+	onMouseEnter: MouseEventHandler<HTMLDivElement> | undefined;
+	onMouseLeave: MouseEventHandler<HTMLDivElement> | undefined;
+	resizing: boolean;
+	visible: boolean;
+	width: number;
+}
+
+/** The inline-end dock; its hide slide follows the reading direction. */
+export function RightDockPanel({
+	children,
+	className,
+	onMouseEnter,
+	onMouseLeave,
+	resizing,
+	visible,
+	width,
+}: RightDockPanelProps) {
+	const dir = useDirection();
+	return (
+		<div
+			aria-hidden={!visible}
+			className={cn(
+				"absolute end-0 bottom-0 z-20 flex flex-row",
+				className,
+				panelStyles.rightPanel
+			)}
+			data-testid="workspace-right-dock"
+			inert={!visible}
+			onMouseEnter={onMouseEnter}
+			onMouseLeave={onMouseLeave}
+			style={
+				// SAFETY: satisfies validates full React CSSProperties and the finite workspace CSS variable slots; this checked-owner cast only removes fresh-literal metadata.
+				{
+					"--workspace-width": `${width}px`,
+					"--workspace-transform": visible
+						? "translateX(0)"
+						: dockHideTransform(dir),
+					"--workspace-pointer-events": visible ? "auto" : "none",
+					"--workspace-transition": resizing
+						? "none"
+						: `transform 300ms ${DOCK_EASE}`,
+				} satisfies WorkspaceDockStyle as WorkspaceDockStyle
+			}
+		>
+			{children}
 		</div>
 	);
 }

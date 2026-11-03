@@ -14,6 +14,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::target_guard::{self, TargetEgress};
 use super::{random_suffix, Issued};
 
 const DEFAULT_REVOCATION: &[&str] = &[
@@ -39,6 +40,9 @@ pub struct PostgresConfig {
     /// Username prefix (default `ryu`).
     #[serde(default)]
     pub username_prefix: Option<String>,
+    /// How connections are made (set from the role's writer; never stored).
+    #[serde(skip)]
+    pub(crate) egress: TargetEgress,
 }
 
 impl PostgresConfig {
@@ -128,6 +132,7 @@ pub(super) async fn connect(config: &PostgresConfig) -> Result<tokio_postgres::C
     }
     let mut pg: tokio_postgres::Config = url.as_str().parse().context("parsing connectionUrl")?;
     pg.connect_timeout(std::time::Duration::from_secs(10));
+    target_guard::pin_postgres(&mut pg, config.egress).await?;
     if mode == "disable" {
         pg.ssl_mode(tokio_postgres::config::SslMode::Disable);
         let (client, connection) = pg.connect(tokio_postgres::NoTls).await?;
@@ -279,6 +284,7 @@ mod tests {
             ],
             revocation_statements: vec![],
             username_prefix: None,
+            egress: TargetEgress::Trusted,
         }
     }
 

@@ -195,20 +195,25 @@ export function availabilityText(
  */
 export function tripWord(
 	trip: RideTrip,
-	acted?: { stage: TripStage; word: string }
+	acted?: { stage: TripStage; word: string },
+	/** Render callers pass their hook `tl`; the word is translated here so a
+	 *  sentence that interpolates it never mixes languages. */
+	tl: LiteralMessage = tr
 ): string {
 	if (acted && trip.stage !== "unassigned") {
-		return acted.stage === "enroute" && trip.carless ? "Up next" : acted.word;
+		return acted.stage === "enroute" && trip.carless
+			? tl("Up next")
+			: acted.word;
 	}
 	switch (trip.stage) {
 		case "arrived":
-			return "Your turn";
+			return tl("Your turn");
 		case "cancelled":
 			return trip.thread.runState === "interrupted"
-				? "Run interrupted"
-				: "Run failed";
+				? tl("Run interrupted")
+				: tl("Run failed");
 		case "enroute":
-			return trip.carless ? "Up next" : STAGE_LABELS.enroute;
+			return trip.carless ? tl("Up next") : STAGE_LABELS.enroute;
 		default:
 			return STAGE_LABELS[trip.stage];
 	}
@@ -234,44 +239,47 @@ export function tripHeadline(
 						detail: tl("{driver} starts this after the current trip", {
 							driver,
 						}),
-						status: tripWord(trip),
+						status: tripWord(trip, undefined, tl),
 					}
 				: {
 						detail: tl("Estimated from {driver}'s usual reply time", {
 							driver,
 						}),
-						status: tripWord(trip),
+						status: tripWord(trip, undefined, tl),
 					};
 		case "arrived":
 			return {
 				detail: tl("{driver} replied.", { driver }),
-				status: tripWord(trip),
+				status: tripWord(trip, undefined, tl),
 			};
 		case "completed":
 			return {
 				detail: tl("{driver} replied. It's still your turn.", { driver }),
-				status: tripWord(trip),
+				status: tripWord(trip, undefined, tl),
 			};
 		case "unassigned":
 			return {
-				detail: "Add an agent to this conversation to start it",
-				status: tripWord(trip),
+				detail: tl("Add an agent to this conversation to start it"),
+				status: tripWord(trip, undefined, tl),
 			};
 		case "requested":
 			return {
 				detail: tl("Waiting for {driver} to pick it up", { driver }),
-				status: tripWord(trip),
+				status: tripWord(trip, undefined, tl),
 			};
 		case "cancelled":
 			return {
 				detail:
 					trip.thread.runState === "interrupted"
-						? "The run was interrupted. Send a message to try again."
-						: "The run failed. Send a message to try again.",
-				status: tripWord(trip),
+						? tl("The run was interrupted. Send a message to try again.")
+						: tl("The run failed. Send a message to try again."),
+				status: tripWord(trip, undefined, tl),
 			};
 		default:
-			return { detail: "Nothing has been sent yet", status: tripWord(trip) };
+			return {
+				detail: tl("Nothing has been sent yet"),
+				status: tripWord(trip, undefined, tl),
+			};
 	}
 }
 
@@ -291,7 +299,7 @@ export function chipText(
 } {
 	if (trip.stage === "enroute") {
 		if (trip.carless) {
-			return { lead: "Up next", tail: null };
+			return { lead: tr("Up next"), tail: null };
 		}
 		// With acts a map pin never shows the typical-length guess.
 		return acted

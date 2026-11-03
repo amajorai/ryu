@@ -107,6 +107,7 @@ async fn run(seal_key: SealKeyStatus) -> anyhow::Result<()> {
         "GATEWAY_CORE_RELAY_KEY",
         "GATEWAY_CORE_PROOF_KEY",
         "GATEWAY_CORE_PROOF_MASTER_KEY",
+        "GATEWAY_CORE_RELAY_MASTER_KEY",
     ])?;
     // The sealing key now lives only in this process's memory: keep same-UID
     // processes from reading it through procfs/ptrace.

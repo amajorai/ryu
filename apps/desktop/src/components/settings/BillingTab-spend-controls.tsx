@@ -29,6 +29,11 @@ import {
 	errorText,
 } from "./BillingTab-spend-shared.tsx";
 import {
+	balanceThresholdError,
+	rechargeRangeError,
+	useSandboxBudgetCaption,
+} from "./BillingTab-usd-copy.ts";
+import {
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -65,6 +70,7 @@ export function SpendControlsSection() {
 		refresh: refreshWallet,
 	} = useCreditsWallet();
 	const tl = useLiteralMessages();
+	const sandboxCaption = useSandboxBudgetCaption();
 	const activeOrgId = useActiveOrgId();
 
 	const [settings, setSettings] = useState<AutoTopupSettings | null>(null);
@@ -166,16 +172,12 @@ export function SpendControlsSection() {
 					amountCents > AUTOTOPUP_MAX_CENTS
 				) {
 					toast.error(
-						// biome-ignore lint/suspicious/noTemplateCurlyInString: ICU message with a literal dollar sign before each amount placeholder.
-						tl("Recharge amount must be between ${min} and ${max}.", {
-							min: String(MIN_TOPUP_DOLLARS),
-							max: String(MAX_TOPUP_DOLLARS),
-						})
+						rechargeRangeError(tl, MIN_TOPUP_DOLLARS, MAX_TOPUP_DOLLARS)
 					);
 					return false;
 				}
 				if (thresholdCents <= 0) {
-					toast.error("Set a balance threshold above $0.");
+					toast.error(balanceThresholdError(tl));
 					return false;
 				}
 			}
@@ -437,10 +439,7 @@ export function SpendControlsSection() {
 
 			<LowBalanceAlertCard />
 
-			<SettingsSection
-				caption="The most one sandboxed run on this node may cost before Ryu stops it. $0 means no limit."
-				title="Sandbox spending"
-			>
+			<SettingsSection caption={sandboxCaption} title="Sandbox spending">
 				<SettingsGroup>
 					<SettingsItem
 						actions={

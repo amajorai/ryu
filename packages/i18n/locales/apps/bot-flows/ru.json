@@ -450,6 +450,7 @@
   "No recent updates": "Нет последних обновлений",
   "No results": "Нет результатов",
   "No tabs found.": "Вкладки не найдены.",
+  "No.": "№",
   "None": "Нет",
   "Normal": "Обычный",
   "Note": "Заметка",
@@ -953,11 +954,13 @@
   "your browser": "браузере",
   "{count} more": "Ещё {count}",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {Выбранный узел перемещён вверх. Новая позиция, x: {x}, y: {y}} down {Выбранный узел перемещён вниз. Новая позиция, x: {x}, y: {y}} left {Выбранный узел перемещён влево. Новая позиция, x: {x}, y: {y}} right {Выбранный узел перемещён вправо. Новая позиция, x: {x}, y: {y}} other {Выбранный узел перемещён. Новая позиция, x: {x}, y: {y}}}",
+  "{label} → {variable}": "{label} → {variable}",
   "{label}:": "{label}:",
   "{label}: next step": "{label}: следующий шаг",
   "{name} is typing": "{name} печатает",
   "{name} · {op, select, increment {increment} clear {clear} now {current date and time} random_id {random id} result_id {result id} transcript {conversation transcript} other {{op}}}": "{name} · {op, select, increment {увеличить} clear {очистить} now {текущие дата и время} random_id {случайный ID} result_id {ID результата} transcript {расшифровка разговора} other {{op}}}",
   "{name}. Ask how to improve the conversation, fix dead ends, or route answers.": "{name}. Спросите, как улучшить диалог, устранить тупики или перенаправить ответы.",
   "{value} of {total} stars": "{value} из {total} звёзд",
-  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {равно {value}} not_equals {не равно {value}} contains {содержит {value}} not_contains {не содержит {value}} greater_than {больше {value}} less_than {меньше {value}} is_set {задано} is_empty {пусто} starts_with {начинается с {value}} ends_with {заканчивается на {value}} other {{operator} {value}}}"
+  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {равно {value}} not_equals {не равно {value}} contains {содержит {value}} not_contains {не содержит {value}} greater_than {больше {value}} less_than {меньше {value}} is_set {задано} is_empty {пусто} starts_with {начинается с {value}} ends_with {заканчивается на {value}} other {{operator} {value}}}",
+  "→ {group}": "→ {group}"
 }

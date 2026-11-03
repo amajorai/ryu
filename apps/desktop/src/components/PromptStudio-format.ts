@@ -1,5 +1,6 @@
 // Prompt Studio placeholder, variable, and score formatting helpers.
 
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { isString } from "@/src/lib/prompt-studio.ts";
 import {
 	type PromptfooValue,
@@ -81,7 +82,7 @@ export function parseVariable(value: string): PromptfooValue {
 }
 
 export function pct(value: number): string {
-	return `${Math.round(value * 100)}%`;
+	return formatPercent(value);
 }
 
 export function scoreTone(score: number): string {

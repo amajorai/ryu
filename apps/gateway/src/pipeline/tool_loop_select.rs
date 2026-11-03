@@ -45,7 +45,8 @@ pub(super) fn unified_composio_identity(
         .as_deref()
         .map(|org_id| {
             crate::composio::ComposioTenantScope::new(org_id)
-                .map(|scope| scope.entity_for_user(ctx.user_id.as_deref()))
+                // A Box key gets only the org-shared entity, never its member's.
+                .map(|scope| scope.entity_for_user(super::composio_entity_user(ctx)))
         })
         .transpose()?;
     // Core treats the tool body's user id as a Composio selector on an unbound

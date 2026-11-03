@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
 import {
@@ -88,7 +89,7 @@ export function AppearanceLayoutPage({ state }: { state: AppearanceTabState }) {
 
 					<div className="space-y-1.5">
 						<FluidSlider
-							format={(v) => `${(v * 100).toFixed(0)}%`}
+							format={(v) => formatPercent(v)}
 							label="Scale (UI zoom)"
 							max={SCALE_MAX}
 							min={SCALE_MIN}

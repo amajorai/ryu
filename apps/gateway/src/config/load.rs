@@ -107,14 +107,18 @@ pub(super) fn load_auth_env(config: &mut GatewayConfig) -> anyhow::Result<()> {
             );
         }
     }
-    if let Ok(master) = std::env::var("GATEWAY_CORE_PROOF_MASTER_KEY") {
+    for variable in [
+        "GATEWAY_CORE_PROOF_MASTER_KEY",
+        "GATEWAY_CORE_RELAY_MASTER_KEY",
+    ] {
+        let Ok(master) = std::env::var(variable) else {
+            continue;
+        };
         ryu_gw_credentials::validate(&master)?;
         if config.auth.master_key.as_deref() == Some(master.as_str())
             || config.auth.api_keys.iter().any(|entry| entry.key == master)
         {
-            anyhow::bail!(
-                "GATEWAY_CORE_PROOF_MASTER_KEY must differ from every Gateway bearer credential"
-            );
+            anyhow::bail!("{variable} must differ from every Gateway bearer credential");
         }
     }
     Ok(())

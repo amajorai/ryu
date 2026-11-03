@@ -7,6 +7,7 @@ import {
 } from "@platejs/media/react";
 import { activeLocale } from "@ryu/i18n/core";
 import { formatByteSize } from "@ryu/i18n/format-intl";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { useUploadFile } from "@ryu/ui/hooks/use-upload-file.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -302,7 +303,7 @@ export function ImageProgress({
 				<div className="absolute end-1 bottom-1 flex items-center space-x-2 rounded-full bg-black/50 px-1 py-0.5 rtl:space-x-reverse">
 					<Loader2Icon className="size-3.5 animate-spin text-muted-foreground" />
 					<span className="font-medium text-white text-xs">
-						{Math.round(progress)}%
+						{formatPercent(progress / 100, 0, activeLocale())}
 					</span>
 				</div>
 			)}

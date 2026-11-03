@@ -1079,6 +1079,7 @@
   "with": "इनके साथ:",
   "working": "काम कर रहे हैं",
   "your browser": "आपके ब्राउज़र",
+  "{action} → {detail}": "{action} → {detail}",
   "{count} more": "{count} और",
   "{count} selected": "{count} चयनित",
   "{count} selected people": "{count} चयनित लोग",

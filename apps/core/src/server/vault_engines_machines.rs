@@ -7,6 +7,7 @@
 //! vault_public_routes_auth_test.rs, vault_engine_roles_tests.rs, and the vault engine tests.
 
 use super::*;
+use crate::vault::dynamic::target_guard::RoleWriter;
 
 // ── Machine identities ────────────────────────────────────────────────────
 
@@ -52,13 +53,18 @@ pub async fn machine_create(
     if let Err(response) = who.require("sys/machines", Capability::Admin) {
         return response;
     }
+    // A delegated admin's identity may only reach public JWKS and Kubernetes
+    // API hosts (screened at every login); a configuration manager's keeps
+    // the host's network.
+    let manager = matches!(&who, Who::Human(ctx) if ctx.manager);
     ok_or(
         who.store()
-            .machine_create(
+            .machine_create_as(
                 &body.name,
                 body.auth,
                 body.policies,
                 body.token_ttl_secs,
+                RoleWriter::from_manager(manager),
                 &who.actor(),
             )
             .await,

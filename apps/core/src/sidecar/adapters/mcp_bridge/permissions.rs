@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::Message;
 
 /// Gate `agent_builder.configure_agent` — an agent rewriting its OWN
 /// configuration — behind an interactive user prompt raised over `permission_tx`.
@@ -66,7 +67,8 @@ pub(super) async fn require_agent_builder_configure_permission(
             "agent_id": agent_id,
             "fields": {
                 "title": "configure itself"
-            }
+            },
+            "i18n": configure_agent_consent_i18n()
         }),
         json!([
             {
@@ -155,6 +157,71 @@ pub(super) fn in_chat_consent_title(tool_id: &str, args: &Value) -> String {
     format!("run {tool_id}")
 }
 
+/// The localizable form of an in-chat consent prompt, sent as `toolCall.i18n`
+/// beside the English `fields.title` (which older clients keep showing): the
+/// action as a whole-sentence Core message, a label message per allow choice
+/// keyed by `optionId` (the desktop catalogues the one-word "Deny" itself), and
+/// an optional untranslated technical `detail`.
+fn consent_i18n(
+    action: Message,
+    detail: Option<String>,
+    allow_session_label: crate::i18n::Template,
+) -> Value {
+    use crate::i18n::messages::CONSENT_ALLOW_ONCE_MESSAGE;
+    let mut i18n = json!({
+        "title": action.to_wire(),
+        "options": {
+            "allow_once": Message::new(CONSENT_ALLOW_ONCE_MESSAGE).to_wire(),
+            "allow_session": Message::new(allow_session_label).to_wire(),
+        }
+    });
+    if let Some(detail) = detail {
+        i18n["detail"] = Value::String(detail);
+    }
+    i18n
+}
+
+/// [`consent_i18n`] for `agent_builder.configure_agent`.
+fn configure_agent_consent_i18n() -> Value {
+    use crate::i18n::messages::{
+        CONSENT_ALLOW_FOR_SESSION_MESSAGE, CONSENT_CONFIGURE_AGENT_MESSAGE,
+    };
+    consent_i18n(
+        Message::new(CONSENT_CONFIGURE_AGENT_MESSAGE),
+        None,
+        CONSENT_ALLOW_FOR_SESSION_MESSAGE,
+    )
+}
+
+/// [`consent_i18n`] for [`in_chat_consent_title`]: a whole sentence per shape;
+/// a Core self-API route is "Change a Ryu setting" with the endpoint as detail.
+pub(super) fn in_chat_consent_i18n(tool_id: &str, args: &Value) -> Value {
+    use crate::i18n::messages::{
+        CONSENT_ALLOW_FOR_CHAT_MESSAGE, CONSENT_CHANGE_SETTING_MESSAGE, CONSENT_RUN_CALL_MESSAGE,
+        CONSENT_SWITCH_INTERFACE_MESSAGE, CONSENT_SWITCH_INTERFACE_UNNAMED_MESSAGE,
+    };
+    let (action, detail) = if tool_id == crate::approvals::chat_grants::SWITCH_INTERFACE_TOOL_ID {
+        let action = match args.get("interface").and_then(Value::as_str) {
+            Some(interface) if !interface.trim().is_empty() => {
+                Message::new(CONSENT_SWITCH_INTERFACE_MESSAGE).text("interface", interface.trim())
+            }
+            _ => Message::new(CONSENT_SWITCH_INTERFACE_UNNAMED_MESSAGE),
+        };
+        (action, None)
+    } else if let Some(route) = crate::self_api::route_for(tool_id) {
+        (
+            Message::new(CONSENT_CHANGE_SETTING_MESSAGE),
+            Some(format!("{} {}", route.method, route.path_template)),
+        )
+    } else {
+        (
+            Message::new(CONSENT_RUN_CALL_MESSAGE).text("tool", tool_id),
+            None,
+        )
+    };
+    consent_i18n(action, detail, CONSENT_ALLOW_FOR_CHAT_MESSAGE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +242,78 @@ mod tests {
         assert!(offers_allow_for_this_chat(
             "ryu_api.put_api_models_id_launch_config"
         ));
+    }
+
+    fn option_source(i18n: &Value, option_id: &str) -> String {
+        i18n["options"][option_id]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    #[test]
+    fn switch_interface_consent_is_one_sentence_with_the_interface_as_a_value() {
+        let i18n = in_chat_consent_i18n(
+            crate::approvals::chat_grants::SWITCH_INTERFACE_TOOL_ID,
+            &json!({ "interface": "minimal" }),
+        );
+        assert_eq!(
+            i18n["title"]["message"],
+            "Switch your interface to {interface}"
+        );
+        assert_eq!(i18n["title"]["args"]["interface"], "minimal");
+        assert!(i18n.get("detail").is_none());
+        assert_eq!(option_source(&i18n, "allow_session"), "Allow for this chat");
+
+        let unnamed = in_chat_consent_i18n(
+            crate::approvals::chat_grants::SWITCH_INTERFACE_TOOL_ID,
+            &json!({}),
+        );
+        assert_eq!(unnamed["title"]["message"], "Switch your interface");
+    }
+
+    #[test]
+    fn settings_route_consent_is_generic_and_keeps_the_endpoint_as_detail() {
+        let tool_id = "ryu_api.put_api_preferences_key";
+        let route = crate::self_api::route_for(tool_id).expect("preferences route exists");
+        let i18n = in_chat_consent_i18n(tool_id, &json!({ "key": "approval-mode" }));
+        assert_eq!(i18n["title"]["message"], "Change a Ryu setting");
+        assert_eq!(
+            i18n["detail"],
+            format!("{} {}", route.method, route.path_template)
+        );
+        // The English summary never leaks into the localizable sentence.
+        assert!(!i18n["title"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&route.path_template));
+    }
+
+    #[test]
+    fn other_tools_and_agent_self_configuration_name_whole_sentences() {
+        let run = in_chat_consent_i18n("files.delete", &json!({}));
+        assert_eq!(run["title"]["message"], "Run the tool {tool}");
+        assert_eq!(run["title"]["args"]["tool"], "files.delete");
+        assert_eq!(option_source(&run, "allow_once"), "Allow once");
+        assert_eq!(option_source(&run, "reject_once"), "");
+
+        let configure = configure_agent_consent_i18n();
+        assert_eq!(
+            configure["title"]["message"],
+            "Let the agent configure itself"
+        );
+        assert_eq!(
+            option_source(&configure, "allow_session"),
+            "Allow for session"
+        );
+    }
+
+    #[test]
+    fn consent_messages_render_through_the_core_catalog() {
+        let configure = Message::new(crate::i18n::messages::CONSENT_CONFIGURE_AGENT_MESSAGE);
+        assert_eq!(configure.render("en"), "Let the agent configure itself");
+        let run = Message::new(crate::i18n::messages::CONSENT_RUN_CALL_MESSAGE)
+            .text("tool", "files.delete");
+        assert_eq!(run.render("en"), "Run the tool files.delete");
     }
 }

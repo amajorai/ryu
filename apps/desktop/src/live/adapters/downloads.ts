@@ -7,6 +7,7 @@
 
 import type { LiveActivity } from "@ryu/app-host/live-activity";
 import { formatByteSize } from "@ryu/i18n/format-intl";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useEffect } from "react";
 import { type DownloadTask, isInFlight } from "@/src/lib/api/downloads.ts";
 import { useDownloadsStore } from "@/src/store/useDownloadsStore.ts";
@@ -28,7 +29,7 @@ function downloadToActivity(task: DownloadTask): LiveActivity {
 	const detail =
 		progress === undefined
 			? "Downloading…"
-			: `${Math.round(progress * 100)}% · ${task.speed_bps ? formatSpeed(task.speed_bps) : "…"}`;
+			: `${formatPercent(progress)} · ${task.speed_bps ? formatSpeed(task.speed_bps) : "…"}`;
 	return {
 		id: `download:${task.id}`,
 		appId: "shell",

@@ -964,7 +964,10 @@ impl ConnectionProvider for ComposioConnection {
                 None
             };
             let tenant = composio_org_id.map(ComposioTenantScope::new).transpose()?;
-            let entity_id = composio.entity_for_request(composio_org_id, ctx.user_id.as_deref())?;
+            // A Box key proves no member's consent to act through their own
+            // connected accounts, so it gets only the org-shared entity.
+            let caller_user = crate::pipeline::composio_entity_user(ctx);
+            let entity_id = composio.entity_for_request(composio_org_id, caller_user)?;
             let (body, chargeable, cost_micro_usd, call_id) = match call.operation.as_deref() {
                 Some("capabilities") => {
                     (composio.list_tools(&call.tool_id).await?, false, None, None)
@@ -986,11 +989,7 @@ impl ConnectionProvider for ComposioConnection {
                 Some("disconnect") => {
                     if let Some(tenant) = tenant.as_ref() {
                         composio
-                            .connection_user_for_tenant(
-                                &call.tool_id,
-                                tenant,
-                                ctx.user_id.as_deref(),
-                            )
+                            .connection_user_for_tenant(&call.tool_id, tenant, caller_user)
                             .await?;
                     }
                     (composio.disconnect(&call.tool_id).await?, false, None, None)
@@ -1026,11 +1025,7 @@ impl ConnectionProvider for ComposioConnection {
                     let account_user = match (tenant.as_ref(), call.account_id.as_deref()) {
                         (Some(tenant), Some(account_id)) => {
                             composio
-                                .connection_user_for_tenant(
-                                    account_id,
-                                    tenant,
-                                    ctx.user_id.as_deref(),
-                                )
+                                .connection_user_for_tenant(account_id, tenant, caller_user)
                                 .await?
                         }
                         _ => entity_id,
@@ -1074,6 +1069,10 @@ impl ConnectionProvider for ComposioConnection {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "connections_box_tests.rs"]
+mod box_tests;
 
 #[cfg(test)]
 mod tests {

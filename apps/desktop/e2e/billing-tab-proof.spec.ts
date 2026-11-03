@@ -237,7 +237,7 @@ test("validates and retries low-balance alerts, auto-recharge, and the sandbox b
 	await recharge.click();
 	await expect(recharge).not.toBeChecked();
 	await expect(
-		page.getByText("Recharge amount must be between $5 and $1000.")
+		page.getByText("Recharge amount must be between $5 and $1,000.")
 	).toBeVisible();
 	await expect(
 		apiWrites(await readProof(page), "/api/credits/autotopup")

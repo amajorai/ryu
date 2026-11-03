@@ -1,4 +1,5 @@
 import { renderTemplate, type SourceItem } from "@ryu/app-host/views";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { parseContributedTarget } from "@/src/contributions/contributed-target.ts";
 import type { OutputStyleSummary } from "@/src/lib/api/output-styles.ts";
 import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
@@ -64,28 +65,39 @@ function documentSegment(kind: SpaceDocument["kind"]): string {
 	return "doc";
 }
 
-function documentKindLabel(kind: SpaceDocument["kind"]): string {
+function documentKindLabel(
+	kind: SpaceDocument["kind"],
+	tl: LiteralMessage
+): string {
 	if (kind === "database") {
-		return "Database";
+		return tl("Database");
 	}
 	if (kind === "whiteboard") {
-		return "Whiteboard";
+		return tl("Whiteboard");
 	}
-	return "Page";
+	return tl("Page");
 }
 
-/** Build navigable mentions for documents already listed in each Space. */
+/**
+ * Build navigable mentions for documents already listed in each Space. `tl`
+ * is the UI-language translator: an untitled page is mentioned by the
+ * localized word, and the description names the Space and the document kind.
+ */
 export function buildSpacePageMentionSources(
 	spaces: readonly Space[],
-	documentsBySpace: readonly (readonly SpaceDocument[])[]
+	documentsBySpace: readonly (readonly SpaceDocument[])[],
+	tl: LiteralMessage
 ): MentionSources["pages"] {
 	const pages: MentionSources["pages"] = [];
 
 	for (const [index, space] of spaces.entries()) {
 		for (const document of documentsBySpace[index] ?? []) {
-			const title = document.title.trim() || "Untitled";
+			const title = document.title.trim() || tl("Untitled");
 			pages.push({
-				description: `${space.name} · ${documentKindLabel(document.kind)}`,
+				description: tl("{space} · {kind}", {
+					kind: documentKindLabel(document.kind, tl),
+					space: space.name,
+				}),
 				id: `${space.id}:${document.id}`,
 				name: title,
 				target: {

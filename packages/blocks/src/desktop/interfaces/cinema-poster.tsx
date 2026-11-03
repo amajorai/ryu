@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { memo, type PointerEvent } from "react";
 import { CinemaArt } from "./cinema-art.tsx";
@@ -204,11 +204,13 @@ export const CinemaPoster = memo(function CinemaPoster({
 	rank,
 	title,
 }: CinemaPosterProps) {
+	// Memoized: the hook re-renders it when the catalog or language changes.
+	const tl = useLiteralMessages();
 	const names = cinemaNames(title.agents);
 	const description = [
 		cinemaStatusText(title),
-		names || "No agent",
-		rank ? tr("Number {rank}", { rank: rank.toString() }) : "",
+		names || tl("No agent"),
+		rank ? tl("Number {rank}", { rank: rank.toString() }) : "",
 	]
 		.filter(Boolean)
 		.join(", ");
@@ -281,6 +283,7 @@ export const CinemaFeature = memo(function CinemaFeature({
 	onSelect: (threadId: string, opener: HTMLElement) => void;
 	title: CinemaTitle;
 }) {
+	const tl = useLiteralMessages();
 	const { thread } = title;
 	const names = cinemaNames(title.agents);
 	return (
@@ -314,7 +317,7 @@ export const CinemaFeature = memo(function CinemaFeature({
 					</span>
 				) : (
 					<span className="text-base text-muted-foreground leading-6">
-						No messages yet.
+						{tl("No messages yet.")}
 					</span>
 				)}
 				{title.group ? (

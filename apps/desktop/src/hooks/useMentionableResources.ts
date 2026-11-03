@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
@@ -38,6 +39,7 @@ export function useMentionableResources(
 	sections: PluginSidebarSection[],
 	options?: { agentId?: string; query?: string | null }
 ): MentionableResources {
+	const tl = useLiteralMessages();
 	const activeNode = useActiveNode();
 	const {
 		error: spacesError,
@@ -164,7 +166,8 @@ export function useMentionableResources(
 			),
 			pages: buildSpacePageMentionSources(
 				spaces,
-				documentQueries.map((query) => query.data ?? [])
+				documentQueries.map((query) => query.data ?? []),
+				tl
 			),
 		}),
 		[
@@ -174,6 +177,7 @@ export function useMentionableResources(
 			spaces,
 			remoteItems,
 			remoteMentions.error,
+			tl,
 		]
 	);
 }

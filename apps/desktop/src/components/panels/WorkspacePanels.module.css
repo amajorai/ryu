@@ -21,13 +21,13 @@
 	transition: var(--workspace-transition);
 }
 .pinnedPanel {
-	right: var(--workspace-right);
+	inset-inline-end: var(--workspace-right);
 	display: var(--workspace-display);
 	width: var(--workspace-width);
 	transition: var(--workspace-transition);
 }
 .floatingPinned {
-	right: var(--workspace-right);
+	inset-inline-end: var(--workspace-right);
 }
 .rightPanel {
 	width: var(--workspace-width);

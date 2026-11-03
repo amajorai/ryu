@@ -1,5 +1,6 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -136,7 +137,7 @@ export function ObservabilityDiscoverSection({
 												{group.key}
 											</span>
 											<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
-												{group.count} · {Math.round(group.percent * 100)}%
+												{group.count} · {formatPercent(group.percent)}
 											</span>
 										</div>
 										<div className="h-1.5 overflow-hidden rounded-full bg-muted">

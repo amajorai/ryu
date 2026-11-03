@@ -384,6 +384,7 @@
   "no encoder available for '{fmt}'": "nenhum codificador disponível para '{fmt}'",
   "not installed": "não instalado",
   "nothing to speak after removing tags": "nada para falar após remover as tags",
+  "pause tags may add at most {maxTotalPauseS}s of silence in total": "as tags de pausa podem adicionar no máximo {maxTotalPauseS} s de silêncio no total",
   "required TTS engine '{engineId}' is missing from the registry": "o mecanismo TTS obrigatório '{engineId}' não está no registro",
   "synthesis failed in '{engine}': {error}": "falha na síntese em '{engine}': {error}",
   "unknown model '{modelName}' for engine '{engine}'": "modelo desconhecido '{modelName}' para o mecanismo '{engine}'",

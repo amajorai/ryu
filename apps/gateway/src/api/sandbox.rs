@@ -491,6 +491,7 @@ pub async fn sandbox_tick(
             "Sandbox tick requires a trusted-forwarder or master key.".to_string(),
         ));
     }
+    crate::pipeline::org_core_relay::require_forwarder_org(&ctx, body.org_id.as_deref())?;
 
     if body
         .box_id

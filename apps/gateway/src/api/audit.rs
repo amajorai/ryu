@@ -657,6 +657,9 @@ pub async fn ingest_exec_audit(
             "Exec audit ingest requires a trusted-forwarder or master key.".to_string(),
         ));
     }
+    // A managed node's org-bound relay key writes rows for its own org only.
+    let forwarder_org =
+        crate::pipeline::org_core_relay::bound_forwarder_org(&ctx).map(str::to_owned);
 
     if body.event_type.as_deref() == Some("service_call") {
         return Err(GatewayError::BadRequest(
@@ -692,6 +695,7 @@ pub async fn ingest_exec_audit(
             record.user_id = user_id;
             record.user_name = user_name;
             record.feature = feature;
+            record.org_id = forwarder_org;
             state.log_audit(record);
         }
         return Ok(Json(json!({ "ok": true })));
@@ -715,6 +719,7 @@ pub async fn ingest_exec_audit(
         record.user_id = user_id;
         record.user_name = user_name;
         record.feature = feature;
+        record.org_id = forwarder_org;
         state.log_audit(record);
     }
 

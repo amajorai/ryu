@@ -58,7 +58,7 @@ function FeedPost({
 				<PersonaAvatar
 					agent={author}
 					className="mt-0.5"
-					name="You"
+					name={tl("You")}
 					showPresence
 					size={40}
 				/>

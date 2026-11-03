@@ -43,6 +43,7 @@ import {
 	type PendingTopup,
 	pendingTopupDollars,
 } from "./credits-model.ts";
+import { useTopupFeeCaption } from "./credits-topup-caption.ts";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -91,6 +92,7 @@ export function CreditsView({
 	const [pendingTopup, setPendingTopup] = useState<PendingTopup | null>(null);
 	const tl = useLiteralMessages();
 	const tlRich = useRichLiteralMessages();
+	const topupCaption = useTopupFeeCaption();
 	const pendingDollars = pendingTopupDollars(pendingTopup, customAmount);
 	const pendingMicroUsd =
 		pendingDollars === null ? null : Math.round(pendingDollars * 1_000_000);
@@ -258,11 +260,7 @@ export function CreditsView({
 			</SettingsSection>
 
 			<SettingsSection
-				caption={
-					billingUnavailable
-						? undefined
-						: "You'll complete payment in your browser via Polar. The exact plan percentage or $5 minimum deposit fee is shown before payment, and Ryu keeps at most $10 of it; your wallet is credited the face value. Your balance updates here once it clears."
-				}
+				caption={billingUnavailable ? undefined : topupCaption}
 				title="Add credits"
 			>
 				{billingUnavailable ? (

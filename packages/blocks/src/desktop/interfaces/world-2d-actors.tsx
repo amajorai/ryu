@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { WorldEntity } from "@ryuhq/protocol/interfaces";
 import { memo, type RefObject } from "react";
@@ -39,6 +39,8 @@ export const AgentActor = memo(function AgentActor({
 	onTalk: (agentId: string) => void;
 	talking: boolean;
 }) {
+	// Memoized: the hook re-renders it when the catalog or language changes.
+	const tl = useLiteralMessages();
 	const prompt = near && !talking;
 	const feet = actorFeet(entity, margin, indoor);
 	// Seated villagers show only their upper body over the desk.
@@ -47,8 +49,8 @@ export const AgentActor = memo(function AgentActor({
 		<button
 			aria-label={
 				asking
-					? tr("Answer {name}", { name: entity.name })
-					: tr("Talk to {name}", { name: entity.name })
+					? tl("Answer {name}", { name: entity.name })
+					: tl("Talk to {name}", { name: entity.name })
 			}
 			className="group absolute cursor-pointer outline-none"
 			onClick={() => onTalk(entity.agentId)}

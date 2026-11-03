@@ -291,6 +291,10 @@ pub(crate) async fn resolve_hosted_box(
             })
         }
         Err(BoxBudgetError::UnknownOrg) => Err(invalid()),
+        // The scope names someone who is not a current member of its org.
+        Err(BoxBudgetError::Refused) => Err(GatewayError::Unauthorized(
+            "The Box credential names a user who is not a member of its organization".to_owned(),
+        )),
         Err(BoxBudgetError::NotConfigured) if !bills_tenants => Ok(HostedBox {
             credit: box_tenant_credit(&BoxOrgBudget::default(), false),
             resolved_at: None,
@@ -354,6 +358,18 @@ pub(crate) fn finish_hosted_context(
         None,
         scope.user_id.as_deref(),
     )
+}
+
+/// The user whose personal Composio entity a request may act through. A Box
+/// key (`gwb1`) is signed with a node-held key, not by its member, so it
+/// proves no member's consent to act through their own connected accounts:
+/// it gets only the org-shared entity. Every other caller keeps the identity
+/// authentication accepted.
+pub(crate) fn composio_entity_user(context: &RequestContext) -> Option<&str> {
+    if context.feature.as_deref() == Some(BOX_FEATURE) && context.api_key.starts_with("box:") {
+        return None;
+    }
+    context.user_id.as_deref()
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ import type {
 	OpenedFileSnapshot,
 } from "@ryu/app-host/opened-file";
 import type { PluginCompanion, PluginFileHandler } from "./api/plugins.ts";
+import { FILE_TOO_LARGE_CODE } from "./desktop-command-error-messages.ts";
 import {
 	basename,
 	readProjectFile,
@@ -118,7 +119,7 @@ export function createOpenedFileAccess(
 		}
 		const text = await io.read(path);
 		if (new TextEncoder().encode(text).length > 8 * 1024 * 1024) {
-			throw new Error("File content exceeds the 8 MiB editor limit");
+			throw new Error(FILE_TOO_LARGE_CODE);
 		}
 		return { uri, text, revision: await openedFileRevision(text) };
 	};
@@ -131,7 +132,7 @@ export function createOpenedFileAccess(
 			? (text, expectedRevision) => {
 					return queueOpenedFileWrite(path, async () => {
 						if (new TextEncoder().encode(text).length > 8 * 1024 * 1024) {
-							throw new Error("File content exceeds the 8 MiB editor limit");
+							throw new Error(FILE_TOO_LARGE_CODE);
 						}
 						const current = await read();
 						if (current.revision !== expectedRevision) {
@@ -152,7 +153,7 @@ export function createOpenedFileAccess(
 								blob.length > 12 * 1024 * 1024 ||
 								atob(blob).length > 8 * 1024 * 1024
 							) {
-								throw new Error("File content exceeds the 8 MiB editor limit");
+								throw new Error(FILE_TOO_LARGE_CODE);
 							}
 							const current = await read();
 							if (current.revision !== expectedRevision) {

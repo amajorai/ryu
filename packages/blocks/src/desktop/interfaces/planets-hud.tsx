@@ -304,7 +304,7 @@ export function PlanetsSystemCard({
 									{summary.waitingOnYou > 0 ? null : starMeta(system)}
 								</>
 							}
-							name="You"
+							name={tl("You")}
 							onBlur={() => onHover(null)}
 							onClick={() => onSelect(STAR_ID)}
 							onFocus={() => {

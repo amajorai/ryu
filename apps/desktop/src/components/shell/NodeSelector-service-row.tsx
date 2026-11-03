@@ -1,6 +1,7 @@
 import { ArrowUp01Icon, Download04Icon } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { formatByteSize } from "@ryu/i18n/format-intl";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { sileo } from "sileo";
 import {
@@ -31,7 +32,7 @@ export function usageCaption(detail: SidecarDetail | undefined): string | null {
 	if (detail.cpuPercent == null) {
 		return mem;
 	}
-	return `${mem} · ${Math.round(detail.cpuPercent)}%`;
+	return `${mem} · ${formatPercent(detail.cpuPercent / 100)}`;
 }
 
 /**

@@ -669,6 +669,7 @@
   "network": "ネットワーク",
   "node": "ノード",
   "none": "なし",
+  "not run": "未実行",
   "now": "今すぐ",
   "once": "1 回",
   "open": "件未解決",
@@ -715,5 +716,6 @@
   "{count} more": "ほか {count} 件",
   "{cueCount} cues copied as {format}.": "{cueCount} 件の字幕を {format} としてコピーしました。",
   "{name} is queued. This runs on your machine, so it takes a while for a long video.": "{name} はキューに入っています。お使いのマシンで処理するため、長い動画では時間がかかります。",
-  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "{cueCount} 行中 {translatedCount} 行を翻訳しました。残りは元の文言のままです。"
+  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "{cueCount} 行中 {translatedCount} 行を翻訳しました。残りは元の文言のままです。",
+  "{video} → {language}": "{video} → {language}"
 }

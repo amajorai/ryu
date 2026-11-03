@@ -21,15 +21,16 @@ import {
 	GUARDRAIL_ACTION_LABELS,
 	GUARDRAIL_ACTION_OPTIONS,
 	GUARDRAIL_ALERT_TIER_LABELS,
-	GUARDRAIL_ALERT_TIER_OPTIONS,
+	guardrailAlertTierOptions,
 } from "./copy.ts";
-import type {
-	GuardrailAlertTier,
-	GuardrailFirewallAction,
-	GuardrailFirewallBase,
-	GuardrailFirewallBoolField,
-	GuardrailFirewallOverlay,
-	GuardrailScopeCtx,
+import {
+	GUARDRAIL_ALERT_TIERS,
+	type GuardrailAlertTier,
+	type GuardrailFirewallAction,
+	type GuardrailFirewallBase,
+	type GuardrailFirewallBoolField,
+	type GuardrailFirewallOverlay,
+	type GuardrailScopeCtx,
 } from "./types.ts";
 
 /** The parenthesised inherit hint, or nothing when the base is not known. */
@@ -40,6 +41,9 @@ function inheritHint(
 	return ctx.inheritedUnknown ? undefined : label;
 }
 
+/** The Inherit option. `label` is an English message id (a tier or action
+ *  name), resolved before it fills the sentence so no English word is left in
+ *  a translated "Inherit (…)". */
 function inheritOption(
 	tl: LiteralMessage,
 	ctx: GuardrailScopeCtx,
@@ -48,8 +52,18 @@ function inheritOption(
 	const hint = label === undefined ? undefined : inheritHint(ctx, label);
 	return {
 		value: "inherit",
-		label: hint ? tl("Inherit ({label})", { label: hint }) : "Inherit",
+		label: hint ? tl("Inherit ({label})", { label: tl(hint) }) : tl("Inherit"),
 	};
+}
+
+/** The firewall action options, each label resolved through the catalog. */
+function actionOptions(
+	tl: LiteralMessage
+): { label: string; value: GuardrailFirewallAction }[] {
+	return GUARDRAIL_ACTION_OPTIONS.map((option) => ({
+		value: option.value,
+		label: tl(option.label),
+	}));
 }
 
 /**
@@ -86,10 +100,7 @@ function actionFrom(value: string | null): GuardrailFirewallAction | null {
 
 /** The tier a select value names, or `null` for Inherit. */
 function alertTierFrom(value: string | null): GuardrailAlertTier | null {
-	return (
-		GUARDRAIL_ALERT_TIER_OPTIONS.find((option) => option.value === value)
-			?.value ?? null
-	);
+	return GUARDRAIL_ALERT_TIERS.find((tier) => tier === value) ?? null;
 }
 
 function actionLabel(action: GuardrailFirewallAction | undefined | null) {
@@ -108,8 +119,10 @@ export function GuardrailBoolRow({
 	field: GuardrailFirewallBoolField;
 	title: string;
 }) {
+	const tl = useLiteralMessages();
 	const nodeValue = Boolean(ctx.node[field]);
 	const overlayValue = ctx.overlay[field];
+	const onOff = (on: boolean) => (on ? tl("On") : tl("Off"));
 	const resolved =
 		overlayValue === null || overlayValue === undefined
 			? nodeValue
@@ -117,15 +130,15 @@ export function GuardrailBoolRow({
 
 	let actions: ReactElement;
 	if (ctx.broaderLocked.has(field)) {
-		actions = <LockedByBroader summary={resolved ? "On" : "Off"} />;
+		actions = <LockedByBroader summary={onOff(resolved)} />;
 	} else if (ctx.isOverlay) {
 		actions = (
 			<TriStateBool
 				addOnly={ctx.addOnly}
-				ariaLabel={title}
+				ariaLabel={tl(title)}
 				disabled={ctx.disabled || !ctx.overlayReady}
 				id={`fw-${field}`}
-				inheritedLabel={inheritHint(ctx, nodeValue ? "On" : "Off")}
+				inheritedLabel={inheritHint(ctx, onOff(nodeValue))}
 				onChange={(next) =>
 					ctx.setOverlayField(overlayBoolPatch(field, next, ctx.addOnly))
 				}
@@ -142,7 +155,7 @@ export function GuardrailBoolRow({
 					onToggle={() => ctx.toggleLock(field)}
 				/>
 				<Switch
-					aria-label={title}
+					aria-label={tl(title)}
 					checked={nodeValue}
 					disabled={ctx.disabled}
 					id={`fw-${field}`}
@@ -175,7 +188,7 @@ export function GuardrailPolicyRow({
 	if (ctx.broaderLocked.has("policy")) {
 		return (
 			<SettingsItem
-				actions={<LockedByBroader summary={actionLabel(resolved) ?? ""} />}
+				actions={<LockedByBroader summary={tl(actionLabel(resolved) ?? "")} />}
 				title={title}
 			/>
 		);
@@ -184,7 +197,7 @@ export function GuardrailPolicyRow({
 	if (ctx.isOverlay) {
 		const items = [
 			inheritOption(tl, ctx, actionLabel(nodeValue)),
-			...GUARDRAIL_ACTION_OPTIONS,
+			...actionOptions(tl),
 		];
 		return (
 			<SettingsItem
@@ -216,6 +229,7 @@ export function GuardrailPolicyRow({
 		);
 	}
 
+	const baseItems = actionOptions(tl);
 	return (
 		<SettingsItem
 			actions={
@@ -228,7 +242,7 @@ export function GuardrailPolicyRow({
 					/>
 					<Select
 						disabled={ctx.disabled}
-						items={GUARDRAIL_ACTION_OPTIONS}
+						items={baseItems}
 						onValueChange={(next: string | null) =>
 							ctx.setNodeField({
 								policy: actionFrom(next) ?? "warn_and_continue",
@@ -240,7 +254,7 @@ export function GuardrailPolicyRow({
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							{GUARDRAIL_ACTION_OPTIONS.map((option) => (
+							{baseItems.map((option) => (
 								<SelectItem key={option.value} value={option.value}>
 									{option.label}
 								</SelectItem>
@@ -275,12 +289,15 @@ export function GuardrailAlertRow({
 	const nodeValue: GuardrailAlertTier = ctx.node.alert ?? "silent";
 	const overlayValue = ctx.overlay.alert;
 	const resolved: GuardrailAlertTier = overlayValue ?? nodeValue;
+	const tierOptions = guardrailAlertTierOptions(tl);
 
 	if (ctx.broaderLocked.has("alert")) {
 		return (
 			<SettingsItem
 				actions={
-					<LockedByBroader summary={GUARDRAIL_ALERT_TIER_LABELS[resolved]} />
+					<LockedByBroader
+						summary={tl(GUARDRAIL_ALERT_TIER_LABELS[resolved])}
+					/>
 				}
 				title="Alerts"
 			/>
@@ -290,7 +307,7 @@ export function GuardrailAlertRow({
 	if (ctx.isOverlay) {
 		const items = [
 			inheritOption(tl, ctx, GUARDRAIL_ALERT_TIER_LABELS[nodeValue]),
-			...GUARDRAIL_ALERT_TIER_OPTIONS,
+			...tierOptions,
 		];
 		return (
 			<SettingsItem
@@ -334,7 +351,7 @@ export function GuardrailAlertRow({
 					/>
 					<Select
 						disabled={ctx.disabled}
-						items={GUARDRAIL_ALERT_TIER_OPTIONS}
+						items={tierOptions}
 						onValueChange={(next: string | null) =>
 							ctx.setNodeField({ alert: alertTierFrom(next) ?? "silent" })
 						}
@@ -344,7 +361,7 @@ export function GuardrailAlertRow({
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							{GUARDRAIL_ALERT_TIER_OPTIONS.map((option) => (
+							{tierOptions.map((option) => (
 								<SelectItem key={option.value} value={option.value}>
 									{option.label}
 								</SelectItem>

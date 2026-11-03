@@ -5,6 +5,7 @@ import {
 	Image01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -186,7 +187,7 @@ function GradientStopsEditor({
 						aria-label={tl("Gradient stop {stopNumber} position", {
 							stopNumber: i + 1,
 						})}
-						format={(v) => `${Math.round(v)}%`}
+						format={(v) => formatPercent(v / 100)}
 						label=""
 						max={100}
 						min={0}
@@ -402,7 +403,7 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 
 								{scaleApplies && (
 									<FluidSlider
-										format={(v) => `${Math.round(v)}%`}
+										format={(v) => formatPercent(v / 100)}
 										label="Scale"
 										max={300}
 										min={25}
@@ -421,7 +422,7 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 										/>
 									</FieldRow>
 									<FluidSlider
-										format={(v) => `${Math.round(v)}%`}
+										format={(v) => formatPercent(v / 100)}
 										label="Overlay opacity"
 										max={100}
 										min={0}
@@ -455,7 +456,7 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 				</div>
 				<div className="space-y-3">
 					<FluidSlider
-						format={(v) => `${Math.round(v)}%`}
+						format={(v) => formatPercent(v / 100)}
 						label="Transparency"
 						max={100}
 						min={0}

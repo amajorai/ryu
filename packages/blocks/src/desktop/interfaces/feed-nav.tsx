@@ -112,10 +112,10 @@ export function FeedNavRail({
 										aria-label={
 											badge
 												? tl("{label}, {workingCount} running", {
-														label,
+														label: tl(label),
 														workingCount,
 													})
-												: label
+												: tl(label)
 										}
 										className={cn(
 											"group flex w-full py-1 outline-none",

@@ -33,6 +33,7 @@ pub mod agent_plugin;
 mod builtin_code;
 pub(crate) use builtin_code::builtin_pi_extension_sources;
 mod builtin_plugin_assets;
+pub(crate) mod public_mount_policy;
 pub mod schema;
 #[cfg(test)]
 #[path = "shipped_portable_loader_runtime_test.rs"]
@@ -2416,8 +2417,10 @@ impl PluginManifestLoader {
     }
 
     /// Combine the manifests available before the HTTP listener starts.
-    /// Installed/runtime manifests win over compiled declarations so a
-    /// materialized package's current manifest is used for its public mount.
+    /// Installed/runtime manifests win over compiled declarations, except for
+    /// `http.public_mount`: that Core route prefix is taken only from the compiled
+    /// first-party manifest with the same id and is dropped for any other package
+    /// (see [`public_mount_policy`]).
     /// Compiled first-party manifests that are opt-in still contribute their
     /// declared public mounts: the router is immutable after bind, while the
     /// enabled gate in the generic proxy keeps an uninstalled app's prefix inert.
@@ -2426,14 +2429,17 @@ impl PluginManifestLoader {
     /// loopback clients; it emptied with the last one, `healing_client.rs`, and was
     /// deleted, per `docs/app-boundary-extraction-plan.md` step 8.)
     pub(crate) fn for_router(installed: &[PluginManifest]) -> Vec<PluginManifest> {
+        let compiled = Self::load_builtins();
         let mut manifests = installed.to_vec();
+        // An installed package never chooses its own Core route prefix.
+        public_mount_policy::restrict_installed_public_mounts(&mut manifests, &compiled);
         let mut seen_ids: HashSet<String> = installed.iter().map(|m| m.id.clone()).collect();
         // Public mounts are stable routes owned by compiled first-party manifests.
         // Include only manifests that declare one; ordinary opt-in built-ins remain
         // absent from the router snapshot, but an app such as Rooms must have its
         // guest prefix registered before a later runtime install can enable it.
         manifests.extend(
-            Self::load_builtins()
+            compiled
                 .into_iter()
                 .filter(|manifest| {
                     manifest.sidecars.iter().any(|sidecar| {

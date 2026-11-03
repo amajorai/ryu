@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { z } from "zod";
 import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/routing.ts
@@ -192,7 +193,7 @@ export function formatRoutingSignal(signal: RoutingSignalReading): string {
 				maximumFractionDigits: 2,
 				minimumFractionDigits: 2,
 			})
-		: `${Math.round(signal.value)}%`;
+		: formatPercent(signal.value / 100);
 }
 
 // ── Reactive failover ───────────────────────────────────────────────────────

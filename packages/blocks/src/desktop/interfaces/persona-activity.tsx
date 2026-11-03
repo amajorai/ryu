@@ -174,7 +174,11 @@ export function PersonaActivity({
 									className="flex items-center gap-3 py-3 first:pt-1"
 									key={thread.id}
 								>
-									<PersonaAvatar agent={owner} name="No agent" size={32} />
+									<PersonaAvatar
+										agent={owner}
+										name={tl("No agent")}
+										size={32}
+									/>
 									<div className="flex min-w-0 flex-1 flex-col">
 										<p className="truncate font-medium text-sm">
 											{thread.title || tr("Untitled")}

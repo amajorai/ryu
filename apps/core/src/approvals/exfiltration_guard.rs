@@ -106,7 +106,8 @@ pub(crate) struct ToolFlowFacts<'a> {
     pub annotations: Option<&'a Value>,
     pub connection_action: ConnectionAction,
     /// The combined flow of the capability verbs this tool serves as a provider
-    /// (see [`provider_tool_flows`]), or `None` when it serves none. Calling a
+    /// (see [`super::provider_tool_flow::provider_flow_for`], which also covers a
+    /// private-source provider's unbound tools), or `None` when it serves none. Calling a
     /// provider tool directly reaches the same data as its verb, so it is never
     /// classified as less than the verb.
     pub provided_verbs: Option<DataFlow>,

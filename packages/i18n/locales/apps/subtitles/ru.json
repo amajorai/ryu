@@ -669,6 +669,7 @@
   "network": "сеть",
   "node": "узел",
   "none": "нет",
+  "not run": "не запускалось",
   "now": "сейчас",
   "once": "единоразово",
   "open": "открытых",
@@ -715,5 +716,6 @@
   "{count} more": "Ещё {count}",
   "{cueCount} cues copied as {format}.": "Скопировано субтитров в формате {format}: {cueCount}.",
   "{name} is queued. This runs on your machine, so it takes a while for a long video.": "{name} в очереди. Обработка идёт на вашем компьютере, поэтому для длинного видео потребуется время.",
-  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "Переведено строк: {translatedCount} из {cueCount}; остальные сохранили исходный текст."
+  "{translatedCount} of {cueCount} lines were translated; the rest kept their original wording.": "Переведено строк: {translatedCount} из {cueCount}; остальные сохранили исходный текст.",
+  "{video} → {language}": "{video} → {language}"
 }

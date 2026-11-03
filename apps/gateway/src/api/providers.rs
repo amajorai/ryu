@@ -297,7 +297,10 @@ async fn require_trusted_as(
             "managed provider calls require Core's trusted forwarder".to_owned(),
         ));
     }
-    Ok((ctx, trusted))
+    // An org-bound forwarder bills only the org its key is bound to.
+    let org_selector =
+        trusted && crate::pipeline::org_core_relay::bound_forwarder_org(&ctx).is_none();
+    Ok((ctx, org_selector))
 }
 
 /// `GET /v1/providers` — the connections layer: the `backends.connections`

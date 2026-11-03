@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -135,15 +136,15 @@ function CasesTable({ cases }: { cases: EvalCaseScore[] }) {
 									</Tooltip>
 								</td>
 								<td className="py-2 pe-4 text-xs tabular-nums">
-									{Math.round(c.overall * 100)}%
+									{formatPercent(c.overall)}
 								</td>
 								<td className="py-2 pe-4 text-xs tabular-nums">
 									{c.latency_available === false
 										? "—"
-										: `${Math.round(c.latency_score * 100)}%`}
+										: formatPercent(c.latency_score)}
 								</td>
 								<td className="py-2 pe-4 text-xs tabular-nums">
-									{Math.round(c.token_efficiency * 100)}%
+									{formatPercent(c.token_efficiency)}
 								</td>
 								<td className="py-2 pe-4">
 									{c.policy_available === false ? (
@@ -159,7 +160,7 @@ function CasesTable({ cases }: { cases: EvalCaseScore[] }) {
 								<td className="py-2 text-xs tabular-nums">
 									{c.substring_match === null
 										? "—"
-										: `${Math.round(c.substring_match * 100)}%`}
+										: formatPercent(c.substring_match)}
 								</td>
 							</tr>
 						))}

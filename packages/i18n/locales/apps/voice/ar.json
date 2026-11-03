@@ -384,6 +384,7 @@
   "no encoder available for '{fmt}'": "لا يتوفر مُرمِّز لـ '{fmt}'",
   "not installed": "غير مثبّت",
   "nothing to speak after removing tags": "لا يوجد ما يُنطق بعد إزالة الوسوم",
+  "pause tags may add at most {maxTotalPauseS}s of silence in total": "يمكن لوسوم الإيقاف المؤقت إضافة {maxTotalPauseS} ث من الصمت كحد أقصى إجمالاً",
   "required TTS engine '{engineId}' is missing from the registry": "محرك TTS المطلوب '{engineId}' غير موجود في السجل",
   "synthesis failed in '{engine}': {error}": "فشل التوليف في '{engine}': {error}",
   "unknown model '{modelName}' for engine '{engine}'": "نموذج غير معروف '{modelName}' للمحرك '{engine}'",

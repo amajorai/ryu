@@ -178,14 +178,11 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
             },
             Err(err) => {
                 run_succeeded = false;
+                // The Gateway's English error text stays in the log; the
+                // reply is one localized sentence per actionable kind.
                 warn!(channel = platform, %err, "channel pipeline run failed");
                 let locale = runtime.reply_locale(message.locale.as_deref()).await;
-                let error = err.to_string();
-                i18n::render(
-                    locale,
-                    i18n::messages::TURN_ERROR_MESSAGE,
-                    &[("error", &error)],
-                )
+                crate::turn_error::failure_reply(locale, &err)
             }
         }
     };

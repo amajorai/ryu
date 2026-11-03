@@ -450,6 +450,7 @@
   "No recent updates": "최근 업데이트 없음",
   "No results": "결과 없음",
   "No tabs found.": "탭을 찾을 수 없습니다.",
+  "No.": "No.",
   "None": "없음",
   "Normal": "보통",
   "Note": "메모",
@@ -953,11 +954,13 @@
   "your browser": "브라우저",
   "{count} more": "{count}개 더",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {선택한 노드를 위로 이동했습니다. 새 위치, x: {x}, y: {y}} down {선택한 노드를 아래로 이동했습니다. 새 위치, x: {x}, y: {y}} left {선택한 노드를 왼쪽으로 이동했습니다. 새 위치, x: {x}, y: {y}} right {선택한 노드를 오른쪽으로 이동했습니다. 새 위치, x: {x}, y: {y}} other {선택한 노드를 이동했습니다. 새 위치, x: {x}, y: {y}}}",
+  "{label} → {variable}": "{label} → {variable}",
   "{label}:": "{label}:",
   "{label}: next step": "{label}: 다음 단계",
   "{name} is typing": "{name} 님이 입력 중",
   "{name} · {op, select, increment {increment} clear {clear} now {current date and time} random_id {random id} result_id {result id} transcript {conversation transcript} other {{op}}}": "{name} · {op, select, increment {증가} clear {지우기} now {현재 날짜 및 시간} random_id {임의 ID} result_id {결과 ID} transcript {대화 기록} other {{op}}}",
   "{name}. Ask how to improve the conversation, fix dead ends, or route answers.": "{name}. 대화를 개선하거나, 막다른 지점을 수정하거나, 답변을 라우팅하는 방법을 물어보세요.",
   "{value} of {total} stars": "별 {total}개 중 {value}개",
-  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {= {value}} not_equals {≠ {value}} contains {{value} 포함} not_contains {{value} 포함 안 함} greater_than {{value}보다 큼} less_than {{value}보다 작음} is_set {설정됨} is_empty {비어 있음} starts_with {{value}(으)로 시작} ends_with {{value}(으)로 끝남} other {{operator} {value}}}"
+  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {= {value}} not_equals {≠ {value}} contains {{value} 포함} not_contains {{value} 포함 안 함} greater_than {{value}보다 큼} less_than {{value}보다 작음} is_set {설정됨} is_empty {비어 있음} starts_with {{value}(으)로 시작} ends_with {{value}(으)로 끝남} other {{operator} {value}}}",
+  "→ {group}": "→ {group}"
 }

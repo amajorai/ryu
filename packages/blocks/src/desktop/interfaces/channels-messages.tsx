@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -34,7 +35,7 @@ function authorOf(
 	if (agent && !startedByYou) {
 		return { agent, isAgent: true, key: agent.id, name: agent.name };
 	}
-	return { isAgent: false, key: "you", name: "You" };
+	return { isAgent: false, key: "you", name: tr("You") };
 }
 
 type ListItem =

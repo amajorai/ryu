@@ -54,8 +54,8 @@ fn templates_echo_their_icu_source() {
         "Your pairing code is {code}."
     );
     assert_eq!(
-        source(messages::TURN_ERROR_MESSAGE),
-        "Sorry, something went wrong: {error}"
+        source(messages::TURN_NO_PROVIDER_MESSAGE),
+        "No provider is available for the model {model}. Ask the owner to check the Gateway's providers."
     );
 }
 
@@ -69,12 +69,16 @@ fn renders_english_and_fills_arguments_verbatim() {
 fn icu_apostrophe_escapes_in_translations_are_unescaped() {
     with_translation(
         "fr",
-        messages::TURN_ERROR_MESSAGE,
-        "Désolé, l''exécution a échoué '{error}' : {error}",
+        messages::TURN_NO_PROVIDER_MESSAGE,
+        "Désolé, l''exécution a échoué '{model}' : {model}",
     );
     assert_eq!(
-        render("fr", messages::TURN_ERROR_MESSAGE, &[("error", "it's {x}")]),
-        "Désolé, l'exécution a échoué {error} : it's {x}"
+        render(
+            "fr",
+            messages::TURN_NO_PROVIDER_MESSAGE,
+            &[("model", "it's {x}")]
+        ),
+        "Désolé, l'exécution a échoué {model} : it's {x}"
     );
     // A lone apostrophe before a letter is literal, as in ICU.
     with_translation(

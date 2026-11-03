@@ -450,6 +450,7 @@
   "No recent updates": "暂无最近更新",
   "No results": "无结果",
   "No tabs found.": "未找到标签页。",
+  "No.": "编号",
   "None": "无",
   "Normal": "普通",
   "Note": "批注",
@@ -953,11 +954,13 @@
   "your browser": "浏览器",
   "{count} more": "还有 {count} 个",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {已将所选节点上移。新位置，x：{x}，y：{y}} down {已将所选节点下移。新位置，x：{x}，y：{y}} left {已将所选节点左移。新位置，x：{x}，y：{y}} right {已将所选节点右移。新位置，x：{x}，y：{y}} other {已移动所选节点。新位置，x：{x}，y：{y}}}",
+  "{label} → {variable}": "{label} → {variable}",
   "{label}:": "{label}：",
   "{label}: next step": "{label}：下一步",
   "{name} is typing": "{name} 正在输入",
   "{name} · {op, select, increment {increment} clear {clear} now {current date and time} random_id {random id} result_id {result id} transcript {conversation transcript} other {{op}}}": "{name} · {op, select, increment {递增} clear {清除} now {当前日期和时间} random_id {随机 ID} result_id {结果 ID} transcript {对话记录} other {{op}}}",
   "{name}. Ask how to improve the conversation, fix dead ends, or route answers.": "{name}。询问如何改进对话、修复对话死角或路由回答。",
   "{value} of {total} stars": "{value} 星（共 {total} 星）",
-  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {等于 {value}} not_equals {不等于 {value}} contains {包含 {value}} not_contains {不包含 {value}} greater_than {大于 {value}} less_than {小于 {value}} is_set {已设置} is_empty {为空} starts_with {以 {value} 开头} ends_with {以 {value} 结尾} other {{operator} {value}}}"
+  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {等于 {value}} not_equals {不等于 {value}} contains {包含 {value}} not_contains {不包含 {value}} greater_than {大于 {value}} less_than {小于 {value}} is_set {已设置} is_empty {为空} starts_with {以 {value} 开头} ends_with {以 {value} 结尾} other {{operator} {value}}}",
+  "→ {group}": "→ {group}"
 }

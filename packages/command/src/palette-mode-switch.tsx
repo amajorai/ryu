@@ -59,7 +59,7 @@ export function PaletteModeSwitch({
 			>
 				{composeLabel}
 			</button>
-			<Kbd className="ml-auto" data-slot="command-palette-mode-hint">
+			<Kbd className="ms-auto" data-slot="command-palette-mode-hint">
 				Tab
 			</Kbd>
 		</div>

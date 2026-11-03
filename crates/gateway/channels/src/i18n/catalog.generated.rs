@@ -103,6 +103,22 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "No provider is available for the model {model}. Ask the owner to check the Gateway's providers.",
+        &[
+            ("ar", "لا يتوفر مزوّد للنموذج {model}. اطلب من المالك التحقق من مزوّدي Gateway."),
+            ("de", "Für das Modell {model} ist kein Anbieter verfügbar. Den Eigentümer bitten, die Anbieter des Gateways zu prüfen."),
+            ("es", "No hay ningún proveedor disponible para el modelo {model}. Pide al propietario que revise los proveedores del Gateway."),
+            ("fr", "Aucun fournisseur n'est disponible pour le modèle {model}. Demandez au propriétaire de vérifier les fournisseurs du Gateway."),
+            ("hi", "मॉडल {model} के लिए कोई प्रदाता उपलब्ध नहीं है। मालिक से Gateway के प्रदाताओं की जांच करने के लिए कहें।"),
+            ("it", "Nessun provider disponibile per il modello {model}. Chiedi al proprietario di controllare i provider del Gateway."),
+            ("ja", "モデル {model} に使用できるプロバイダーがありません。Gateway のプロバイダーを確認するようオーナーに依頼してください。"),
+            ("ko", "모델 {model}에 사용할 수 있는 제공업체가 없습니다. 소유자에게 Gateway의 제공업체를 확인해 달라고 요청하세요."),
+            ("pt-BR", "Nenhum provedor está disponível para o modelo {model}. Peça ao proprietário para verificar os provedores do Gateway."),
+            ("ru", "Для модели {model} нет доступного поставщика. Попросите владельца проверить поставщиков Gateway."),
+            ("zh-CN", "模型 {model} 没有可用的提供商。请让所有者检查 Gateway 的提供商。"),
+        ],
+    ),
+    (
         "Ryu reply",
         &[
             ("ar", "رد Ryu"),
@@ -151,22 +167,6 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
-        "Sorry, something went wrong: {error}",
-        &[
-            ("ar", "عذرًا، حدث خطأ: {error}"),
-            ("de", "Leider ist ein Fehler aufgetreten: {error}"),
-            ("es", "Lo sentimos, se produjo un error: {error}"),
-            ("fr", "Désolé, une erreur s’est produite : {error}"),
-            ("hi", "क्षमा करें, कुछ गलत हो गया: {error}"),
-            ("it", "Si è verificato un errore: {error}"),
-            ("ja", "申し訳ありません。問題が発生しました: {error}"),
-            ("ko", "죄송합니다. 문제가 발생했습니다: {error}"),
-            ("pt-BR", "Desculpe, algo deu errado: {error}"),
-            ("ru", "К сожалению, произошла ошибка: {error}"),
-            ("zh-CN", "抱歉，出错了：{error}"),
-        ],
-    ),
-    (
         "The agent sent no response.",
         &[
             ("ar", "لم يرسل الوكيل أي رد."),
@@ -183,6 +183,38 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "This assistant has reached its spending limit. Ask the owner to raise it, then try again.",
+        &[
+            ("ar", "بلغ هذا المساعد حد الإنفاق. اطلب من المالك رفعه، ثم أعد المحاولة."),
+            ("de", "Dieser Assistent hat sein Ausgabenlimit erreicht. Den Eigentümer bitten, es zu erhöhen, und es dann erneut versuchen."),
+            ("es", "Este asistente alcanzó su límite de gasto. Pide al propietario que lo aumente y vuelve a intentarlo."),
+            ("fr", "Cet assistant a atteint sa limite de dépenses. Demandez au propriétaire de l'augmenter, puis réessayez."),
+            ("hi", "यह असिस्टेंट अपनी खर्च सीमा तक पहुंच गया है। मालिक से इसे बढ़ाने के लिए कहें, फिर दोबारा कोशिश करें।"),
+            ("it", "Questo assistente ha raggiunto il limite di spesa. Chiedi al proprietario di aumentarlo, poi riprova."),
+            ("ja", "このアシスタントは支出上限に達しました。上限を引き上げるようオーナーに依頼してから、もう一度お試しください。"),
+            ("ko", "이 어시스턴트가 지출 한도에 도달했습니다. 소유자에게 한도를 높여 달라고 요청한 후 다시 시도하세요."),
+            ("pt-BR", "Este assistente atingiu o limite de gastos. Peça ao proprietário para aumentá-lo e tente novamente."),
+            ("ru", "Этот ассистент достиг лимита расходов. Попросите владельца увеличить его и повторите попытку."),
+            ("zh-CN", "此助手已达到支出上限。请让所有者提高上限，然后重试。"),
+        ],
+    ),
+    (
+        "This assistant is out of credits. Ask the owner to add credits, then try again.",
+        &[
+            ("ar", "نفدت أرصدة هذا المساعد. اطلب من المالك إضافة أرصدة، ثم أعد المحاولة."),
+            ("de", "Dieser Assistent hat keine Credits mehr. Den Eigentümer bitten, Credits hinzuzufügen, und es dann erneut versuchen."),
+            ("es", "Este asistente no tiene créditos. Pide al propietario que añada créditos y vuelve a intentarlo."),
+            ("fr", "Cet assistant n'a plus de crédits. Demandez au propriétaire d'en ajouter, puis réessayez."),
+            ("hi", "इस असिस्टेंट के क्रेडिट खत्म हो गए हैं। मालिक से क्रेडिट जोड़ने के लिए कहें, फिर दोबारा कोशिश करें।"),
+            ("it", "Questo assistente ha esaurito i crediti. Chiedi al proprietario di aggiungerne, poi riprova."),
+            ("ja", "このアシスタントのクレジットがなくなりました。クレジットを追加するようオーナーに依頼してから、もう一度お試しください。"),
+            ("ko", "이 어시스턴트의 크레딧이 모두 소진되었습니다. 소유자에게 크레딧 추가를 요청한 후 다시 시도하세요."),
+            ("pt-BR", "Este assistente está sem créditos. Peça ao proprietário para adicionar créditos e tente novamente."),
+            ("ru", "У этого ассистента закончились кредиты. Попросите владельца пополнить их и повторите попытку."),
+            ("zh-CN", "此助手的额度已用完。请让所有者添加额度，然后重试。"),
+        ],
+    ),
+    (
         "This assistant is private.",
         &[
             ("ar", "هذا المساعد خاص."),
@@ -196,6 +228,22 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
             ("pt-BR", "Este assistente é privado."),
             ("ru", "Этот ассистент закрытый."),
             ("zh-CN", "此助手为私密助手。"),
+        ],
+    ),
+    (
+        "Too many requests right now. Wait a moment, then try again.",
+        &[
+            ("ar", "هناك طلبات كثيرة جدًا الآن. انتظر قليلاً، ثم أعد المحاولة."),
+            ("de", "Gerade zu viele Anfragen. Kurz warten und es dann erneut versuchen."),
+            ("es", "Demasiadas solicitudes en este momento. Espera un momento y vuelve a intentarlo."),
+            ("fr", "Trop de requêtes pour le moment. Patientez un instant, puis réessayez."),
+            ("hi", "अभी बहुत ज़्यादा अनुरोध हैं। थोड़ी देर रुकें, फिर दोबारा कोशिश करें।"),
+            ("it", "Troppe richieste in questo momento. Attendi un attimo, poi riprova."),
+            ("ja", "現在リクエストが多すぎます。しばらく待ってから、もう一度お試しください。"),
+            ("ko", "현재 요청이 너무 많습니다. 잠시 기다린 후 다시 시도하세요."),
+            ("pt-BR", "Muitas solicitações no momento. Aguarde um pouco e tente novamente."),
+            ("ru", "Слишком много запросов. Подождите немного и повторите попытку."),
+            ("zh-CN", "当前请求过多。请稍候，然后重试。"),
         ],
     ),
     (

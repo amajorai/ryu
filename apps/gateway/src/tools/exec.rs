@@ -141,8 +141,9 @@ pub async fn exec_tool(
     let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
 
     // Gate: trusted-forwarder or master key, neutralized when mesh is on (B-9).
-    let is_trusted =
-        ctx.is_master_key || ctx.key_config.as_ref().is_some_and(|k| k.trusted_forwarder);
+    // An org-bound forwarder (a managed node's per-org relay key) is refused:
+    // this Gateway's Core (`CORE_URL`) is not that org's Core.
+    let is_trusted = crate::pipeline::org_core_relay::is_unscoped_trusted(&ctx);
     if !is_trusted || mesh_enabled() {
         return Err(GatewayError::Unauthorized(
             "Tool execution requires a trusted-forwarder or master key.".to_string(),

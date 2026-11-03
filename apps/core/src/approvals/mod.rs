@@ -32,6 +32,7 @@
 pub mod chat_grants;
 pub mod exfiltration_guard;
 pub mod policy;
+pub(crate) mod provider_tool_flow;
 pub mod store;
 pub mod text;
 pub mod tool_intent;

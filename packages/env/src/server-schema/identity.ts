@@ -22,9 +22,13 @@ export const identityServerEnv = {
 		.enum(["first-party", "hosted"])
 		.default("first-party"),
 	CORS_ORIGIN: z.string().optional(),
-	// Trusted Core-to-Gateway relay shared by the API provisioning path,
-	// hosted Gateway, and managed Core nodes. Never inject it into agents.
+	// Trusted Core-to-Gateway relay of a single-org (self-hosted) Gateway.
+	// Never handed to managed nodes: provisioning derives per-org keys from
+	// GATEWAY_CORE_RELAY_MASTER_KEY instead. Never inject it into agents.
 	GATEWAY_CORE_RELAY_KEY: z.string().optional(),
+	// Master the per-organization Core relay keys derive from. Required to
+	// provision managed nodes; the hosted Gateway needs the same value.
+	GATEWAY_CORE_RELAY_MASTER_KEY: z.string().optional(),
 	// Proof-only key used by managed Core requests alongside their org relay;
 	// unlike the Core relay it is never accepted as Authorization.
 	GATEWAY_CORE_PROOF_KEY: z.string().optional(),

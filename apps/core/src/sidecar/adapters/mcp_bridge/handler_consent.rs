@@ -52,7 +52,8 @@ impl RyuMcpHandler {
                 "title": title,
                 "kind": gate_id,
                 "rawInput": raw_input,
-                "fields": { "title": title }
+                "fields": { "title": title },
+                "i18n": in_chat_consent_i18n(gate_id, args)
             }),
             consent_options(gate_id),
             Some(conversation_id.to_owned()),

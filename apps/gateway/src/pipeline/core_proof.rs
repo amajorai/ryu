@@ -146,7 +146,8 @@ pub(super) const BOX_FEATURE: &str = "box";
 /// (`GET {CONTROL_PLANE_URL}/api/gateway/orgs/:orgId/budget`).
 pub(super) const BOX_ORG_BUDGET_PATH: &str = "/api/gateway/orgs";
 /// How long a resolved org budget is reused for `gwb1` requests. The debit
-/// path keeps the wallet's cached balance fresh in between.
+/// path keeps the wallet's cached balance fresh in between. A member removed
+/// while an accepted lookup is cached is refused once this window lapses.
 pub(super) const BOX_ORG_BUDGET_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 /// Largest org-budget response read.
 pub(super) const MAX_BOX_ORG_BUDGET_BYTES: usize = 64 * 1024;
@@ -291,6 +292,9 @@ pub(super) enum BoxBudgetError {
     NotConfigured,
     /// The control plane does not know the org (`404`).
     UnknownOrg,
+    /// The control plane refused the Box's named member (`403`): not a
+    /// current member of the org. Never cached, so a re-added member recovers.
+    Refused,
     /// Transport failure, a non-404 error status, or an unreadable body.
     Unavailable,
 }
@@ -340,6 +344,9 @@ pub(super) async fn box_org_budget(
         .map_err(|_| BoxBudgetError::Unavailable)?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Err(BoxBudgetError::UnknownOrg);
+    }
+    if response.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err(BoxBudgetError::Refused);
     }
     if !response.status().is_success() {
         return Err(BoxBudgetError::Unavailable);

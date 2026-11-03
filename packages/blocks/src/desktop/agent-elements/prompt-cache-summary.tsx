@@ -1,5 +1,6 @@
 "use client";
 
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { useEffect, useState } from "react";
@@ -114,7 +115,7 @@ export function PromptCacheSummary({
 		<div className={cn("flex flex-col gap-1.5", className)}>
 			<div className="font-medium">Prompt cache</div>
 			{status.hitRate === undefined ? null : (
-				<Row label="Hit rate" value={`${Math.round(status.hitRate * 100)}%`} />
+				<Row label="Hit rate" value={formatPercent(status.hitRate)} />
 			)}
 			<Row
 				label="Status"

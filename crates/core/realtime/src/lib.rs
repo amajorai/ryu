@@ -51,6 +51,10 @@
 //! happens in stages 2/3, so several items are intentionally unused for now.
 #![allow(dead_code)]
 
+mod room_keys;
+
+pub use room_keys::{document_room_key, is_reserved_room_id};
+
 use std::{
     collections::{HashMap, HashSet},
     sync::{
@@ -420,9 +424,11 @@ impl RoomRegistry {
     }
 
     /// Tell every live document subscriber that the authoritative CRDT
-    /// generation was replaced. No-op when the room has no subscribers.
-    pub fn publish_document_reset(&self, room_id: &str, epoch: u64) {
-        if let Some(handle) = self.lock().get(room_id) {
+    /// generation was replaced. `doc_id` is the bare document id; the frame goes
+    /// to its namespaced [`document_room_key`] room, never to a same-id
+    /// conversation room. No-op when the room has no subscribers.
+    pub fn publish_document_reset(&self, doc_id: &str, epoch: u64) {
+        if let Some(handle) = self.lock().get(&document_room_key(doc_id)) {
             let _ = handle.broadcast.send(Frame::DocumentReset { epoch });
         }
     }

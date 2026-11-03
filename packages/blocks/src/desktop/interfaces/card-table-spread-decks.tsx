@@ -78,7 +78,11 @@ function RestingDeck({
 				aria-label={
 					empty && !act
 						? dealLabel(deck, tl)
-						: deckLabel(deck, act, empty ? "Deal a thread" : "Fan out the deck")
+						: deckLabel(
+								deck,
+								act,
+								empty ? tl("Deal a thread") : tl("Fan out the deck")
+							)
 				}
 				className="group/deck relative block w-full cursor-pointer rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
 				data-act-agent={act?.agentId}
@@ -205,7 +209,7 @@ function DockedDeck({
 					blocker.kind !== "interrupted" && blocker.kind !== "rate-limited"
 			)
 		: deck.attention > 0;
-	let label = deckLabel(deck, act, "Fan out the deck");
+	let label = deckLabel(deck, act, tl("Fan out the deck"));
 	if (fanned) {
 		label = tl("{deckName}: fanned out. Gather the deck", {
 			deckName: deck.name,

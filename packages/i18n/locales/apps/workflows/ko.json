@@ -1079,6 +1079,7 @@
   "with": "참여자:",
   "working": "작업 중",
   "your browser": "브라우저",
+  "{action} → {detail}": "{action} → {detail}",
   "{count} more": "{count}개 더",
   "{count} selected": "{count}개 선택됨",
   "{count} selected people": "선택한 사람 {count}명",

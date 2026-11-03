@@ -450,6 +450,7 @@
   "No recent updates": "لا توجد تحديثات حديثة",
   "No results": "لا توجد نتائج",
   "No tabs found.": "لم يُعثر على علامات تبويب.",
+  "No.": "رقم",
   "None": "لا شيء",
   "Normal": "عادية",
   "Note": "ملاحظة",
@@ -953,11 +954,13 @@
   "your browser": "متصفحك",
   "{count} more": "{count} أخرى",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {تم نقل العقدة المحددة إلى الأعلى. الموضع الجديد، x: {x}، y: {y}} down {تم نقل العقدة المحددة إلى الأسفل. الموضع الجديد، x: {x}، y: {y}} left {تم نقل العقدة المحددة إلى اليسار. الموضع الجديد، x: {x}، y: {y}} right {تم نقل العقدة المحددة إلى اليمين. الموضع الجديد، x: {x}، y: {y}} other {تم نقل العقدة المحددة. الموضع الجديد، x: {x}، y: {y}}}",
+  "{label} → {variable}": "{label} ← {variable}",
   "{label}:": "{label}:",
   "{label}: next step": "{label}: الخطوة التالية",
   "{name} is typing": "{name} يكتب",
   "{name} · {op, select, increment {increment} clear {clear} now {current date and time} random_id {random id} result_id {result id} transcript {conversation transcript} other {{op}}}": "{name} · {op, select, increment {زيادة} clear {مسح} now {التاريخ والوقت الحاليان} random_id {معرّف عشوائي} result_id {معرّف النتيجة} transcript {نص المحادثة} other {{op}}}",
   "{name}. Ask how to improve the conversation, fix dead ends, or route answers.": "{name}. اسأل عن كيفية تحسين المحادثة أو إصلاح الطرق المسدودة أو توجيه الإجابات.",
   "{value} of {total} stars": "{value} من {total} نجوم",
-  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {يساوي {value}} not_equals {لا يساوي {value}} contains {يحتوي على {value}} not_contains {لا يحتوي على {value}} greater_than {أكبر من {value}} less_than {أصغر من {value}} is_set {معيّن} is_empty {فارغ} starts_with {يبدأ بـ {value}} ends_with {ينتهي بـ {value}} other {{operator} {value}}}"
+  "{variable} {operator, select, equals {equals {value}} not_equals {does not equal {value}} contains {contains {value}} not_contains {does not contain {value}} greater_than {is greater than {value}} less_than {is less than {value}} is_set {is set} is_empty {is empty} starts_with {starts with {value}} ends_with {ends with {value}} other {{operator} {value}}}": "{variable} {operator, select, equals {يساوي {value}} not_equals {لا يساوي {value}} contains {يحتوي على {value}} not_contains {لا يحتوي على {value}} greater_than {أكبر من {value}} less_than {أصغر من {value}} is_set {معيّن} is_empty {فارغ} starts_with {يبدأ بـ {value}} ends_with {ينتهي بـ {value}} other {{operator} {value}}}",
+  "→ {group}": "← {group}"
 }

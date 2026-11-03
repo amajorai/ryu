@@ -39,6 +39,9 @@ import { useReducedMotion } from "./reduced-motion.ts";
 
 /** Below this width the sidebar floats over the page instead of beside it. */
 const OVERLAY_BELOW = 760;
+/** The top bar's "Open sidebar" button, found by its shortcut: its label is
+ * translated copy, so it is never a selector. */
+const OPEN_SIDEBAR_BUTTON = 'header button[aria-keyshortcuts="Control+\\\\"]';
 /** Below this height the properties block starts folded, to keep the chat tall. */
 const PROPERTIES_FOLD_BELOW = 720;
 
@@ -177,9 +180,7 @@ export function NotebookInterface({
 		if (kept) {
 			return;
 		}
-		rootRef.current
-			?.querySelector<HTMLElement>('header button[aria-label="Open sidebar"]')
-			?.focus();
+		rootRef.current?.querySelector<HTMLElement>(OPEN_SIDEBAR_BUTTON)?.focus();
 	}, [overlayOpen]);
 	const closeOverlay = useCallback(() => {
 		restoreFocus.current = true;
@@ -276,7 +277,7 @@ export function NotebookInterface({
 		const outer = window.requestAnimationFrame(() => {
 			inner = window.requestAnimationFrame(() => {
 				const field = rootRef.current?.querySelector<HTMLInputElement>(
-					'nav[aria-label="Notebook"] input[type="search"]'
+					'nav[data-notebook-nav] input[type="search"]'
 				);
 				field?.focus();
 				field?.select();

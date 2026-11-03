@@ -77,7 +77,7 @@ export function TablePot({
 	pileSize,
 	running,
 	snapshot,
-	word = "running",
+	word,
 }: {
 	activeThreadId: string | null;
 	/**
@@ -107,7 +107,10 @@ export function TablePot({
 	const inPlay = running.some((thread) => thread.id === activeThreadId);
 	let label = tl("Pot: nothing running");
 	if (count > 0) {
-		const values = { threads: tableCount(count, "thread", tl), word };
+		const values = {
+			threads: tableCount(count, "thread", tl),
+			word: word ?? tl("running"),
+		};
 		label = inPlay
 			? tl("Pot: {threads} {word}, one open. Show them", values)
 			: tl("Pot: {threads} {word}. Show them", values);

@@ -13,18 +13,26 @@
  * This applies the rule `sso-email-domain.ts` applies to SSO identities: a
  * SCIM create, or a SCIM rename to a new address, must land on a domain (or a
  * subdomain of one) that an SSO provider of the connection's organization has
- * DNS-verified. An organization only ever provisions addresses it proves it
- * owns. Fail closed: no SCIM connection on the request, no verified provider,
- * or an off-domain address refuses the write. A SCIM update that keeps the
- * stored address passes, so the directory can still deactivate and delete the
- * accounts it holds.
+ * DNS-verified AND that the organization still holds in its `verifiedDomains`.
+ * Better Auth never clears a provider's `domainVerified`, while Ryu moves a
+ * domain to whichever organization proves DNS control last, so a former
+ * holder's flag alone is not proof. An organization only ever provisions
+ * addresses it proves it owns. Fail closed: no SCIM connection on the request,
+ * no verified provider, an unreadable organization, or an off-domain address
+ * refuses the write. A SCIM update that keeps the stored address passes, so
+ * the directory can still deactivate and delete the accounts it holds.
  */
 
 import type { GenericEndpointContext } from "@better-auth/core";
 import { getCurrentAdapter } from "@better-auth/core/context";
 import { APIError } from "better-auth/api";
 import { z } from "zod";
-import { emailOnProviderDomain } from "./sso-email-domain.ts";
+import {
+	emailOnProviderDomain,
+	findOrganizationVerifiedDomains,
+	type OrganizationDomainsLookup,
+	organizationHoldsProviderDomains,
+} from "./sso-email-domain.ts";
 
 export const SCIM_EMAIL_DOMAIN_REFUSED = "SCIM_EMAIL_DOMAIN_REFUSED";
 export const SCIM_EMAIL_DOMAIN_DETAIL =
@@ -54,10 +62,14 @@ const providerListSchema = z
 		})
 	);
 
-/** True when `email` is on a DNS-verified domain of one of `providers`. */
+/**
+ * True when `email` is on a DNS-verified domain of one of `providers` whose
+ * every domain the organization still holds (`organizationDomains`).
+ */
 export function emailOnVerifiedOrganizationDomain(
 	email: unknown,
-	providers: readonly ScimDomainProviderRecord[]
+	providers: readonly ScimDomainProviderRecord[],
+	organizationDomains: readonly string[]
 ): boolean {
 	if (typeof email !== "string") {
 		return false;
@@ -65,6 +77,7 @@ export function emailOnVerifiedOrganizationDomain(
 	return providers.some(
 		(provider) =>
 			provider.domainVerified === true &&
+			organizationHoldsProviderDomains(organizationDomains, provider.domain) &&
 			emailOnProviderDomain(email, provider.domain)
 	);
 }
@@ -92,11 +105,13 @@ function refusal(): APIError {
 
 /**
  * Refuse a SCIM write that would put `email` on an account unless the address
- * is on a verified SSO domain of the SCIM connection's organization.
+ * is on a verified SSO domain the SCIM connection's organization still holds.
+ * `findOrganizationDomains` defaults to the Mongoose read; tests inject one.
  */
 export async function assertScimEmailOnVerifiedDomain(
 	email: unknown,
-	ctx: GenericEndpointContext | null | undefined
+	ctx: GenericEndpointContext | null | undefined,
+	findOrganizationDomains: OrganizationDomainsLookup = findOrganizationVerifiedDomains
 ): Promise<void> {
 	const organizationId = scimConnectionOrganizationId(ctx);
 	if (!(ctx && organizationId)) {
@@ -109,7 +124,13 @@ export async function assertScimEmailOnVerifiedDomain(
 			where: [{ field: "organizationId", value: organizationId }],
 		})
 	);
-	if (!emailOnVerifiedOrganizationDomain(email, providers)) {
+	const organizationDomains = await findOrganizationDomains(organizationId);
+	if (
+		!(
+			organizationDomains &&
+			emailOnVerifiedOrganizationDomain(email, providers, organizationDomains)
+		)
+	) {
 		throw refusal();
 	}
 }

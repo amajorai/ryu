@@ -5,6 +5,7 @@ import {
 	PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
@@ -174,7 +175,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					<HugeiconsIcon className="size-4" icon={MinusSignIcon} />
 				</Button>
 				<span className="w-12 text-center text-muted-foreground text-xs">
-					{Math.round(scale * 100)}%
+					{formatPercent(scale)}
 				</span>
 				<Button
 					aria-label="Zoom in"

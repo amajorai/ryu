@@ -1,3 +1,4 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Select,
 	SelectContent,
@@ -62,12 +63,22 @@ const ALERT_TIER_DESCRIPTIONS = {
 	email: "Email recipients only (instead of the fan-out channels)",
 } satisfies Record<GatewayAlertTier, string>;
 
-/** `Label — clause` options, ascending in severity (the Rust `Ord` order). */
-const ALERT_TIER_OPTIONS: { value: GatewayAlertTier; label: string }[] =
-	ALERT_TIERS.map((tier) => ({
-		value: tier,
-		label: `${ALERT_TIER_LABELS[tier]} — ${ALERT_TIER_DESCRIPTIONS[tier]}`,
-	}));
+/**
+ * `Label — clause` options, ascending in severity (the Rust `Ord` order). Each
+ * is one whole literal message so a catalog translates it as a unit; the
+ * selected value shows this text.
+ */
+export function alertTierOptions(
+	tl: LiteralMessage
+): { value: GatewayAlertTier; label: string }[] {
+	const labels = {
+		silent: tl("Silent — no notification (default)"),
+		warn: tl("Warn — in-app notification only"),
+		fanout: tl("Fanout — webhook, Telegram, and mobile push"),
+		email: tl("Email — recipients only (instead of the fan-out channels)"),
+	} satisfies Record<GatewayAlertTier, string>;
+	return ALERT_TIERS.map((tier) => ({ value: tier, label: labels[tier] }));
+}
 
 /**
  * The dependency this control cannot satisfy on its own, said once and reused by
@@ -135,9 +146,11 @@ export function AlertTierSelect({
 	// No `disabled` prop: both call sites are inside a budget editor whose other
 	// selects (`budget-action`, `session-budget-action`) are always enabled too —
 	// the permission gate on those surfaces is on the Save button, not the fields.
+	const tl = useLiteralMessages();
+	const options = alertTierOptions(tl);
 	return (
 		<Select
-			items={ALERT_TIER_OPTIONS}
+			items={options}
 			onValueChange={(v) => {
 				if (v) {
 					onChange(v);
@@ -149,11 +162,13 @@ export function AlertTierSelect({
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
-				{ALERT_TIER_OPTIONS.map((opt) => (
+				{options.map((opt) => (
 					<SelectItem key={opt.value} value={opt.value}>
-						<span className="font-medium">{ALERT_TIER_LABELS[opt.value]}</span>
+						<span className="font-medium">
+							{tl(ALERT_TIER_LABELS[opt.value])}
+						</span>
 						<span className="ms-1 text-muted-foreground text-xs">
-							— {ALERT_TIER_DESCRIPTIONS[opt.value]}
+							— {tl(ALERT_TIER_DESCRIPTIONS[opt.value])}
 						</span>
 					</SelectItem>
 				))}

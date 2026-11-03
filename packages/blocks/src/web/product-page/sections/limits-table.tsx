@@ -1,11 +1,24 @@
+"use client";
+
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
+import { localizeProfileLimits } from "../profile-locale-values.ts";
 import type { ProductLimits } from "../profile-types.ts";
 import { ProductSection, ProductSectionHeader } from "./section-shell.tsx";
 
 /**
  * Limits and rates as a two-column reference table: what is metered, its
  * published value (tabular figures, so numbers align) and an optional note.
+ * Priced values are formatted for the page's locale (../profile-locale-values.ts).
  */
-export function ProductLimitsTable({ limits }: { limits: ProductLimits }) {
+export function ProductLimitsTable({
+	limits: published,
+}: {
+	limits: ProductLimits;
+}) {
+	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
+	// Prices and counts in the reader's digits and currency placement.
+	const limits = localizeProfileLimits(published, tl, locale);
 	if (limits.rows.length === 0) {
 		return null;
 	}

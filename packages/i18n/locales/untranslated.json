@@ -13920,6 +13920,21 @@
     ],
     "reason": "placeholders and punctuation only"
   },
+  "{action} → {detail}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a flow arrow; the arrow reads correctly in this left-to-right language."
+  },
   "{action}: {sentence}": {
     "locales": [
       "ar",
@@ -14866,6 +14881,21 @@
     ],
     "reason": "'tokens' is the established term in es/pt-BR AI UI"
   },
+  "{label} → {variable}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a flow arrow; the arrow reads correctly in this left-to-right language."
+  },
   "{label}, {kind}, {threads}{urgent}": {
     "locales": [
       "de",
@@ -15583,6 +15613,22 @@
     ],
     "reason": "only placeholders and punctuation"
   },
+  "{space} · {kind}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a separator."
+  },
   "{spanCount, plural, one {{spanLabel} span} other {{spanLabel} spans}}": {
     "locales": [
       "es",
@@ -16067,6 +16113,21 @@
     ],
     "reason": "placeholders and punctuation only; nothing to translate"
   },
+  "{video} → {language}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a flow arrow; the arrow reads correctly in this left-to-right language."
+  },
   "{view}, {count}": {
     "locales": [
       "de",
@@ -16199,5 +16260,20 @@
       "fr"
     ],
     "reason": "'messages' is the French word"
+  },
+  "→ {group}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only a placeholder and a flow arrow; the arrow reads correctly in this left-to-right language."
   }
 }

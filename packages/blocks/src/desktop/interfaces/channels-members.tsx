@@ -39,8 +39,10 @@ export function ChannelsMembers({
 				render={
 					<Button
 						aria-label={tl(
-							"{count, plural, one {# member of #{channel}} other {# members of #{channel}}}",
-							{ channel: channelLabel, count: members.length }
+							"{count, plural, one {# member of {channel}} other {# members of {channel}}}",
+							// The channel's "#" travels in the value: inside a plural
+							// branch a literal "#" would print the count.
+							{ channel: `#${channelLabel}`, count: members.length }
 						)}
 						className="ms-auto h-7 gap-1 rounded-md border border-border ps-1 pe-2 hover:bg-muted aria-expanded:bg-muted"
 						size="sm"

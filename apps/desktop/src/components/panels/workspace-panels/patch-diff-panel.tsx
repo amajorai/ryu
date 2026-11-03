@@ -110,9 +110,10 @@ export function PatchDiffPanel({
 				code: number;
 			}>("shell_execute", { command, cwd: folder, shell: shellArg });
 			if (result.code !== 0) {
+				const { code } = result;
 				throw new Error(
 					result.stderr.trim() ||
-						`The Git command exited with status ${result.code}.`
+						tl("The Git command exited with status {code}.", { code })
 				);
 			}
 			return result.stdout;

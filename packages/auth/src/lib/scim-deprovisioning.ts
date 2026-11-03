@@ -9,6 +9,11 @@ import type {
 	SCIMTransactionContext,
 } from "@better-auth/scim";
 import {
+	findOrganizationVerifiedDomains,
+	type OrganizationDomainsLookup,
+	organizationHoldsProviderDomains,
+} from "./sso-email-domain.ts";
+import {
 	ADMIN_ROLE,
 	APPROVED_ROLE,
 	isWaitlistBypassed,
@@ -249,14 +254,17 @@ function providerDomains(domain: string | null | undefined): string[] {
  * Link an incoming SCIM User to an existing Ryu account only when the
  * account is already a non-owner member of the connection's organization, its
  * email is verified, and that email is on one of the organization's verified
- * SSO domains. Everyone else is created (and conflicts on an existing email),
- * so a SCIM token can never adopt an unrelated account or an owner. Linked
- * accounts keep their profile (`preserve`): the directory controls their
- * lifecycle in this organization, not their sign-in email.
+ * SSO domains that the organization still holds (a provider's `domainVerified`
+ * outlives a transfer of the domain to another organization). Everyone else is
+ * created (and conflicts on an existing email), so a SCIM token can never
+ * adopt an unrelated account or an owner. Linked accounts keep their profile
+ * (`preserve`): the directory controls their lifecycle in this organization,
+ * not their sign-in email.
  */
 export async function resolveScimUser(
 	input: SCIMIdentityResolutionInput,
-	context: SCIMIdentityResolutionContext
+	context: SCIMIdentityResolutionContext,
+	findOrganizationDomains: OrganizationDomainsLookup = findOrganizationVerifiedDomains
 ): Promise<SCIMIdentityResolution> {
 	const create: SCIMIdentityResolution = { action: "create" };
 	const email = input.resource.primaryEmail.trim().toLowerCase();
@@ -286,18 +294,35 @@ export async function resolveScimUser(
 		model: "ssoProvider",
 		where: [{ field: "organizationId", value: organizationId }],
 	});
-	const domainVerified = providers.some(
+	const verifiedProviders = providers.filter(
 		(provider) =>
 			provider.domainVerified === true &&
 			providerDomains(provider.domain).includes(emailDomain)
 	);
-	if (!domainVerified) {
+	if (verifiedProviders.length === 0) {
+		return create;
+	}
+	const organizationDomains = await findOrganizationDomains(organizationId);
+	const held = verifiedProviders.some(
+		(provider) =>
+			organizationDomains !== null &&
+			organizationHoldsProviderDomains(organizationDomains, provider.domain)
+	);
+	if (!held) {
 		return create;
 	}
 	return { action: "link", profile: "preserve", userId: user.id };
 }
 
-/** The SCIM identity hooks: link SSO-first members so SCIM can deprovision them. */
-export function createScimIdentity(): SCIMIdentity {
-	return { resolveUser: resolveScimUser };
+/**
+ * The SCIM identity hooks: link SSO-first members so SCIM can deprovision them.
+ * `findOrganizationDomains` defaults to the Mongoose read; tests inject one.
+ */
+export function createScimIdentity(
+	options: { findOrganizationDomains?: OrganizationDomainsLookup } = {}
+): SCIMIdentity {
+	return {
+		resolveUser: (input, context) =>
+			resolveScimUser(input, context, options.findOrganizationDomains),
+	};
 }

@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use super::target_guard::{self, TargetEgress};
 use super::Issued;
 
 const STS_MIN_SECS: i64 = 900;
@@ -37,6 +38,9 @@ pub struct AwsStsConfig {
     /// Override endpoint (tests or partitions), e.g. `https://sts.cn-north-1.amazonaws.com.cn`.
     #[serde(default)]
     pub endpoint: Option<String>,
+    /// How connections are made (set from the role's writer; never stored).
+    #[serde(skip)]
+    pub(crate) egress: TargetEgress,
 }
 
 impl AwsStsConfig {
@@ -166,17 +170,16 @@ pub(super) async fn issue(config: &AwsStsConfig, role: &str, ttl_secs: i64) -> R
         .ok_or_else(|| anyhow!("STS endpoint has no host"))?
         .to_owned();
     let amz_date = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-    let mut request = reqwest::Client::new()
-        .post(format!("{}/", endpoint.trim_end_matches('/')))
-        .timeout(std::time::Duration::from_secs(15))
-        .body(body.clone());
-    for (name, value) in sign_post(config, &host, &body, &amz_date) {
-        request = request.header(name, value);
-    }
-    let response = request.send().await?;
-    let status = response.status();
-    let text = response.text().await.unwrap_or_default();
-    if !status.is_success() {
+    let headers = sign_post(config, &host, &body, &amz_date);
+    let (status, text) = target_guard::post(
+        &format!("{}/", endpoint.trim_end_matches('/')),
+        headers,
+        body.into_bytes(),
+        config.egress,
+    )
+    .await?;
+    let text = String::from_utf8_lossy(&text).into_owned();
+    if !(200..300).contains(&status) {
         let message = xml_field(&text, "Message").unwrap_or("request failed");
         bail!("sts:AssumeRole returned {status}: {message}");
     }
@@ -226,6 +229,7 @@ mod tests {
             role_arn: "arn:aws:iam::123456789012:role/app".into(),
             session_policy: None,
             endpoint: None,
+            egress: TargetEgress::Trusted,
         };
         config.validate().unwrap();
         let headers = sign_post(

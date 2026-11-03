@@ -68,6 +68,9 @@ use crate::plugin_manifest::schema::{HttpProxySpec, RouteAuth, SidecarSpec};
 use crate::server::ServerState;
 use crate::sidecar::manager::{ForwardDenied, ForwardTarget};
 
+#[cfg(test)]
+#[path = "ext_proxy_public_mount_tests.rs"]
+mod public_mount_tests;
 #[path = "ext_proxy_response_cookies.rs"]
 mod response_cookies;
 
@@ -826,6 +829,12 @@ pub fn public_mount_routes(
             };
             let mount = mount.trim_end_matches('/');
             if mount.is_empty() {
+                continue;
+            }
+            // A mount is a literal prefix, never route syntax: `:param`/`*rest`
+            // would shadow Core routes or panic axum at boot.
+            if !crate::plugin_manifest::public_mount_policy::is_literal_public_mount(mount) {
+                tracing::warn!(plugin = %manifest.id, mount, "skipping non-literal public_mount");
                 continue;
             }
             // Guard against two built-ins claiming the same public prefix. Choosing

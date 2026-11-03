@@ -53,6 +53,7 @@ pub mod items;
 pub mod keyring;
 pub mod leases;
 pub mod machine;
+mod machine_egress;
 pub mod password_managers;
 pub mod password_policy;
 pub mod pki;

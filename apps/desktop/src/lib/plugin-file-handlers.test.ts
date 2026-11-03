@@ -44,6 +44,17 @@ describe("opened file scope", () => {
 		);
 	});
 
+	test("an oversized write rejects with a code, not an English sentence", async () => {
+		const access = createOpenedFileAccess("/work/big.txt", true, {
+			read: async () => "",
+			write: async () => undefined,
+		});
+		const snapshot = await access.read();
+		await expect(
+			access.write?.("x".repeat(8 * 1024 * 1024 + 1), snapshot.revision)
+		).rejects.toThrow("file_too_large");
+	});
+
 	test("read-only handlers receive no writer", () => {
 		const access = createOpenedFileAccess("/work/view.txt", false);
 		expect(access.write).toBeUndefined();

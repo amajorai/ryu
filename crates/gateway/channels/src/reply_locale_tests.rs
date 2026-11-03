@@ -126,8 +126,8 @@ async fn a_sender_without_a_locale_gets_the_owners_language() {
 async fn failed_and_empty_turns_are_answered_in_the_senders_language() {
     with_translation(
         "de",
-        messages::TURN_ERROR_MESSAGE,
-        "Leider ist etwas schiefgelaufen: {error}",
+        messages::TURN_FAILED_MESSAGE,
+        "Leider ist etwas schiefgelaufen.",
     );
     with_translation(
         "de",
@@ -136,10 +136,9 @@ async fn failed_and_empty_turns_are_answered_in_the_senders_language() {
     );
     let bot = channel(DmPolicy::Open, "en");
     let failed = reply(&bot, PipelineHost(None), Some("de-AT")).await;
-    assert_eq!(
-        failed,
-        "Leider ist etwas schiefgelaufen: upstream refused the request"
-    );
+    // The Gateway's English error text never reaches the chat.
+    assert_eq!(failed, "Leider ist etwas schiefgelaufen.");
+    assert!(!failed.contains("upstream refused the request"));
     let empty = reply(
         &bot,
         PipelineHost(Some(json!({ "choices": [] }))),
@@ -149,4 +148,24 @@ async fn failed_and_empty_turns_are_answered_in_the_senders_language() {
     assert_eq!(empty, "Der Agent hat nicht geantwortet.");
     let english = reply(&bot, PipelineHost(Some(json!({}))), None).await;
     assert_eq!(english, "The agent sent no response.");
+}
+
+#[tokio::test]
+async fn an_actionable_pipeline_failure_gets_its_own_localized_sentence() {
+    struct BudgetHost;
+    #[async_trait]
+    impl ChannelHost for BudgetHost {
+        async fn run_pipeline(&self, _channel: &str, _body: Value) -> anyhow::Result<Value> {
+            Err(anyhow::anyhow!("Budget exceeded"))
+        }
+    }
+    with_translation(
+        "de",
+        messages::TURN_BUDGET_EXCEEDED_MESSAGE,
+        "Dieser Assistent hat sein Ausgabenlimit erreicht.",
+    );
+    let bot = channel(DmPolicy::Open, "en");
+    handle_turn(Arc::clone(&bot), Arc::new(BudgetHost), message(Some("de"))).await;
+    let reply = bot.sent.lock().unwrap().pop().expect("a reply was sent");
+    assert_eq!(reply, "Dieser Assistent hat sein Ausgabenlimit erreicht.");
 }

@@ -7,6 +7,7 @@
 //! vault_public_routes_auth_test.rs, vault_engine_roles_tests.rs, and the vault engine tests.
 
 use super::*;
+use crate::vault::dynamic::target_guard::RoleWriter;
 
 // ── Dynamic secrets and leases ────────────────────────────────────────────
 
@@ -55,13 +56,16 @@ pub async fn dynamic_put_role(
     if let Err(response) = who.require(&format!("sys/dynamic/{name}"), Capability::Admin) {
         return response;
     }
+    // A delegated admin's role may only target public hosts (screened at
+    // every connect); a configuration manager's keeps the host's network.
+    let manager = matches!(&who, Who::Human(ctx) if ctx.manager);
     ok_or(
         who.store()
-            .dynamic_put_role(
+            .dynamic_put_role_as(
                 &name,
                 &body.provider,
-                body.default_ttl_secs,
-                body.max_ttl_secs,
+                (body.default_ttl_secs, body.max_ttl_secs),
+                RoleWriter::from_manager(manager),
                 &who.actor(),
             )
             .await,

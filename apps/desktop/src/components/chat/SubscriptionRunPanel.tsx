@@ -146,7 +146,7 @@ export function SubscriptionRunPanel({
 			</div>
 			{run.outputTail ? (
 				<pre
-					aria-label="Run log"
+					aria-label={tl("Run log")}
 					className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-1.5 font-mono text-xs"
 				>
 					{run.outputTail}
@@ -176,7 +176,7 @@ export function SubscriptionRunPanel({
 						<p className="text-muted-foreground">No changes yet.</p>
 					) : (
 						<pre
-							aria-label="Changes"
+							aria-label={tl("Changes")}
 							className="max-h-72 overflow-auto rounded-lg bg-muted p-1.5 font-mono text-xs"
 						>
 							{diff.patch}

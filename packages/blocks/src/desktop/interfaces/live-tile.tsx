@@ -1,4 +1,3 @@
-import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -195,6 +194,8 @@ export const LiveBoxArt = memo(function LiveBoxArtImpl({
 }: {
 	category: LiveCategory;
 }) {
+	// Memoized: the hook re-renders it when the catalog or language changes.
+	const tl = useLiteralMessages();
 	const colors = liveCategoryStage(liveHash(category.id) % 360);
 	return (
 		<span
@@ -207,7 +208,7 @@ export const LiveBoxArt = memo(function LiveBoxArtImpl({
 					className="font-semibold text-[clamp(10px,6cqw,14px)] uppercase tracking-[0.16em]"
 					style={{ color: colors.accent }}
 				>
-					{category.kind === "team" ? "Team" : "Project"}
+					{category.kind === "team" ? tl("Team") : tl("Project")}
 				</span>
 				<span
 					className="mt-auto line-clamp-4 text-balance font-bold text-[16cqw] leading-[0.98] tracking-tight"
@@ -232,11 +233,12 @@ export function LiveCategoryTile({
 	entry: LiveCategoryEntry;
 	onSelect: (categoryId: string) => void;
 }) {
+	const tl = useLiteralMessages();
 	const { category } = entry;
 	const meta =
 		entry.liveCount > 0
-			? tr("{count} live", { count: entry.liveCount })
-			: tr("{count, plural, one {# video} other {# videos}}", {
+			? tl("{count} live", { count: entry.liveCount })
+			: tl("{count, plural, one {# video} other {# videos}}", {
 					count: entry.threads.length,
 				});
 	return (
@@ -271,7 +273,9 @@ export function LiveCategoryTile({
 					{meta}
 				</p>
 				<div className="mt-1 flex">
-					<LiveTag>{category.kind === "team" ? "Team" : "Project"}</LiveTag>
+					<LiveTag>
+						{category.kind === "team" ? tl("Team") : tl("Project")}
+					</LiveTag>
 				</div>
 			</div>
 		</article>

@@ -7,6 +7,7 @@ import {
 	ContextMenuItem,
 	ContextMenuSeparator,
 } from "@ryu/ui/components/context-menu.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -27,7 +28,13 @@ import type {
 } from "@ryu/workbench/model";
 import type { DesktopWorkbenchValue } from "./DesktopWorkbenchContext.tsx";
 import type { WorkbenchChromeValue } from "./workbench-chrome.tsx";
+import { physicalSide } from "./workbench-direction.ts";
 
+/**
+ * Message sources for region names, resolved with `tl()` at render. Index by
+ * `physicalSide(region, dir)` so "Left" names the region on screen-left under
+ * RTL too; persisted region ids never change.
+ */
 export const REGION_LABELS = {
 	bottom: "Bottom",
 	center: "Center",
@@ -35,12 +42,17 @@ export const REGION_LABELS = {
 	right: "Right",
 } satisfies Record<WorkbenchRegion, string>;
 
+/** Bottom alignment choices; labels are message sources resolved at render. */
 export const BOTTOM_ALIGNMENT_OPTIONS = [
 	{ label: "Center", value: "center" },
 	{ label: "Full width", value: "full" },
 	{ label: "Left", value: "left" },
 	{ label: "Right", value: "right" },
 ] as const satisfies ReadonlyArray<{ label: string; value: BottomAlignment }>;
+
+const BOTTOM_ALIGNMENT_LABELS = Object.fromEntries(
+	BOTTOM_ALIGNMENT_OPTIONS.map((option) => [option.value, option.label])
+) as Record<BottomAlignment, string>;
 
 export function isBottomAlignment(value: unknown): value is BottomAlignment {
 	return BOTTOM_ALIGNMENT_OPTIONS.some((option) => option.value === value);
@@ -78,6 +90,7 @@ export function WorkbenchTabMenu({
 	toTheRight: WorkbenchItem[];
 }) {
 	const tl = useLiteralMessages();
+	const dir = useDirection();
 	return (
 		<ContextMenuContent>
 			{moveRegions.map((region) => (
@@ -85,7 +98,9 @@ export function WorkbenchTabMenu({
 					key={region}
 					onClick={() => moveToRegion(item.id, region)}
 				>
-					{tl("Move to {region}", { region: tl(REGION_LABELS[region]) })}
+					{tl("Move to {region}", {
+						region: tl(REGION_LABELS[physicalSide(region, dir)]),
+					})}
 				</ContextMenuItem>
 			))}
 			<ContextMenuSeparator />
@@ -153,6 +168,7 @@ export function WorkbenchStripActions({
 	state: DesktopWorkbenchValue["state"];
 }) {
 	const tl = useLiteralMessages();
+	const dir = useDirection();
 	return (
 		<>
 			{addMenu && addMenu.tools.length > 0 && group.region !== "center" ? (
@@ -221,7 +237,9 @@ export function WorkbenchStripActions({
 								}
 							}}
 						>
-							{tl("Move to {region}", { region: tl(REGION_LABELS[region]) })}
+							{tl("Move to {region}", {
+								region: tl(REGION_LABELS[physicalSide(region, dir)]),
+							})}
 						</DropdownMenuItem>
 					))}
 					{group.region === "bottom" ? (
@@ -241,7 +259,9 @@ export function WorkbenchStripActions({
 											key={option.value}
 											value={option.value}
 										>
-											{option.label}
+											{tl(
+												BOTTOM_ALIGNMENT_LABELS[physicalSide(option.value, dir)]
+											)}
 										</DropdownMenuRadioItem>
 									))}
 								</DropdownMenuRadioGroup>

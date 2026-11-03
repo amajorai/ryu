@@ -100,56 +100,60 @@ export function buildLocalTopology(
 	const assigned = input.assignedPolicies ?? {};
 	const chain: TopologyInput["chain"] = {
 		"scope:agent": {
-			detail: policyDetail(assigned.agent, "Agent policies", tl),
-			label: "Agents",
+			detail: policyDetail(assigned.agent, tl("Agent policies"), tl),
+			label: tl("Agents"),
 		},
 		"scope:key": {
-			detail: policyDetail(assigned.key, "Key policies", tl),
-			label: "Keys",
+			detail: policyDetail(assigned.key, tl("Key policies"), tl),
+			label: tl("Keys"),
 		},
 		"scope:member": {
-			detail: policyDetail(assigned.member, "Member policies", tl),
-			label: "Members",
+			detail: policyDetail(assigned.member, tl("Member policies"), tl),
+			label: tl("Members"),
 		},
 		"scope:org": {
-			detail: policyDetail(assigned.org, "Organization policies", tl),
-			label: "Organization",
+			detail: policyDetail(assigned.org, tl("Organization policies"), tl),
+			label: tl("Organization"),
 		},
 		"scope:team": {
-			detail: policyDetail(assigned.team, "Team policies", tl),
-			label: "Teams",
+			detail: policyDetail(assigned.team, tl("Team policies"), tl),
+			label: tl("Teams"),
 		},
-		"stage:budget": { detail: "Spend caps", label: "Budgets", locked: true },
+		"stage:budget": {
+			detail: tl("Spend caps"),
+			label: tl("Budgets"),
+			locked: true,
+		},
 		"stage:node": {
-			detail: "Firewall and DLP",
-			label: "This node's filters",
+			detail: tl("Firewall and DLP"),
+			label: tl("This node's filters"),
 		},
 		"stage:platform_floor": {
-			detail: "Ryu-held credentials only",
-			label: "Ryu platform floor",
+			detail: tl("Ryu-held credentials only"),
+			label: tl("Ryu platform floor"),
 			locked: true,
 		},
 		"stage:rate_limit": {
-			detail: "Per key and client",
-			label: "Rate limits",
+			detail: tl("Per key and client"),
+			label: tl("Rate limits"),
 			locked: true,
 		},
 		"stage:standing": {
-			detail: "Ryu-managed traffic only",
-			label: "Account standing",
+			detail: tl("Ryu-managed traffic only"),
+			label: tl("Account standing"),
 			locked: true,
 		},
 	};
 	if (!known || stages.has(STAGE_INSPECTOR)) {
 		chain["stage:inspector"] = {
-			detail: "Model-based screening",
-			label: "Inspector",
+			detail: tl("Model-based screening"),
+			label: tl("Inspector"),
 		};
 	}
 	if (!known || stages.has(STAGE_EVALUATORS)) {
 		chain["stage:evaluator"] = {
-			detail: "Inline evaluators",
-			label: "Evaluators",
+			detail: tl("Inline evaluators"),
+			label: tl("Evaluators"),
 		};
 	}
 	const providers = [...new Set(input.providers)].map((name) => ({
@@ -157,47 +161,47 @@ export function buildLocalTopology(
 		label: providerLabel(name),
 		name,
 	}));
-	providers.push({ health: "ok", label: "Other providers", name: "other" });
+	providers.push({ health: "ok", label: tl("Other providers"), name: "other" });
 	const infra: NonNullable<TopologyInput["infra"]> = [
-		{ detail: "Relays this feed", id: "infra:core", label: "Ryu Core" },
+		{ detail: tl("Relays this feed"), id: "infra:core", label: "Ryu Core" },
 	];
 	if (input.signedIn) {
 		infra.push({
-			detail: "Policies and standing",
+			detail: tl("Policies and standing"),
 			id: "infra:control_plane",
-			label: "Ryu control plane",
+			label: tl("Ryu control plane"),
 		});
 	}
 	return buildTopology({
 		chain,
 		gateway: {
-			detail: "Local node",
+			detail: tl("Local node"),
 			health: input.gatewayReachable ? "ok" : "down",
-			label: "This gateway",
+			label: tl("This gateway"),
 		},
 		infra,
 		providers,
-		route: { detail: "Model routing and cache", label: "Router" },
+		route: { detail: tl("Model routing and cache"), label: tl("Router") },
 		surfaces: [
 			{
 				detail: "/v1/chat, /v1/responses",
 				id: "surface:openai",
-				label: "OpenAI-compatible API",
+				label: tl("OpenAI-compatible API"),
 			},
 			{
 				detail: "/v1/messages",
 				id: "surface:anthropic",
-				label: "Anthropic Messages API",
+				label: tl("Anthropic Messages API"),
 			},
 			{
-				detail: "Your own subscriptions",
+				detail: tl("Your own subscriptions"),
 				id: "surface:passthrough",
-				label: "Subscription passthrough",
+				label: tl("Subscription passthrough"),
 			},
 			{
-				detail: "Media, tools, services",
+				detail: tl("Media, tools, services"),
 				id: "surface:other",
-				label: "Other routes",
+				label: tl("Other routes"),
 			},
 		],
 	});

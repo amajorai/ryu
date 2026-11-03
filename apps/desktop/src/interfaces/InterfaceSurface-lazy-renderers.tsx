@@ -186,9 +186,9 @@ export const CinemaInterface = lazy(() =>
 	)
 );
 export const NoticeboardInterface = lazy(() =>
-	import("@ryu/blocks/desktop/interfaces/noticeboard-interface.tsx").then(
-		(module) => ({ default: module.NoticeboardInterface })
-	)
+	import(
+		"@ryu/blocks/desktop/interfaces/noticeboard-interface-localized.tsx"
+	).then((module) => ({ default: module.LocalizedNoticeboardInterface }))
 );
 
 export const MailInterface = lazy(() =>

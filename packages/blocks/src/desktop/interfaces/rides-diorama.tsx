@@ -417,7 +417,7 @@ export function RidesDioramaScene({
 									})
 								: tl("{title}, {word}. Show the trip", {
 										title: trip.thread.title,
-										word: tripWord(trip, acts?.view.trips?.get(trip.id)),
+										word: tripWord(trip, acts?.view.trips?.get(trip.id), tl),
 									})
 						}
 						onSelect={() =>
