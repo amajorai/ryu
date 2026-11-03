@@ -466,6 +466,7 @@ impl RecommendationModelAdapter<'_> {
         references: &[CatalogReference],
         signals: &[String],
         generated_at: &str,
+        locale: &str,
     ) -> Vec<RecommendationRow> {
         let model = crate::agent_selection::resolve_side_model(
             &self.state.preferences,
@@ -475,13 +476,13 @@ impl RecommendationModelAdapter<'_> {
         .await
         .map(|value| (value.model, value.effort))
         .unwrap_or_else(|| (crate::registry::DEFAULT_LLM_MODEL.to_owned(), String::new()));
-        let system = "You are Ryu's Marketplace recommendation adapter. Rank only the supplied catalog references. Return safe derived reasons and never request or reveal private user context, memory text, credentials, or connection payloads.";
+        let system = language::recommendation_system(locale);
         match super::call_side_model(
             self.state,
             &crate::sidecar::gateway::SidePurpose::Recommendations,
             &model.0,
             &model.1,
-            system,
+            &system,
             &recommendation_prompt(references, signals),
         )
         .await
@@ -538,9 +539,14 @@ async fn load(
     let profile_revision = digest(&signals.join(","));
     let gateway = crate::sidecar::gateway::gateway_url();
     let settings = settings_revision(state, cadence).await;
-    let key = format!(
-        "{}:{}:{}:{}:{}",
-        gateway, scope, revision, profile_revision, settings
+    let locale = crate::i18n::locale::node_locale().await;
+    let key = language::feed_cache_key(
+        &gateway,
+        &scope,
+        &revision,
+        &profile_revision,
+        &settings,
+        locale,
     );
     let now = std::time::Instant::now();
     let mut cache_guard = cache().lock().await;
@@ -562,7 +568,9 @@ async fn load(
 
     let generated_at = Utc::now().to_rfc3339();
     let adapter = RecommendationModelAdapter { state };
-    let mut items = adapter.generate(&references, &signals, &generated_at).await;
+    let mut items = adapter
+        .generate(&references, &signals, &generated_at, locale)
+        .await;
     if items.is_empty() {
         items = references
             .iter()
@@ -702,6 +710,13 @@ pub fn routes() -> Router<ServerState> {
             route_put(set_preference),
         )
 }
+
+#[path = "recommendations_language.rs"]
+mod language;
+
+#[cfg(test)]
+#[path = "recommendations_language_tests.rs"]
+mod language_tests;
 
 #[cfg(test)]
 mod tests {

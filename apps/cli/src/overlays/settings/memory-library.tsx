@@ -14,6 +14,7 @@ import {
 	coreMemoryListResponseSchema,
 	coreMemoryWriteResponseSchema,
 } from "../../core/settings-response-codecs.ts";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf, tr } from "../../i18n/translate.ts";
 
 /** Core's existing /api/memory snake_case projection, also consumed by Desktop. */
@@ -83,7 +84,7 @@ export function MemoryLibraryPanel({
 		} catch (cause) {
 			setError(
 				tf("Couldn't load memories: {error}. Press r to retry.", {
-					error: cause instanceof Error ? cause.message : String(cause),
+					error: errorText(cause),
 				})
 			);
 		} finally {
@@ -177,7 +178,7 @@ export function MemoryLibraryPanel({
 			setError(
 				tf(
 					"Couldn't save memory: {error}. Draft retained. Reload to check the library before retrying an unconfirmed creation.",
-					{ error: cause instanceof Error ? cause.message : String(cause) }
+					{ error: errorText(cause) }
 				)
 			);
 		} finally {
@@ -209,7 +210,7 @@ export function MemoryLibraryPanel({
 			setError(
 				tf(
 					"Couldn't delete memory: {error}. Press y to retry or n to cancel.",
-					{ error: cause instanceof Error ? cause.message : String(cause) }
+					{ error: errorText(cause) }
 				)
 			);
 		} finally {

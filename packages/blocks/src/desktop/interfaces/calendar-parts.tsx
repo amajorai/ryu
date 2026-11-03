@@ -379,7 +379,7 @@ export function RunPopover({
 				appearance="composer-menu"
 				className="w-80 max-w-[calc(100vw-2rem)]"
 				corners="rounded"
-				side="right"
+				side="inline-end"
 				sideOffset={6}
 			>
 				<RunDetails

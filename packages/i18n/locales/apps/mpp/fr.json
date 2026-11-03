@@ -120,7 +120,6 @@
   "This payment attempt cannot be retried.": "Cette tentative de paiement ne peut pas être relancée.",
   "This payment challenge already has a receipt.": "Cette demande de paiement a déjà un reçu.",
   "To": "Vers",
-  "Tool": "Outil",
   "Trusted origins": "Origines de confiance",
   "Unsupported HTTP method.": "Méthode HTTP non prise en charge.",
   "Use at most six decimal places.": "Utilisez au maximum six décimales.",

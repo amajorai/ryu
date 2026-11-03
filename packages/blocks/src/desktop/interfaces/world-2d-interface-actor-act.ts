@@ -1,9 +1,10 @@
 import {
+	type ClockOptions,
 	type InterfaceAgentAct,
 	waitBand,
-	waitLabel,
 } from "@ryuhq/protocol/interfaces";
 import { toolForActivity } from "./game3d-acts.ts";
+import { clockLabel, waitLabel } from "./interface-act-time.ts";
 import type { World2dTool } from "./world-2d-act-sprites.ts";
 import type { ActorAct } from "./world-2d-render.ts";
 
@@ -27,7 +28,9 @@ export function actorAct(
 	act: InterfaceAgentAct,
 	nowMs: number,
 	/** `minimal` (the "Overlay density" setting) drops pips, "~" and the next sign. */
-	density: "full" | "minimal" = "full"
+	density: "full" | "minimal" = "full",
+	/** The act clock's format, for the limit's reset time. */
+	clock?: ClockOptions
 ): ActorAct {
 	const minimal = density === "minimal";
 	const ask = act.act === "asking" ? act.ask : null;
@@ -47,8 +50,8 @@ export function actorAct(
 				blocker.kind !== "interrupted" && blocker.kind !== "rate-limited"
 		).length,
 		back:
-			act.act === "limited"
-				? (/back (.+)$/.exec(act.bubble?.text ?? "")?.[1] ?? null)
+			act.act === "limited" && act.timer?.until
+				? clockLabel(act.timer.until, nowMs, clock)
 				: null,
 		carry: ask ? carry : null,
 		followers: act.helpers?.running ?? 0,

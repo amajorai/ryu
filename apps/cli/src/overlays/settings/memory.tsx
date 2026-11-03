@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card.tsx";
 import { TextInput } from "@/components/ui/text-input.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { errorText } from "../../i18n/error-text.ts";
 import { formatCliNumber } from "../../i18n/format.ts";
 import { tf } from "../../i18n/translate.ts";
 import { MemoryAdvancedPanel } from "./memory-advanced.tsx";
@@ -88,8 +89,7 @@ export function MemoryPanel({
 			setLoadState("error");
 			setError(
 				tf("Couldn't load Memory preferences: {error}. Press r to retry.", {
-					error:
-						loadError instanceof Error ? loadError.message : String(loadError),
+					error: errorText(loadError),
 				})
 			);
 		}
@@ -151,10 +151,7 @@ export function MemoryPanel({
 				setError(
 					tf("Couldn't save {label}: {error}. Press r to retry.", {
 						label: intent.label,
-						error:
-							saveError instanceof Error
-								? saveError.message
-								: String(saveError),
+						error: errorText(saveError),
 					})
 				);
 			} finally {

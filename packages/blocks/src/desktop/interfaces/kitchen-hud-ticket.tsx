@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { KeyboardEvent } from "react";
 import { GAME_FOCUS } from "./game-hud.tsx";
@@ -101,9 +102,9 @@ export function TicketCard({
 	if (act) {
 		// The act's words as they are.
 	} else if (ticket.state === "ready" && !compact) {
-		status = "Ready to serve";
+		status = tr("Ready to serve");
 	} else if (progress?.over) {
-		status = compact ? "Over time" : "Over usual time";
+		status = compact ? tr("Over time") : tr("Over usual time");
 	}
 	// With acts only a run's exact elapsed time shows; never a last update.
 	const timer = act

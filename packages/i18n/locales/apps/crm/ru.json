@@ -30,6 +30,7 @@
   "every option needs a label": "у каждого варианта должна быть метка",
   "field \"{id}\" is listed twice": "поле «{id}» указано дважды",
   "list-specific fields cannot be unique": "поля, относящиеся к списку, не могут быть уникальными",
+  "more records referenced the removed options than can be changed in one request": "удалённые варианты используются в большем числе записей, чем можно изменить за один запрос",
   "no column is mapped to a field, so this import would write nothing": "ни один столбец не сопоставлен с полем, поэтому этот импорт ничего не запишет",
   "no field \"{title}\" on the \"{slug}\" object": "в объекте «{slug}» нет поля «{title}»",
   "no live record \"{id}\" on the target object": "в целевом объекте нет активной записи «{id}»",
@@ -53,5 +54,6 @@
   "this import has already been applied and cannot be remapped — its outcome is on the job": "этот импорт уже применён, и его нельзя переназначить — результат указан в задании",
   "this relation field has no target object configured": "для этого поля связи не настроен целевой объект",
   "two columns map to \"{name}\" — the second would overwrite the first": "два столбца сопоставлены с «{name}» — второй перезапишет первый",
-  "unknown object \"{reference}\"": "неизвестный объект «{reference}»"
+  "unknown object \"{reference}\"": "неизвестный объект «{reference}»",
+  "{affected} records still use the options being removed, over the {maxOptionMigrationRecords} that can be changed in one request — clear those values in bulk first, then remove the options": "{affected} записей всё ещё используют удаляемые варианты — это больше, чем {maxOptionMigrationRecords}, которые можно изменить за один запрос. Сначала массово очистите эти значения, затем удалите варианты"
 }

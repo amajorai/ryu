@@ -7,6 +7,7 @@ import {
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -41,6 +42,7 @@ export function ChatSearchBar({
 	onQueryChange,
 	query,
 }: ChatSearchBarProps) {
+	const tl = useLiteralMessages();
 	const inputRef = useRef<HTMLInputElement>(null);
 
 	useEffect(() => {
@@ -56,7 +58,10 @@ export function ChatSearchBar({
 		mode === "chat"
 			? hasQuery
 				? chatHasMatches
-					? `${activeMatchIndex + 1} of ${matches.length}`
+					? tl("{current} of {total}", {
+							current: activeMatchIndex + 1,
+							total: matches.length,
+						})
 					: "No matches"
 				: "Search messages"
 			: folderAvailable

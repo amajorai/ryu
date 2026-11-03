@@ -233,7 +233,7 @@ export function FoldButton({
 			handlers={handlers}
 			isToday={isToday}
 			items={items}
-			side="right"
+			side="inline-end"
 			sideOffset={6}
 			style={{
 				height: (CASCADE_MINUTES / 60) * HOUR_PX - BLOCK_GAP_PX,

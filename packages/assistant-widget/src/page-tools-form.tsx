@@ -2,6 +2,7 @@
 
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -143,6 +144,8 @@ export function PageToolForm({
 	const [invalid, setInvalid] = useState<string | null>(null);
 	const [failure, setFailure] = useState<RunFailure | null>(null);
 	const isWrite = toolIsWrite(tool);
+	const tl = useLiteralMessages();
+	const originLabel = tool.origin ?? tl("Current page");
 
 	useEffect(() => {
 		setValues({});
@@ -201,15 +204,18 @@ export function PageToolForm({
 					type="button"
 					variant="ghost-muted"
 				>
-					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+					<HugeiconsIcon
+						className="size-4 rtl:-scale-x-100"
+						icon={ArrowLeft01Icon}
+					/>
 				</Button>
 				<div className="min-w-0">
 					<p className="truncate font-medium text-sm">{displayTitle(tool)}</p>
 					<p
 						className="truncate text-detail text-muted-foreground"
-						title={`${tool.name} · ${tool.origin ?? "Current page"}`}
+						title={`${tool.name} · ${originLabel}`}
 					>
-						{tool.name} · {tool.origin ?? "Current page"}
+						{tool.name} · {originLabel}
 					</p>
 				</div>
 			</div>

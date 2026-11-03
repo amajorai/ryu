@@ -6,17 +6,16 @@ import {
 	DialogDescription,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import {
-	blockerKindWord,
-	type ClockOptions,
-	clockLabel,
-	type InterfaceBlocker,
-	type InterfacePort,
-	type InterfaceSnapshot,
-	waitLabel,
+import type {
+	ClockOptions,
+	InterfaceBlocker,
+	InterfacePort,
+	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import type { KeyboardEvent, RefObject } from "react";
 import { useEffect, useRef } from "react";
+import { blockerKindWord } from "./interface-act-messages.ts";
+import { clockLabel, waitLabel } from "./interface-act-time.ts";
 
 const QUEUE_ITEM = "[data-ask-queue-item]";
 

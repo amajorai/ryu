@@ -19,6 +19,7 @@ export const RESOURCE_ACTIVE_PREFIXES: readonly string[] = [
 	"/certifications",
 	"/guides",
 	"/help",
+	"/knowledge-base",
 	"/blog",
 	"/changelog",
 	"/stories",
@@ -26,6 +27,12 @@ export const RESOURCE_ACTIVE_PREFIXES: readonly string[] = [
 	"/compare",
 	"/community",
 	"/perks",
+	// The mobile Resources sheet's Company group. The desktop menu leaves them
+	// to the footer, but they are still resources pages, not product pages.
+	"/about",
+	"/careers",
+	"/press",
+	"/events",
 ];
 
 /** Whether the route is one of the prefixes or a page under one of them. */

@@ -220,7 +220,10 @@ export function SubscriptionUsageDashboard({
 							label="On pace to hit limit"
 							value={
 								pool.forecastable > 0
-									? `${pool.atRisk} of ${pool.forecastable}`
+									? tl("{current} of {total}", {
+											current: pool.atRisk,
+											total: pool.forecastable,
+										})
 									: "—"
 							}
 						/>

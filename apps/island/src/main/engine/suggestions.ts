@@ -110,6 +110,11 @@ export interface SuggestionEngineDeps {
 	log?(message: string): void;
 	/** Post feedback to Shadow. */
 	postFeedback(kind: FeedbackKind, suggestionType: string): Promise<void>;
+	/**
+	 * Optional: the Island's UI language, so the model writes the suggestion's
+	 * title and body in it. Null (or a failure) keeps the English prompt.
+	 */
+	uiLocale?(): Promise<string | null>;
 }
 
 /** Tracks an in-flight debounce window for a candidate change. */
@@ -318,7 +323,8 @@ export class SuggestionEngine {
 		snapshot: ContextSnapshot,
 		now: number
 	): Promise<void> {
-		const messages = buildSuggestionMessages(snapshot);
+		const locale = (await this.deps.uiLocale?.().catch(() => null)) ?? null;
+		const messages = buildSuggestionMessages(snapshot, locale);
 		const text = await this.deps.complete(messages);
 		if (!text) {
 			this.log("model returned no text");

@@ -92,7 +92,10 @@ async fn creates_a_missing_index_then_writes_and_queries_the_namespace() {
                 id: "a".into(),
                 vector: vec![1.0, 0.0],
                 document: Some("alpha".into()),
-                metadata: json!({"lang": "en", "skip": null}).as_object().cloned().unwrap(),
+                metadata: json!({"lang": "en", "skip": null})
+                    .as_object()
+                    .cloned()
+                    .unwrap(),
             }],
         )
         .await
@@ -133,7 +136,10 @@ async fn creates_a_missing_index_then_writes_and_queries_the_namespace() {
     );
     assert_eq!(hits[0].id, "a");
     assert_eq!(hits[0].document.as_deref(), Some("alpha"));
-    assert_eq!(hits[0].metadata, *json!({"lang": "en"}).as_object().unwrap());
+    assert_eq!(
+        hits[0].metadata,
+        *json!({"lang": "en"}).as_object().unwrap()
+    );
     assert!((hits[0].score - 0.8).abs() < 1e-6);
     assert!(hits[1].document.is_none());
     let delete = data.find("POST", "/vectors/delete");

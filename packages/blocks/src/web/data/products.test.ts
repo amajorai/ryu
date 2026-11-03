@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ProductLandingPage from "../product-landing-page.tsx";
+import { BANNED_COPY } from "./banned-copy.ts";
 import {
 	getProduct,
 	type Product,
@@ -10,37 +11,6 @@ import {
 	products,
 	productsByCategory,
 } from "./products.tsx";
-
-const BANNED_COPY = [
-	"apps/skills",
-	"apps/mcp",
-	"NEEDS_AUTH",
-	"identity.read",
-	"Pokémon",
-	"workcell",
-	"BYOA",
-	"BYOS",
-	"Runnable",
-	"sidecar",
-	"Restate",
-	"sqlite-vec",
-	"BuzzKit",
-	"Cactus Compute",
-	"ZeroClaw",
-	"Palantir",
-	"supply-side",
-	"demand-side",
-	"~16 sidecars",
-	"Parity with Codex",
-	"Hundreds of",
-	"20+ tools",
-	"Self-improving",
-	"improves itself",
-	"Promptfoo",
-	"Mac-like",
-	"Northstar Studio",
-	"Customize",
-];
 
 const PRIMARY_LABELS = new Set([
 	"Download",
@@ -441,6 +411,12 @@ test("copy matches what the code ships", () => {
 	// Devices stream to your node; there are no rings and no on-device models.
 	expect(copy("devices")).not.toMatch(/rings?\b|on-device|local AI/i);
 	expect(copy("agents-as-a-service")).not.toMatch(/white-glove|for free/i);
+	// Sites serves a verified custom domain once your edge confirms HTTPS
+	// (docs/standalone/sites.mdx); there is no pending "HTTPS support" release.
+	expect(copy("sites")).not.toMatch(/until HTTPS support ships/);
+	expect(copy("sites")).toContain("No edge ships with Sites");
+	// No public docs page states the Gateway's provider breaker threshold.
+	expect(copy("gateway")).not.toMatch(/failures in a row|\b\d+ failures\b/i);
 	expect(copy("bot")).toContain("subscription");
 });
 

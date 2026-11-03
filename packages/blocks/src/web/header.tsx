@@ -34,6 +34,11 @@ import { ProgressiveBlur } from "./progressive-blur.tsx";
 interface HeaderLink {
 	external?: boolean;
 	label: string;
+	/**
+	 * Hide the top-bar link below this breakpoint. Only set it on a link that
+	 * stays reachable another way at narrower widths (Docs is in Resources).
+	 */
+	minBreakpoint?: "lg";
 	/** Open an external link in this tab (the docs share this header's chrome). */
 	sameTab?: boolean;
 	to: string;
@@ -47,10 +52,26 @@ function externalLinkTarget(link: HeaderLink) {
 
 // Top bar: Products and Resources menus, then Enterprise and Docs.
 // Marketplace lives inside the Products menu and Pricing inside Resources.
+// From md to lg the bar cannot fit Docs beside the Download CTA, so Docs waits
+// for lg there; the Resources menu lists it under Learn at every width.
 const MARKETING_LINKS: readonly HeaderLink[] = [
 	{ to: "/enterprise", label: "Enterprise" },
-	{ to: DOCS_URL, label: "Docs", external: true, sameTab: true },
+	{
+		to: DOCS_URL,
+		label: "Docs",
+		external: true,
+		minBreakpoint: "lg",
+		sameTab: true,
+	},
 ];
+
+/** Classes that hide a top-bar link below its `minBreakpoint`. */
+const MIN_BREAKPOINT_CLASS: Record<
+	NonNullable<HeaderLink["minBreakpoint"]>,
+	string
+> = {
+	lg: "hidden lg:inline-flex",
+};
 
 const NO_HIDDEN_PRODUCTS: readonly string[] = [];
 
@@ -89,7 +110,8 @@ function HeaderLinkList({
 								variant: "ghost",
 							}),
 							"text-foreground hover:bg-muted hover:text-foreground",
-							active && "bg-muted text-foreground"
+							active && "bg-muted text-foreground",
+							link.minBreakpoint && MIN_BREAKPOINT_CLASS[link.minBreakpoint]
 						);
 				if (link.external) {
 					return (
@@ -449,7 +471,11 @@ export default function Header({
 						{mobileActions}
 					</div>
 				) : null}
-				<div className="hidden min-w-0 flex-1 items-center justify-end md:flex">
+				{/* Never narrower than its own content: with `min-w-0` this flex-1 half
+				    got only its equal share of the space beside the nav at md, and the
+				    Download CTA spilled left over the nav links. Now the logo half gives
+				    way first, and wide screens still split evenly around the nav. */}
+				<div className="hidden min-w-max flex-1 items-center justify-end md:flex">
 					{userMenu}
 				</div>
 			</div>

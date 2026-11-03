@@ -282,6 +282,7 @@ async fn run_dream_review_inner(
 
     let (model, effort) = resolve_dream_model(state).await;
     let (system, user) = dream_prompt(&sources);
+    let system = language::with_dream_language(system, crate::i18n::locale::node_locale().await);
     let raw = super::call_side_model(
         state,
         &crate::sidecar::gateway::SidePurpose::MemoryDream,
@@ -973,6 +974,13 @@ fn normalize_key(value: &str) -> String {
         .join(" ")
         .to_ascii_lowercase()
 }
+
+#[path = "memory_dream_language.rs"]
+mod language;
+
+#[cfg(test)]
+#[path = "memory_dream_language_tests.rs"]
+mod language_tests;
 
 #[cfg(test)]
 mod tests {

@@ -391,7 +391,7 @@ export function NotebookTree({
 								strokeWidth={2.25}
 							/>
 						</TooltipTrigger>
-						<TooltipContent side="right">
+						<TooltipContent side="inline-end">
 							{tl("New page in {label}", { label: group.label })}
 							<Kbd>N</Kbd>
 						</TooltipContent>

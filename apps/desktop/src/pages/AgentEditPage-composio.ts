@@ -1,4 +1,5 @@
 import type { ComposioAccountOption } from "@ryu/blocks/desktop/agent-edit.tsx";
+import { translate as tl } from "@ryu/i18n/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	modeHasOwnAccounts,
@@ -74,7 +75,7 @@ export function useAgentEditComposio(ctx: AgentEditBase & AgentEditFormState) {
 			status: string;
 			toolkit: string;
 		}) =>
-			`${connection.toolkit} · ${connection.active ? "Active" : connection.status.toLowerCase() || "inactive"} · ${connection.id}`;
+			`${connection.toolkit} · ${connection.active ? tl("Active") : connection.status.toLowerCase() || tl("Inactive")} · ${connection.id}`;
 		const yours = modeUsesYourAccounts(identityMode)
 			? (composioConnectionsQuery.data ?? []).filter(
 					(connection) =>

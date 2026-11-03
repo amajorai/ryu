@@ -1,5 +1,6 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { ChevronRight } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -91,7 +92,8 @@ function GroupBlock({
 						aria-hidden="true"
 						className={cn(
 							"size-4 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none",
-							!collapsed && "rotate-90"
+							// Collapsed, it points to the inline end; open, it points down.
+							collapsed ? DIRECTIONAL_ICON_CLASS : "rotate-90"
 						)}
 					/>
 					<span

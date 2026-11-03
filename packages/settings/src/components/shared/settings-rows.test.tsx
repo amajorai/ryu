@@ -53,4 +53,19 @@ describe("@ryu/settings rows", () => {
 		expect(html).toMatch(/<div class="[^"]*px-3\.5[^"]*"><h3/);
 		expect(html).toMatch(/<p class="[^"]*px-3\.5[^"]*">Caption text<\/p>/);
 	});
+
+	test("row actions sit at the inline end in either direction", () => {
+		const html = renderToStaticMarkup(
+			<div dir="rtl">
+				<SettingsItem
+					actions={<button type="button">Toggle</button>}
+					title="Row"
+				/>
+			</div>
+		);
+
+		const actions = html.match(/<div[^>]*class="([^"]*)"[^>]*><button/);
+		expect(actions?.[1]).toContain("ms-auto");
+		expect(actions?.[1]).not.toMatch(/(?:^|\s)m[lr]-auto(?:\s|$)/);
+	});
 });

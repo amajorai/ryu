@@ -55,7 +55,6 @@
   "The recording has no audio data.": "В записи нет аудиоданных.",
   "The recording is not a WAV file.": "Запись не является файлом WAV.",
   "Use auto-scroll": "Использовать автопрокрутку",
-  "Voice": "Голос",
   "Voice following isn't available in this window. Open Teleprompter in Ryu Desktop or Island, or switch to auto-scroll.": "Следование за голосом недоступно в этом окне. Откройте Teleprompter в Ryu Desktop или Island либо переключитесь на автопрокрутку.",
   "Write or paste what you want to say.": "Напишите или вставьте то, что хотите сказать.",
   "{wordCount} words · about {speakingTime} at {wordsPerMinute} words per minute. Text in [brackets] is shown as a cue and never needs to be spoken.": "Слов: {wordCount} · около {speakingTime} при {wordsPerMinute} словах в минуту. Текст в [скобках] показывается как подсказка и не произносится.",

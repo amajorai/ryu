@@ -42,6 +42,7 @@ import {
 	getProactive,
 	postFeedback,
 } from "../services/shadow.ts";
+import { suggestionUiLocale } from "../suggestion-locale.ts";
 
 let engine: SuggestionEngine | null = null;
 
@@ -154,6 +155,7 @@ function buildEngine(getWindow: () => BrowserWindow | null): SuggestionEngine {
 				: await completions({ messages });
 			return result.available ? result.text : null;
 		},
+		uiLocale: () => suggestionUiLocale(),
 		postFeedback: async (kind: FeedbackKind, suggestionType: string) => {
 			await postFeedback({ kind, suggestion_type: suggestionType });
 		},

@@ -7,9 +7,14 @@
 	background-color: var(--range-slider-1-background-color);
 }
 .inline2 {
-	left: var(--range-slider-2-left);
+	inset-inline-start: var(--range-slider-2-left);
 }
 .inline3 {
-	left: var(--range-slider-3-left);
+	inset-inline-start: var(--range-slider-3-left);
 	translate: var(--range-slider-3-x) var(--range-slider-3-y);
+}
+/* The thumb's self-offset pulls it back toward the inline start, which is the
+ * physical right under RTL, so the horizontal half flips sign there. */
+.inline3:dir(rtl) {
+	translate: calc(var(--range-slider-3-x) * -1) var(--range-slider-3-y);
 }

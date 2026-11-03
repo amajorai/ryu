@@ -70,6 +70,7 @@
           "German",
           "Spanish",
           "French",
+          "Hindi",
           "Italian",
           "Japanese",
           "Korean",
@@ -77,7 +78,10 @@
           "Russian",
           "SimpChinese"
         ],
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "customLanguageFiles": {
+          "Hindi": "nsis/Hindi.nsh"
+        }
       },
       "wix": {
         "language": "en-US"

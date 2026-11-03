@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceActivityKind,
@@ -241,16 +242,16 @@ export function podiumWords(act: InterfaceAgentAct): string {
 	const focus = act.blockers[0];
 	switch (act.act) {
 		case "asking":
-			return "Buzzed";
+			return tr("Buzzed");
 		case "blocked":
-			return focus?.kind === "interrupted" ? "Paused" : "X";
+			return focus?.kind === "interrupted" ? tr("Paused") : "X";
 		case "delivering":
-			return "Answer";
+			return tr("Answer");
 		case "limited":
-			return "Out";
+			return tr("Out");
 		case "working": {
 			const verb = act.bubble?.text?.split(/\s+/)[0] ?? "";
-			return verb && verb.length <= PODIUM_WORD_MAX ? verb : "Working";
+			return verb && verb.length <= PODIUM_WORD_MAX ? verb : tr("Working");
 		}
 		default: {
 			const letters = Array.from(act.agentName);

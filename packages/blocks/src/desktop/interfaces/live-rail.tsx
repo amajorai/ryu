@@ -118,7 +118,7 @@ function CollapsedRow({
 						) : null}
 					</span>
 				</TooltipTrigger>
-				<TooltipContent side="right">
+				<TooltipContent side="inline-end">
 					<span className="flex flex-col">
 						<span className="font-semibold">{agent.name}</span>
 						<span className="text-muted-foreground">

@@ -92,7 +92,7 @@ export function PageToolsPopover({
 						<div className="mt-2 flex flex-col">
 							{tools.map((tool) => (
 								<button
-									className="flex min-w-0 flex-col rounded-lg px-2 py-1.5 text-left outline-none transition-colors duration-(--duration-fast) hover:bg-foreground/10 focus-visible:bg-foreground/10"
+									className="flex min-w-0 flex-col rounded-lg px-2 py-1.5 text-start outline-none transition-colors duration-(--duration-fast) hover:bg-foreground/10 focus-visible:bg-foreground/10"
 									key={tool.id}
 									onClick={() => setSelectedId(tool.id)}
 									title={tool.name}

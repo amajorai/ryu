@@ -415,7 +415,7 @@ export function KnowledgeControlsButton({ onOpen }: { onOpen: () => void }) {
 			>
 				<Settings2 aria-hidden="true" className="size-4" />
 			</TooltipTrigger>
-			<TooltipContent side="left">Graph settings</TooltipContent>
+			<TooltipContent side="inline-start">Graph settings</TooltipContent>
 		</Tooltip>
 	);
 }

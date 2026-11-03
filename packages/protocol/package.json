@@ -23,6 +23,7 @@
     "./feature-flags": "./src/feature-flags.ts",
     "./hardware": "./src/hardware.ts",
     "./interfaces": "./src/interfaces.ts",
+    "./interface-act-parts": "./src/interface-act-parts.ts",
     "./interfaces-fixture": "./src/interfaces-fixture.ts",
     "./publisher-trust": "./src/publisher-trust.ts",
     "./quest-events": "./src/quest-events.ts",

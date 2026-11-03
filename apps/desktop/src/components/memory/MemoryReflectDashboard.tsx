@@ -1,5 +1,6 @@
 import { Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -93,6 +94,9 @@ function SectionTitle({ children }: { children: string }) {
 }
 
 export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
+	// Insights are Core's AI-fluency observations, sent in English; their
+	// titles and details are catalog keys.
+	const tl = useLiteralMessages();
 	const [period, setPeriod] = useState<ReflectPeriod>("7d");
 	const [dashboard, setDashboard] = useState<ReflectDashboard | null>(null);
 	const [settings, setSettings] = useState<ReflectSettings>(EMPTY_SETTINGS);
@@ -332,9 +336,9 @@ export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
 									className="border-border border-b py-3 last:border-b-0"
 									key={insight.id}
 								>
-									<p className="text-sm">{insight.title}</p>
+									<p className="text-sm">{tl(insight.title)}</p>
 									<p className="text-detail text-muted-foreground">
-										{insight.body}
+										{tl(insight.body)}
 									</p>
 								</li>
 							))}

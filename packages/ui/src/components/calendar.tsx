@@ -126,17 +126,18 @@ export function useCalendarLocalization(
 	code: string | undefined
 ): CalendarLocalization {
 	const english = ENGLISH_CALENDAR_WORDS;
+	// Literal arguments, so the catalog extractor collects each label.
 	const chooseMonth =
-		useLocalizedString(english.chooseMonth) ?? english.chooseMonth;
+		useLocalizedString("Choose the Month") ?? english.chooseMonth;
 	const chooseYear =
-		useLocalizedString(english.chooseYear) ?? english.chooseYear;
-	const navigation =
-		useLocalizedString(english.navigation) ?? english.navigation;
-	const nextMonth = useLocalizedString(english.nextMonth) ?? english.nextMonth;
+		useLocalizedString("Choose the Year") ?? english.chooseYear;
+	const navigation = useLocalizedString("Navigation bar") ?? english.navigation;
+	const nextMonth =
+		useLocalizedString("Go to the Next Month") ?? english.nextMonth;
 	const previousMonth =
-		useLocalizedString(english.previousMonth) ?? english.previousMonth;
-	const selected = useLocalizedString(english.selected) ?? english.selected;
-	const today = useLocalizedString(english.today) ?? english.today;
+		useLocalizedString("Go to the Previous Month") ?? english.previousMonth;
+	const selected = useLocalizedString("selected") ?? english.selected;
+	const today = useLocalizedString("Today") ?? english.today;
 	return useMemo(
 		() =>
 			calendarLocalization(code, {

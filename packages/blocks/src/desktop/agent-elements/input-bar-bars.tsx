@@ -7,6 +7,7 @@ import {
 	MessageQuestionIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
 import { useCallback } from "react";
@@ -50,6 +51,7 @@ export function useInputBarBars({
 	voice,
 	composerPrompt,
 }: UseInputBarBarsInput) {
+	const tl = useLiteralMessages();
 	const handleSubmit = useCallback(
 		(followUpMode?: "opposite") => {
 			const trimmed = input.trim();
@@ -325,7 +327,10 @@ export function useInputBarBars({
 								<HugeiconsIcon className="h-3.5 w-3.5" icon={ArrowUp01Icon} />
 							</Button>
 							<span>
-								{clampedQuestionIndex} of {totalQuestions}
+								{tl("{current} of {total}", {
+									current: clampedQuestionIndex,
+									total: totalQuestions,
+								})}
 							</span>
 							<Button
 								aria-label="Next question"

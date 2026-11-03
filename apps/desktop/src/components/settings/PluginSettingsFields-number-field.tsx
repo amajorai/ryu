@@ -31,7 +31,7 @@ function validateNumberInput(
 	}
 	const parsed = Number(trimmed);
 	if (!Number.isFinite(parsed)) {
-		return { error: "Enter a number." };
+		return { error: tl("Enter a number.") };
 	}
 	if (field.min !== undefined && parsed < field.min) {
 		return {
@@ -101,7 +101,9 @@ export function NumberField({
 			// Don't nag when the text never changed — a stored value that violates
 			// bounds the plugin tightened later would otherwise toast on every blur.
 			if (value !== committed) {
-				toast.error(`${field.label} — ${result.error}`);
+				toast.error(
+					tl("{label} — {error}", { label: field.label, error: result.error })
+				);
 			}
 			setValue(committed);
 			return;

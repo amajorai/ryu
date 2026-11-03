@@ -1,5 +1,6 @@
 "use client";
 
+import { formatNumberValue } from "@ryu/i18n/format-intl";
 import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { buttonVariants } from "@ryu/ui/components/button";
@@ -144,7 +145,13 @@ export function ProfileStatsPanel({
 						label="Total spend"
 						value={formatCost(totals?.costMicroUsd ?? 0)}
 					/>
-					<HeroStat label="Agent hours" value={agentHours.toFixed(1)} />
+					<HeroStat
+						label="Agent hours"
+						value={formatNumberValue(locale, agentHours, {
+							maximumFractionDigits: 1,
+							minimumFractionDigits: 1,
+						})}
+					/>
 					<HeroStat
 						label="Active days"
 						value={formatCompact(insights?.activeDays ?? 0)}
@@ -152,12 +159,16 @@ export function ProfileStatsPanel({
 					<HeroStat
 						hint={USAGE_STREAK_HINT}
 						label="Current streak"
-						value={`${summary?.streak.current ?? 0} days`}
+						value={tl("{count, plural, one {# day} other {# days}}", {
+							count: summary?.streak.current ?? 0,
+						})}
 					/>
 					<HeroStat
 						hint={USAGE_STREAK_HINT}
 						label="Longest streak"
-						value={`${summary?.streak.longest ?? 0} days`}
+						value={tl("{count, plural, one {# day} other {# days}}", {
+							count: summary?.streak.longest ?? 0,
+						})}
 					/>
 				</div>
 			</SettingsSection>

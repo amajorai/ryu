@@ -127,7 +127,9 @@ pub fn validate_client_data(
     }
     match b64url_decode(&data.challenge) {
         Ok(challenge) if !challenge.is_empty() => Ok(data),
-        _ => Err(RelayError::ClientData("challenge is empty or not base64url".to_owned())),
+        _ => Err(RelayError::ClientData(
+            "challenge is empty or not base64url".to_owned(),
+        )),
     }
 }
 
@@ -166,19 +168,30 @@ fn check_options(request: &RelayRequest, challenge: &str) -> Result<(), RelayErr
     };
     if let Some(declared) = options_str(options, rp_path) {
         if declared != request.rp_id {
-            return Err(RelayError::Options("options rpId differs from rp_id".to_owned()));
+            return Err(RelayError::Options(
+                "options rpId differs from rp_id".to_owned(),
+            ));
         }
     }
     let listed = options.get(list_key).and_then(serde_json::Value::as_array);
     if listed.is_some_and(|list| list.len() > MAX_CREDENTIAL_DESCRIPTORS) {
-        return Err(RelayError::Options(format!("{list_key} lists too many credentials")));
+        return Err(RelayError::Options(format!(
+            "{list_key} lists too many credentials"
+        )));
     }
     if request.kind == CeremonyKind::Create {
         if options_str(options, &["user", "id"]).is_none() {
-            return Err(RelayError::Options("options.user.id is required".to_owned()));
+            return Err(RelayError::Options(
+                "options.user.id is required".to_owned(),
+            ));
         }
-        if !options.get("pubKeyCredParams").is_some_and(serde_json::Value::is_array) {
-            return Err(RelayError::Options("options.pubKeyCredParams is required".to_owned()));
+        if !options
+            .get("pubKeyCredParams")
+            .is_some_and(serde_json::Value::is_array)
+        {
+            return Err(RelayError::Options(
+                "options.pubKeyCredParams is required".to_owned(),
+            ));
         }
     }
     Ok(())

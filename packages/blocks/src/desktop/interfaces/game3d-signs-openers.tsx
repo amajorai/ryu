@@ -1,7 +1,7 @@
 /* eslint-disable react/no-unknown-property */
 import { useFrame } from "@react-three/fiber";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import { askAriaLabel, type InterfaceAsk } from "@ryuhq/protocol/interfaces";
+import type { InterfaceAsk } from "@ryuhq/protocol/interfaces";
 import { Mail, Package, ScrollText, StickyNote } from "lucide-react";
 import { useRef } from "react";
 import type { Mesh } from "three";
@@ -11,6 +11,7 @@ import { ItemShape } from "./game3d-life.tsx";
 import { ToonMesh } from "./game3d-materials.tsx";
 import type { Vec3 } from "./game3d-palette.ts";
 import { ActPlate, openerLabel, Post } from "./game3d-signs-plate.tsx";
+import { askAriaLabel } from "./interface-act-messages.ts";
 
 /**
  * A soft glow under an item: steady (`steady`, and always under reduced

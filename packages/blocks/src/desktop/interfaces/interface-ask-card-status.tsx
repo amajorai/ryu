@@ -1,19 +1,21 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	askAriaLabel,
-	askBubble,
-	blockerAriaLabel,
-	type ClockOptions,
-	clockLabel,
-	type InterfaceAgentAct,
-	type InterfaceAsk,
-	type InterfaceSnapshot,
-	waitLabel,
+import type {
+	ClockOptions,
+	InterfaceAgentAct,
+	InterfaceAsk,
+	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import { type ReactNode, useId, useMemo } from "react";
 import { GAME_FOCUS, GAME_PLATE } from "./game-hud.tsx";
 import { type BlockerEntry, blockerEntries } from "./game3d-acts.ts";
+import {
+	askAriaLabel,
+	askBubble,
+	blockerAriaLabel,
+} from "./interface-act-messages.ts";
+import { clockLabel, waitLabel } from "./interface-act-time.ts";
 import { isolateKeys } from "./interface-ask-card-core.ts";
 
 // ---------------------------------------------------------------------------
@@ -139,7 +141,7 @@ export function ActStatus({
 					<span key="answer">
 						{act.bubble?.text ?? askBubble(act.ask, privacy)}
 					</span>,
-					answer(act.ask, "Open answer")
+					answer(act.ask, tr("Open answer"))
 				);
 			}
 			break;

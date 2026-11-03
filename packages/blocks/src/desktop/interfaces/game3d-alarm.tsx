@@ -1,10 +1,9 @@
 /* eslint-disable react/no-unknown-property */
 import { useFrame } from "@react-three/fiber";
 import { useLiteralMessages } from "@ryu/i18n/react";
-import {
-	blockerAriaLabel,
-	type ClockOptions,
-	type InterfaceBlocker,
+import type {
+	ClockOptions,
+	InterfaceBlocker,
 } from "@ryuhq/protocol/interfaces";
 import { AlarmClock, CalendarX, Flag, Siren } from "lucide-react";
 import { useRef } from "react";
@@ -14,6 +13,7 @@ import { ToonMesh } from "./game3d-materials.tsx";
 import { MeterText } from "./game3d-meters.tsx";
 import type { Vec3 } from "./game3d-palette.ts";
 import { ActPlate } from "./game3d-signs.tsx";
+import { blockerAriaLabel } from "./interface-act-messages.ts";
 
 /**
  * Why a run stopped, at the thread's station: `AlarmBeacon`, one per

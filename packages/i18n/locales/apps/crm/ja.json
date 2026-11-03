@@ -30,6 +30,7 @@
   "every option needs a label": "すべての選択肢にラベルが必要です",
   "field \"{id}\" is listed twice": "フィールド「{id}」が重複しています",
   "list-specific fields cannot be unique": "リスト固有のフィールドを一意にすることはできません",
+  "more records referenced the removed options than can be changed in one request": "削除されたオプションを参照しているレコードが、1 回のリクエストで変更できる数を超えています",
   "no column is mapped to a field, so this import would write nothing": "フィールドにマッピングされた列がないため、このインポートでは何も書き込まれません",
   "no field \"{title}\" on the \"{slug}\" object": "「{slug}」オブジェクトにフィールド「{title}」がありません",
   "no live record \"{id}\" on the target object": "ターゲットオブジェクトに有効なレコード「{id}」がありません",
@@ -53,5 +54,6 @@
   "this import has already been applied and cannot be remapped — its outcome is on the job": "このインポートはすでに適用済みのため再マッピングできません。結果はジョブに記録されています",
   "this relation field has no target object configured": "このリレーションフィールドには対象オブジェクトが設定されていません",
   "two columns map to \"{name}\" — the second would overwrite the first": "2 つの列が「{name}」にマッピングされています。2 つ目が 1 つ目を上書きします",
-  "unknown object \"{reference}\"": "不明なオブジェクト「{reference}」"
+  "unknown object \"{reference}\"": "不明なオブジェクト「{reference}」",
+  "{affected} records still use the options being removed, over the {maxOptionMigrationRecords} that can be changed in one request — clear those values in bulk first, then remove the options": "{affected} 件のレコードが削除予定のオプションをまだ使用しており、1 回のリクエストで変更できる {maxOptionMigrationRecords} 件を超えています。先にそれらの値を一括でクリアしてから、オプションを削除してください"
 }

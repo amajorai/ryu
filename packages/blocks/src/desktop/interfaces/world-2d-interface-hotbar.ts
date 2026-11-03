@@ -1,12 +1,12 @@
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
-	askAriaLabel,
 	compareAsks,
 	type InterfaceParamsByRenderer,
 	type InterfacePort,
 	type WorldLayout,
 } from "@ryuhq/protocol/interfaces";
 import { type KeyboardEvent, useCallback, useMemo, useState } from "react";
+import { askAriaLabel } from "./interface-act-messages.ts";
 import type { useActCards } from "./interface-ask-card.tsx";
 import type { useActs } from "./use-acts.ts";
 import type { useWorldController } from "./use-world-controller.ts";
@@ -81,7 +81,10 @@ export function useWorld2dHotbar({
 					label: askAriaLabel(ask, entity.name, nowMs, privacy),
 				});
 			} else if (act) {
-				actLabel = `${act.ariaLabel} Visit ${entity.name}.`;
+				actLabel = tl("{actLabel} Visit {name}.", {
+					actLabel: act.ariaLabel,
+					name: entity.name,
+				});
 			}
 			return {
 				ask,

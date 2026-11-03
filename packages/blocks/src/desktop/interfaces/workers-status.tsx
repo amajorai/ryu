@@ -1,10 +1,6 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	WORKER_STATE_LABELS,
-	type WorkerState,
-	type WorkerView,
-} from "./workers-model.ts";
+import type { WorkerState, WorkerView } from "./workers-model.ts";
 import { wk, wkFaded } from "./workers-palette.ts";
 
 /** The light on each state: the legend, the sheet and the screen plates. */
@@ -42,13 +38,24 @@ export function StatusLight({
 
 /** What a worker's controls say to a screen reader. */
 export function deskLabel(worker: WorkerView): string {
-	const parts = [worker.name, WORKER_STATE_LABELS[worker.state]];
+	const name = worker.name;
+	// The state's own words (WORKER_STATE_LABELS), selected inside each
+	// message so a translator can inflect them in the sentence.
+	const state = worker.state === "your-turn" ? "yourTurn" : worker.state;
 	if (worker.current) {
-		parts.push(`working on ${worker.current.title.trim() || tr("Untitled")}`);
-	} else {
-		parts.push("no tasks yet");
+		return tr(
+			"{name}, {state, select, attention {Needs attention} idle {Idle} paused {Paused} working {Working} other {Waiting on you}}, working on {title}",
+			{
+				name,
+				state,
+				title: worker.current.title.trim() || tr("Untitled"),
+			}
+		);
 	}
-	return parts.join(", ");
+	return tr(
+		"{name}, {state, select, attention {Needs attention} idle {Idle} paused {Paused} working {Working} other {Waiting on you}}, no tasks yet",
+		{ name, state }
+	);
 }
 
 /** A conversation's title for a screen, with a fallback for blank ones. */

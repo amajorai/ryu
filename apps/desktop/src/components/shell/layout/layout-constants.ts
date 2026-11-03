@@ -38,5 +38,5 @@ export interface LayoutCssVariables extends LayoutCSSProperties {
 	"--desktop-inline4-pointer-Events"?: string | number;
 	"--desktop-inline4-sign"?: string | number;
 	"--desktop-inline4-width"?: string | number;
-	"--desktop-inline7-padding-Right"?: string | number;
+	"--desktop-inline7-padding-End"?: string | number;
 }

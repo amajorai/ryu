@@ -72,12 +72,13 @@ pub(super) fn scope_spawn_cmd(
         match managed_pi_tool_scope(&spawn_cmd, agent_id, allowlist, public_agent_turn) {
             Ok(command) => command,
             Err(error) => {
-                let _ = events_tx.send(AcpEvent::Error(AcpFailure::localized(
-                    "pi_tool_scope",
-                    m::ACP_SCOPE_FAILED_TITLE_MESSAGE,
-                    vec![Message::new(m::ACP_SCOPE_FAILED_MESSAGE)
-                        .text("error", error.to_string())],
-                )));
+                let _ =
+                    events_tx.send(AcpEvent::Error(AcpFailure::localized(
+                        "pi_tool_scope",
+                        m::ACP_SCOPE_FAILED_TITLE_MESSAGE,
+                        vec![Message::new(m::ACP_SCOPE_FAILED_MESSAGE)
+                            .text("error", error.to_string())],
+                    )));
                 return None;
             }
         }
@@ -99,12 +100,13 @@ pub(super) fn scope_spawn_cmd(
         ) {
             Ok(command) => command,
             Err(error) => {
-                let _ = events_tx.send(AcpEvent::Error(AcpFailure::localized(
-                    "pi_tool_scope",
-                    m::ACP_SCOPE_FAILED_TITLE_MESSAGE,
-                    vec![Message::new(m::ACP_SCOPE_FAILED_MESSAGE)
-                        .text("error", error.to_string())],
-                )));
+                let _ =
+                    events_tx.send(AcpEvent::Error(AcpFailure::localized(
+                        "pi_tool_scope",
+                        m::ACP_SCOPE_FAILED_TITLE_MESSAGE,
+                        vec![Message::new(m::ACP_SCOPE_FAILED_MESSAGE)
+                            .text("error", error.to_string())],
+                    )));
                 return None;
             }
         }

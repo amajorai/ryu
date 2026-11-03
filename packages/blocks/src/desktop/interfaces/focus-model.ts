@@ -120,7 +120,7 @@ export function focusCursorAt(queue: FocusItem[], index: number): FocusCursor {
 /** "3 of 10" for a card, or a caught-up summary past the end. */
 export function focusPosition(index: number, total: number): string {
 	if (total === 0) {
-		return "Queue empty";
+		return tr("Queue empty");
 	}
 	if (index >= total) {
 		return tr("All {total} seen", { total });

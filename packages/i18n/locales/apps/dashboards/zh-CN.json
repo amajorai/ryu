@@ -1,6 +1,7 @@
 {
   "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "此节点上不可使用智能体小组件:刷新它们需要委托的用户执行权限,而刷新任务不具备该权限。请改用 http、composio 或静态来源。",
   "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "监控小组件暂不可用:没有允许应用读取监控结果的主机能力。请改用 http、composio 或静态来源。",
+  "Ryu metric widgets are not available yet: apps cannot read Ryu's internal metrics, and no host capability exposes them. Use an http, composio, or static source instead.": "Ryu 指标小组件尚不可用：应用无法读取 Ryu 的内部指标，也没有主机功能公开这些指标。请改用 http、composio 或静态数据源。",
   "The Composio action failed: {error}": "Composio 操作失败:{error}",
   "The Composio action returned HTTP {status}.": "Composio 操作返回了 HTTP {status}。",
   "The web source redirected, and redirects are not allowed.": "Web 来源发生了重定向,但不允许重定向。",

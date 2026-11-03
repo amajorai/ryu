@@ -235,7 +235,7 @@ function TestCaseRowEditor({
 								autoComplete="off"
 								name={`test-variable-${row.id}-${name}`}
 								onChange={(e) => handleVarChange(name, e.target.value)}
-								placeholder={`Value for {{${name}}}`}
+								placeholder={tl("Value for {name}", { name: `{{${name}}}` })}
 								size="dense"
 								value={displayVariable(row.vars[name])}
 							/>

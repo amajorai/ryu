@@ -30,6 +30,7 @@
   "every option needs a label": "每个选项都需要标签",
   "field \"{id}\" is listed twice": "字段“{id}”重复列出",
   "list-specific fields cannot be unique": "列表专属字段不能设为唯一",
+  "more records referenced the removed options than can be changed in one request": "引用已移除选项的记录数超过了单次请求可更改的数量",
   "no column is mapped to a field, so this import would write nothing": "没有列映射到字段，因此此次导入不会写入任何内容",
   "no field \"{title}\" on the \"{slug}\" object": "“{slug}”对象上没有字段“{title}”",
   "no live record \"{id}\" on the target object": "目标对象上没有有效记录“{id}”",
@@ -53,5 +54,6 @@
   "this import has already been applied and cannot be remapped — its outcome is on the job": "此导入已应用，无法重新映射——结果见作业",
   "this relation field has no target object configured": "此关系字段未配置目标对象",
   "two columns map to \"{name}\" — the second would overwrite the first": "两列映射到“{name}”——第二列会覆盖第一列",
-  "unknown object \"{reference}\"": "未知对象“{reference}”"
+  "unknown object \"{reference}\"": "未知对象“{reference}”",
+  "{affected} records still use the options being removed, over the {maxOptionMigrationRecords} that can be changed in one request — clear those values in bulk first, then remove the options": "仍有 {affected} 条记录使用待移除的选项，超过单次请求可更改的 {maxOptionMigrationRecords} 条——请先批量清除这些值，再移除选项"
 }

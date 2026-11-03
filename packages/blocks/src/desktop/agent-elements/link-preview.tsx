@@ -3,6 +3,7 @@
 import { PreviewCard } from "@base-ui/react/preview-card";
 import { Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { HoverCard, HoverCardTrigger } from "@ryu/ui/components/hover-card";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
@@ -126,13 +127,14 @@ function WebsitePreviewCard({
 	);
 }
 
-function FilePreviewCard({
+export function FilePreviewCard({
 	data,
 	path,
 }: {
 	data: LinkPreviewReadFields | null | undefined;
 	path: string;
 }) {
+	const tl = useLiteralMessages();
 	const name = data?.name ?? path.split(/[\\/]/).at(-1) ?? path;
 	return (
 		<div className="overflow-hidden rounded-xl">
@@ -148,9 +150,17 @@ function FilePreviewCard({
 				</div>
 			</div>
 			<div className="relative max-h-48 overflow-hidden bg-muted">
-				<pre className="overflow-hidden whitespace-pre-wrap p-3 font-mono text-muted-foreground text-xs leading-4">
-					{data?.snippet || "Preview unavailable"}
-				</pre>
+				{data?.snippet ? (
+					<pre className="overflow-hidden whitespace-pre-wrap p-3 font-mono text-muted-foreground text-xs leading-4">
+						{data.snippet}
+					</pre>
+				) : (
+					// Outside the <pre>: the DOM localizer skips <pre>, and the
+					// fallback follows the UI's direction rather than the file's.
+					<p className="p-3 text-muted-foreground text-xs leading-4">
+						{tl("Preview unavailable")}
+					</p>
+				)}
 				<div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-popover" />
 			</div>
 		</div>

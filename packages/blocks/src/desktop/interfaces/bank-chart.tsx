@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { type KeyboardEvent, useId, useState } from "react";
@@ -19,9 +20,9 @@ function dayReadout(
 	isToday: boolean,
 	currency: string
 ): string[] {
-	const name = isToday ? "Today" : shortWeekday(day.date);
+	const name = isToday ? tr("Today") : shortWeekday(day.date);
 	if (day.count === 0) {
-		return [name, isToday ? "No spend yet" : "No spend"];
+		return [name, isToday ? tr("No spend yet") : tr("No spend")];
 	}
 	return [
 		name,

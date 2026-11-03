@@ -250,6 +250,9 @@ pub(super) fn acp_spawn_from_spawn(spawn_cmd: &str) -> anyhow::Result<AcpSpawn> 
             // session load/list/close) reads the same `${RYU_PI_…}` references.
             apply_managed_pi_secret_env(&mut stdio.env);
             ensure_gateway_spawn_ready(&stdio)?;
+            if is_claude_code_spawn(spawn_cmd) {
+                apply_claude_code_entrypoint(&mut stdio.env);
+            }
             agent_client_protocol::schema::v1::McpServer::Stdio(
                 crate::agent_sandbox::confine_classified_codex_stdio(stdio, codex).map_err(
                     |error| {

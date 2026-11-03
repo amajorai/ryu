@@ -1,6 +1,7 @@
 {
   "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "أدوات الوكيل غير متاحة على هذه العقدة: يتطلب تحديثها صلاحية تنفيذ مفوَّضة من المستخدم لا تمتلكها مهام التحديث. استخدم مصدر http أو composio أو مصدرًا ثابتًا بدلًا من ذلك.",
   "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "أدوات المراقبة غير متاحة بعد: لا توجد قدرة في المضيف تتيح لتطبيق قراءة نتائج المراقبة. استخدم مصدر http أو composio أو مصدرًا ثابتًا بدلًا من ذلك.",
+  "Ryu metric widgets are not available yet: apps cannot read Ryu's internal metrics, and no host capability exposes them. Use an http, composio, or static source instead.": "أدوات مقاييس Ryu غير متاحة بعد: لا يمكن للتطبيقات قراءة مقاييس Ryu الداخلية، ولا توجد قدرة مضيف تتيحها. استخدم مصدر http أو composio أو مصدرًا ثابتًا بدلًا من ذلك.",
   "The Composio action failed: {error}": "فشل إجراء Composio: {error}",
   "The Composio action returned HTTP {status}.": "أعاد إجراء Composio الرمز HTTP {status}.",
   "The web source redirected, and redirects are not allowed.": "أعاد مصدر الويب التوجيه، وإعادة التوجيه غير مسموح بها.",

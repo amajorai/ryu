@@ -137,7 +137,7 @@ export function RyuAssistantRecentChats({
 			<div className="flex flex-col">
 				{items.slice(0, 4).map((item) => (
 					<button
-						className="flex h-8 min-w-0 items-center gap-3 rounded-lg px-2 text-left text-sm outline-none transition-colors duration-(--duration-fast) hover:bg-foreground/10 focus-visible:bg-foreground/10"
+						className="flex h-8 min-w-0 items-center gap-3 rounded-lg px-2 text-start text-sm outline-none transition-colors duration-(--duration-fast) hover:bg-foreground/10 focus-visible:bg-foreground/10"
 						key={item.id}
 						onClick={() => onSelect(item.id)}
 						type="button"

@@ -17,6 +17,7 @@ import {
 	useState,
 } from "react";
 import { type AnnounceState, actAnnouncement } from "./game3d-acts.ts";
+import { localizeActs } from "./interface-act-sentences.ts";
 
 /**
  * React glue for the act layer: `useActs(snapshot)` derives every agent's
@@ -147,10 +148,14 @@ export function useActs(snapshot: InterfaceSnapshot): ActsView {
 			previous.current = new Map();
 			return NO_ACTS;
 		}
-		const { acts: next, kept } = stableActs(
+		// The protocol words acts in English; show them in the UI language.
+		const worded = localizeActs(
 			agentActs(snapshot, nowMs, clock),
-			previous.current
+			snapshot,
+			nowMs,
+			clock
 		);
+		const { acts: next, kept } = stableActs(worded, previous.current);
 		previous.current = kept;
 		return next;
 	}, [clock, enabled, nowMs, snapshot]);

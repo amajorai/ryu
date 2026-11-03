@@ -8,6 +8,7 @@ import css from "./range-slider-fluid.module.css";
 
 interface Inline1Style extends MotionStyle {
 	"--range-slider-fluid-1-clip-path"?: MotionStyle["clipPath"];
+	"--range-slider-fluid-1-clip-path-rtl"?: MotionStyle["clipPath"];
 }
 interface Inline2Style extends CSSProperties {
 	"--range-slider-fluid-2-color"?: CSSProperties["color"];
@@ -36,9 +37,9 @@ function decimalsForStep(step: number): number {
 
 export interface FluidSliderProps extends SliderOptions {
 	className?: string;
-	/** Formats the value shown on the right. */
+	/** Formats the value shown at the inline end. */
 	format?: (value: number) => string;
-	/** Text shown on the left of the track. */
+	/** Text shown at the inline start of the track. */
 	label?: string;
 }
 
@@ -84,6 +85,8 @@ export function FluidSlider({
 	// left behind, and the label inside is never scaled or re-laid out.
 	const uncovered = useTransform(pos, (v) => 100 - v);
 	const clipPath = useMotionTemplate`inset(0 ${uncovered}% 0 0 round 9999px)`;
+	// The stylesheet picks this one under RTL, where the fill grows from the right.
+	const clipPathRtl = useMotionTemplate`inset(0 0 0 ${uncovered}% round 9999px)`;
 
 	const row = (
 		<>
@@ -94,6 +97,7 @@ export function FluidSlider({
 
 	const inline1Style: Inline1Style = {
 		"--range-slider-fluid-1-clip-path": clipPath,
+		"--range-slider-fluid-1-clip-path-rtl": clipPathRtl,
 	};
 	const inline2Style: Inline2Style = {
 		"--range-slider-fluid-2-color": fillInk,
@@ -119,7 +123,7 @@ export function FluidSlider({
 
 			{/* fill + the same label, both clipped to the value, so the text inverts
 			    as the fill covers it and lines up glyph for glyph with the copy
-			    underneath. The clip's rounded right edge is the liquid cap. */}
+			    underneath. The clip's rounded trailing edge is the liquid cap. */}
 			<motion.div
 				className={[css.inline1, "absolute inset-0"].join(" ")}
 				style={inline1Style}

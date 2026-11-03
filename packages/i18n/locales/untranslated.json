@@ -187,6 +187,16 @@
     ],
     "reason": "'Solution' is the French word"
   },
+  "1 MiB": {
+    "locales": [
+      "de",
+      "es",
+      "hi",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Binary size units (KiB, MiB) are written the same way in these locales"
+  },
   "1 chat": {
     "locales": [
       "es",
@@ -218,6 +228,16 @@
       "de"
     ],
     "reason": "'Minimal' is the German word"
+  },
+  "128 KiB": {
+    "locales": [
+      "de",
+      "es",
+      "hi",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Binary size units (KiB, MiB) are written the same way in these locales"
   },
   "15 min": {
     "locales": [
@@ -285,6 +305,32 @@
     ],
     "reason": "hardware units vCPU/GB are written identically in these locales"
   },
+  "2 vCPU, 4 GiB": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "machine size in units"
+  },
+  "256 KiB": {
+    "locales": [
+      "de",
+      "es",
+      "hi",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Binary size units (KiB, MiB) are written the same way in these locales"
+  },
   "3 store": {
     "locales": [
       "it"
@@ -327,6 +373,22 @@
       "pt-BR"
     ],
     "reason": "hardware units vCPU/GB are written identically in these locales"
+  },
+  "4 vCPU, 8 GiB": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "machine size in units"
   },
   "45 min": {
     "locales": [
@@ -380,6 +442,16 @@
     ],
     "reason": "min is the unit abbreviation in these locales."
   },
+  "600 KiB": {
+    "locales": [
+      "de",
+      "es",
+      "hi",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Binary size units (KiB, MiB) are written the same way in these locales"
+  },
   "8 vCPU · 16 GiB": {
     "locales": [
       "ar",
@@ -402,6 +474,22 @@
       "pt-BR"
     ],
     "reason": "hardware units vCPU/GB are written identically in these locales"
+  },
+  "8 vCPU, 16 GiB": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "machine size in units"
   },
   "9:16 vertical": {
     "locales": [
@@ -668,6 +756,13 @@
     ],
     "reason": "product name of the Agent Browser tool"
   },
+  "Agent {id}": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "\"Agent\" is the catalog term in German and French."
+  },
   "Agent · Scout": {
     "locales": [
       "de",
@@ -816,6 +911,14 @@
     ],
     "reason": "music genre name 'Ambient' is used as-is in German and Italian"
   },
+  "Amplitude": {
+    "locales": [
+      "de",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "Same spelling in this language, matching the catalog's \"Amplitude\"."
+  },
   "Andromeeda": {
     "locales": [
       "ar",
@@ -920,6 +1023,12 @@
       "zh-CN"
     ],
     "reason": "Ryu app product name (@ryu/app-studio)"
+  },
+  "App {id}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "\"App\" is the catalog term in German."
   },
   "App ·": {
     "locales": [
@@ -1334,6 +1443,12 @@
     ],
     "reason": "'Badge' is the native word in French and Italian"
   },
+  "Bank": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Same word in German, matching the catalog's \"Bank\"."
+  },
   "Banner": {
     "locales": [
       "de",
@@ -1466,6 +1581,12 @@
       "it"
     ],
     "reason": "model name plus Italian word 'video'"
+  },
+  "Bias": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'bias' is the established Italian term"
   },
   "Bing": {
     "locales": [
@@ -1664,6 +1785,22 @@
       "zh-CN"
     ],
     "reason": "Ryu Box product name"
+  },
+  "Box API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product API name"
   },
   "Boxes": {
     "locales": [
@@ -2161,6 +2298,15 @@
     ],
     "reason": "Country name is spelled 'Chile' in German, Spanish and Portuguese"
   },
+  "Chip": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'chip' is the established word in these locales"
+  },
   "Chorus": {
     "locales": [
       "de"
@@ -2613,6 +2759,22 @@
     ],
     "reason": "product name"
   },
+  "Connect MCP": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product and protocol name"
+  },
   "Console": {
     "locales": [
       "fr",
@@ -2776,6 +2938,20 @@
       "ru"
     ],
     "reason": "technical scheduler term Cron with a placeholder"
+  },
+  "Cron: {expr}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Cron is the technical schedule-expression name, kept as in other locales' Cron labels."
   },
   "Ctrl": {
     "locales": [
@@ -3150,6 +3326,18 @@
       "fr"
     ],
     "reason": "Distance is the French word"
+  },
+  "Distance {distance}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Same word in French, matching the catalog's \"Distance\"."
+  },
+  "Distribution": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'distribution' is the French word"
   },
   "Dither": {
     "locales": [
@@ -3610,6 +3798,12 @@
     ],
     "reason": "French word is spelled identically"
   },
+  "Export {operationId} · {bundleHash}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "\"Export\" is the German word too."
+  },
   "Expression": {
     "locales": [
       "fr"
@@ -3849,6 +4043,16 @@
     ],
     "reason": "Company name"
   },
+  "Firmware": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'firmware' is the established word in these locales"
+  },
   "Fish": {
     "locales": [
       "ar",
@@ -4011,6 +4215,22 @@
       "fr"
     ],
     "reason": "\"Gain\" is the French audio term"
+  },
+  "Gateway API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product API name"
   },
   "Gateways": {
     "locales": [
@@ -4282,6 +4502,12 @@
       "pt-BR"
     ],
     "reason": "\"Global\" is the same word in these languages"
+  },
+  "Globe": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Same word in French, matching the catalog."
   },
   "Golden Gate": {
     "locales": [
@@ -5005,6 +5231,17 @@
     ],
     "reason": "editor/UI theme name"
   },
+  "Hub": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "These locales keep \"Hub\" as their catalog term."
+  },
   "Hybrid": {
     "locales": [
       "de"
@@ -5106,6 +5343,13 @@
       "fr"
     ],
     "reason": "Incorrect is the correct French word"
+  },
+  "Index": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Index' is the German and French word"
   },
   "Indigo": {
     "locales": [
@@ -5321,6 +5565,13 @@
     ],
     "reason": "Ryu product name kept untranslated per glossary"
   },
+  "Isolation": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Isolation is the German and French word"
+  },
   "Item": {
     "locales": [
       "pt-BR"
@@ -5332,6 +5583,16 @@
       "pt-BR"
     ],
     "reason": "'Item' is the Portuguese word (glossary Item)"
+  },
+  "JACKPOT": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "These locales keep \"JACKPOT\" as their catalog term."
   },
   "JSON UI": {
     "locales": [
@@ -5820,6 +6081,18 @@
     ],
     "reason": "surname of the mathematician; Latin-script locales write it unchanged"
   },
+  "Licence": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'licence' is the French word"
+  },
+  "Licences": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "licences is the French spelling"
+  },
   "Life Recorder": {
     "locales": [
       "ar",
@@ -5851,6 +6124,12 @@
       "zh-CN"
     ],
     "reason": "editor theme name"
+  },
+  "Limits": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Limits' is the German plural of 'Limit'"
   },
   "Linear": {
     "locales": [
@@ -6157,6 +6436,28 @@
     ],
     "reason": "Apple hardware product name."
   },
+  "Machine": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "machine is the French word"
+  },
+  "Mail API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product API name"
+  },
   "Maintenance": {
     "locales": [
       "fr"
@@ -6178,6 +6479,19 @@
       "zh-CN"
     ],
     "reason": "programming language/format name"
+  },
+  "Manifest": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Manifest' is the German word"
+  },
+  "Manifesto": {
+    "locales": [
+      "it",
+      "pt-BR"
+    ],
+    "reason": "manifesto is the Italian and Portuguese word"
   },
   "Manual": {
     "locales": [
@@ -6464,6 +6778,22 @@
     ],
     "reason": "French plural 'Messages' is identical"
   },
+  "Messaging API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product API name"
+  },
   "Messenger": {
     "locales": [
       "de"
@@ -6705,6 +7035,12 @@
     ],
     "reason": "French plural 'Moments' is identical"
   },
+  "Monocle": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Same word in French, matching the catalog."
+  },
   "Monokai": {
     "locales": [
       "ar",
@@ -6926,6 +7262,12 @@
     ],
     "reason": "German 'Neutral' is identical"
   },
+  "Newsroom": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Newsroom' is the established German loanword"
+  },
   "Night Owl": {
     "locales": [
       "ar",
@@ -7062,6 +7404,22 @@
     ],
     "reason": "French 'Notifications' is identical"
   },
+  "Notify API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product API name"
+  },
   "Nuremberg, DE": {
     "locales": [
       "fr",
@@ -7168,6 +7526,12 @@
     ],
     "reason": "Audio format name"
   },
+  "On demand": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'on demand' is the established Italian loanword"
+  },
   "One Dark Pro": {
     "locales": [
       "ar",
@@ -7205,6 +7569,31 @@
       "de"
     ],
     "reason": "German UI standard term is 'Online'"
+  },
+  "Open core": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'open core' is the established industry term in these locales"
+  },
+  "OpenAI SDK": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product and SDK name"
   },
   "OpenClaw / Hermes": {
     "locales": [
@@ -7523,6 +7912,22 @@
     ],
     "reason": "'Passkeys' is the platform-standard German term"
   },
+  "Passport Fetch API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product API name"
+  },
   "Password": {
     "locales": [
       "it"
@@ -7547,6 +7952,13 @@
       "fr"
     ],
     "reason": "'Pause' is the French word"
+  },
+  "Payload": {
+    "locales": [
+      "it",
+      "pt-BR"
+    ],
+    "reason": "payload is the established technical loanword in these locales"
   },
   "Per bot": {
     "locales": [
@@ -7707,6 +8119,14 @@
       "fr"
     ],
     "reason": "'Pirate' is the French word"
+  },
+  "Pitch deck": {
+    "locales": [
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'pitch deck' is the established loanword in these locales"
   },
   "Pixabay": {
     "locales": [
@@ -8201,6 +8621,28 @@
     ],
     "reason": "video codec and file format"
   },
+  "Probes": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Probes' is the established German technical loanword"
+  },
+  "Product Hunt": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name Product Hunt"
+  },
   "Product Hunt — {label}": {
     "locales": [
       "ar",
@@ -8396,6 +8838,20 @@
     ],
     "reason": "'local' is the native word in these languages; rest is a model name"
   },
+  "README: {size}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "README is a file name."
+  },
   "REST API": {
     "locales": [
       "ar",
@@ -8574,6 +9030,12 @@
       "it"
     ],
     "reason": "Standard software release loanword in Italian."
+  },
+  "Releases": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Releases' is the established German loanword for software releases"
   },
   "Replica": {
     "locales": [
@@ -8760,6 +9222,12 @@
     ],
     "reason": "Rotation is the native French word; axis letter unchanged"
   },
+  "Round": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Italian keeps \"Round\" as its catalog term."
+  },
   "Round 1": {
     "locales": [
       "it"
@@ -8823,6 +9291,22 @@
       "fr"
     ],
     "reason": "Tests is the native German and French word; Ryu is a brand"
+  },
+  "Ryu 101": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "course name"
   },
   "Ryu A Major Pass": {
     "locales": [
@@ -9560,6 +10044,36 @@
     ],
     "reason": "Product names joined by in, which is the same word in German and Italian."
   },
+  "Ryu vs": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "product name; 'vs' is used as is in these locales"
+  },
+  "Ryu vs LangChain": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "product names; 'vs' is used as is in these locales"
+  },
+  "Ryu ·": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name Ryu with a separator"
+  },
   "Ryu · local · Gemma 4": {
     "locales": [
       "es",
@@ -9648,6 +10162,13 @@
     ],
     "reason": "Standard protocol name and version"
   },
+  "SAML ACS URL": {
+    "locales": [
+      "hi",
+      "ko"
+    ],
+    "reason": "technical acronyms kept in Latin script in these locales"
+  },
   "SDK": {
     "locales": [
       "ar",
@@ -9663,6 +10184,16 @@
       "zh-CN"
     ],
     "reason": "Acronym used unchanged in every locale."
+  },
+  "SDKs": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'SDKs' is the technical acronym used in these locales"
   },
   "SGLang": {
     "locales": [
@@ -9866,6 +10397,16 @@
     ],
     "reason": "identical spelling is the correct word in this language"
   },
+  "Secret Vault": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "product feature name Secret Vault"
+  },
   "Secrets": {
     "locales": [
       "fr"
@@ -9883,6 +10424,12 @@
       "fr"
     ],
     "reason": "identical spelling is the correct word in this language"
+  },
+  "Self-hosting": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'self-hosting' is the established Italian loanword"
   },
   "Sentry for Startups": {
     "locales": [
@@ -10142,6 +10689,29 @@
       "zh-CN"
     ],
     "reason": "Ryu Sites product name"
+  },
+  "Sites API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product API name"
+  },
+  "Sites in Ryu Desktop": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "product names; 'in' is the German and Italian word"
   },
   "Skill": {
     "locales": [
@@ -10661,6 +11231,12 @@
       "de"
     ],
     "reason": "'Support' is the standard German term for customer support"
+  },
+  "Surface {name}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "\"Surface\" is the French word too."
   },
   "Surfaces": {
     "locales": [
@@ -12074,6 +12650,14 @@
     ],
     "reason": "glossary keeps 'Workflow' in de/fr/it"
   },
+  "Workflow {id}": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "These locales keep \"Workflow\" as their catalog term (de/fr/it)."
+  },
   "Workflow: {workflowName}": {
     "locales": [
       "de"
@@ -12558,6 +13142,15 @@
     ],
     "reason": "Standard ML loanword in these locales."
   },
+  "emoji {emoji}": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "\"emoji\" is the word these languages use."
+  },
   "entry.": {
     "locales": [
       "ar",
@@ -12732,6 +13325,22 @@
     ],
     "reason": "'live' is the standard German word for live broadcasts"
   },
+  "llama.cpp + Gemma 4 E2B": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "software and model names"
+  },
   "local": {
     "locales": [
       "es",
@@ -12846,6 +13455,12 @@
     ],
     "reason": "Standard term in French and Italian."
   },
+  "option": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Same spelling in French."
+  },
   "optional": {
     "locales": [
       "de"
@@ -12952,6 +13567,12 @@
       "fr"
     ],
     "reason": "French word 'questions' is spelled identically"
+  },
+  "ratio": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Same spelling in French."
   },
   "routine": {
     "locales": [
@@ -13099,6 +13720,13 @@
     ],
     "reason": "'total' is the same word in es/fr/pt-BR; p95 is a metric name"
   },
+  "transparent": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Same spelling in German and French, matching the catalog."
+  },
   "transport": {
     "locales": [
       "fr"
@@ -13171,6 +13799,12 @@
       "fr"
     ],
     "reason": "French word is 'version'"
+  },
+  "version {version}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Same spelling in French."
   },
   "via Artificial Analysis (": {
     "locales": [
@@ -13444,6 +14078,20 @@
     ],
     "reason": "'agent/agents' is the French word"
   },
+  "{count, plural, one {# app} other {# apps}}": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "app is the established loanword in these locales"
+  },
+  "{count, plural, one {# article} other {# articles}}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'article' is the French word"
+  },
   "{count, plural, one {# clip} other {# clips}}": {
     "locales": [
       "es",
@@ -13469,6 +14117,18 @@
       "fr"
     ],
     "reason": "'document/documents' is the French word"
+  },
+  "{count, plural, one {# download} other {# downloads}}": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "\"download\" is the Brazilian Portuguese word in use."
+  },
+  "{count, plural, one {# guide} other {# guides}}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'guide' is the French word"
   },
   "{count, plural, one {# image} other {# images}}": {
     "locales": [
@@ -13748,6 +14408,13 @@
     ],
     "reason": "'participants' is the French word"
   },
+  "{count} pools": {
+    "locales": [
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'pool' is the established loanword in these locales"
+  },
   "{count} proxies": {
     "locales": [
       "es",
@@ -13819,6 +14486,14 @@
       "ru"
     ],
     "reason": "placeholders and parentheses only"
+  },
+  "{date} at {time}": {
+    "locales": [
+      "ja",
+      "ko",
+      "zh-CN"
+    ],
+    "reason": "The translation is placeholders only (\"{date} {time}\"), which is the natural form in this language."
   },
   "{day} {time}": {
     "locales": [
@@ -14034,6 +14709,15 @@
     ],
     "reason": "plugin 'hook' is a technical term kept as 'Hooks' in es/fr/pt-BR locale files; 'crochet'/'gancho' is the wrong sense"
   },
+  "{hours} h": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "h is the hour abbreviation in these locales"
+  },
   "{hours} h {minutes} min": {
     "locales": [
       "de",
@@ -14086,6 +14770,22 @@
       "zh-CN"
     ],
     "reason": "Only placeholders and separators."
+  },
+  "{key} {action}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders; the key name and the translated verb are filled in."
   },
   "{kindLabel} — Ryu Marketplace": {
     "locales": [
@@ -14143,6 +14843,21 @@
       "ru"
     ],
     "reason": "only placeholders and punctuation"
+  },
+  "{label} — {error}": {
+    "locales": [
+      "ar",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a dash."
   },
   "{label} — {tokenCount} tokens": {
     "locales": [
@@ -14274,6 +14989,22 @@
       "fr"
     ],
     "reason": "'messages' is the French word"
+  },
+  "{levelCode} · {level}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "placeholders and a separator only"
   },
   "{level} · {durationMinutes} min": {
     "locales": [
@@ -14465,6 +15196,18 @@
     ],
     "reason": "placeholders and punctuation only; nothing to translate"
   },
+  "{name}: {kind}.": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Only placeholders and punctuation."
+  },
   "{name}: {summary}": {
     "locales": [
       "ar",
@@ -14535,6 +15278,12 @@
       "de"
     ],
     "reason": "vCPU, GB and RAM are hardware/unit abbreviations used as-is in German"
+  },
+  "{noun} {label} {start} to {end}": {
+    "locales": [
+      "ko"
+    ],
+    "reason": "The translation uses a range mark (\"{start}~{end}\") with no words to translate."
   },
   "{path}: {reason}": {
     "locales": [
@@ -14629,6 +15378,13 @@
     ],
     "reason": "'preset' is the standard Italian term"
   },
+  "{provider} via {upstream}": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "\"via\" is used unchanged in French and Portuguese."
+  },
   "{provider} · {ttl} TTL. {note}": {
     "locales": [
       "de",
@@ -14689,6 +15445,22 @@
     ],
     "reason": "placeholders and punctuation only; nothing to translate"
   },
+  "{repository} #{number} · {age}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and separators."
+  },
   "{scope} · {category} · importance {importance} · {tags}": {
     "locales": [
       "fr"
@@ -14721,6 +15493,20 @@
     ],
     "reason": "Only placeholders and separators."
   },
+  "{server}. {singapore}.": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "placeholders and punctuation only"
+  },
   "{sessionId} · {messageCount} messages": {
     "locales": [
       "fr"
@@ -14732,6 +15518,34 @@
       "fr"
     ],
     "reason": "'session/sessions' is the French word"
+  },
+  "{size} GB": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "zh-CN"
+    ],
+    "reason": "GB is the unit symbol these locales use."
+  },
+  "{size} GiB": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "zh-CN"
+    ],
+    "reason": "GiB is the unit symbol these locales use."
   },
   "{size} RAM": {
     "locales": [
@@ -14984,6 +15798,14 @@
       "ru"
     ],
     "reason": "placeholders and punctuation only; nothing to translate"
+  },
+  "{time} of {duration}": {
+    "locales": [
+      "ja",
+      "ko",
+      "zh-CN"
+    ],
+    "reason": "The translation uses a slash (\"{time} / {duration}\"), with no words to translate."
   },
   "{time} · {segmentCount, plural, one {{segmentLabel} clip} other {{segmentLabel} clips}} · {duration}": {
     "locales": [

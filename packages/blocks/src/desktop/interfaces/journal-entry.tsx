@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
@@ -46,8 +47,11 @@ export function JournalEntryPage({
 	const agents = entry?.agents ?? draftAgents;
 	const place = entry ? entry.place : draftPlace;
 	const dateLine = entry
-		? `${fullDateLabel(entry.day)} at ${timeLabel(entry.at)}`
-		: "New entry";
+		? tr("{date} at {time}", {
+				date: fullDateLabel(entry.day),
+				time: timeLabel(entry.at),
+			})
+		: tr("New entry");
 	const items: JournalMetaItem[] = entryPlaceItems(agents, place);
 	if (entry) {
 		items.push({

@@ -1,6 +1,7 @@
 {
   "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "इस नोड पर एजेंट विजेट उपलब्ध नहीं हैं: इन्हें रीफ़्रेश करने के लिए प्रत्यायोजित उपयोगकर्ता निष्पादन अधिकार चाहिए, जो रीफ़्रेश जॉब के पास नहीं होता। इसके बजाय http, composio या स्थिर स्रोत का उपयोग करें।",
   "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "मॉनिटर विजेट अभी उपलब्ध नहीं हैं: कोई होस्ट क्षमता किसी ऐप को मॉनिटर परिणाम पढ़ने नहीं देती। इसके बजाय http, composio या स्थिर स्रोत का उपयोग करें।",
+  "Ryu metric widgets are not available yet: apps cannot read Ryu's internal metrics, and no host capability exposes them. Use an http, composio, or static source instead.": "Ryu मेट्रिक विजेट अभी उपलब्ध नहीं हैं: ऐप्स Ryu के आंतरिक मेट्रिक्स नहीं पढ़ सकते, और कोई भी होस्ट क्षमता उन्हें उपलब्ध नहीं कराती। इसके बजाय http, composio या स्टैटिक स्रोत का उपयोग करें।",
   "The Composio action failed: {error}": "Composio कार्रवाई विफल रही: {error}",
   "The Composio action returned HTTP {status}.": "Composio कार्रवाई ने HTTP {status} लौटाया।",
   "The web source redirected, and redirects are not allowed.": "वेब स्रोत ने रीडायरेक्ट किया, और रीडायरेक्ट की अनुमति नहीं है।",

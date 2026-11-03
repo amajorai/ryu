@@ -15,6 +15,7 @@ import { z } from "zod";
 import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf, tr } from "../../i18n/translate.ts";
 
 type AccessLevel = "risk_based" | "read_only" | "write" | "full";
@@ -37,7 +38,6 @@ const connectionStatusSchema = z.object({
 });
 type ConnectionStatusValue = z.infer<typeof connectionStatusSchema>["status"];
 const connectionStatusStringSchema = z.string();
-const connectionErrorSchema = z.instanceof(Error);
 
 const ACCESS_LEVELS: readonly AccessLevel[] = [
 	"risk_based",
@@ -52,13 +52,6 @@ const ACCESS_LABELS = {
 	write: "Write",
 	full: "Full",
 } satisfies Record<AccessLevel, string>;
-
-function errorMessage(
-	error: Parameters<typeof connectionErrorSchema.safeParse>[0]
-): string {
-	const parsed = connectionErrorSchema.safeParse(error);
-	return parsed.success ? parsed.data.message : String(error);
-}
 
 function normalizeStatus(value: ConnectionStatusValue): string {
 	const parsed = connectionStatusStringSchema.safeParse(value);
@@ -136,7 +129,7 @@ export function ConnectionsPanel({
 			);
 		} catch (loadError) {
 			if (requestIdRef.current === requestId) {
-				setError(errorMessage(loadError));
+				setError(errorText(loadError));
 			}
 		} finally {
 			if (requestIdRef.current === requestId) {
@@ -219,7 +212,7 @@ export function ConnectionsPanel({
 			if (mountedRef.current) {
 				setError(
 					tf("Could not start the connection: {error}", {
-						error: errorMessage(connectError),
+						error: errorText(connectError),
 					})
 				);
 			}
@@ -271,7 +264,7 @@ export function ConnectionsPanel({
 			if (mountedRef.current) {
 				setError(
 					tf("Could not check the connection: {error}", {
-						error: errorMessage(statusError),
+						error: errorText(statusError),
 					})
 				);
 			}

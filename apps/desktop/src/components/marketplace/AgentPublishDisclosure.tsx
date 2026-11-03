@@ -22,7 +22,12 @@ import {
 	Share08Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { formatList } from "@ryu/i18n";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import type { ReactNode } from "react";
@@ -87,8 +92,9 @@ export function AgentPublishDisclosure({
 	const connectionProviders = descriptor.connections.map(
 		(connection) => connection.provider
 	);
-	const avatarLabel = describeAvatar(descriptor);
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
+	const avatarLabel = describeAvatar(descriptor, tl, locale);
 
 	return (
 		<div className="flex flex-col gap-3">
@@ -231,38 +237,71 @@ const STAYS_HERE = [
 	"The Gateway policy this agent runs under (firewall, DLP, budget).",
 ];
 
-/** A one-line summary of the glyph the listing will carry, or null for none. */
-function describeAvatar(descriptor: AgentDescriptor): string | null {
+/** A one-line summary of the glyph the listing will carry, or null for none.
+ *
+ *  Every part is a whole catalog phrase and the parts are joined the way the
+ *  reader's language writes a list, so no English fragment or comma survives
+ *  into a translated disclosure. */
+export function describeAvatar(
+	descriptor: AgentDescriptor,
+	tl: LiteralMessage,
+	locale?: string
+): string | null {
 	const avatar = descriptor.avatar;
 	if (!avatar) {
 		return null;
 	}
 	const parts: string[] = [];
 	if (avatar.emoji) {
-		parts.push(`emoji ${avatar.emoji}`);
+		parts.push(tl("emoji {emoji}", { emoji: avatar.emoji }));
 	}
 	if (avatar.icon) {
-		parts.push("a custom icon");
+		parts.push(tl("a custom icon"));
 	}
 	if (avatar.dicebear) {
-		parts.push("a generated avatar");
+		parts.push(tl("a generated avatar"));
 	}
 	if (avatar.dither) {
-		parts.push("a dither gradient");
+		parts.push(tl("a dither gradient"));
 	}
 	if (avatar.expressive) {
-		parts.push(
-			`an expressive ${avatar.expressive.expression ?? "random"} ghost avatar${avatar.expressive.animation ? ` with ${avatar.expressive.animation} animation` : ""}`
-		);
+		parts.push(describeExpressive(avatar.expressive, tl));
 	}
 	if (avatar.avatar_style) {
-		parts.push(`a Marketplace avatar style (${avatar.avatar_style.style})`);
+		parts.push(
+			tl("a Marketplace avatar style ({style})", {
+				style: avatar.avatar_style.style,
+			})
+		);
 	}
 	if (avatar.avatar_url) {
-		parts.push("a linked image");
+		parts.push(tl("a linked image"));
 	}
 	if (avatar.tone) {
-		parts.push(`tone "${avatar.tone}"`);
+		parts.push(tl('tone "{tone}"', { tone: avatar.tone }));
 	}
-	return parts.length > 0 ? parts.join(", ") : null;
+	return parts.length > 0 ? formatList(parts, "conjunction", locale) : null;
+}
+
+function describeExpressive(
+	expressive: { animation?: string | null; expression?: string | null },
+	tl: LiteralMessage
+): string {
+	const { animation, expression } = expressive;
+	if (expression) {
+		return animation
+			? tl(
+					"an expressive {expression} ghost avatar with {animation} animation",
+					{
+						animation,
+						expression,
+					}
+				)
+			: tl("an expressive {expression} ghost avatar", { expression });
+	}
+	return animation
+		? tl("an expressive random ghost avatar with {animation} animation", {
+				animation,
+			})
+		: tl("an expressive random ghost avatar");
 }

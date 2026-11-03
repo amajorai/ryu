@@ -1,6 +1,6 @@
 "use client";
 
-import { useRichLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
@@ -84,6 +84,8 @@ export function SourceCoverage({
 }: {
 	sources: UsageHistoryReport["sources"];
 }) {
+	// Core sends each source's limitations in English; they are catalog keys.
+	const tl = useLiteralMessages();
 	return (
 		<SettingsSection
 			caption={
@@ -111,7 +113,7 @@ export function SourceCoverage({
 						title={source.label}
 					>
 						<p className="text-muted-foreground text-xs">
-							{source.limitations}
+							{tl(source.limitations)}
 						</p>
 					</SettingsItem>
 				))}

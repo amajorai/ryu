@@ -27,7 +27,13 @@ import {
 import { SeatAvatar } from "./card-table-pieces.tsx";
 import { ThreadRow } from "./card-table-rows.tsx";
 
-export type SeatMenuSide = "bottom" | "left" | "right" | "top";
+export type SeatMenuSide =
+	| "bottom"
+	| "inline-end"
+	| "inline-start"
+	| "left"
+	| "right"
+	| "top";
 export type SeatMenuAlign = "center" | "end" | "start";
 
 /** Threads listed in a seat's menu before "and n more". */

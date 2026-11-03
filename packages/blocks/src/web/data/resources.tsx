@@ -3,13 +3,14 @@ import {
 	BookOpen,
 	GitCommitHorizontal,
 	GraduationCap,
-	LifeBuoy,
+	LibraryBig,
 	Newspaper,
 	Quote,
 	Scale,
 	Trophy,
 	Users,
 } from "lucide-react";
+import { COMPANY_ROUTES } from "./company.ts";
 
 /* Resources power the marketing header's "Resources" menu: the non-product
  * destinations (docs, learning, updates, community). Pricing leads that menu
@@ -127,12 +128,14 @@ export const resources: Resource[] = [
 		href: "/certifications",
 		Icon: BadgeCheck,
 	},
+	/* Knowledge Base takes the Help Center slot: it searches help, guides,
+	 * Academy, and docs topics together. Help Center stays in the footer. */
 	{
 		category: "Learn",
-		label: "Help Center",
-		description: "Answers, troubleshooting, and integration guides.",
-		href: "/help",
-		Icon: LifeBuoy,
+		label: "Knowledge Base",
+		description: "Search help, guides, courses, and docs topics in one place.",
+		href: COMPANY_ROUTES.knowledgeBase,
+		Icon: LibraryBig,
 	},
 
 	/* ============================= UPDATES ========================== */

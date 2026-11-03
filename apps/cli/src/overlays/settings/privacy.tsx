@@ -7,12 +7,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { errorText } from "../../i18n/error-text.ts";
 import { formatCliDateTime } from "../../i18n/format.ts";
 import { tf } from "../../i18n/translate.ts";
 import {
 	DEFAULTS,
 	type DiagnosticsContentMode,
-	errorMessage,
 	ONE_HOUR_MS,
 	PRIVACY_KEY_ORDER,
 	PRIVACY_KEYS,
@@ -120,7 +120,7 @@ export function PrivacyPanel({
 				setLoadState("error");
 				setError(
 					tf("Couldn't load privacy preferences: {error}. Press r to retry.", {
-						error: errorMessage(loadError),
+						error: errorText(loadError),
 					})
 				);
 			}
@@ -185,7 +185,7 @@ export function PrivacyPanel({
 				setError(
 					tf("Couldn't save {label}: {error}. Press r to retry.", {
 						label: intent.label,
-						error: errorMessage(saveError),
+						error: errorText(saveError),
 					})
 				);
 			} finally {
@@ -298,7 +298,7 @@ export function PrivacyPanel({
 		} catch (testError) {
 			setError(
 				tf("Couldn't send the test span: {error}", {
-					error: errorMessage(testError),
+					error: errorText(testError),
 				})
 			);
 		} finally {

@@ -1,8 +1,22 @@
 import { HeroBackground } from "./backgrounds/hero-background.tsx";
 import { readTheDocsCta } from "./data/resources.tsx";
+import { ENTERPRISE_NAV } from "./enterprise-page/enterprise-data.ts";
+import { EnterpriseDeployment } from "./enterprise-page/enterprise-deployment.tsx";
+import { EnterpriseGlance } from "./enterprise-page/enterprise-glance.tsx";
+import { EnterpriseGroupSection } from "./enterprise-page/enterprise-groups.tsx";
+import {
+	ENTERPRISE_GROUPS,
+	type EnterpriseGroupId,
+} from "./enterprise-page/enterprise-groups-data.ts";
+import { EnterpriseRollout } from "./enterprise-page/enterprise-rollout.tsx";
 import { withBentoFigures } from "./iso/figures/bento/with-bento-figures.tsx";
 import { landingSectionClass } from "./landing-typography.ts";
 import { StageFigure } from "./product-figure.tsx";
+import { BAND_CLASSES } from "./product-page/layouts/archetype-theme.ts";
+import {
+	ProductSectionNav,
+	SECTION_ANCHOR_CLASS,
+} from "./product-page/sections/section-nav.tsx";
 import {
 	BentoGrid,
 	type BentoItem,
@@ -46,6 +60,22 @@ export const ENTERPRISE_CONTROLS: BentoItem[] = [
 
 const CONTROLS_DOCS_PATH = "/docs/security/enterprise-identity";
 
+/*
+ * Composition, top to bottom: the stage hero and figure (unchanged), an
+ * "On this page" sub-nav, a tinted at-a-glance sheet, the controls grid, the
+ * three themed groups (Governance as ruled rows, Security on an inverse band,
+ * Support as tiles with the docs' gating caveat), the deployment comparison,
+ * the rollout checklist beside the identity-provider URLs, and the CTA.
+ */
+
+function groupById(id: EnterpriseGroupId) {
+	const group = ENTERPRISE_GROUPS.find((entry) => entry.id === id);
+	if (!group) {
+		throw new Error(`Missing enterprise group: ${id}`);
+	}
+	return group;
+}
+
 export default function EnterpriseLanding() {
 	return (
 		<div data-testid="enterprise-page">
@@ -57,8 +87,19 @@ export default function EnterpriseLanding() {
 				title="Agents your company controls"
 			/>
 			<StageFigure figure="passport-cabinet" />
+			{/* Sticky sub-nav: a direct child of the page so it can stick past the figure. */}
+			<div aria-hidden="true" className="h-16 md:h-24" />
+			<ProductSectionNav items={ENTERPRISE_NAV} productName="Enterprise" />
 
-			<section className={landingSectionClass} id="controls">
+			<div className={BAND_CLASSES.muted} data-enterprise-band="muted">
+				<EnterpriseGlance />
+			</div>
+
+			<section
+				className={`${landingSectionClass} ${SECTION_ANCHOR_CLASS}`}
+				data-testid="enterprise-controls"
+				id="controls"
+			>
 				<SectionHeading
 					subtitle="Keep access, cost, and accountability visible as teams work with agents."
 					title="Controls for company-wide use"
@@ -71,6 +112,15 @@ export default function EnterpriseLanding() {
 					or a self-hosted Enterprise license.
 				</p>
 			</section>
+
+			<EnterpriseGroupSection group={groupById("governance")} />
+			<div className={BAND_CLASSES.inverse} data-enterprise-band="inverse">
+				<EnterpriseGroupSection group={groupById("security")} />
+			</div>
+			<EnterpriseGroupSection group={groupById("support")} layout="cards" />
+
+			<EnterpriseDeployment />
+			<EnterpriseRollout />
 
 			<ProductCta
 				primaryCta={SALES_CTA}

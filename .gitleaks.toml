@@ -21,6 +21,10 @@ regexes = [
   '''ryu-sk-your-secret-key''',
   # Non-secret JWT-shaped adapter sentinel retained in older public mirror commits.
   '''eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0\.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoicnl1LWxvY2FsIn19\.''',
+  # Synthetic AWS-key-shaped value (AKIA + 16 letters, not a real key) that the
+  # conversation-history redaction tests and the portable-history redaction
+  # fixture feed in to prove it is redacted.
+  '''AKIAABCDEFGHIJKLMNOP''',
 ]
 paths = [
   # Vendored single-file plugin-UI fixtures: minified/bundled third-party web apps

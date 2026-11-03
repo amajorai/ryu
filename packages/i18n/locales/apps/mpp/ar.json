@@ -120,7 +120,6 @@
   "This payment attempt cannot be retried.": "لا يمكن إعادة محاولة الدفع هذه.",
   "This payment challenge already has a receipt.": "يوجد إيصال بالفعل لطلب الدفع هذا.",
   "To": "إلى",
-  "Tool": "أداة",
   "Trusted origins": "المصادر الموثوقة",
   "Unsupported HTTP method.": "طريقة HTTP غير مدعومة.",
   "Use at most six decimal places.": "استخدم ست خانات عشرية كحد أقصى.",

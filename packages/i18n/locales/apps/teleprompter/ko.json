@@ -55,7 +55,6 @@
   "The recording has no audio data.": "녹음에 오디오 데이터가 없습니다.",
   "The recording is not a WAV file.": "녹음이 WAV 파일이 아닙니다.",
   "Use auto-scroll": "자동 스크롤 사용",
-  "Voice": "음성",
   "Voice following isn't available in this window. Open Teleprompter in Ryu Desktop or Island, or switch to auto-scroll.": "이 창에서는 음성 따라가기를 사용할 수 없습니다. Ryu Desktop 또는 Island에서 Teleprompter를 열거나 자동 스크롤로 전환하세요.",
   "Write or paste what you want to say.": "말하고 싶은 내용을 작성하거나 붙여넣으세요.",
   "{wordCount} words · about {speakingTime} at {wordsPerMinute} words per minute. Text in [brackets] is shown as a cue and never needs to be spoken.": "{wordCount}단어 · 분당 {wordsPerMinute}단어 기준 약 {speakingTime}. [대괄호] 안의 텍스트는 큐로 표시되며 읽을 필요가 없습니다.",

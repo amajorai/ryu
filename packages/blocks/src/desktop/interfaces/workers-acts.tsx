@@ -326,22 +326,24 @@ export function plateBubble(act: InterfaceAgentAct): LifeBubble | null {
  */
 export function screenActivity(act: InterfaceAgentAct): string {
 	if (act.stalled) {
-		return act.stalledFor ? `Stalled? ${act.stalledFor}` : "Stalled?";
+		return act.stalledFor
+			? tr("Stalled? {duration}", { duration: act.stalledFor })
+			: tr("Stalled?");
 	}
 	switch (act.act) {
 		case "working":
 		case "blocked":
 			return act.bubble?.text ?? tr("Working");
 		case "asking":
-			return "Asks you";
+			return tr("Asks you");
 		case "delivering":
-			return "Answer ready";
+			return tr("Answer ready");
 		case "limited":
-			return "Usage limit hit";
+			return tr("Usage limit hit");
 		case "waiting":
-			return "Waiting for a reply";
+			return tr("Waiting for a reply");
 		default:
-			return "Idle";
+			return tr("Idle");
 	}
 }
 

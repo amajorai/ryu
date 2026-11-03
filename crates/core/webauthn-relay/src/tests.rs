@@ -6,7 +6,8 @@ const ORIGIN: &str = "https://login.example.com";
 const CHALLENGE: &str = "c2lnbi1pbi1jaGFsbGVuZ2UtMTIzNA";
 
 fn client_data(kind: &str, origin: &str, challenge: &str) -> String {
-    let body = json!({ "type": kind, "challenge": challenge, "origin": origin, "crossOrigin": false });
+    let body =
+        json!({ "type": kind, "challenge": challenge, "origin": origin, "crossOrigin": false });
     b64url_encode(body.to_string().as_bytes())
 }
 
@@ -86,15 +87,24 @@ fn a_well_formed_request_validates_and_hashes_its_client_data() {
 fn client_data_must_match_the_origin_type_and_challenge() {
     let mut wrong_origin = get_request();
     wrong_origin.client_data_json = client_data("webauthn.get", "https://evil.com", CHALLENGE);
-    assert!(matches!(validate_relay(&wrong_origin), Err(RelayError::ClientData(_))));
+    assert!(matches!(
+        validate_relay(&wrong_origin),
+        Err(RelayError::ClientData(_))
+    ));
 
     let mut wrong_type = get_request();
     wrong_type.client_data_json = client_data("webauthn.create", ORIGIN, CHALLENGE);
-    assert!(matches!(validate_relay(&wrong_type), Err(RelayError::ClientData(_))));
+    assert!(matches!(
+        validate_relay(&wrong_type),
+        Err(RelayError::ClientData(_))
+    ));
 
     let mut wrong_challenge = get_request();
     wrong_challenge.options["challenge"] = json!("b3RoZXI");
-    assert!(matches!(validate_relay(&wrong_challenge), Err(RelayError::Options(_))));
+    assert!(matches!(
+        validate_relay(&wrong_challenge),
+        Err(RelayError::Options(_))
+    ));
 }
 
 #[test]
@@ -113,7 +123,10 @@ fn create_needs_a_user_and_algorithms() {
     request.kind = CeremonyKind::Create;
     request.client_data_json = client_data("webauthn.create", ORIGIN, CHALLENGE);
     request.options = json!({ "challenge": CHALLENGE, "rp": { "id": "example.com" } });
-    assert!(matches!(validate_relay(&request), Err(RelayError::Options(_))));
+    assert!(matches!(
+        validate_relay(&request),
+        Err(RelayError::Options(_))
+    ));
     request.options = json!({
         "challenge": CHALLENGE,
         "rp": { "id": "example.com", "name": "Example" },

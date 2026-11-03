@@ -156,8 +156,8 @@ function threadIncident(
 ): StatusIncident {
 	const interrupted = thread.runState === "interrupted";
 	const fallback = interrupted
-		? "The run stopped before it finished."
-		: "The last run failed before it finished.";
+		? tr("The run stopped before it finished.")
+		: tr("The last run failed before it finished.");
 	return {
 		affected: agentNames(agents, thread.agentIds),
 		agentIds: thread.agentIds,

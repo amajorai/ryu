@@ -8,6 +8,7 @@
 // client decodes the wire into these shapes.
 
 import { translate as tl } from "@ryu/i18n/core";
+import type { AgentUnsupportedField } from "./policy-agent-blockers.ts";
 import type {
 	GuardrailFirewallAction,
 	GuardrailFirewallOverlay,
@@ -283,18 +284,27 @@ export function previewFieldLabel(field: string): string {
 	return PREVIEW_FIELD_LABELS[field] ?? field;
 }
 
-const PREVIEW_WARNINGS: Record<string, string> = {
-	no_models_eligible:
-		"No model is eligible at this scope. The allowlists above and the Ryu platform policy leave nothing in common, so every request would be refused.",
-	no_providers_eligible:
-		"No provider is eligible at this scope. The allowlists above and the Ryu platform policy leave nothing in common.",
-	platform_floor_unavailable:
-		"The Ryu platform policy could not be read, so this preview leaves it out.",
+const PREVIEW_WARNINGS: Record<string, () => string> = {
+	no_models_eligible: () =>
+		tl(
+			"No model is eligible at this scope. The allowlists above and the Ryu platform policy leave nothing in common, so every request would be refused."
+		),
+	no_providers_eligible: () =>
+		tl(
+			"No provider is eligible at this scope. The allowlists above and the Ryu platform policy leave nothing in common."
+		),
+	platform_floor_unavailable: () =>
+		tl(
+			"The Ryu platform policy could not be read, so this preview leaves it out."
+		),
 };
 
 /** A sentence for a preview warning code; unknown codes show as sent. */
 export function previewWarningText(code: string): string {
-	return PREVIEW_WARNINGS[code] ?? code;
+	const warning = Object.hasOwn(PREVIEW_WARNINGS, code)
+		? PREVIEW_WARNINGS[code]
+		: undefined;
+	return warning?.() ?? code;
 }
 
 export function emptyPolicyRules(): PolicyRules {
@@ -352,28 +362,28 @@ export function policyRulesAreEmpty(rules: PolicyRules): boolean {
 export function agentUnsupportedFields(
 	rules: PolicyRules,
 	locked: readonly PolicyLockableField[]
-): string[] {
-	const fields: string[] = [];
+): AgentUnsupportedField[] {
+	const fields: AgentUnsupportedField[] = [];
 	if (rules.approvedModels.length > 0) {
-		fields.push("approved models");
+		fields.push("approvedModels");
 	}
 	if (rules.approvedProviders.length > 0) {
-		fields.push("approved providers");
+		fields.push("approvedProviders");
 	}
 	if (rules.allowedRegions.length > 0) {
-		fields.push("regions");
+		fields.push("allowedRegions");
 	}
 	if (rules.permissions.length > 0) {
 		fields.push("permissions");
 	}
 	if (rules.budgets.length > 0) {
-		fields.push("spend cap");
+		fields.push("budgets");
 	}
 	if (rules.zeroDataRetention === true) {
-		fields.push("zero data retention");
+		fields.push("zeroDataRetention");
 	}
 	if (locked.length > 0) {
-		fields.push("locked fields");
+		fields.push("locked");
 	}
 	return fields;
 }

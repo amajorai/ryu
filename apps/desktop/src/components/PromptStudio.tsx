@@ -274,7 +274,7 @@ export function PromptStudio({
 									id={`var-${name}`}
 									name={`preview-variable-${name}`}
 									onChange={(e) => handleVarChange(name, e.target.value)}
-									placeholder={`Value for {{${name}}}`}
+									placeholder={tl("Value for {name}", { name: `{{${name}}}` })}
 									size="compact"
 									value={varValues[name] ?? ""}
 								/>

@@ -8,11 +8,11 @@ import type { z } from "zod";
 import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
-import { nativeErrorMessage as errorMessage } from "../../core/native-errors.ts";
 import {
 	autoUpdatePreferenceSchema,
 	autoUpdateSettingSchema,
 } from "../../core/self-update.ts";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf, tr } from "../../i18n/translate.ts";
 
 const AUTO_UPDATE_KEY = "auto-updates";
@@ -62,7 +62,7 @@ export function UpdatesPanel() {
 			} else {
 				setError(
 					tf("Couldn't load update preferences: {error}. Press r to reload.", {
-						error: errorMessage(loadError),
+						error: errorText(loadError),
 					})
 				);
 			}
@@ -107,7 +107,7 @@ export function UpdatesPanel() {
 			setError(
 				tf(
 					"Couldn't save the update preference: {error}. Press r to reload, then try again.",
-					{ error: errorMessage(saveError) }
+					{ error: errorText(saveError) }
 				)
 			);
 		} finally {

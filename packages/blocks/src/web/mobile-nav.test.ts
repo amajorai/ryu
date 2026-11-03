@@ -91,11 +91,24 @@ test("sheets mirror the desktop menus: the same groups, items, and summaries", a
 			expect(link.description?.length).toBeGreaterThan(0);
 		}
 	}
-	// Plans, then the desktop Resources menu's categories; Docs sits in Learn.
+	// Plans, then the desktop Resources menu's categories (Docs sits in Learn),
+	// then the mobile-only Company group, since the footer is out of reach.
 	expect(RESOURCE_SHEET.map((group) => group.title)).toEqual([
 		"Plans",
 		...resourceCategories,
+		"Company",
 	]);
+	expect(RESOURCE_SHEET.at(-1)?.links.map((link) => link.href)).toEqual([
+		"/about",
+		"/careers",
+		"/press",
+		"/events",
+	]);
+	expect(
+		RESOURCE_SHEET.find((group) => group.title === "Learn")?.links.map(
+			(link) => link.label
+		)
+	).toEqual(["Docs", "Academy", "Certifications", "Knowledge Base"]);
 	expect(RESOURCE_SHEET[0]?.links.map((link) => link.label)).toEqual([
 		"Pricing",
 		"Gift Ryu",

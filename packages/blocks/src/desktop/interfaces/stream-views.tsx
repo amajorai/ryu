@@ -1,5 +1,5 @@
 import { translate as tr } from "@ryu/i18n/lite";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
@@ -8,8 +8,8 @@ import type { Ref } from "react";
 import { agentHandle, compactAge } from "./interface-renderer.ts";
 import { StreamAvatar } from "./stream-avatar.tsx";
 import {
+	activityKind,
 	activityPosts,
-	activityVerb,
 	type StreamActivityFilter,
 	type StreamPost,
 	searchStream,
@@ -49,6 +49,28 @@ function ActivityBadge({ failed }: { failed: boolean }) {
 			<Icon className="size-2.5" strokeWidth={3} />
 		</span>
 	);
+}
+
+/** "Run failed in <title>": one message, the thread title kept as written. */
+function ActivityLine({ post }: { post: StreamPost }) {
+	const tlRich = useRichLiteralMessages();
+	const kind = activityKind(post);
+	const tags = {
+		title: () => (
+			<span
+				className={kind === "replied" ? "text-foreground" : "text-destructive"}
+				data-ryu-i18n="off"
+			>
+				{post.title}
+			</span>
+		),
+	};
+	if (kind === "interrupted") {
+		return tlRich("Run interrupted in <title></title>", {}, tags);
+	}
+	return kind === "failed"
+		? tlRich("Run failed in <title></title>", {}, tags)
+		: tlRich("Replied in <title></title>", {}, tags);
 }
 
 function ActivityRow({
@@ -93,13 +115,7 @@ function ActivityRow({
 						</time>
 					</span>
 					<span className="truncate text-muted-foreground">
-						{activityVerb(post)}{" "}
-						<span
-							className={failed ? "text-destructive" : "text-foreground"}
-							data-ryu-i18n="off"
-						>
-							{post.title}
-						</span>
+						<ActivityLine post={post} />
 					</span>
 					{post.body ? (
 						<span

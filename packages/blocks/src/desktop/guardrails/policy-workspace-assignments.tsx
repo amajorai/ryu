@@ -9,6 +9,7 @@ import {
 	SettingsItem,
 	SettingsSection,
 } from "../settings-items.tsx";
+import { agentUnsupportedFieldList } from "./policy-agent-blockers.ts";
 import {
 	agentUnsupportedFields,
 	type PolicyAssignmentView,
@@ -196,7 +197,7 @@ export function AssignmentsPanel({
 							<p className="px-3.5 text-sm text-status-warning">
 								{tl(
 									"An agent assignment carries firewall settings and evaluators only. Remove {fields} first.",
-									{ fields: agentBlockers.join(", ") }
+									{ fields: agentUnsupportedFieldList(agentBlockers) }
 								)}
 							</p>
 						) : null}

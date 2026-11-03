@@ -3622,6 +3622,22 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Ryu metric widgets are not available yet: apps cannot read Ryu's internal metrics, and no host capability exposes them. Use an http, composio, or static source instead.",
+        &[
+            ("ar", "أدوات مقاييس Ryu غير متاحة بعد: لا يمكن للتطبيقات قراءة مقاييس Ryu الداخلية، ولا توجد قدرة مضيف تتيحها. استخدم مصدر http أو composio أو مصدرًا ثابتًا بدلًا من ذلك."),
+            ("de", "Ryu-Metrik-Widgets sind noch nicht verfügbar: Apps können die internen Metriken von Ryu nicht lesen, und keine Host-Fähigkeit stellt sie bereit. Verwenden Sie stattdessen eine http-, composio- oder statische Quelle."),
+            ("es", "Los widgets de métricas de Ryu aún no están disponibles: las apps no pueden leer las métricas internas de Ryu y ninguna capacidad del host las expone. Usa una fuente http, composio o estática."),
+            ("fr", "Les widgets de métriques Ryu ne sont pas encore disponibles : les apps ne peuvent pas lire les métriques internes de Ryu et aucune capacité de l'hôte ne les expose. Utilisez plutôt une source http, composio ou statique."),
+            ("hi", "Ryu मेट्रिक विजेट अभी उपलब्ध नहीं हैं: ऐप्स Ryu के आंतरिक मेट्रिक्स नहीं पढ़ सकते, और कोई भी होस्ट क्षमता उन्हें उपलब्ध नहीं कराती। इसके बजाय http, composio या स्टैटिक स्रोत का उपयोग करें।"),
+            ("it", "I widget delle metriche Ryu non sono ancora disponibili: le app non possono leggere le metriche interne di Ryu e nessuna capacità dell'host le espone. Usa invece una sorgente http, composio o statica."),
+            ("ja", "Ryu のメトリクスウィジェットはまだ利用できません。アプリは Ryu の内部メトリクスを読み取れず、それを公開するホスト機能もありません。代わりに http、composio、または静的ソースを使用してください。"),
+            ("ko", "Ryu 메트릭 위젯은 아직 사용할 수 없습니다. 앱은 Ryu의 내부 메트릭을 읽을 수 없으며, 이를 노출하는 호스트 기능도 없습니다. 대신 http, composio 또는 정적 소스를 사용하세요."),
+            ("pt-BR", "Os widgets de métricas do Ryu ainda não estão disponíveis: os apps não podem ler as métricas internas do Ryu e nenhum recurso do host as expõe. Use uma fonte http, composio ou estática."),
+            ("ru", "Виджеты метрик Ryu пока недоступны: приложения не могут читать внутренние метрики Ryu, и ни одна возможность хоста их не предоставляет. Используйте вместо этого источник http, composio или статический."),
+            ("zh-CN", "Ryu 指标小组件尚不可用：应用无法读取 Ryu 的内部指标，也没有主机功能公开这些指标。请改用 http、composio 或静态数据源。"),
+        ],
+    ),
+    (
         "Ryu test email",
         &[
             ("ar", "بريد Ryu الإلكتروني التجريبي"),

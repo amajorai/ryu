@@ -16,6 +16,7 @@
 #[path = "catalog.generated.rs"]
 #[rustfmt::skip]
 mod catalog;
+pub mod commands;
 mod locale;
 pub mod messages;
 mod owner;

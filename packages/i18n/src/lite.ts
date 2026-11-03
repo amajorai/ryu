@@ -27,6 +27,7 @@ export {
 	relativeTimeFormatter,
 	unitFormatter,
 } from "./format-intl.ts";
+export { formatList, type ListFormatType } from "./format-list.ts";
 export {
 	type LiteralCatalog,
 	type LiteralCatalogLoader,

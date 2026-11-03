@@ -30,6 +30,7 @@
   "every option needs a label": "يحتاج كل خيار إلى تسمية",
   "field \"{id}\" is listed twice": "الحقل \"{id}\" مُدرج مرتين",
   "list-specific fields cannot be unique": "لا يمكن أن تكون الحقول الخاصة بالقائمة فريدة",
+  "more records referenced the removed options than can be changed in one request": "عدد السجلات التي أشارت إلى الخيارات المُزالة يتجاوز ما يمكن تغييره في طلب واحد",
   "no column is mapped to a field, so this import would write nothing": "لم يتم ربط أي عمود بحقل، لذا لن يكتب هذا الاستيراد أي شيء",
   "no field \"{title}\" on the \"{slug}\" object": "لا يوجد الحقل \"{title}\" في الكائن \"{slug}\"",
   "no live record \"{id}\" on the target object": "لا يوجد سجل نشط \"{id}\" في الكائن الهدف",
@@ -53,5 +54,6 @@
   "this import has already been applied and cannot be remapped — its outcome is on the job": "تم تطبيق هذا الاستيراد بالفعل ولا يمكن إعادة تعيينه — نتيجته موجودة في المهمة",
   "this relation field has no target object configured": "لم يتم تكوين كائن هدف لحقل العلاقة هذا",
   "two columns map to \"{name}\" — the second would overwrite the first": "عمودان مرتبطان بـ \"{name}\" — سيستبدل الثاني الأول",
-  "unknown object \"{reference}\"": "كائن غير معروف \"{reference}\""
+  "unknown object \"{reference}\"": "كائن غير معروف \"{reference}\"",
+  "{affected} records still use the options being removed, over the {maxOptionMigrationRecords} that can be changed in one request — clear those values in bulk first, then remove the options": "لا يزال {affected} سجلًا يستخدم الخيارات المراد إزالتها، وهذا يتجاوز الحد الأقصى البالغ {maxOptionMigrationRecords} سجلًا الذي يمكن تغييره في طلب واحد — امسح هذه القيم بشكل جماعي أولًا، ثم أزل الخيارات"
 }

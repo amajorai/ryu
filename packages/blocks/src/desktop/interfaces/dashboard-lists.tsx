@@ -228,7 +228,7 @@ function FailedRunRow({
 				</span>
 				<span className="truncate text-[13px] text-muted-foreground leading-[18px]">
 					<span className="text-destructive">Scheduled run failed</span>
-					{` · ${agent?.name ?? "Workflow"}`}
+					{` · ${agent?.name ?? tr("Workflow")}`}
 				</span>
 			</span>
 		</li>
@@ -369,7 +369,7 @@ export function UpcomingList({
 			{events.map((event) => {
 				const agent = agentById(snapshot, event.agentId);
 				const when = fullDateLabel(event.start);
-				const detail = [event.label, agent?.name ?? "Workflow"]
+				const detail = [event.label, agent?.name ?? tr("Workflow")]
 					.filter(Boolean)
 					.join(" · ");
 				return (

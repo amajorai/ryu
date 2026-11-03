@@ -30,6 +30,7 @@
   "every option needs a label": "jede Option benötigt eine Beschriftung",
   "field \"{id}\" is listed twice": "Feld „{id}“ ist doppelt aufgeführt",
   "list-specific fields cannot be unique": "listenspezifische Felder können nicht eindeutig sein",
+  "more records referenced the removed options than can be changed in one request": "mehr Datensätze verwiesen auf die entfernten Optionen, als in einer Anfrage geändert werden können",
   "no column is mapped to a field, so this import would write nothing": "keine Spalte ist einem Feld zugeordnet, daher würde dieser Import nichts schreiben",
   "no field \"{title}\" on the \"{slug}\" object": "kein Feld „{title}“ im Objekt „{slug}“",
   "no live record \"{id}\" on the target object": "kein aktiver Datensatz „{id}“ im Zielobjekt",
@@ -53,5 +54,6 @@
   "this import has already been applied and cannot be remapped — its outcome is on the job": "dieser Import wurde bereits angewendet und kann nicht neu zugeordnet werden – das Ergebnis steht im Auftrag",
   "this relation field has no target object configured": "für dieses Beziehungsfeld ist kein Zielobjekt konfiguriert",
   "two columns map to \"{name}\" — the second would overwrite the first": "zwei Spalten sind „{name}“ zugeordnet – die zweite würde die erste überschreiben",
-  "unknown object \"{reference}\"": "unbekanntes Objekt „{reference}“"
+  "unknown object \"{reference}\"": "unbekanntes Objekt „{reference}“",
+  "{affected} records still use the options being removed, over the {maxOptionMigrationRecords} that can be changed in one request — clear those values in bulk first, then remove the options": "{affected} Datensätze verwenden noch die zu entfernenden Optionen, mehr als die {maxOptionMigrationRecords}, die in einer Anfrage geändert werden können – leeren Sie diese Werte zuerst gesammelt und entfernen Sie dann die Optionen"
 }

@@ -3,6 +3,12 @@
 // beui.dev/components/motion/range-slider — shared value + input plumbing for
 // every slider design in `components/motion/range-slider*`.
 
+import { useDirection } from "@ryu/ui/components/direction.tsx";
+import {
+	isRtlTrack,
+	ratioFromPointer,
+	strideForKey,
+} from "@ryu/ui/hooks/use-slider-direction.ts";
 import {
 	type KeyboardEvent,
 	type PointerEvent,
@@ -83,6 +89,9 @@ export function useSlider({
 	// The state drives visuals. Move reads this ref instead, so the first
 	// pointermove after pointerdown does not have to wait on a re-render.
 	const draggingRef = useRef(false);
+	// Read on pointerdown so a drag does not query computed style per move.
+	const rtlRef = useRef(false);
+	const contextDirection = useDirection();
 	const [internal, setInternal] = useState(defaultValue);
 	const [dragging, setDragging] = useState(false);
 	const controlled = value !== undefined;
@@ -112,7 +121,7 @@ export function useSlider({
 			if (!rect || rect.width === 0) {
 				return;
 			}
-			const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
+			const ratio = ratioFromPointer(rect, clientX, rtlRef.current);
 			commit(lo + ratio * (hi - lo));
 		},
 		[commit, lo, hi]
@@ -126,12 +135,13 @@ export function useSlider({
 			// optional: test DOMs and older browsers omit pointer capture
 			event.currentTarget.setPointerCapture?.(event.pointerId);
 			draggingRef.current = true;
+			rtlRef.current = isRtlTrack(event.currentTarget, contextDirection);
 			setDragging(true);
 			// A click on the track should land keyboard focus on the handle.
 			sliderEl.current?.focus({ preventScroll: true });
 			commitFromX(event.clientX);
 		},
-		[disabled, commitFromX]
+		[disabled, commitFromX, contextDirection]
 	);
 
 	const onPointerMove = useCallback(
@@ -159,16 +169,19 @@ export function useSlider({
 			if (disabled) {
 				return;
 			}
-			const map = new Map([
-				["ArrowRight", current + stride],
-				["ArrowUp", current + stride],
-				["ArrowLeft", current - stride],
-				["ArrowDown", current - stride],
+			const arrow = strideForKey(
+				event.key,
+				isRtlTrack(event.currentTarget, contextDirection)
+			);
+			const map = new Map<string, number>([
 				["PageUp", current + stride * PAGE_STRIDE],
 				["PageDown", current - stride * PAGE_STRIDE],
 				["Home", lo],
 				["End", hi],
 			]);
+			if (arrow !== 0) {
+				map.set(event.key, current + arrow * stride);
+			}
 			if (map.has(event.key)) {
 				event.preventDefault();
 				const next = map.get(event.key);
@@ -177,7 +190,7 @@ export function useSlider({
 				}
 			}
 		},
-		[disabled, current, stride, lo, hi, commit]
+		[disabled, current, stride, lo, hi, commit, contextDirection]
 	);
 
 	return {

@@ -48,7 +48,8 @@ export function KitchenTitle({
 			icon={<ChefHat strokeWidth={2.25} />}
 			keepStatus={actStatus !== undefined}
 			status={
-				actStatus ?? (parts.length > 0 ? parts.join(" · ") : "A quiet service")
+				actStatus ??
+				(parts.length > 0 ? parts.join(" · ") : tr("A quiet service"))
 			}
 			title="Kitchen"
 		/>

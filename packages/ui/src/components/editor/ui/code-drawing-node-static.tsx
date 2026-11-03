@@ -1,4 +1,5 @@
 import type { TCodeDrawingElement } from "@platejs/code-drawing";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { SlateElementProps } from "platejs/static";
 import { SlateElement } from "platejs/static";
@@ -7,13 +8,15 @@ export function CodeDrawingElementStatic({
 	children,
 	...props
 }: SlateElementProps<TCodeDrawingElement>) {
+	// The localizer skips <pre>/<code>, so the placeholder is translated here.
+	const tl = useLiteralMessages();
 	return (
 		<SlateElement className="my-4 flex w-full items-stretch" {...props}>
 			<div className={cn("flex w-full flex-col md:flex-row")}>
 				<div className="relative h-full min-w-0 flex-1 rounded-md bg-muted/50 p-8 pe-4">
 					<pre className="m-0 overflow-x-auto font-mono text-sm leading-[normal] [tab-size:2] print:break-inside-avoid">
 						<code className="block w-full">
-							{props.element.data?.code || "Enter your code here…"}
+							{props.element.data?.code || tl("Enter your code here…")}
 						</code>
 					</pre>
 				</div>

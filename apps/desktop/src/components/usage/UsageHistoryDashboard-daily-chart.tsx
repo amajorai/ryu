@@ -1,6 +1,7 @@
 "use client";
 
 import { formatForecastChange } from "@ryu/blocks/desktop/usage-forecast.ts";
+import { activeLocale } from "@ryu/i18n/core";
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	type ChartConfig,
@@ -36,6 +37,7 @@ import {
 } from "./history-forecast.ts";
 import { formatHistoryTokens } from "./history-format.ts";
 import { COLORS, money } from "./UsageHistoryDashboard-shared.tsx";
+import { dayHeading, dayTick, forecastLabel } from "./usage-chart-format.ts";
 import usageVisualStyles from "./usage-visual-indicators.module.css";
 import type { UsageVisualStyle } from "./usage-visual-style.ts";
 
@@ -105,7 +107,7 @@ export function DailyChart({
 			config[item.key] = {
 				label:
 					item.key === "total"
-						? "All sources"
+						? tl("All sources")
 						: (report.sources.find((source) => source.id === id)?.label ?? id),
 				color:
 					item.key === "total"
@@ -118,7 +120,7 @@ export function DailyChart({
 							],
 			};
 			config[`${item.key}Forecast`] = {
-				label: `${config[item.key]?.label ?? item.key} forecast`,
+				label: forecastLabel(tl, String(config[item.key]?.label ?? item.key)),
 				color: config[item.key]?.color,
 			};
 		}
@@ -217,7 +219,7 @@ export function DailyChart({
 			String(left.date).localeCompare(String(right.date))
 		);
 		return { config, forecasts, rows, series };
-	}, [report, metric, view, showForecast, forecastable]);
+	}, [report, metric, view, showForecast, forecastable, tl]);
 	const format = (value: number, exact = false) =>
 		metric === "tokens" ? formatHistoryTokens(value, !exact) : money(value);
 	const totalForecast = view === "total" ? forecasts.get("total") : undefined;
@@ -291,7 +293,7 @@ export function DailyChart({
 									minTickGap={36}
 									scale="time"
 									tickFormatter={(date: number) =>
-										new Date(date).toISOString().slice(5, 10)
+										dayTick(activeLocale(), date)
 									}
 									tickLine={false}
 									type="number"
@@ -325,9 +327,7 @@ export function DailyChart({
 												const timestamp = Number(
 													payload?.[0]?.payload?.timestamp
 												);
-												return Number.isFinite(timestamp)
-													? new Date(timestamp).toISOString().slice(0, 10)
-													: "";
+												return dayHeading(activeLocale(), timestamp);
 											}}
 										/>
 									}

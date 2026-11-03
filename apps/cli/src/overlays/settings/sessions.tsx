@@ -14,6 +14,7 @@ import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { accountBackendTarget } from "../../core/authBackend.ts";
 import { useCore } from "../../core/CoreContext.tsx";
+import { errorText } from "../../i18n/error-text.ts";
 import { formatCliDateTime } from "../../i18n/format.ts";
 import { tf, tr } from "../../i18n/translate.ts";
 
@@ -36,7 +37,6 @@ const sessionMutationSchema = z.object({
 	error: z.string().optional().catch(undefined),
 	success: z.boolean().optional().catch(undefined),
 });
-const sessionErrorSchema = z.instanceof(Error);
 
 function requestSessionMutation(
 	target: ApiTarget,
@@ -60,12 +60,6 @@ function decodeSession(
 ): Session | null {
 	const parsed = sessionSchema.safeParse(value);
 	return parsed.success ? parsed.data : null;
-}
-function errorText(
-	error: Parameters<typeof sessionErrorSchema.safeParse>[0]
-): string {
-	const parsed = sessionErrorSchema.safeParse(error);
-	return parsed.success ? parsed.data.message : String(error);
 }
 
 function deviceName(userAgent: string | null): string {

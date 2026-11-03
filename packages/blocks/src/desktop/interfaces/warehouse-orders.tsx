@@ -141,7 +141,12 @@ export function OrdersList({
 				<h2 className="font-semibold text-base text-foreground">Orders</h2>
 				{loading ? null : (
 					<span className="text-muted-foreground text-sm tabular-nums">
-						{fulfiller ? `${shownOrders} of ${totalOrders}` : totalOrders}
+						{fulfiller
+							? tl("{current} of {total}", {
+									current: shownOrders,
+									total: totalOrders,
+								})
+							: totalOrders}
 					</span>
 				)}
 			</header>

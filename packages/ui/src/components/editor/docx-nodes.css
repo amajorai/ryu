@@ -1,5 +1,5 @@
 [data-docx-style="editorblockListStatic1"] {
-	margin-left: var(--editorblockListStatic1-margin-left);
+	margin-inline-start: var(--editorblockListStatic1-margin-left);
 	list-style-type: var(--editorblockListStatic1-list-style-type);
 }
 [data-docx-style="editorcalloutNodeStatic1"] {
@@ -113,7 +113,7 @@
 	width: var(--editormediaVideoNodeStatic2-width);
 }
 [data-docx-style="editortableNodeStatic1"] {
-	padding-left: var(--editortableNodeStatic1-padding-left);
+	padding-inline-start: var(--editortableNodeStatic1-padding-left);
 }
 [data-docx-style="editortableNodeStatic2"] {
 	width: 100%;
@@ -128,7 +128,7 @@
 }
 [data-docx-style="editortocNodeStatic2"] {
 	margin: 4pt 0;
-	margin-left: var(--editortocNodeStatic2-margin-left);
+	margin-inline-start: var(--editortocNodeStatic2-margin-left);
 }
 [data-docx-style="editortocNodeStatic3"] {
 	color: #0066cc;
@@ -142,4 +142,33 @@
 [data-docx-cell="true"] {
 	min-width: var(--cellMinWidth);
 	max-width: var(--cellMaxWidth);
+}
+
+/*
+ * The indents above are logical, so a right-to-left page indents from the
+ * right. Word export inlines this file with juice against the export's
+ * <html dir> (juice skips @media blocks), and the DOCX converter reads only
+ * physical margins. It derives a list's nesting level from margin-left, so
+ * lists keep it in both directions; TOC entries restate their indent on the
+ * physical start side. The @media block then restores the logical indents in
+ * browsers, at any nesting depth.
+ */
+[dir] [data-docx-style="editorblockListStatic1"] {
+	margin-left: var(--editorblockListStatic1-margin-left);
+}
+[dir="ltr"] [data-docx-style="editortocNodeStatic2"] {
+	margin-right: 0;
+	margin-left: var(--editortocNodeStatic2-margin-left);
+}
+[dir="rtl"] [data-docx-style="editortocNodeStatic2"] {
+	margin-right: var(--editortocNodeStatic2-margin-left);
+	margin-left: 0;
+}
+@media all {
+	[dir] [data-docx-style="editorblockListStatic1"] {
+		margin-inline: var(--editorblockListStatic1-margin-left) 0;
+	}
+	[dir] [data-docx-style="editortocNodeStatic2"] {
+		margin-inline: var(--editortocNodeStatic2-margin-left) 0;
+	}
 }

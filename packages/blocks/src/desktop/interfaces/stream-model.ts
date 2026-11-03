@@ -284,14 +284,14 @@ export function statusLine(
 	}
 }
 
-/** The activity row's verb: what happened that needs the user. */
-export function activityVerb(post: StreamPost): string {
+/** What happened in an activity row that needs the user. */
+export function activityKind(
+	post: StreamPost
+): "failed" | "interrupted" | "replied" {
 	if (post.status === "attention") {
-		return post.runState === "interrupted"
-			? "Run interrupted in"
-			: "Run failed in";
+		return post.runState === "interrupted" ? "interrupted" : "failed";
 	}
-	return "Replied in";
+	return "replied";
 }
 
 /** The agent the composer posts to by default: the most recently active. */

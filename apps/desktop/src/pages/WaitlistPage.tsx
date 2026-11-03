@@ -232,7 +232,7 @@ export default function WaitlistPage({
 				throw new Error(error.message ?? "Couldn't reserve that handle.");
 			}
 			setReserved(next);
-			toast.success(`@${next} is reserved`);
+			toast.success(tl("@{handle} is reserved", { handle: next }));
 		} catch (err) {
 			setHandleError(
 				err instanceof Error ? err.message : "Couldn't reserve that handle."

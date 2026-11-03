@@ -10,8 +10,6 @@ import { BENTO_GROUP_LOADERS, type BentoGroupId } from "./loaders.ts";
  * card: a renamed card title fails here instead of silently losing its figure.
  */
 
-const PLATFORM_LAYERS = ["core", "gateway", "cloud"];
-
 const expected = new Map<string, string[]>([
 	...products
 		.filter((product) => product.bento.items.length > 0)
@@ -24,12 +22,6 @@ const expected = new Map<string, string[]>([
 		solution.useCases.map((item) => item.title),
 	]),
 	["enterprise", ENTERPRISE_CONTROLS.map((item) => item.title)],
-	[
-		"platform",
-		products
-			.filter((product) => PLATFORM_LAYERS.includes(product.slug))
-			.map((product) => product.name),
-	],
 ]);
 
 describe("bento card drawings", () => {

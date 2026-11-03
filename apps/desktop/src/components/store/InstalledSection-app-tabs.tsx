@@ -3,7 +3,7 @@
 // The store detail tabs and runtime doctor card for an installed app.
 
 import { Markdown } from "@ryu/blocks/desktop/agent-elements/markdown.tsx";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { RequiredPluginsSection } from "@ryu/marketplace/catalog/detail/dependency-graph";
 import { ListingDetailTabs } from "@ryu/marketplace/catalog/detail/listing-detail-tabs";
 import { runScorecard } from "@ryu/marketplace/catalog/scorecard";
@@ -90,9 +90,12 @@ export function InstalledAppTabs({
 		staleTime: 5 * 60 * 1000,
 	});
 	const tabsHost = useContext(TabsContext);
+	// runScorecard translates through the active runtime when it runs, so a
+	// language change or a late catalog load must recompute it.
+	const i18nVersion = useOptionalI18n()?.version;
 	const scorecard = useMemo(
 		() => (detail ? runScorecard(entry, detail) : null),
-		[detail, entry]
+		[detail, entry, i18nVersion]
 	);
 	const doctorQuery = useQuery({
 		enabled: false,

@@ -79,8 +79,9 @@ export function RangeSlider({
 	const smooth = useSpring(target, SPRING_GLIDE);
 	const pos = reduce ? target : smooth;
 	const left = useMotionTemplate`${pos}%`;
-	// Self-offset the thumb from 0% (flush left) to -100% (flush right) of its
+	// Self-offset the thumb from 0% (flush start) to -100% (flush end) of its
 	// own width so it stays fully inside the track at both ends — no clip, no gap.
+	// The module stylesheet negates it under RTL, where the end is on the left.
 	const thumbX = useTransform(pos, (p) => `${-p}%`);
 
 	// Floor rather than round, so a range the step does not divide (0 to 10 by 4)
@@ -116,13 +117,13 @@ export function RangeSlider({
 			)}
 			data-slot="slider"
 		>
-			{/* fill — runs from the left edge to the thumb. Neutral by default; a
+			{/* fill — runs from the inline start to the thumb. Neutral by default; a
 			    `fillColor` tints it and cross-fades as the value lands elsewhere. */}
 			<motion.div
 				className={[
 					css.inline1,
 					cn(
-						"absolute inset-y-0 left-0",
+						"absolute inset-y-0 start-0",
 						fillColor
 							? [
 									css.fillTint,
@@ -146,7 +147,7 @@ export function RangeSlider({
 						<span
 							className={[
 								css.inline2,
-								"absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/25",
+								"absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/25 rtl:translate-x-1/2",
 							].join(" ")}
 							key={t}
 							style={inline2Style}

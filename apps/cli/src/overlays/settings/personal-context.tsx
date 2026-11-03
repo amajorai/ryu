@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import { corePreferenceResponseSchema } from "../../core/settings-response-codecs.ts";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf } from "../../i18n/translate.ts";
 import { ConfirmPrompt } from "../../ui/ConfirmPrompt.tsx";
 import { aboutYouCacheWarning } from "./prompt-cache-warning.ts";
@@ -88,7 +89,7 @@ export function PersonalContext({
 				if (!signal?.aborted) {
 					setFailed(true);
 					const text = tf("Could not load personal context: {error}", {
-						error: error instanceof Error ? error.message : String(error),
+						error: errorText(error),
 					});
 					setErrorMessage(text);
 					setMessage(text);
@@ -135,7 +136,7 @@ export function PersonalContext({
 			edit(false);
 		} catch (error) {
 			const text = tf("Could not save personal context: {error}", {
-				error: error instanceof Error ? error.message : String(error),
+				error: errorText(error),
 			});
 			setErrorMessage(text);
 			setMessage(text);

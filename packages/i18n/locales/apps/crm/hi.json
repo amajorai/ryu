@@ -30,6 +30,7 @@
   "every option needs a label": "हर विकल्प के लिए एक लेबल ज़रूरी है",
   "field \"{id}\" is listed twice": "फ़ील्ड \"{id}\" दो बार सूचीबद्ध है",
   "list-specific fields cannot be unique": "सूची-विशिष्ट फ़ील्ड अद्वितीय नहीं हो सकते",
+  "more records referenced the removed options than can be changed in one request": "हटाए गए विकल्पों को जितने रिकॉर्ड संदर्भित करते थे, वे एक अनुरोध में बदले जा सकने वाली संख्या से अधिक हैं",
   "no column is mapped to a field, so this import would write nothing": "कोई कॉलम किसी फ़ील्ड से मैप नहीं है, इसलिए यह इम्पोर्ट कुछ भी नहीं लिखेगा",
   "no field \"{title}\" on the \"{slug}\" object": "\"{slug}\" ऑब्जेक्ट पर \"{title}\" फ़ील्ड नहीं है",
   "no live record \"{id}\" on the target object": "लक्ष्य ऑब्जेक्ट पर कोई सक्रिय रिकॉर्ड \"{id}\" नहीं है",
@@ -53,5 +54,6 @@
   "this import has already been applied and cannot be remapped — its outcome is on the job": "यह आयात पहले ही लागू हो चुका है और इसे फिर से मैप नहीं किया जा सकता — इसका परिणाम जॉब पर है",
   "this relation field has no target object configured": "इस रिलेशन फ़ील्ड के लिए कोई लक्ष्य ऑब्जेक्ट कॉन्फ़िगर नहीं है",
   "two columns map to \"{name}\" — the second would overwrite the first": "दो कॉलम \"{name}\" पर मैप होते हैं — दूसरा पहले को ओवरराइट कर देगा",
-  "unknown object \"{reference}\"": "अज्ञात ऑब्जेक्ट \"{reference}\""
+  "unknown object \"{reference}\"": "अज्ञात ऑब्जेक्ट \"{reference}\"",
+  "{affected} records still use the options being removed, over the {maxOptionMigrationRecords} that can be changed in one request — clear those values in bulk first, then remove the options": "{affected} रिकॉर्ड अभी भी हटाए जा रहे विकल्पों का उपयोग करते हैं, जो एक अनुरोध में बदले जा सकने वाले {maxOptionMigrationRecords} से अधिक है — पहले उन मानों को एक साथ साफ़ करें, फिर विकल्प हटाएँ"
 }

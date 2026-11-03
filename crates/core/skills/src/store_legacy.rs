@@ -5,7 +5,7 @@ use std::path::Path;
 
 use ryu_workspace::source_history::SourceHistory;
 
-use super::{SkillVersion, source_history, source_history_path, validate_id, versions_root};
+use super::{source_history, source_history_path, validate_id, versions_root, SkillVersion};
 
 /// What [`import_legacy_skill_versions`] did.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

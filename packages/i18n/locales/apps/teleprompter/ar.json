@@ -55,7 +55,6 @@
   "The recording has no audio data.": "لا يحتوي التسجيل على بيانات صوتية.",
   "The recording is not a WAV file.": "التسجيل ليس ملف WAV.",
   "Use auto-scroll": "استخدام التمرير التلقائي",
-  "Voice": "الصوت",
   "Voice following isn't available in this window. Open Teleprompter in Ryu Desktop or Island, or switch to auto-scroll.": "المتابعة الصوتية غير متاحة في هذه النافذة. افتح Teleprompter في Ryu Desktop أو Island، أو بدّل إلى التمرير التلقائي.",
   "Write or paste what you want to say.": "اكتب أو الصق ما تريد قوله.",
   "{wordCount} words · about {speakingTime} at {wordsPerMinute} words per minute. Text in [brackets] is shown as a cue and never needs to be spoken.": "{wordCount} كلمة · نحو {speakingTime} بمعدل {wordsPerMinute} كلمة في الدقيقة. يظهر النص بين [قوسين معقوفين] كإشارة ولا يلزم نطقه أبدًا.",

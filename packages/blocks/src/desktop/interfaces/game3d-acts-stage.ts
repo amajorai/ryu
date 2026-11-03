@@ -1,6 +1,5 @@
 import {
 	type ClockOptions,
-	clockLabel,
 	compareAsks,
 	type InterfaceAct,
 	type InterfaceAgentAct,
@@ -16,6 +15,7 @@ import {
 	type YouSlot,
 } from "./game3d-acts.ts";
 import { type LifePlace, placeAt } from "./game3d-life.ts";
+import { clockLabel } from "./interface-act-time.ts";
 
 /** Where acts happen on a stage: actor targets, who is on stage, you-spots and totals. */
 

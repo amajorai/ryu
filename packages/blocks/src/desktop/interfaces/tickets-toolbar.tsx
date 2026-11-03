@@ -444,7 +444,10 @@ export function TicketsFooter({
 			<span className="tabular-nums">
 				{shown === total
 					? ticketCountLabel(total)
-					: `${shown} of ${ticketCountLabel(total)}`}
+					: tr("{current} of {total}", {
+							current: shown,
+							total: ticketCountLabel(total),
+						})}
 			</span>
 			{showHints ? (
 				<span aria-hidden="true" className="ms-auto flex items-center gap-4">

@@ -99,6 +99,10 @@ export const STATIC_FIGURES = {
 		() => import("./notify-tower.tsx")
 	),
 	"os-windows": staticFigure("os-windows", () => import("./os-windows.tsx")),
+	"pro-workbench": staticFigure(
+		"pro-workbench",
+		() => import("./pro-workbench.tsx")
+	),
 	"red-team-rig": staticFigure(
 		"red-team-rig",
 		() => import("./red-team-rig.tsx")
@@ -106,6 +110,10 @@ export const STATIC_FIGURES = {
 	"sdk-typecase": staticFigure(
 		"sdk-typecase",
 		() => import("./sdk-typecase.tsx")
+	),
+	"security-checkpoint": staticFigure(
+		"security-checkpoint",
+		() => import("./security-checkpoint.tsx")
 	),
 	"share-belt": staticFigure("share-belt", () => import("./share-belt.tsx")),
 	"sites-plotter": staticFigure(

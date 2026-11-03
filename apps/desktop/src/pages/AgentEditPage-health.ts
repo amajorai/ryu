@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	type AgentHealthInput,
 	runAgentScorecard,
@@ -292,9 +292,12 @@ export function useAgentEditHealth(
 			triggerSubs.length,
 		]
 	);
+	// The scorecard translates through the active runtime when it runs, so a
+	// language change or a late catalog load must recompute it.
+	const i18nVersion = useOptionalI18n()?.version;
 	const agentHealthScorecard = useMemo(
 		() => runAgentScorecard(agentHealthInput),
-		[agentHealthInput]
+		[agentHealthInput, i18nVersion]
 	);
 	return {
 		mcpToolNames,

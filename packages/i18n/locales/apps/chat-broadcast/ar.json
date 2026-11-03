@@ -11,7 +11,6 @@
   "No visible chats yet": "لا توجد دردشات مرئية بعد",
   "Ready to send to {targetCount, plural, one {{targetLabel} chat} other {{targetLabel} chats}}.": "جاهز للإرسال إلى {targetCount, plural, zero {{targetLabel} محادثة} one {{targetLabel} محادثة} two {{targetLabel} محادثة} few {{targetLabel} محادثات} many {{targetLabel} محادثة} other {{targetLabel} محادثة}}.",
   "Refresh chats": "تحديث الدردشات",
-  "Running": "قيد التشغيل",
   "Running chats will continue with this instruction after their current turn.": "ستتابع الدردشات قيد التشغيل بهذه التعليمة بعد دورتها الحالية.",
   "Select chats, write one message, and review delivery before sending.": "حدد الدردشات واكتب رسالة واحدة وراجع التسليم قبل الإرسال.",
   "Select {chatTitle}": "تحديد {chatTitle}",

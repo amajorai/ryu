@@ -358,7 +358,7 @@ body {
 	padding: var(--ryu-app-gutter);
 	overflow: auto;
 	background: var(--ryu-app-panel);
-	border-left: 1px solid var(--border);
+	border-inline-start: 1px solid var(--border);
 }
 
 .ryu-app-form {

@@ -1,13 +1,13 @@
 import { translate as tr } from "@ryu/i18n/lite";
-import {
-	type ClockOptions,
-	clockLabel,
-	type InterfaceAgentAct,
-	type InterfaceBlocker,
-	type InterfaceSnapshot,
+import type {
+	ClockOptions,
+	InterfaceAgentAct,
+	InterfaceBlocker,
+	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import { ActStation, type StationLayout } from "./game3d-act-stage.tsx";
 import { isRedBlocker } from "./game3d-acts.ts";
+import { clockLabel } from "./interface-act-time.ts";
 import type { KitchenStation } from "./kitchen-model.ts";
 import { COUNTER_HEIGHT } from "./kitchen-props.tsx";
 

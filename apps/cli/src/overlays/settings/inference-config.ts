@@ -21,7 +21,6 @@ const inferenceScalarSchema = z.union([
 const inferenceStringSchema = z.string();
 const inferenceStringArraySchema = z.array(inferenceStringSchema);
 const inferenceLogitBiasSchema = z.number().min(-100).max(100);
-const inferenceErrorSchema = z.instanceof(Error);
 const inferencePreferenceSchema = z.object({
 	value: z.string().nullable().optional(),
 });
@@ -202,11 +201,4 @@ export function valueLabel(value: InferenceValue): string {
 	}
 	const rendered = JSON.stringify(value);
 	return rendered ?? String(value);
-}
-
-export function errorText(
-	error: Parameters<typeof inferenceErrorSchema.safeParse>[0]
-): string {
-	const parsed = inferenceErrorSchema.safeParse(error);
-	return parsed.success ? parsed.data.message : String(error);
 }

@@ -1,5 +1,8 @@
 import { translate as tl } from "@ryu/i18n/core";
-import { z } from "zod";
+import {
+	passportControlDetails,
+	passportGatewayDetails,
+} from "@/src/lib/agent-passport-details.ts";
 import type { AuditEntry } from "@/src/lib/api/gateway.ts";
 import type {
 	OrganizationAuditEntry,
@@ -100,79 +103,6 @@ function compactId(value: string | null | undefined): string | null {
 	return value.length > 20 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value;
 }
 
-function detailsFromGateway(entry: {
-	backend: string | null;
-	command: string | null;
-	costMicroUsd?: number | null;
-	durationMs: number | null;
-	error: string | null;
-	eventType: string;
-	feature: string | null;
-	inputTokens: number;
-	latencyMs: number;
-	model?: string | null;
-	outputTokens: number;
-	provider: string;
-}): string {
-	const parts: string[] = [];
-	if (entry.eventType === "model_call") {
-		parts.push(`${entry.provider} · ${entry.model}`);
-		parts.push(`tokens ${entry.inputTokens + entry.outputTokens}`);
-		parts.push(`latency ${entry.latencyMs}ms`);
-	} else {
-		if (entry.backend) {
-			parts.push(entry.backend);
-		}
-		if (entry.command) {
-			parts.push(entry.command);
-		}
-		if (entry.durationMs !== null) {
-			parts.push(`duration ${entry.durationMs}ms`);
-		}
-	}
-	if (entry.feature) {
-		parts.push(`surface ${entry.feature}`);
-	}
-	if (entry.costMicroUsd !== undefined && entry.costMicroUsd !== null) {
-		parts.push(`cost ${entry.costMicroUsd}µUSD`);
-	}
-	if (entry.error) {
-		parts.push(`error: ${entry.error}`);
-	}
-	return parts.join(" · ") || "No additional metadata";
-}
-
-const controlDetailBooleanSchema = z.boolean();
-const controlDetailScalarSchema = z.union([
-	z.string(),
-	z.number(),
-	controlDetailBooleanSchema,
-]);
-
-function detailsFromControl(entry: OrganizationAuditEntry): string {
-	const parts: string[] = [];
-	if (entry.feature) {
-		parts.push(`surface ${entry.feature}`);
-	}
-	for (const [key, value] of Object.entries(entry.details)) {
-		if (value === null || value === undefined) {
-			continue;
-		}
-		const printable = controlDetailScalarSchema.safeParse(value);
-		if (!printable.success) {
-			continue;
-		}
-		const boolean = controlDetailBooleanSchema.safeParse(printable.data);
-		parts.push(
-			`${key}: ${boolean.success ? (boolean.data ? "yes" : "no") : String(printable.data)}`
-		);
-	}
-	if (entry.error) {
-		parts.push(`error: ${entry.error}`);
-	}
-	return parts.join(" · ") || "Change accepted by the control plane";
-}
-
 function userLabel(
 	name: string | null | undefined,
 	id: string | null | undefined
@@ -193,7 +123,7 @@ export function passportRowFromGateway(
 		actorLabel: isControl ? (initiatedBy ?? "Gateway admin") : agentName,
 		actorType: isControl ? (entry.user_id ? "user" : "gateway") : "agent",
 		agentAction: !isControl,
-		details: detailsFromGateway({
+		details: passportGatewayDetails({
 			backend: entry.backend,
 			command: entry.command,
 			costMicroUsd: entry.cost_micro_usd,
@@ -235,7 +165,7 @@ export function passportRowFromOrganizationActivity(
 		actorLabel: agentName,
 		actorType: "agent",
 		agentAction: true,
-		details: detailsFromGateway(entry),
+		details: passportGatewayDetails(entry),
 		eventLabel: eventLabel(type),
 		eventType: type,
 		id: `org-activity:${entry.id}`,
@@ -269,7 +199,7 @@ export function passportRowFromOrganizationControl(
 		actorLabel,
 		actorType: entry.actor.type,
 		agentAction: false,
-		details: detailsFromControl(entry),
+		details: passportControlDetails(entry),
 		eventLabel: passportActionLabel(entry.action),
 		eventType: entry.eventType || "control_change",
 		id: `org-control:${entry.id}`,

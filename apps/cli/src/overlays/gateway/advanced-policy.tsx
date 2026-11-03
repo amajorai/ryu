@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import { useCliProductMode } from "../../core/ProductModeContext.tsx";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf } from "../../i18n/translate.ts";
 import {
 	canonical,
@@ -156,7 +157,7 @@ export function GatewayAdvancedPolicy({
 			if (!current.signal.aborted) {
 				setMessage(
 					tf("Could not load advanced policy: {error} · r retry", {
-						error: error instanceof Error ? error.message : String(error),
+						error: errorText(error),
 					})
 				);
 			}
@@ -267,7 +268,7 @@ export function GatewayAdvancedPolicy({
 			if (!current.signal.aborted) {
 				setMessage(
 					tf("Could not save: {error} · y retry · n cancel", {
-						error: error instanceof Error ? error.message : String(error),
+						error: errorText(error),
 					})
 				);
 			}
@@ -309,7 +310,7 @@ export function GatewayAdvancedPolicy({
 				} catch (error) {
 					setMessage(
 						tf("Invalid policy JSON: {error}", {
-							error: error instanceof Error ? error.message : String(error),
+							error: errorText(error),
 						})
 					);
 				}

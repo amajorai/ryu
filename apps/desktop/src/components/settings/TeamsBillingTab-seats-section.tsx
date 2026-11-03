@@ -3,6 +3,7 @@ import type {
 	fetchTeamsSeatStatus,
 	OrganizationPlanId,
 } from "@/src/lib/api/teams-billing.ts";
+import { formatWholeUsd } from "@/src/lib/billing-amounts.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -29,8 +30,10 @@ export function TeamsBillingSeatsSection({
 				<SettingsItem
 					actions={
 						<span className="text-muted-foreground text-sm tabular-nums">
-							{seatStatus?.allocatedSeats ?? 0} of{" "}
-							{seatStatus?.includedSeats ?? "—"}
+							{tl("{current} of {total}", {
+								current: seatStatus?.allocatedSeats ?? 0,
+								total: seatStatus?.includedSeats ?? "—",
+							})}
 						</span>
 					}
 					description={tl(
@@ -40,7 +43,7 @@ export function TeamsBillingSeatsSection({
 						{
 							allocated: String(seatStatus?.allocatedSeats ?? 0),
 							bonusSeats: String(seatStatus?.bonusSeats ?? 0),
-							bundle: `$${includedCreditBundle}`,
+							bundle: formatWholeUsd(includedCreditBundle),
 							capacity: String(seatStatus?.includedSeats ?? "—"),
 							currentSeats: String(currentSeats),
 							memberCount: String(seatStatus?.memberCount ?? 0),

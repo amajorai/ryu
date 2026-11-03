@@ -5,5 +5,5 @@
 	width: var(--live-activity-progress);
 }
 [data-live-activity-border] {
-	border-left-color: var(--live-activity-tint);
+	border-inline-start-color: var(--live-activity-tint);
 }

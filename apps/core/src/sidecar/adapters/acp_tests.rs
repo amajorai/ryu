@@ -6,12 +6,14 @@ use agent_client_protocol::schema::v1::{Diff, ToolCallUpdateFields};
 mod acp_spawn_environment;
 #[path = "acp_tests/capabilities_and_gateway_wrapping.rs"]
 mod capabilities_and_gateway_wrapping;
+#[path = "acp_tests/claude_entrypoint_env_test.rs"]
+mod claude_entrypoint_env_test;
 #[path = "acp_tests/codex_egress_and_flagship.rs"]
 mod codex_egress_and_flagship;
-#[path = "acp_tests/failure_i18n.rs"]
-mod failure_i18n;
 #[path = "acp_tests/config_write_back_and_ordering.rs"]
 mod config_write_back_and_ordering;
+#[path = "acp_tests/failure_i18n.rs"]
+mod failure_i18n;
 #[path = "acp_tests/pi_default_and_gateway_opt_out.rs"]
 mod pi_default_and_gateway_opt_out;
 #[path = "acp_tests/pi_widgets_fs_and_turns.rs"]

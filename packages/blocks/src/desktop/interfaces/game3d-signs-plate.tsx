@@ -2,11 +2,12 @@
 import { Html } from "@react-three/drei";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import { askAriaLabel, type InterfaceAsk } from "@ryuhq/protocol/interfaces";
+import type { InterfaceAsk } from "@ryuhq/protocol/interfaces";
 import type { ReactNode } from "react";
 import { GAME_FOCUS, GAME_PLATE } from "./game-hud.tsx";
 import { ToonMesh } from "./game3d-materials.tsx";
 import type { Vec3 } from "./game3d-palette.ts";
+import { askAriaLabel } from "./interface-act-messages.ts";
 
 /** What an opener plate is, for the browser checks. */
 export type ActTargetKind =

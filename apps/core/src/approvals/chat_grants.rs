@@ -231,7 +231,9 @@ mod tests {
         assert!(chat_confirmable(PREFERENCES));
         assert!(requires_per_call_consent(PREFERENCES));
         assert!(!requires_per_call_consent(LAUNCH));
-        assert!(!requires_per_call_consent("ryu_api.get_api_preferences_key"));
+        assert!(!requires_per_call_consent(
+            "ryu_api.get_api_preferences_key"
+        ));
 
         // "Allow for this chat" on a theme change must not let a later call in
         // the same chat switch approval or the command scan off.

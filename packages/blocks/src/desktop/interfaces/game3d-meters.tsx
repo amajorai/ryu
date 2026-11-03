@@ -4,7 +4,6 @@ import { useFrame } from "@react-three/fiber";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceProgress } from "@ryuhq/protocol/interfaces";
-import { waitLabel } from "@ryuhq/protocol/interfaces";
 import { useRef } from "react";
 import type { Group, Mesh } from "three";
 import { GAME_PLATE } from "./game-hud.tsx";
@@ -17,6 +16,7 @@ import {
 	type WaitTimerSpec,
 } from "./game3d-meters-timer-props.tsx";
 import type { Vec3 } from "./game3d-palette.ts";
+import { waitLabel } from "./interface-act-time.ts";
 
 export {
 	bandColor,

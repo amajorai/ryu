@@ -1475,6 +1475,7 @@ async fn draft_profile(
         output_label = output_label,
         tools = RECOMMENDED_AGENT_TOOLS.join(", "),
     );
+    let prompt = language::with_profile_language(prompt, crate::i18n::locale::node_locale().await);
 
     let reply = crate::sidecar::adapters::run_text_turn(
         conversation_id.to_owned(),
@@ -2265,3 +2266,10 @@ You repeat release checks across several recent sessions.
 #[cfg(test)]
 #[path = "onboarding_profile_availability_test.rs"]
 mod availability_test;
+
+#[path = "onboarding_profile_language.rs"]
+mod language;
+
+#[cfg(test)]
+#[path = "onboarding_profile_language_tests.rs"]
+mod language_tests;

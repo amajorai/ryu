@@ -26,7 +26,7 @@ export function DiffFilePreviewPopover({
 				align="start"
 				appearance="composer-preview"
 				className="w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-hidden"
-				side="left"
+				side="inline-start"
 				sideOffset={10}
 			>
 				<div className="mb-1 flex items-center gap-2 px-2 py-1 text-muted-foreground text-xs">

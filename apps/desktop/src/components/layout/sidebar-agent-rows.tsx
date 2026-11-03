@@ -219,7 +219,7 @@ export function MessagingAgentRowBody({
 				>
 					{agent.name}
 				</TooltipTrigger>
-				<TooltipContent align="start" className="max-w-64" side="right">
+				<TooltipContent align="start" className="max-w-64" side="inline-end">
 					<span className="flex min-w-0 flex-col gap-0.5">
 						<span className="truncate" data-ryu-i18n="off">
 							{agent.title?.trim()

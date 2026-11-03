@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import { useRef } from "react";
@@ -97,9 +98,9 @@ export function SlotCabinet({
 	}
 	let topper: string | null = null;
 	if (inPlay) {
-		topper = "IN PLAY";
+		topper = tr("IN PLAY");
 	} else if (won) {
-		topper = "JACKPOT";
+		topper = tr("JACKPOT");
 	}
 	return (
 		<article

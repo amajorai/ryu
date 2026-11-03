@@ -16,6 +16,7 @@ import {
 	useMemo,
 	useState,
 } from "react";
+import { BLOG_TAGS } from "./blog-index/blog-tag-list.ts";
 import { FeaturedUpdates } from "./featured-updates.tsx";
 import { formatPublicationDate } from "./publication-date.ts";
 import { outlineCtaClass } from "./sections.tsx";
@@ -48,6 +49,9 @@ export interface BlogPostData {
 	tag?: string;
 	title: string;
 }
+
+/** Re-exported so existing `blog.tsx` importers keep their path. */
+export { BLOG_TAGS };
 
 const AVATAR_SIZES = {
 	small: { width: 20, height: 20, className: "h-5 w-5" },
@@ -116,17 +120,6 @@ export function BlogAuthor({
 		</div>
 	);
 }
-
-/** The tags posts in apps/web/content/blog actually carry, most used first. */
-export const BLOG_TAGS = [
-	{ label: "All", value: undefined },
-	{ label: "Comparisons", value: "Comparisons" },
-	{ label: "Explainers", value: "Explainers" },
-	{ label: "How-to", value: "How-to" },
-	{ label: "Product", value: "Product" },
-	{ label: "Company", value: "Company" },
-	{ label: "Research", value: "Research" },
-];
 
 /**
  * Tag filter chips, presentational client links. With `counts`, only "All"

@@ -1,6 +1,5 @@
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
-	askKindWords,
 	compareAsks,
 	type InterfaceAgentAct,
 	type InterfaceBlocker,
@@ -9,6 +8,7 @@ import {
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { countedBlockerThreads } from "./game3d-acts.ts";
+import { askKindWords } from "./interface-act-messages.ts";
 import { plainText } from "./interface-ask-card.tsx";
 import { STAGE_LABELS, type TripStage } from "./rides-model.ts";
 

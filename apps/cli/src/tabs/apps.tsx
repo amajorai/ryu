@@ -1,8 +1,5 @@
 import type { z } from "zod";
-import {
-	nativeErrorMessage as errText,
-	humanizeError,
-} from "../core/native-errors.ts";
+import { humanizeError } from "../core/native-errors.ts";
 import {
 	type sidecarCatalogItemSchema,
 	sidecarCatalogSchema,
@@ -32,6 +29,7 @@ import { installSidecar } from "@ryuhq/core-client/plugins";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
+import { errorText } from "../i18n/error-text.ts";
 import { tf } from "../i18n/translate.ts";
 import { ConfirmPrompt } from "../ui/ConfirmPrompt.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
@@ -165,7 +163,7 @@ export function AppsTab({ active }: TabProps) {
 					if (controller.signal.aborted || reqRef.current !== reqId) {
 						return;
 					}
-					setError(errText(err));
+					setError(errorText(err));
 					setLoaded(true);
 				})
 				.finally(() => {
@@ -235,7 +233,7 @@ export function AppsTab({ active }: TabProps) {
 				.catch((err) => {
 					setNotice(null);
 					notify(
-						tf("install failed: {error}", { error: errText(err) }),
+						tf("install failed: {error}", { error: errorText(err) }),
 						"error"
 					);
 				})
@@ -263,7 +261,7 @@ export function AppsTab({ active }: TabProps) {
 				.catch((err) => {
 					setNotice(null);
 					notify(
-						tf("uninstall failed: {error}", { error: errText(err) }),
+						tf("uninstall failed: {error}", { error: errorText(err) }),
 						"error"
 					);
 				})

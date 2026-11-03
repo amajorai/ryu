@@ -212,7 +212,9 @@ test("a tweet video names its play button and X link in the reader's language", 
 		},
 	};
 	const enriched = enrichTweet(
-		tweetFixture({ mediaDetails: [video as unknown as typeof photo] })
+		tweetFixture({
+			mediaDetails: [video as unknown as NonNullable<typeof photo>],
+		})
 	);
 	const container = await mountInJapanese(
 		<>

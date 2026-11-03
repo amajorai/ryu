@@ -25,18 +25,16 @@ pub(crate) fn attach_org_limits_and_ladder(
     ladder_user: Option<&str>,
 ) -> Result<(), GatewayError> {
     let bills_tenants = state.config.credits.is_active();
-    context.org_limits = Some(Arc::new(
-        crate::org_limits::OrgLimitContext::from_resolved(
-            resolved,
-            bills_tenants,
-            crate::org_limits::ResolvedSubject {
-                bound_user_id,
-                team_ids,
-                configured_project_id: None,
-                verified_bot_id,
-            },
-        ),
-    ));
+    context.org_limits = Some(Arc::new(crate::org_limits::OrgLimitContext::from_resolved(
+        resolved,
+        bills_tenants,
+        crate::org_limits::ResolvedSubject {
+            bound_user_id,
+            team_ids,
+            configured_project_id: None,
+            verified_bot_id,
+        },
+    )));
     // Ladder L2 and L3 and the new-key limit on the fleet (spec 04.8.1): the
     // posture this request is served under, and the in-flight slots it holds
     // until its last clone (a stream body included) drops.

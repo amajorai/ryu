@@ -87,6 +87,7 @@ export const EMPTY_ROW_STATE: RowState = {
  * Why the connected node can't run an engine. Core's `unsupported_reason` wins:
  * it knows the node's OS, CPU arch, and any operator-placed binary. The
  * `platforms` message is only the fallback for an older Core that omits it.
+ * Core sends English; its sentences are catalog keys, so `tl` translates them.
  */
 export function unsupportedReason(
 	tl: LiteralMessage,
@@ -95,10 +96,10 @@ export function unsupportedReason(
 ): string {
 	const fromCore = coreReason?.trim();
 	if (fromCore) {
-		return fromCore;
+		return tl(fromCore);
 	}
 	if (platforms.length === 0) {
-		return "Not available on this node";
+		return tl("Not available on this node");
 	}
 	const labels = platforms.map((p) => PLATFORM_LABELS.get(p) ?? p).join(" / ");
 	return tl("Requires {labels} — the connected node can't run it", { labels });

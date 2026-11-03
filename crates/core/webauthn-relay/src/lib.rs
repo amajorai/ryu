@@ -145,7 +145,9 @@ impl RelayCredential {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum RelayDecision {
-    Approve { credential: RelayCredential },
+    Approve {
+        credential: RelayCredential,
+    },
     Deny {
         #[serde(default)]
         reason: Option<String>,
@@ -157,7 +159,9 @@ pub enum RelayDecision {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RelayOutcome {
-    Ok { credential: RelayCredential },
+    Ok {
+        credential: RelayCredential,
+    },
     /// The user denied it, or the key reported an error.
     Denied {
         #[serde(default)]
@@ -168,7 +172,9 @@ pub enum RelayOutcome {
     /// No answer before the deadline.
     Timeout,
     /// The request failed validation.
-    Invalid { message: String },
+    Invalid {
+        message: String,
+    },
 }
 
 /// Why a relay was refused during validation.
@@ -187,4 +193,3 @@ pub enum RelayError {
     #[error("options are invalid: {0}")]
     Options(String),
 }
-

@@ -247,7 +247,8 @@ impl Channel for TelegramChannel {
         Ok(())
     }
 
-    /// Register the command menu with `setMyCommands`. An EMPTY list leaves the
+    /// Register the command menu with `setMyCommands`: the default menu, then one
+    /// per catalog language (`language_code`). An EMPTY list leaves the
     /// published menu untouched rather than clearing it with `deleteMyCommands`.
     ///
     /// The instinct is the other way round — a stale menu advertises commands that
@@ -266,11 +267,15 @@ impl Channel for TelegramChannel {
             return Ok(());
         }
         let max = self.options.command_menu_max.clamp(1, 100);
-        self.call(
-            "setMyCommands",
-            commands_payload(&cmds[..cmds.len().min(max)]),
-        )
-        .await?;
+        let menu = &cmds[..cmds.len().min(max)];
+        self.call("setMyCommands", commands_payload(menu)).await?;
+        // One menu per catalog language. Best-effort: a rejected language keeps
+        // Telegram's default (English) menu for those users.
+        for (language_code, payload) in localized_commands_payloads(menu) {
+            if let Err(err) = self.call("setMyCommands", payload).await {
+                warn!(%err, language_code, "telegram localized command menu rejected");
+            }
+        }
         Ok(())
     }
 

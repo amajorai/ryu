@@ -120,7 +120,6 @@
   "This payment attempt cannot be retried.": "Este intento de pago no se puede reintentar.",
   "This payment challenge already has a receipt.": "Esta solicitud de pago ya tiene un recibo.",
   "To": "A",
-  "Tool": "Herramienta",
   "Trusted origins": "Orígenes de confianza",
   "Unsupported HTTP method.": "Método HTTP no compatible.",
   "Use at most six decimal places.": "Usa como máximo seis decimales.",

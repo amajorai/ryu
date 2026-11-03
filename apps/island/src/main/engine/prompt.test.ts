@@ -4,6 +4,7 @@ import {
 	BROWSER_TRUNCATE_CHARS,
 	buildSuggestionMessages,
 	OCR_TRUNCATE_CHARS,
+	replyLanguageInstruction,
 	SELECTION_TRUNCATE_CHARS,
 } from "./prompt.ts";
 
@@ -191,5 +192,61 @@ describe("buildSuggestionMessages untrusted-content boundary", () => {
 		const [system] = buildSuggestionMessages(snapshot());
 		expect(system.content).toContain("untrusted");
 		expect(system.content).toContain("not instructions");
+	});
+});
+
+describe("buildSuggestionMessages UI language", () => {
+	const englishPrompt = buildSuggestionMessages(snapshot())[0].content;
+
+	it("asks for Japanese prose and keeps the JSON contract in English for ja", () => {
+		const [system] = buildSuggestionMessages(snapshot(), "ja");
+		expect(system.content).toContain(
+			"Write every sentence meant for the user in Japanese."
+		);
+		expect(system.content).toContain("Keep JSON keys");
+		expect(system.content).toContain('"action": "chat" | "dismiss"');
+		expect(system.content.startsWith(englishPrompt)).toBe(true);
+	});
+
+	it("leaves the prompt unchanged for English, a missing locale and a bad tag", () => {
+		for (const locale of ["en", "en-GB", null, undefined, "not a tag"]) {
+			const [system] = buildSuggestionMessages(snapshot(), locale);
+			expect(system.content).toBe(englishPrompt);
+			expect(system.content).not.toContain("Write every sentence");
+		}
+	});
+
+	it("names regional and community-pack languages the way Core does", () => {
+		expect(replyLanguageInstruction("ja-JP")).toContain("in Japanese.");
+		expect(replyLanguageInstruction("pt-PT")).toContain(
+			"in Brazilian Portuguese."
+		);
+		expect(replyLanguageInstruction("zh-CN")).toContain(
+			"in Simplified Chinese."
+		);
+		expect(replyLanguageInstruction("nl")).toContain("in Dutch.");
+	});
+
+	it("asks for Arabic and German prose for ar and de-DE", () => {
+		for (const [locale, name] of [
+			["ar", "Arabic"],
+			["de-DE", "German"],
+		] as const) {
+			const [system] = buildSuggestionMessages(snapshot(), locale);
+			expect(
+				system.content.endsWith(
+					`\nWrite every sentence meant for the user in ${name}. Keep JSON keys, field names, labels and fixed keywords the instructions specify exactly as given, in English.`
+				)
+			).toBe(true);
+		}
+	});
+
+	it("keeps English voice packs on the English prompt", () => {
+		expect(replyLanguageInstruction("en-x-chronic")).toBeNull();
+	});
+
+	it("keeps the language line out of the untrusted user turn", () => {
+		const [, user] = buildSuggestionMessages(snapshot(), "ja");
+		expect(user.content).not.toContain("Write every sentence");
 	});
 });

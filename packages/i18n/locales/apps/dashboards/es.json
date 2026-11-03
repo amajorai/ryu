@@ -1,6 +1,7 @@
 {
   "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "Los widgets de agente no están disponibles en este nodo: actualizarlos requiere autoridad delegada de ejecución del usuario que los trabajos de actualización no tienen. Usa una fuente http, composio o estática.",
   "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "Los widgets de monitor aún no están disponibles: ninguna capacidad del host permite que una app lea resultados de monitores. Usa una fuente http, composio o estática.",
+  "Ryu metric widgets are not available yet: apps cannot read Ryu's internal metrics, and no host capability exposes them. Use an http, composio, or static source instead.": "Los widgets de métricas de Ryu aún no están disponibles: las apps no pueden leer las métricas internas de Ryu y ninguna capacidad del host las expone. Usa una fuente http, composio o estática.",
   "The Composio action failed: {error}": "La acción de Composio falló: {error}",
   "The Composio action returned HTTP {status}.": "La acción de Composio devolvió HTTP {status}.",
   "The web source redirected, and redirects are not allowed.": "La fuente web redirigió y no se permiten redirecciones.",

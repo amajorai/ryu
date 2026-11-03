@@ -169,7 +169,9 @@ mod tests {
 
     #[test]
     fn policy_and_gateway_changes_are_offered_allow_once_only() {
-        assert!(!offers_allow_for_this_chat("ryu_api.put_api_preferences_key"));
+        assert!(!offers_allow_for_this_chat(
+            "ryu_api.put_api_preferences_key"
+        ));
         assert!(offers_allow_for_this_chat(
             "ryu_api.put_api_models_id_launch_config"
         ));

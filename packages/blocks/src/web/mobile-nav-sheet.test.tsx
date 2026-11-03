@@ -7,8 +7,10 @@ if (registeredDom) {
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
+// Tests render on the home page unless they set another route first.
+let currentPathname = "/";
 mock.module("next/navigation", () => ({
-	usePathname: () => "/",
+	usePathname: () => currentPathname,
 }));
 
 const { act } = await import("react");
@@ -206,5 +208,75 @@ test("the Resources sheet opens the Docs entry in a new tab, as the desktop Reso
 	} finally {
 		act(() => root.unmount());
 		container.remove();
+	}
+});
+
+test("on a company page the Resources sheet opens on its Company group", async () => {
+	currentPathname = "/press";
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	try {
+		await act(async () => {
+			root.render(<MobileNav />);
+		});
+		const resources = Array.from(
+			container.querySelectorAll<HTMLButtonElement>(
+				'button[aria-controls="mobile-nav-sheet"]'
+			)
+		).find((button) => button.textContent?.includes("Resources"));
+		await act(async () => {
+			resources?.click();
+		});
+		await settle();
+
+		const sheet = document.getElementById("mobile-nav-sheet");
+		if (!sheet) {
+			throw new Error("The Resources sheet did not open");
+		}
+		const sections = Array.from(
+			sheet.querySelectorAll<HTMLElement>("[data-sheet-group]")
+		);
+		expect(sections.map((section) => section.dataset.sheetGroup)).toEqual([
+			"Plans",
+			"Learn",
+			"Updates",
+			"Community",
+			"Company",
+		]);
+		const company = sections.at(-1);
+		expect(
+			company
+				?.querySelector("button[aria-expanded]")
+				?.getAttribute("aria-expanded")
+		).toBe("true");
+		expect(
+			sections
+				.slice(0, -1)
+				.map((section) =>
+					section
+						.querySelector("button[aria-expanded]")
+						?.getAttribute("aria-expanded")
+				)
+		).toEqual(["false", "false", "false", "false"]);
+		const links = Array.from(
+			company?.querySelectorAll<HTMLAnchorElement>("a[href]") ?? []
+		);
+		expect(links.map((link) => link.getAttribute("href"))).toEqual([
+			"/about",
+			"/careers",
+			"/press",
+			"/events",
+		]);
+		// Internal pages open in this tab, each name over its summary.
+		expect(links.some((link) => link.hasAttribute("target"))).toBe(false);
+		expect(links[2]?.textContent).toContain("Press");
+		expect(links[2]?.textContent).toContain(
+			"Company facts, announcements, and brand files."
+		);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		currentPathname = "/";
 	}
 });

@@ -321,12 +321,14 @@ function UsageAnalytics({ summary }: { summary: UsageSummaryData }) {
 }
 
 function UsageRowItem({ row }: { row: UsageRow }) {
+	const tl = useLiteralMessages();
 	const tokens =
 		row.inputTokens === null && row.outputTokens === null
 			? null
-			: `${formatNumber(row.inputTokens ?? 0)} in · ${formatNumber(
-					row.outputTokens ?? 0
-				)} out`;
+			: tl("{inputTokens} in · {outputTokens} out", {
+					inputTokens: formatNumber(row.inputTokens ?? 0),
+					outputTokens: formatNumber(row.outputTokens ?? 0),
+				});
 	// Only the facts this row actually has. An absent model or duration is left
 	// OUT rather than shown as a dash-filled column, because a list row (unlike a
 	// table) has no column to keep aligned and empty slots just add noise.
@@ -335,7 +337,10 @@ function UsageRowItem({ row }: { row: UsageRow }) {
 	// upstream ("via …") is shown only for traffic that is not Ryu Router's.
 	const provider =
 		row.upstreamProvider && providerName !== RYU_ROUTER_LABEL
-			? `${providerName ?? "Provider"} via ${row.upstreamProvider}`
+			? tl("{provider} via {upstream}", {
+					provider: providerName ?? tl("Provider"),
+					upstream: row.upstreamProvider,
+				})
 			: providerName;
 	const meta = [provider, tokens, formatDurationMs(row.durationMs)].filter(
 		(part): part is string => Boolean(part) && part !== "—"

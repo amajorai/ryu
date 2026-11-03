@@ -36,10 +36,11 @@
 	pointer-events: auto;
 }
 
-/* Physical on purpose: the Ask Ryu rail (AssistantPanel) is pinned to the
-   window's physical right in both directions, so the reserve must match it. */
+/* Logical, like the rail it reserves room for: the docked Ask Ryu rail
+   (AssistantPanel) sits at the inline end, opposite the start sidebar, so the
+   reserve is the inline-end padding (the physical left under RTL). */
 #assistantReserve {
-	padding-right: var(--desktop-inline7-padding-Right);
+	padding-inline-end: var(--desktop-inline7-padding-End);
 }
 
 .authored1 {

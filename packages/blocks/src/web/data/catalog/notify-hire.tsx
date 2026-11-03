@@ -315,8 +315,9 @@ export const NOTIFY_TO_HIRE: Product[] = [
 			},
 			{
 				question: "Can I use a custom domain?",
+				// docs/standalone/sites.mdx, "Custom domains".
 				answer:
-					"Not yet. You can add a domain and verify you own it, but it can't serve traffic until HTTPS support ships. Use a subdomain of your Sites address for now.",
+					"Yes, on your own edge. Add a domain and verify you own it; it serves visitors once your edge confirms it handles HTTPS for that domain. No edge ships with Sites, so until then use a subdomain of your Sites address.",
 			},
 		],
 		cta: {

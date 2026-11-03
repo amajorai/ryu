@@ -74,8 +74,6 @@ export const BENTO_GROUP_LOADERS = {
 	"for/design": () => import("./for/design/index.ts"),
 	enterprise: () => import("./enterprise/index.ts"),
 	security: () => import("./security/index.ts"),
-	pro: () => import("./pro/index.ts"),
-	platform: () => import("./platform/index.ts"),
 	interfaces: () => import("./interfaces/index.ts"),
 } as const;
 

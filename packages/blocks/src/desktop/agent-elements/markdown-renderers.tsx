@@ -26,6 +26,7 @@ import {
 	type StreamdownProps,
 	useIsCodeFenceIncomplete,
 } from "streamdown";
+import { withBidiAuto } from "./bidi-text.ts";
 import {
 	staticCodeHighlighter,
 	streamingCodeHighlighter,
@@ -379,7 +380,7 @@ const MarkdownCode: NonNullable<Components["code"]> = ({
 	);
 };
 
-export const MARKDOWN_COMPONENTS: Components = {
+export const MARKDOWN_COMPONENTS: Components = withBidiAuto({
 	code: MarkdownCode,
 	h1: ({ children, ...props }) => (
 		<h1
@@ -463,7 +464,7 @@ export const MARKDOWN_COMPONENTS: Components = {
 			{children}
 		</td>
 	),
-};
+});
 
 const MARKDOWN_RENDERERS = [
 	{ component: MarkdownMermaidRenderer, language: ["mermaid", "mmd"] },

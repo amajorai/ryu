@@ -107,7 +107,10 @@ export function TicketsPage({
 						{position && position.total > 1 ? (
 							<>
 								<span className="me-1 hidden text-muted-foreground text-xs tabular-nums sm:inline">
-									{position.index + 1} of {position.total}
+									{tl("{current} of {total}", {
+										current: position.index + 1,
+										total: position.total,
+									})}
 								</span>
 								<Button
 									aria-label="Previous ticket in view"

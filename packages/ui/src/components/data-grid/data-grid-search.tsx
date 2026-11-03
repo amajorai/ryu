@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocalizedText } from "@ryu/i18n/react";
+import { useLiteralMessages, useLocalizedText } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { useAsRef } from "@ryu/ui/hooks/use-as-ref.ts";
@@ -88,6 +88,7 @@ function DataGridSearchImpl({
 	onNavigateToNextMatch,
 	onNavigateToPrevMatch,
 }: DataGridSearchProps) {
+	const tl = useLiteralMessages();
 	const localizedNoResults = useLocalizedText("No results", { literal: true });
 	const localizedTypeToSearch = useLocalizedText("Type to search", {
 		literal: true,
@@ -248,7 +249,10 @@ function DataGridSearchImpl({
 			<div className="flex items-center gap-1 whitespace-nowrap text-muted-foreground text-xs">
 				{searchMatches.length > 0 ? (
 					<span className="tabular-nums">
-						{matchIndex + 1} of {searchMatches.length}
+						{tl("{current} of {total}", {
+							current: matchIndex + 1,
+							total: searchMatches.length,
+						})}
 					</span>
 				) : hasQuery ? (
 					<span>{localizedNoResults}</span>

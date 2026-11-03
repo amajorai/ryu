@@ -1,11 +1,9 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
-import {
-	askAriaLabel,
-	blockerAriaLabel,
-	type ClockOptions,
-	type InterfaceSnapshot,
+import type {
+	ClockOptions,
+	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import {
 	CalendarX,
@@ -27,6 +25,7 @@ import {
 	openerLabel,
 	overflowLabel,
 } from "./game3d-signs.tsx";
+import { askAriaLabel, blockerAriaLabel } from "./interface-act-messages.ts";
 import type { TownActEntry } from "./town-acts.tsx";
 
 /** What the act props need to answer and open cards. */

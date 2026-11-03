@@ -189,6 +189,32 @@ fn mask_inherited_unscoped_credentials(env: &mut Vec<EnvVariable>) {
     }
 }
 
+/// Label a Claude Code ACP child `CLAUDE_CODE_ENTRYPOINT` from its final env, which
+/// already holds Core's inherited variables (blank when masked) and the agent's
+/// configured ones. Names match case-insensitively on Windows, as the OS does.
+pub(super) fn apply_claude_code_entrypoint(env: &mut Vec<EnvVariable>) {
+    let var = |name: &str| {
+        env.iter()
+            .find(|entry| {
+                if cfg!(windows) {
+                    entry.name.eq_ignore_ascii_case(name)
+                } else {
+                    entry.name == name
+                }
+            })
+            .map(|entry| entry.value.clone())
+    };
+    let ryu_configured = var(crate::claude_config::CLAUDE_CODE_ENTRYPOINT_ENV);
+    let config_dir = crate::claude_config::config_dir_from_env(var);
+    let resolved =
+        crate::claude_config::resolve_entrypoint(config_dir.as_deref(), ryu_configured.as_deref());
+    set_stdio_env(
+        env,
+        crate::claude_config::CLAUDE_CODE_ENTRYPOINT_ENV.to_owned(),
+        resolved,
+    );
+}
+
 pub(super) fn sanitize_acp_child_env(env: &mut Vec<EnvVariable>) {
     // Keep masks for inherited case variants too: removing an entry would let
     // the SDK inherit that spelling again on case-sensitive platforms.

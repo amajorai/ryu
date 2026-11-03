@@ -148,7 +148,7 @@ export function StreamRail({
 									size="rail"
 								/>
 							</TooltipTrigger>
-							<TooltipContent side="right">{item.label}</TooltipContent>
+							<TooltipContent side="inline-end">{item.label}</TooltipContent>
 						</Tooltip>
 					);
 				})}

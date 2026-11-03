@@ -42,4 +42,31 @@ describe("RangeSlider", () => {
 			`background-color: var(${FILL_VARIABLE})`
 		);
 	});
+
+	it("anchors the fill, ticks and thumb to the inline start", async () => {
+		const css = await Bun.file(
+			new URL("./range-slider.module.css", import.meta.url)
+		).text();
+		const html = renderToStaticMarkup(<RangeSlider max={4} />);
+
+		expect(html).toContain("start-0");
+		expect(html).toContain("rtl:translate-x-1/2");
+		expect(moduleRule(css, ".inline2")).toContain("inset-inline-start:");
+		expect(moduleRule(css, ".inline3")).toContain("inset-inline-start:");
+		expect(css).not.toMatch(/(?:^|\s)left:/m);
+		// Under RTL the thumb's self-offset must pull it the other way.
+		expect(moduleRule(css, ".inline3:dir(rtl)")).toContain(
+			"translate: calc(var(--range-slider-3-x) * -1)"
+		);
+	});
+
+	it("clips the fluid fill from the inline end under RTL", async () => {
+		const css = await Bun.file(
+			new URL("./range-slider-fluid.module.css", import.meta.url)
+		).text();
+
+		expect(moduleRule(css, ".inline1:dir(rtl)")).toContain(
+			"var(--range-slider-fluid-1-clip-path-rtl)"
+		);
+	});
 });

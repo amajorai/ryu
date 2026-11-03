@@ -20,6 +20,11 @@ export {
 	type PublishedMailAllowance,
 } from "./standalone-pricing-figures.ts";
 export {
+	ENGLISH_LIMIT_VALUES,
+	type LocalizedLimitValues,
+	localizedLimitValues,
+} from "./standalone-pricing-limits.ts";
+export {
 	ENGLISH_PRICING_FORMAT,
 	type PricingFormat,
 	pricingFormat,

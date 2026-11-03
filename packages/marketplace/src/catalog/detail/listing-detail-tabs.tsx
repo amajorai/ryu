@@ -17,6 +17,7 @@
 // BELOW it, not wrapped around a duplicate summary. Passing the node in keeps one
 // tab implementation rather than two that drift.
 
+import { useOptionalI18n } from "@ryu/i18n/react";
 import {
 	Tabs,
 	TabsContent,
@@ -142,12 +143,15 @@ export function ListingDetailTabs({
 	// "undocumented, unlicensed" — true of the card, and completely misleading
 	// about the listing. So no detail ⇒ no grade shown. Memoized so scrolling does
 	// not re-run every check per frame.
+	// runScorecard translates when it runs, so the active language's version is
+	// a dependency: switching languages or a late catalog load recomputes it.
+	const i18nVersion = useOptionalI18n()?.version;
 	const ownScorecard = useMemo(
 		() =>
 			detail && scorecardProp === undefined
 				? runScorecard(entry, detail)
 				: null,
-		[entry, detail, scorecardProp]
+		[entry, detail, scorecardProp, i18nVersion]
 	);
 	const scorecard = scorecardProp ?? ownScorecard;
 

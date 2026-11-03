@@ -37,6 +37,7 @@ import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
 import { useInputFocused } from "../core/InputFocusContext.tsx";
 import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
+import { errorText } from "../i18n/error-text.ts";
 import { tf } from "../i18n/translate.ts";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
@@ -130,7 +131,7 @@ export function AgentsTab({ active }: TabProps) {
 				}
 				setDetailError(
 					tf("Failed to load detail: {error}", {
-						error: nativeErrorMessage(err),
+						error: errorText(err),
 					})
 				);
 			})

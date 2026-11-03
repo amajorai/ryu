@@ -31,29 +31,41 @@ export interface SeasonStation {
 
 /** The season's words for the act layer. */
 export interface SeasonActWords {
-	/** The limit's words with a reset time ("Snowed in, back 15:10"). */
-	limitBack: string;
+	/** The limit's words with a reset time ("snowed in, back 15:10"). */
+	limitBack: (time: string) => string;
 	/** With no known reset time. */
-	limitNone: string;
+	readonly limitNone: string;
 	/** A villager plate's action suffix (non-asking agents). */
-	open: string;
+	readonly open: string;
 }
 
 export const SEASON_ACT_WORDS: Record<Season, SeasonActWords> = {
 	advent: {
-		limitBack: "snowed in, back",
-		limitNone: "snowed in for now",
-		open: "Open their conversation.",
+		limitBack: (time) => tr("snowed in, back {time}", { time }),
+		get limitNone() {
+			return tr("snowed in for now");
+		},
+		get open() {
+			return tr("Open their conversation.");
+		},
 	},
 	halloween: {
-		limitBack: "fogged in, back",
-		limitNone: "fogged in for now",
-		open: "Open their conversation.",
+		limitBack: (time) => tr("fogged in, back {time}", { time }),
+		get limitNone() {
+			return tr("fogged in for now");
+		},
+		get open() {
+			return tr("Open their conversation.");
+		},
 	},
 	"lunar-new-year": {
-		limitBack: "stall shut, back",
-		limitNone: "stall shut for now",
-		open: "Open their conversation.",
+		limitBack: (time) => tr("stall shut, back {time}", { time }),
+		get limitNone() {
+			return tr("stall shut for now");
+		},
+		get open() {
+			return tr("Open their conversation.");
+		},
 	},
 };
 
@@ -66,7 +78,7 @@ export const SEASON_ACT_WORDS: Record<Season, SeasonActWords> = {
 export function seasonLimit(season: Season): LimitText {
 	const words = SEASON_ACT_WORDS[season];
 	return (act, clearsAt) => {
-		const text = clearsAt ? `${words.limitBack} ${clearsAt}` : words.limitNone;
+		const text = clearsAt ? words.limitBack(clearsAt) : words.limitNone;
 		return limitIsLikely(act)
 			? text
 			: `${text.charAt(0).toUpperCase()}${text.slice(1)}`;

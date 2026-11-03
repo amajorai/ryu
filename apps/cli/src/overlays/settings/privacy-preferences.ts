@@ -73,7 +73,6 @@ const privacyPreferenceSchema = z.object({ value: z.json().optional() });
 type PreferenceWire = z.infer<typeof privacyPreferenceSchema>;
 type PrivacyPreferenceValue = PreferenceWire["value"];
 const privacyStringSchema = z.string();
-const privacyErrorSchema = z.instanceof(Error);
 export const testSpanResponseSchema = z.object({ endpoint: z.string() });
 export function requestPrivacyPreference(target: ApiTarget, path: string) {
 	return request(target, path, {}, appResponseValueSchema).then((raw) =>
@@ -130,13 +129,6 @@ export function parseContentMode(
 export function rawValue(wire: PreferenceWire): string | null {
 	const parsed = privacyStringSchema.safeParse(wire.value);
 	return parsed.success ? parsed.data : null;
-}
-
-export function errorMessage(
-	error: Parameters<typeof privacyErrorSchema.safeParse>[0]
-): string {
-	const parsed = privacyErrorSchema.safeParse(error);
-	return parsed.success ? parsed.data.message : String(error);
 }
 
 export function parseExpiry(raw: string | null): number {

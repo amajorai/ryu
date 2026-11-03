@@ -1,6 +1,10 @@
 import { ComputerIcon, GitBranchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import {
+	implementationFeatureLine,
+	implementationGroupLabel,
+} from "../implementation-labels.ts";
 import { surfaceLabel } from "../surface-labels.ts";
 import {
 	extensionSummaries,
@@ -87,9 +91,11 @@ export function SupportExtensionPanel({
 								className="min-w-0 rounded-lg bg-muted px-3 py-2"
 								key={extension.target}
 							>
-								<p className="font-medium text-sm">{extension.label}</p>
+								<p className="font-medium text-sm">
+									{implementationGroupLabel(tl, extension.label)}
+								</p>
 								<p className="mt-0.5 break-words text-muted-foreground text-xs">
-									{extension.features.join(" · ")}
+									{implementationFeatureLine(tl, extension.features)}
 								</p>
 							</li>
 						))}
@@ -109,9 +115,11 @@ export function SupportExtensionPanel({
 								className="min-w-0 rounded-lg bg-muted px-3 py-2"
 								key={location.layer}
 							>
-								<p className="font-medium text-sm">{location.label}</p>
+								<p className="font-medium text-sm">
+									{implementationGroupLabel(tl, location.label)}
+								</p>
 								<p className="mt-0.5 break-words text-muted-foreground text-xs">
-									{location.features.join(" · ")}
+									{implementationFeatureLine(tl, location.features)}
 								</p>
 							</li>
 						))}

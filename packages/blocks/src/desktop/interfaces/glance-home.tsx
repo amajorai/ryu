@@ -1,4 +1,4 @@
-import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
+import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -133,7 +133,7 @@ function UpcomingWidget({ distance, now, snapshot }: GlanceHomeProps) {
 				<ol className="flex flex-col gap-[0.4cqw]">
 					{shown.map((event) => {
 						const agent = agentById(snapshot, event.agentId);
-						const who = agent?.name ?? "Workflow";
+						const who = agent?.name ?? tr("Workflow");
 						return (
 							<li className="flex min-w-0 flex-col py-[1cqw]" key={event.id}>
 								<span

@@ -148,6 +148,9 @@ function addGroup(
 	groups.set(target, { features: cleanFeatures, label, target });
 }
 
+// The group and feature words below are stable English ids shared with the
+// server and Core builders; the panel translates them through
+// `implementation-labels.ts`, whose test reads this file for new words.
 function shellFeatures(
 	api: NonNullable<PluginCatalogDetail["apiSurface"]>
 ): string[] {

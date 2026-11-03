@@ -154,7 +154,7 @@ export function SidebarChatMessages({
 							<HoverCardContent
 								align="start"
 								className="w-72 max-w-[min(18rem,calc(100vw-2rem))]"
-								side="right"
+								side="inline-end"
 								sideOffset={10}
 								spacing="rail"
 							>

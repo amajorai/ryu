@@ -99,7 +99,10 @@ export function JournalToolbar({
 					<div className="ms-auto flex items-center gap-1">
 						{neighbors.position > 0 ? (
 							<span className="pe-2 text-muted-foreground text-xs tabular-nums">
-								{neighbors.position} of {countLabel(neighbors.total, "entry")}
+								{tl("{current} of {total}", {
+									current: neighbors.position,
+									total: countLabel(neighbors.total, "entry"),
+								})}
 							</span>
 						) : null}
 						<JournalIconButton

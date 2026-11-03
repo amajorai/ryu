@@ -14,6 +14,11 @@ import type {
 	ViewSpec,
 } from "../core/views.ts";
 import { viewSourceRowSchema } from "../core/views.ts";
+import {
+	type CliTranslator,
+	tf as cliTf,
+	tr as cliTr,
+} from "../i18n/translate.ts";
 
 export const MAX_ACTION_KEYS = 9;
 export const CELL_WIDTH_CAP = 20;
@@ -234,18 +239,32 @@ export function actionEntries(
 	return [];
 }
 
-/** The trailing hint text, matching the verb list each kind actually binds. */
-export function hintsFor(spec: ViewSpec, hasActions: boolean): string {
+/** The trailing hint text, matching the verb list each kind actually binds.
+ *  Key names stay literal; only the verbs are translated, and
+ *  `"{key} {action}"` lets a locale reorder them. */
+export function hintsFor(
+	spec: ViewSpec,
+	hasActions: boolean,
+	translator: Pick<CliTranslator, "tf" | "tr"> = { tf: cliTf, tr: cliTr }
+): string {
+	const { tf, tr } = translator;
+	const hint = (key: string, action: string): string =>
+		tf("{key} {action}", { action, key });
 	const parts: string[] = [];
 	if (spec.view === "list-detail" || spec.view === "data-table") {
-		parts.push("↑↓ move");
+		parts.push(hint("↑↓", tr("move")));
 	}
 	if (spec.view === "form") {
-		parts.push("↑↓ field", "e edit", "space toggle", "←→ option");
+		parts.push(
+			hint("↑↓", tr("field")),
+			hint("e", tr("edit")),
+			hint("space", tr("toggle")),
+			hint("←→", tr("option"))
+		);
 	}
 	if (hasActions) {
-		parts.push("1-9 run", "Enter primary");
+		parts.push(hint("1-9", tr("run")), hint("Enter", tr("primary")));
 	}
-	parts.push("r reload");
+	parts.push(hint("r", tr("reload")));
 	return `· ${parts.join(" · ")}`;
 }

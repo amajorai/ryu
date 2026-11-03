@@ -1,9 +1,8 @@
-import {
-	type ClockOptions,
-	clockLabel,
-	type InterfaceEvent,
-	type InterfaceSnapshot,
-	type InterfaceThread,
+import type {
+	ClockOptions,
+	InterfaceEvent,
+	InterfaceSnapshot,
+	InterfaceThread,
 } from "@ryuhq/protocol/interfaces";
 import { cloneElement, useMemo } from "react";
 import { CardRoom, type CardRoomActors } from "./card-table-diorama.tsx";
@@ -27,6 +26,7 @@ import { islandFor } from "./game3d-ground.tsx";
 import { IsoStage, type IsoView } from "./game3d-stage.tsx";
 import type { IsoInsets } from "./game3d-stage-framing.ts";
 import type { useVillagerLooks } from "./game3d-villager.tsx";
+import { clockLabel } from "./interface-act-time.ts";
 
 /**
  * The Card Table's room: the 3D card room (or, without WebGL, the flat

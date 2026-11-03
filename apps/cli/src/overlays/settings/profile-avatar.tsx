@@ -10,7 +10,8 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { tf } from "../../i18n/translate.ts";
+import { errorText } from "../../i18n/error-text.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 import {
 	securityMessageSuccessResponseSchema,
 	securitySessionResponseSchema,
@@ -65,7 +66,8 @@ export function ProfileAvatar({
 					throw new Error("Choose an image smaller than 5 MB.");
 				}
 				if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-					throw new Error("Choose a JPEG, PNG, or WebP image.");
+					// tr(): "WebP" reads as an identifier to the extractor's throw filter.
+					throw new Error(tr("Choose a JPEG, PNG, or WebP image."));
 				}
 				const form = new FormData();
 				form.append(
@@ -132,7 +134,7 @@ export function ProfileAvatar({
 				return;
 			}
 			const text = tf("Could not update profile photo: {error}", {
-				error: error instanceof Error ? error.message : String(error),
+				error: errorText(error),
 			});
 			setErrorMessage(text);
 			setMessage(text);

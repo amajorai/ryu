@@ -74,7 +74,7 @@ function RailButton({
 						</button>
 					}
 				/>
-				<TooltipContent side="right">{label}</TooltipContent>
+				<TooltipContent side="inline-end">{label}</TooltipContent>
 			</Tooltip>
 		</div>
 	);

@@ -30,6 +30,7 @@
   "every option needs a label": "ogni opzione richiede un'etichetta",
   "field \"{id}\" is listed twice": "il campo \"{id}\" è indicato due volte",
   "list-specific fields cannot be unique": "i campi specifici dell'elenco non possono essere univoci",
+  "more records referenced the removed options than can be changed in one request": "più record facevano riferimento alle opzioni rimosse di quanti se ne possano modificare in una sola richiesta",
   "no column is mapped to a field, so this import would write nothing": "nessuna colonna è associata a un campo, quindi questa importazione non scriverebbe nulla",
   "no field \"{title}\" on the \"{slug}\" object": "nessun campo \"{title}\" nell'oggetto \"{slug}\"",
   "no live record \"{id}\" on the target object": "nessun record attivo \"{id}\" nell'oggetto di destinazione",
@@ -53,5 +54,6 @@
   "this import has already been applied and cannot be remapped — its outcome is on the job": "questa importazione è già stata applicata e non può essere rimappata: il risultato è nel job",
   "this relation field has no target object configured": "questo campo di relazione non ha un oggetto di destinazione configurato",
   "two columns map to \"{name}\" — the second would overwrite the first": "due colonne sono mappate su «{name}»: la seconda sovrascriverebbe la prima",
-  "unknown object \"{reference}\"": "oggetto sconosciuto «{reference}»"
+  "unknown object \"{reference}\"": "oggetto sconosciuto «{reference}»",
+  "{affected} records still use the options being removed, over the {maxOptionMigrationRecords} that can be changed in one request — clear those values in bulk first, then remove the options": "{affected} record usano ancora le opzioni da rimuovere, oltre i {maxOptionMigrationRecords} modificabili in una sola richiesta: cancella prima quei valori in blocco, poi rimuovi le opzioni"
 }

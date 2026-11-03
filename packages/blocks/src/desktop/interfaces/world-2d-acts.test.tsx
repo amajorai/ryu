@@ -270,7 +270,7 @@ describe("world-2d useful state (text equivalent)", () => {
 			if (!act) {
 				throw new Error(name);
 			}
-			return actorAct(act, FIXTURE_NOW);
+			return actorAct(act, FIXTURE_NOW, "full", FIXTURE_CLOCK);
 		};
 		// One lamp per counted failure (Di's second: the nightly backup), a
 		// dim one per old failure, and none for an interruption.

@@ -455,7 +455,10 @@ async fn compact_hook_reentrancy_keeps_the_original_summary() {
     let convo = vec![("user".to_owned(), "hi".to_owned())];
     let original = "[Earlier conversation summary]\n- said hi".to_owned();
     let out = IN_COMPACT_HOOK
-        .scope((), compact_hooks::apply_compact_hooks(None, &convo, original.clone()))
+        .scope(
+            (),
+            compact_hooks::apply_compact_hooks(None, &convo, original.clone()),
+        )
         .await;
     assert_eq!(out, original);
 }

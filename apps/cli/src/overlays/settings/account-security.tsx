@@ -4,6 +4,7 @@ import { useKeyboard } from "@opentui/react";
 import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { useEffect, useRef, useState } from "react";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf } from "../../i18n/translate.ts";
 import {
 	type SecurityEmailChangeResponse,
@@ -76,9 +77,7 @@ export function AccountSecurity({
 		} catch (error) {
 			if (!controller.signal.aborted) {
 				setMessage(
-					tf("Could not complete action: {error}", {
-						error: error instanceof Error ? error.message : String(error),
-					})
+					tf("Could not complete action: {error}", { error: errorText(error) })
 				);
 			}
 		} finally {
@@ -124,7 +123,7 @@ export function AccountSecurity({
 		void read(controller.signal).catch((error) => {
 			if (!controller.signal.aborted) {
 				setMessage(
-					tf("Could not load security: {error}", { error: String(error) })
+					tf("Could not load security: {error}", { error: errorText(error) })
 				);
 			}
 		});

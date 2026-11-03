@@ -104,7 +104,7 @@ function RailAgentButton({
 							</button>
 						}
 					/>
-					<TooltipContent side="right">{agent.name}</TooltipContent>
+					<TooltipContent side="inline-end">{agent.name}</TooltipContent>
 				</Tooltip>
 			</ContextMenuTrigger>
 			<ContextMenuContent>

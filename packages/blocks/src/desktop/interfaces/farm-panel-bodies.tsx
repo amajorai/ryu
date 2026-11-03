@@ -97,7 +97,6 @@ export function PlotBody({
 }) {
 	const tl = useLiteralMessages();
 	const agent = plot?.agent ?? undefined;
-	const target = agent?.name ?? "an agent";
 	return (
 		<div className="min-h-0 flex-1 overflow-y-auto">
 			<div className="flex flex-col gap-6 p-4">
@@ -127,7 +126,11 @@ export function PlotBody({
 					<InterfaceComposer
 						agents={agents.length > 0 ? agents : undefined}
 						defaultAgentId={agent?.id}
-						label={tl("Prompt for {target}", { target })}
+						label={
+							agent
+								? tl("Prompt for {target}", { target: agent.name })
+								: tl("Prompt for an agent")
+						}
 						onSubmit={onPlant}
 						placeholder={
 							agent

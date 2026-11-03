@@ -8,7 +8,6 @@ import {
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
 import {
-	askKindWords,
 	type ClockOptions,
 	type InterfaceAsk,
 	type InterfaceAskChoice,
@@ -16,9 +15,10 @@ import {
 	type InterfaceSnapshot,
 	isSuggestion,
 	riskTagLabel,
-	waitLabel,
 } from "@ryuhq/protocol/interfaces";
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
+import { askKindWords } from "./interface-act-messages.ts";
+import { waitLabel } from "./interface-act-time.ts";
 import { isolateKeys, plainText } from "./interface-ask-card-core.ts";
 import { resolveReturnFocus } from "./interface-blocker-card.tsx";
 

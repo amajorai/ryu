@@ -79,7 +79,10 @@ export function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 		};
 		config[series.forecastKey] = {
 			color: seriesColor(index),
-			label: model.view === "total" ? "Forecast" : `${series.label} forecast`,
+			label:
+				model.view === "total"
+					? tl("Forecast")
+					: tl("{source} forecast", { source: series.label }),
 		};
 	});
 	const hasSelectedData = model.series.some(

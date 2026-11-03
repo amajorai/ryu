@@ -5,11 +5,11 @@ import {
 	type InterfaceThread,
 	type ThreadStatus,
 	threadStatus,
-	waitLabel,
 } from "@ryuhq/protocol/interfaces";
 import { createContext, useContext } from "react";
 import type { CardVerdict } from "./card-table-model.ts";
 import { SuitGlyph } from "./card-table-pieces.tsx";
+import { waitLabel } from "./interface-act-time.ts";
 import {
 	agentById,
 	compactAge,

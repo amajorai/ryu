@@ -357,7 +357,10 @@ fn a_cut_off_or_unclosed_json_reply_is_malformed_not_prose() {
         classify_reply(&reply(r#"{"flagged": true, "reason": "override"#), true),
         JudgeReply::Malformed("no_verdict")
     );
-    assert_eq!(classify_reply(&reply("Paris"), true), JudgeReply::Unparseable);
+    assert_eq!(
+        classify_reply(&reply("Paris"), true),
+        JudgeReply::Unparseable
+    );
 }
 
 // Type slips from a small judge keep their meaning instead of dropping a flag.

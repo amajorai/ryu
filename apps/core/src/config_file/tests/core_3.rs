@@ -5,24 +5,54 @@
 use crate::config_file::{friendly_path_to_env_name, is_reserved_or_secret};
 
 const CASES: &[(&str, &str)] = &[
-    ("sandbox.daytonaTimeoutSecs", "RYU_SANDBOX_DAYTONA_TIMEOUT_SECS"),
+    (
+        "sandbox.daytonaTimeoutSecs",
+        "RYU_SANDBOX_DAYTONA_TIMEOUT_SECS",
+    ),
     ("sandbox.daytonaVcpu", "RYU_SANDBOX_DAYTONA_VCPU"),
     ("sandbox.dockerBinary", "RYU_SANDBOX_DOCKER_BINARY"),
     ("sandbox.dockerDetectSecs", "RYU_SANDBOX_DOCKER_DETECT_SECS"),
     ("sandbox.dockerImage", "RYU_SANDBOX_DOCKER_IMAGE"),
     ("sandbox.localEnable", "RYU_SANDBOX_LOCAL_ENABLE"),
-    ("sandbox.microsandboxBinary", "RYU_SANDBOX_MICROSANDBOX_BINARY"),
-    ("sandbox.microsandboxDetectSecs", "RYU_SANDBOX_MICROSANDBOX_DETECT_SECS"),
-    ("sandbox.microsandboxImage", "RYU_SANDBOX_MICROSANDBOX_IMAGE"),
-    ("sandbox.mxcAllowDaclMutation", "RYU_SANDBOX_MXC_ALLOW_DACL_MUTATION"),
+    (
+        "sandbox.microsandboxBinary",
+        "RYU_SANDBOX_MICROSANDBOX_BINARY",
+    ),
+    (
+        "sandbox.microsandboxDetectSecs",
+        "RYU_SANDBOX_MICROSANDBOX_DETECT_SECS",
+    ),
+    (
+        "sandbox.microsandboxImage",
+        "RYU_SANDBOX_MICROSANDBOX_IMAGE",
+    ),
+    (
+        "sandbox.mxcAllowDaclMutation",
+        "RYU_SANDBOX_MXC_ALLOW_DACL_MUTATION",
+    ),
     ("sandbox.mxcBinary", "RYU_SANDBOX_MXC_BINARY"),
     ("sandbox.mxcDetectSecs", "RYU_SANDBOX_MXC_DETECT_SECS"),
-    ("sandbox.opensandboxBinary", "RYU_SANDBOX_OPENSANDBOX_BINARY"),
-    ("sandbox.opensandboxDetectSecs", "RYU_SANDBOX_OPENSANDBOX_DETECT_SECS"),
+    (
+        "sandbox.opensandboxBinary",
+        "RYU_SANDBOX_OPENSANDBOX_BINARY",
+    ),
+    (
+        "sandbox.opensandboxDetectSecs",
+        "RYU_SANDBOX_OPENSANDBOX_DETECT_SECS",
+    ),
     ("sandbox.opensandboxImage", "RYU_SANDBOX_OPENSANDBOX_IMAGE"),
-    ("sandbox.opensandboxTimeout", "RYU_SANDBOX_OPENSANDBOX_TIMEOUT"),
-    ("sandbox.singularityBinary", "RYU_SANDBOX_SINGULARITY_BINARY"),
-    ("sandbox.singularityDetectSecs", "RYU_SANDBOX_SINGULARITY_DETECT_SECS"),
+    (
+        "sandbox.opensandboxTimeout",
+        "RYU_SANDBOX_OPENSANDBOX_TIMEOUT",
+    ),
+    (
+        "sandbox.singularityBinary",
+        "RYU_SANDBOX_SINGULARITY_BINARY",
+    ),
+    (
+        "sandbox.singularityDetectSecs",
+        "RYU_SANDBOX_SINGULARITY_DETECT_SECS",
+    ),
     ("sandbox.singularityImage", "RYU_SANDBOX_SINGULARITY_IMAGE"),
     ("sandbox.sshBinary", "RYU_SANDBOX_SSH_BINARY"),
     ("sd.model", "RYU_SD_MODEL"),
@@ -45,24 +75,45 @@ const CASES: &[(&str, &str)] = &[
     ("tool.execMemoryMb", "RYU_TOOL_EXEC_MEMORY_MB"),
     ("trace.maxRows", "RYU_TRACE_MAX_ROWS"),
     ("trace.retentionDays", "RYU_TRACE_RETENTION_DAYS"),
-    ("treg.catalogCacheTtlSecs", "RYU_TREG_CATALOG_CACHE_TTL_SECS"),
+    (
+        "treg.catalogCacheTtlSecs",
+        "RYU_TREG_CATALOG_CACHE_TTL_SECS",
+    ),
     ("treg.catalogUrl", "RYU_TREG_CATALOG_URL"),
     ("voice.ttsEngine", "RYU_TTS_ENGINE"),
     ("vault.auditFailClosed", "RYU_VAULT_AUDIT_FAIL_CLOSED"),
     ("vault.auditRetentionDays", "RYU_VAULT_AUDIT_RETENTION_DAYS"),
     ("vault.brokerBurst", "RYU_VAULT_BROKER_BURST"),
-    ("vault.brokerLogMaxAgeHours", "RYU_VAULT_BROKER_LOG_MAX_AGE_HOURS"),
+    (
+        "vault.brokerLogMaxAgeHours",
+        "RYU_VAULT_BROKER_LOG_MAX_AGE_HOURS",
+    ),
     ("vault.brokerLogMaxRows", "RYU_VAULT_BROKER_LOG_MAX_ROWS"),
-    ("vault.brokerMaxRequestBytes", "RYU_VAULT_BROKER_MAX_REQUEST_BYTES"),
-    ("vault.brokerNetworkAllowlist", "RYU_VAULT_BROKER_NETWORK_ALLOWLIST"),
+    (
+        "vault.brokerMaxRequestBytes",
+        "RYU_VAULT_BROKER_MAX_REQUEST_BYTES",
+    ),
+    (
+        "vault.brokerNetworkAllowlist",
+        "RYU_VAULT_BROKER_NETWORK_ALLOWLIST",
+    ),
     ("vault.brokerRps", "RYU_VAULT_BROKER_RPS"),
-    ("vault.externalAllowLoopback", "RYU_VAULT_EXTERNAL_ALLOW_LOOPBACK"),
-    ("vault.externalAllowPrivate", "RYU_VAULT_EXTERNAL_ALLOW_PRIVATE"),
+    (
+        "vault.externalAllowLoopback",
+        "RYU_VAULT_EXTERNAL_ALLOW_LOOPBACK",
+    ),
+    (
+        "vault.externalAllowPrivate",
+        "RYU_VAULT_EXTERNAL_ALLOW_PRIVATE",
+    ),
     ("vault.loginRatePerMin", "RYU_VAULT_LOGIN_RATE_PER_MIN"),
     ("vault.shared", "RYU_VAULT_SHARED"),
     ("vault.sharedCacheSecs", "RYU_VAULT_SHARED_CACHE_SECS"),
     ("vault.sharedStaleSecs", "RYU_VAULT_SHARED_STALE_SECS"),
-    ("vault.transitSoftDeleteDays", "RYU_VAULT_TRANSIT_SOFT_DELETE_DAYS"),
+    (
+        "vault.transitSoftDeleteDays",
+        "RYU_VAULT_TRANSIT_SOFT_DELETE_DAYS",
+    ),
     ("vector.cacheMb", "RYU_VECTOR_CACHE_MB"),
     ("vllm.model", "RYU_VLLM_MODEL"),
 ];

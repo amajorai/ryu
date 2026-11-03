@@ -11,7 +11,6 @@
   "No visible chats yet": "Nenhum chat visível ainda",
   "Ready to send to {targetCount, plural, one {{targetLabel} chat} other {{targetLabel} chats}}.": "Pronto para enviar para {targetCount, plural, one {{targetLabel} chat} other {{targetLabel} chats}}.",
   "Refresh chats": "Atualizar chats",
-  "Running": "Em execução",
   "Running chats will continue with this instruction after their current turn.": "Os chats em execução continuarão com esta instrução após o turno atual.",
   "Select chats, write one message, and review delivery before sending.": "Selecione chats, escreva uma mensagem e revise a entrega antes de enviar.",
   "Select {chatTitle}": "Selecionar {chatTitle}",

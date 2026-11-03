@@ -1,10 +1,9 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
-import {
-	blockerKindWord,
-	type InterfaceActivityKind,
-	type InterfaceAgentAct,
-	type InterfaceSnapshot,
+import type {
+	InterfaceActivityKind,
+	InterfaceAgentAct,
+	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import {
 	type ActSpots,
@@ -28,6 +27,7 @@ import type {
 	VillagerSpec,
 	VillagerTool,
 } from "./game3d-villager.tsx";
+import { blockerKindWord } from "./interface-act-messages.ts";
 import { SKIN } from "./warehouse-acts-props.tsx";
 import { QUEUE_BUBBLE, youPoints } from "./warehouse-acts-queue.ts";
 import {

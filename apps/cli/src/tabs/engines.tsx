@@ -34,6 +34,7 @@ import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
 import { useInputFocused } from "../core/InputFocusContext.tsx";
 import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
+import { errorText } from "../i18n/error-text.ts";
 import { tf } from "../i18n/translate.ts";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
@@ -141,7 +142,7 @@ export function EnginesTab({ active }: TabProps) {
 			})
 			.catch((err) =>
 				notify(
-					tf("activate failed: {error}", { error: nativeErrorMessage(err) }),
+					tf("activate failed: {error}", { error: errorText(err) }),
 					"error"
 				)
 			);

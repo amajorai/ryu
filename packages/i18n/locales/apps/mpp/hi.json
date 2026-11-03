@@ -120,7 +120,6 @@
   "This payment attempt cannot be retried.": "इस भुगतान प्रयास को दोबारा नहीं किया जा सकता।",
   "This payment challenge already has a receipt.": "इस भुगतान अनुरोध के लिए पहले से एक रसीद है।",
   "To": "को",
-  "Tool": "टूल",
   "Trusted origins": "विश्वसनीय ऑरिजिन",
   "Unsupported HTTP method.": "असमर्थित HTTP मेथड।",
   "Use at most six decimal places.": "अधिकतम छह दशमलव स्थानों का उपयोग करें।",

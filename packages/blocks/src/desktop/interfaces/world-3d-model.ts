@@ -1,7 +1,6 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
-	askBubble,
 	compareAsks,
 	type InterfaceAgent,
 	type InterfaceAgentAct,
@@ -13,6 +12,7 @@ import {
 	type WorldEntity,
 	type WorldPoint,
 } from "@ryuhq/protocol/interfaces";
+import { askBubble } from "./interface-act-messages.ts";
 
 /**
  * View-model logic for the 3D world's chrome: which thread of an agent is
@@ -236,8 +236,8 @@ export function spokenLine(
 	const [latest] = threads;
 	if (!latest) {
 		return agent.status === "working"
-			? "Working on something right now."
-			: "What should we work on?";
+			? tr("Working on something right now.")
+			: tr("What should we work on?");
 	}
 	const title = latest.title || tr("our last conversation");
 	if (latest.running) {
@@ -263,7 +263,7 @@ export function actLine(
 		case "working":
 			return privacy === "full" && act.bubble?.text
 				? `${act.bubble.text}.`
-				: "Working on something right now.";
+				: tr("Working on something right now.");
 		case "delivering": {
 			const thread = threads.find((item) => item.id === act.threadId);
 			const summary = privacy === "full" ? thread?.outcome?.summary : null;

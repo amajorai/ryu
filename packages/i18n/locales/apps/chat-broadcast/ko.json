@@ -11,7 +11,6 @@
   "No visible chats yet": "아직 표시되는 채팅이 없습니다",
   "Ready to send to {targetCount, plural, one {{targetLabel} chat} other {{targetLabel} chats}}.": "{targetCount, plural, other {{targetLabel}개 채팅}}에 보낼 준비가 되었습니다.",
   "Refresh chats": "채팅 새로 고침",
-  "Running": "실행 중",
   "Running chats will continue with this instruction after their current turn.": "실행 중인 채팅은 현재 턴이 끝난 후 이 지시로 계속 진행합니다.",
   "Select chats, write one message, and review delivery before sending.": "채팅을 선택하고 메시지 하나를 작성한 뒤 보내기 전에 전달 내용을 검토하세요.",
   "Select {chatTitle}": "{chatTitle} 선택",

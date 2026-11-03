@@ -158,7 +158,12 @@ export function AcpRuntimeSection({
 
 	const autoLimit = config.auto_max_parallel_agents;
 	const parallelItems = [
-		{ value: "auto", label: `Auto${autoLimit ? ` (${autoLimit})` : ""}` },
+		{
+			value: "auto",
+			label: autoLimit
+				? tl("Auto ({limit})", { limit: String(autoLimit) })
+				: tl("Auto"),
+		},
 		...PARALLEL_OPTIONS.map((value) => ({
 			value: String(value),
 			label: String(value),

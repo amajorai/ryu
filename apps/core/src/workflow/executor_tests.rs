@@ -2086,7 +2086,7 @@ async fn fail_run_raises_run_failed_without_affecting_the_failure() {
         store::load_run(&leaf_id).expect("leaf").status,
         RunStatus::Failed
     );
-    let emitted = crate::sidecar::event_subscribers::test_capture::emitted_for(&leaf_id);
+    let emitted = crate::run_failures::tests::emitted_eventually(&leaf_id).await;
     assert_eq!(emitted.len(), 1, "{emitted:?}");
     assert_eq!(
         emitted[0]["kind"],

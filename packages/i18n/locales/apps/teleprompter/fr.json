@@ -55,7 +55,6 @@
   "The recording has no audio data.": "L’enregistrement ne contient aucune donnée audio.",
   "The recording is not a WAV file.": "L’enregistrement n’est pas un fichier WAV.",
   "Use auto-scroll": "Utiliser le défilement automatique",
-  "Voice": "Voix",
   "Voice following isn't available in this window. Open Teleprompter in Ryu Desktop or Island, or switch to auto-scroll.": "Le suivi vocal n’est pas disponible dans cette fenêtre. Ouvrez Teleprompter dans Ryu Desktop ou Island, ou passez au défilement automatique.",
   "Write or paste what you want to say.": "Écrivez ou collez ce que vous voulez dire.",
   "{wordCount} words · about {speakingTime} at {wordsPerMinute} words per minute. Text in [brackets] is shown as a cue and never needs to be spoken.": "{wordCount} mots · environ {speakingTime} à {wordsPerMinute} mots par minute. Le texte entre [crochets] s’affiche comme repère et n’a jamais besoin d’être prononcé.",

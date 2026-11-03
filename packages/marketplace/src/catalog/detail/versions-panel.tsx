@@ -1,5 +1,7 @@
 import { Download01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { activeLocale } from "@ryu/i18n/core";
+import { formatByteSize } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
@@ -112,8 +114,13 @@ export function VersionSnapshotRow({
 				})
 			: null,
 		snapshot.readme
-			? `README: ${Math.round(snapshot.readme.length / 100) / 10}k chars`
-			: "No README at this tag",
+			? tl("README: {size}", {
+					size: formatByteSize(
+						new TextEncoder().encode(snapshot.readme).length,
+						activeLocale()
+					),
+				})
+			: tl("No README at this tag"),
 	].filter((fact): fact is string => Boolean(fact));
 
 	return (

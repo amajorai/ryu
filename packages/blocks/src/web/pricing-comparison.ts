@@ -303,9 +303,21 @@ export function comparisonSections(
 					id: "people",
 					label: "People included",
 					values: {
-						...catalogRow(() => "1 person", "Custom"),
-						teams: `${TEAMS_MIN_SEATS}–${TEAMS_MAX_SEATS} seats`,
-						business: `${BUSINESS_INCLUDED_SEATS}–${TEAMS_MAX_SEATS} seats`,
+						...catalogRow(
+							() =>
+								tl("{count, plural, one {# person} other {# people}}", {
+									count: 1,
+								}),
+							"Custom"
+						),
+						teams: tl("{min}–{max} seats", {
+							min: TEAMS_MIN_SEATS,
+							max: TEAMS_MAX_SEATS,
+						}),
+						business: tl("{min}–{max} seats", {
+							min: BUSINESS_INCLUDED_SEATS,
+							max: TEAMS_MAX_SEATS,
+						}),
 					},
 				},
 				{

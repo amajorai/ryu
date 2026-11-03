@@ -1,5 +1,5 @@
 //! Claude Code gateway-routing toggle (subscription-preserving egress
-//! governance).
+//! governance) and process entrypoint labeling for Ryu-spawned runs.
 //!
 //! Claude Code (`acp:claude`) speaks the Anthropic Messages wire format and, on a
 //! Pro/Max **subscription**, authenticates with the user's own OAuth bearer — not
@@ -22,6 +22,15 @@
 //! Mirrors [`crate::composio_auth`]: a process-global flag seeded from the
 //! `claude-gateway-routing` preference at startup and on change, read
 //! synchronously on the (sync) spawn path.
+
+mod entrypoint;
+
+#[cfg(test)]
+pub use entrypoint::DEFAULT as DEFAULT_CLAUDE_CODE_ENTRYPOINT;
+pub use entrypoint::{
+    apply_to_provider_cli_command, config_dir_from_env, process_config_dir,
+    resolve as resolve_entrypoint, ENV_VAR as CLAUDE_CODE_ENTRYPOINT_ENV,
+};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 

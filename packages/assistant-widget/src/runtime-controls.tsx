@@ -114,7 +114,7 @@ function SettingsChoice({
 		<button
 			aria-checked={checked}
 			className={cn(
-				"flex min-h-8 w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-sm outline-none transition-colors duration-(--duration-fast)",
+				"flex min-h-8 w-full items-start gap-2 rounded-lg px-2 py-1.5 text-start text-sm outline-none transition-colors duration-(--duration-fast)",
 				"hover:bg-foreground/10 focus-visible:bg-foreground/10 disabled:pointer-events-none disabled:opacity-50"
 			)}
 			disabled={disabled}
@@ -202,7 +202,7 @@ export function RuntimeSettingsMenu({
 				<>
 					<Separator className="mx-2 my-1 w-auto" />
 					<button
-						className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm outline-none transition-colors duration-(--duration-fast) hover:bg-foreground/10 focus-visible:bg-foreground/10 disabled:pointer-events-none disabled:opacity-50"
+						className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-sm outline-none transition-colors duration-(--duration-fast) hover:bg-foreground/10 focus-visible:bg-foreground/10 disabled:pointer-events-none disabled:opacity-50"
 						disabled={busy}
 						onClick={onDisconnect}
 						type="button"
@@ -356,7 +356,7 @@ export function RuntimeSetupPrompt({
 	if (mode === "browser") {
 		return (
 			<div
-				className="flex flex-col gap-3 p-3 text-left"
+				className="flex flex-col gap-3 p-3 text-start"
 				data-testid="assistant-runtime-setup"
 			>
 				<div className="flex flex-col gap-1">
@@ -384,7 +384,7 @@ export function RuntimeSetupPrompt({
 
 	return (
 		<form
-			className="flex flex-col gap-3 p-3 text-left"
+			className="flex flex-col gap-3 p-3 text-start"
 			data-testid="assistant-runtime-setup"
 			onSubmit={onConnect}
 		>

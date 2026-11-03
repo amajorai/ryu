@@ -10,13 +10,32 @@ import { PRODUCT_NAV_GROUPS } from "./data/product-realms.ts";
 import {
 	DOCS_URL,
 	PLAN_LINKS,
+	resourceCategories,
 	resources,
 	resourcesByCategory,
 } from "./data/resources.tsx";
 
+// Each test renders on /marketplace unless it sets another route first.
+let currentPathname = "/marketplace";
 mock.module("next/navigation", () => ({
-	usePathname: () => "/marketplace",
+	usePathname: () => currentPathname,
 }));
+
+function renderOn(pathname: string): string {
+	currentPathname = pathname;
+	try {
+		return renderToStaticMarkup(createElement(Header));
+	} finally {
+		currentPathname = "/marketplace";
+	}
+}
+
+function triggerTags(html: string): string[] {
+	return Array.from(
+		html.matchAll(/<button[^>]*data-slot="navigation-menu-trigger"[^>]*>/g),
+		(match) => match[0]
+	);
+}
 
 const { default: blurStyles } = await import("./progressive-blur.module.css");
 const { default: Header } = await import("./header.tsx");
@@ -66,12 +85,67 @@ test("top-bar links are full pills the size of the menu triggers", () => {
 	expect(enterprise).toContain("px-3");
 });
 
+function anchorTag(html: string, href: string): string {
+	const escaped = href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return html.match(new RegExp(`<a[^>]*href="${escaped}"[^>]*>`))?.[0] ?? "";
+}
+
+test("the top-bar Docs link hides below lg so the bar stays one row at md", () => {
+	const html = renderToStaticMarkup(createElement(Header));
+	const docs = anchorTag(html, DOCS_URL);
+
+	expect(docs).not.toBe("");
+	const classes = (docs.match(/class="([^"]*)"/)?.[1] ?? "").split(" ");
+	expect(classes).toContain("hidden");
+	expect(classes).toContain("lg:inline-flex");
+	// The plain display class would override `hidden`; it must be merged away.
+	expect(classes).not.toContain("inline-flex");
+});
+
+test("Docs stays reachable below lg through the Resources menu", () => {
+	const learn = resourcesByCategory("Learn");
+	expect(learn.map((resource) => resource.href)).toContain(DOCS_URL);
+});
+
+test("no other top-bar link carries the lg-only visibility", () => {
+	const html = renderToStaticMarkup(createElement(Header));
+	const enterprise = anchorTag(html, "/enterprise");
+
+	expect(enterprise).toContain("inline-flex");
+	expect(enterprise).not.toContain("lg:inline-flex");
+	expect(enterprise).not.toMatch(/class="([^"]* )?hidden[ "]/);
+	expect(html.match(/lg:inline-flex/g)).toHaveLength(
+		// The Docs link plus the Research Preview badge, which was lg-only before.
+		2
+	);
+	// Portal links render as given: the flag never leaks onto them.
+	const portal = renderToStaticMarkup(
+		createElement(Header, {
+			links: [{ to: "/console/billing", label: "Billing" }],
+			variant: "portal",
+		})
+	);
+	expect(anchorTag(portal, "/console/billing")).not.toContain("lg:inline-flex");
+});
+
+test("the md+ actions block keeps its content width instead of spilling over the nav", () => {
+	const html = renderToStaticMarkup(
+		createElement(Header, {
+			userMenu: createElement("span", null, "Account actions"),
+		})
+	);
+	const actions =
+		html.match(/<div class="([^"]*)">(?:(?!<div).)*Account actions/)?.[1] ?? "";
+
+	expect(actions.split(" ")).toEqual(
+		expect.arrayContaining(["hidden", "md:flex", "flex-1", "min-w-max"])
+	);
+	expect(actions.split(" ")).not.toContain("min-w-0");
+});
+
 test("on /marketplace only the Products trigger is active", () => {
 	const html = renderToStaticMarkup(createElement(Header));
-	const triggers = Array.from(
-		html.matchAll(/<button[^>]*data-slot="navigation-menu-trigger"[^>]*>/g),
-		(match) => match[0]
-	);
+	const triggers = triggerTags(html);
 
 	expect(triggers).toHaveLength(2);
 	expect(triggers[0]).toContain('data-active="true"');
@@ -91,6 +165,44 @@ test("resources menu keeps three small groups and leaves Pricing and Marketplace
 	expect(hrefs).not.toContain("/marketplace");
 	expect(hrefs).not.toContain("/subscriptions");
 	expect(PLAN_LINKS.map((link) => link.href)).toEqual(["/pricing", "/gifts"]);
+});
+
+test("Learn swaps Help Center for Knowledge Base and the menu keeps no Company group", () => {
+	const learn = resourcesByCategory("Learn");
+	expect(learn.map((resource) => resource.label)).toEqual([
+		"Docs",
+		"Academy",
+		"Certifications",
+		"Knowledge Base",
+	]);
+	const knowledgeBase = learn.at(-1);
+	expect(knowledgeBase?.href).toBe("/knowledge-base");
+	expect(knowledgeBase?.external).toBeUndefined();
+	expect(knowledgeBase?.description.length).toBeGreaterThan(0);
+	// Help Center stays reachable from the footer, not from this menu.
+	expect(resources.map((resource) => resource.href)).not.toContain("/help");
+	// Three groups after Plans: Company pages live in the footer and the
+	// mobile Resources sheet only.
+	expect(resourceCategories).toEqual(["Learn", "Updates", "Community"]);
+	for (const href of ["/about", "/careers", "/press", "/events"]) {
+		expect(resources.map((resource) => resource.href)).not.toContain(href);
+	}
+});
+
+test("the Resources trigger is active on the Knowledge Base and company pages", () => {
+	for (const pathname of [
+		"/knowledge-base",
+		"/about",
+		"/careers",
+		"/press",
+		"/events",
+	]) {
+		const [products, resourcesTrigger] = triggerTags(renderOn(pathname));
+		expect(products).not.toContain('data-active="true"');
+		expect(resourcesTrigger).toContain('data-active="true"');
+	}
+	const [, resourcesOnHome] = triggerTags(renderOn("/"));
+	expect(resourcesOnHome).not.toContain('data-active="true"');
 });
 
 test("transparent marketing header feathers over the landing visual", () => {

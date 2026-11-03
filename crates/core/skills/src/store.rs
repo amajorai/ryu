@@ -367,7 +367,7 @@ mod legacy;
 
 #[cfg(test)]
 use legacy::import_legacy_skill_versions_in;
-pub use legacy::{LegacyImportReport, import_legacy_skill_versions, legacy_skill_versions_pending};
+pub use legacy::{import_legacy_skill_versions, legacy_skill_versions_pending, LegacyImportReport};
 
 /// List a skill's saved versions, newest first (metadata only).
 pub fn list_skill_versions(skill_id: &str) -> std::io::Result<Vec<SkillVersionMeta>> {

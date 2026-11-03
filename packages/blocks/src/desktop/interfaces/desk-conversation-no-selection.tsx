@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -27,7 +28,7 @@ function needsYouPhrase(count: number, tl: LiteralMessage): string {
 /** The empty pane's quieter second line: what to do next. */
 function noSelectionDetail(empty: boolean, hint: DeskNeedsYouHint): string {
 	if (empty) {
-		return "Conversations with your agents are listed here.";
+		return tr("Conversations with your agents are listed here.");
 	}
 	if (hint.scope !== "view" && hint.count > 0) {
 		return "Nothing in this view is waiting on you.";
@@ -43,11 +44,14 @@ function noSelectionCopy(
 	tl: LiteralMessage
 ): string {
 	if (empty) {
-		return "Start a conversation with any agent";
+		return tl("Start a conversation with any agent");
 	}
 	if (hint.scope === "view" && hint.count > 0) {
 		return viewLabel
-			? `${needsYouPhrase(hint.count, tl)} in ${viewLabel}`
+			? tl(
+					"{count, plural, one {{countLabel} conversation needs you in {view}} other {{countLabel} conversations need you in {view}}}",
+					{ count: hint.count, countLabel: String(hint.count), view: viewLabel }
+				)
 			: needsYouPhrase(hint.count, tl);
 	}
 	if (hint.count > 0) {
@@ -56,7 +60,7 @@ function noSelectionCopy(
 			{ count: hint.count, countLabel: String(hint.count) }
 		);
 	}
-	return "Select a conversation to read it";
+	return tr("Select a conversation to read it");
 }
 
 /** Statuses the queue overview counts, most urgent first. */

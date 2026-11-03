@@ -16,6 +16,7 @@ import {
 	VncCanvas,
 	type VncConnectionStatus,
 } from "@ryu/blocks/session-box/vnc-canvas.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { requestWebSocketTicket } from "@ryuhq/core-client/client.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -50,6 +51,7 @@ export function desktopWsUrl(
 }
 
 export function DesktopStreamPanel({ active = true }: { active?: boolean }) {
+	const tl = useLiteralMessages();
 	const { apps } = useApps();
 	const { agents } = useAgents();
 	const node = useActiveNode();
@@ -172,7 +174,7 @@ export function DesktopStreamPanel({ active = true }: { active?: boolean }) {
 					}
 					onStatusChange={(next) => setStatus(next)}
 					reconnectDelaysMs={NO_AUTOMATIC_RECONNECT}
-					title={`${node.name || "Remote desktop"} · ${selectedAgent?.name ?? selectedAgentId}`}
+					title={`${node.name || tl("Remote desktop")} · ${selectedAgent?.name ?? selectedAgentId}`}
 				/>
 			</div>
 		</div>

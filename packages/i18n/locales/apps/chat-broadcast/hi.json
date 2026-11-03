@@ -11,7 +11,6 @@
   "No visible chats yet": "अभी तक कोई दिखने वाली चैट नहीं",
   "Ready to send to {targetCount, plural, one {{targetLabel} chat} other {{targetLabel} chats}}.": "{targetCount, plural, one {{targetLabel} चैट} other {{targetLabel} चैट}} पर भेजने के लिए तैयार।",
   "Refresh chats": "चैट रीफ़्रेश करें",
-  "Running": "चल रहा है",
   "Running chats will continue with this instruction after their current turn.": "चल रही चैट अपने मौजूदा टर्न के बाद इस निर्देश के साथ जारी रहेंगी।",
   "Select chats, write one message, and review delivery before sending.": "चैट चुनें, एक संदेश लिखें और भेजने से पहले डिलीवरी की समीक्षा करें।",
   "Select {chatTitle}": "{chatTitle} चुनें",

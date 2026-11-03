@@ -1,12 +1,11 @@
 import { translate as tr } from "@ryu/i18n/lite";
 /* eslint-disable react/no-unknown-property */
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
-import {
-	type ClockOptions,
-	clockLabel,
-	type InterfaceActivityKind,
-	type InterfaceAgentAct,
-	type InterfaceSnapshot,
+import type {
+	ClockOptions,
+	InterfaceActivityKind,
+	InterfaceAgentAct,
+	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
 import { besideStation, stationLayoutFor } from "./arcade-acts-layout.ts";
 import { ARCADE_3D } from "./arcade-palette.ts";
@@ -31,6 +30,7 @@ import { LIFE_FACE_CAMERA, type LifePaths } from "./game3d-life.ts";
 import { type PipSkin, queuePlateText } from "./game3d-meters.tsx";
 import type { Vec3 } from "./game3d-palette.ts";
 import type { MemberLooks, VillagerSpec } from "./game3d-villager.tsx";
+import { clockLabel } from "./interface-act-time.ts";
 
 export {
 	ARCADE_STATION_LAYOUT,

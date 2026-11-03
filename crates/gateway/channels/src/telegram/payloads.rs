@@ -3,6 +3,10 @@
 
 use super::*;
 
+mod guest_locale;
+#[cfg(test)]
+mod tests;
+
 /// The thread tag for a message, if it arrived inside one.
 ///
 /// A direct-messages topic and a forum topic are DIFFERENT API parameters, so
@@ -184,17 +188,40 @@ pub(super) fn commands_payload(cmds: &[ChannelCommand]) -> Value {
     })
 }
 
+/// One `setMyCommands` payload per catalog language, each with its Telegram
+/// `language_code` (`pt-BR` is `pt`, `zh-CN` is `zh`). Telegram shows a user the
+/// menu for their app language and the default one otherwise.
+pub(super) fn localized_commands_payloads(cmds: &[ChannelCommand]) -> Vec<(String, Value)> {
+    crate::i18n::commands::telegram_menus(cmds)
+        .into_iter()
+        .map(|(language_code, menu)| {
+            let mut payload = commands_payload(&menu);
+            payload["language_code"] = json!(language_code);
+            (language_code, payload)
+        })
+        .collect()
+}
+
 /// `answerGuestQuery` payload: one `InlineQueryResultArticle` carrying the reply.
 ///
 /// The result `id` is a short constant rather than the query id — it only has to
 /// be unique within this answer, and `InlineQueryResult.id` is capped at 64 bytes.
+///
+/// The title is in the guest's Telegram app language, which [`guest_inbound`]
+/// recorded for this query (English when Telegram reported none).
 pub(super) fn guest_reply_payload(query_id: &str, text: &str) -> Value {
+    let language = guest_locale::take(query_id).unwrap_or_default();
+    let title = crate::i18n::render(
+        &language,
+        crate::i18n::messages::TELEGRAM_GUEST_REPLY_TITLE_MESSAGE,
+        &[],
+    );
     json!({
         "guest_query_id": query_id,
         "result": {
             "type": "article",
             "id": "reply",
-            "title": "Reply",
+            "title": title,
             "input_message_content": { "message_text": text },
         },
     })
@@ -218,6 +245,9 @@ pub(super) fn guest_reply_payload(query_id: &str, text: &str) -> Value {
 pub(super) fn guest_inbound(message: &Message) -> Option<InboundMessage> {
     let query_id = message.guest_query_id.as_deref()?;
     let key = format!("{GUEST_KEY_PREFIX}{query_id}");
+    if let Some(language) = sender_locale(message) {
+        guest_locale::remember(query_id, &language);
+    }
     let text = message
         .text
         .clone()

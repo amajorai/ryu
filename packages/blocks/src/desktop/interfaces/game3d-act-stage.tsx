@@ -6,7 +6,7 @@ import type {
 	InterfaceAgentAct,
 	InterfaceSnapshot,
 } from "@ryuhq/protocol/interfaces";
-import { clockLabel, threadClaims } from "@ryuhq/protocol/interfaces";
+import { threadClaims } from "@ryuhq/protocol/interfaces";
 import { type ReactNode, useMemo } from "react";
 import {
 	blockerThread,
@@ -35,6 +35,7 @@ import type { Vec3 } from "./game3d-palette.ts";
 import { useGameKitSettings } from "./game3d-settings.tsx";
 import { NextSign, SuggestionNote, UnreadMark } from "./game3d-signs.tsx";
 import { useStageCramped, useStageQuality } from "./game3d-stage.tsx";
+import { clockLabel } from "./interface-act-time.ts";
 
 export {
 	blockerThread,

@@ -318,7 +318,7 @@ export function StatusMaintenanceList({
 											"affects",
 											item.affected
 												? tr("Affects {affected}", { affected: item.affected })
-												: "Workspace-wide",
+												: tr("Workspace-wide"),
 										],
 									]}
 								/>

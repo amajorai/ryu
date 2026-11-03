@@ -37,6 +37,7 @@ import {
 	updateDreamSettings,
 } from "@/src/lib/api/memory.ts";
 import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
+import { dreamReason, dreamSource, dreamSummary } from "./memory-dream-copy.ts";
 
 function formatReviewDate(timestamp: number): string {
 	if (!timestamp) {
@@ -108,6 +109,9 @@ function ProposalCard({
 	onReject: (proposal: MemoryProposal) => void;
 	proposal: MemoryProposal;
 }) {
+	const tl = useLiteralMessages();
+	const source = dreamSource(proposal.source, tl);
+	const reason = dreamReason(proposal.reason, tl);
 	return (
 		<Card borderTone="muted" data-testid="dream-proposal" elevation="flat">
 			<CardHeader appearance="dream-proposal">
@@ -115,14 +119,10 @@ function ProposalCard({
 					<div className="min-w-0">
 						<div className="flex flex-wrap items-center gap-2">
 							<h2 className="font-medium text-sm">Proposed memory</h2>
-							{proposal.source ? (
-								<Badge variant="secondary">{proposal.source}</Badge>
-							) : null}
+							{source ? <Badge variant="secondary">{source}</Badge> : null}
 						</div>
-						{proposal.reason ? (
-							<p className="mt-1 text-muted-foreground text-xs">
-								{proposal.reason}
-							</p>
+						{reason ? (
+							<p className="mt-1 text-muted-foreground text-xs">{reason}</p>
 						) : null}
 					</div>
 					<Badge variant="outline">Needs review</Badge>
@@ -341,13 +341,7 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 			) : review?.proposals.length ? (
 				<>
 					<div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground text-xs">
-						<span>
-							{review.summary ??
-								tl(
-									"{count, plural, one {# proposal} other {# proposals}} waiting for your review.",
-									{ count: review.proposals.length }
-								)}
-						</span>
+						<span>{dreamSummary(review, tl)}</span>
 						<span>
 							{tl("Last run {date}", {
 								date: formatReviewDate(review.generatedAt),

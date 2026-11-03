@@ -80,6 +80,7 @@ pub async fn probe_cli_version(binary: &str) -> Option<String> {
         cmd.arg("--version").no_window();
         cmd
     };
+    apply_claude_version_probe_entrypoint(&mut cmd, binary);
 
     let output = tokio::time::timeout(
         Duration::from_secs(4),
@@ -96,6 +97,17 @@ pub async fn probe_cli_version(binary: &str) -> Option<String> {
     combined.push('\n');
     combined.push_str(&String::from_utf8_lossy(&output.stderr));
     parse_cli_version(&combined)
+}
+
+fn apply_claude_version_probe_entrypoint(cmd: &mut tokio::process::Command, binary: &str) {
+    if !binary.eq_ignore_ascii_case("claude") {
+        return;
+    }
+    let config_dir = crate::claude_config::process_config_dir();
+    cmd.env(
+        crate::claude_config::CLAUDE_CODE_ENTRYPOINT_ENV,
+        crate::claude_config::resolve_entrypoint(config_dir.as_deref(), None),
+    );
 }
 
 /// A content-free description of one JSON-RPC frame for TRACE logs: its

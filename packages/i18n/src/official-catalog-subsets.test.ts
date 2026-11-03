@@ -4,6 +4,7 @@ import { OFFICIAL_CATALOG_LOCALES } from "./catalog-locale.ts";
 import { I18nRuntime } from "./core.ts";
 import {
 	type LiteralCatalog,
+	literalCatalogLoader,
 	messageIdForLiteral,
 	registerLiteralCatalogLoader,
 } from "./literal-catalog.ts";
@@ -11,6 +12,7 @@ import { officialBotLiteralCatalog } from "./official-catalog-bot.ts";
 import { officialCliLiteralCatalog } from "./official-catalog-cli.ts";
 import { officialEmailLiteralCatalog } from "./official-catalog-email.ts";
 import { officialExtensionLiteralCatalog } from "./official-catalog-extension.ts";
+import { loadOfficialWebLiteralCatalog } from "./official-catalog-web.ts";
 
 afterEach(() => {
 	registerLiteralCatalogLoader(null);
@@ -83,6 +85,33 @@ describe("the official extension subset", () => {
 					expect(subset[label]).toBe(full[label]);
 				}
 			}
+		}
+	});
+});
+
+describe("the official web subset", () => {
+	test("registers itself and lazy-loads a slice of the full catalog per locale", async () => {
+		registerLiteralCatalogLoader(null);
+		// Importing the module is the opt-in; re-import it to register again.
+		await import(`./official-catalog-web.ts?register=${Date.now()}`);
+		expect(await literalCatalogLoader()?.("de")).toEqual(
+			await loadOfficialWebLiteralCatalog("de")
+		);
+		expect(await loadOfficialWebLiteralCatalog("en")).toBeNull();
+		for (const locale of OFFICIAL_CATALOG_LOCALES) {
+			const full: LiteralCatalog = (
+				await import(`../locales/${locale}.json`, { with: { type: "json" } })
+			).default;
+			const subset = (await loadOfficialWebLiteralCatalog(locale)) ?? {};
+			const entries = Object.entries(subset);
+			// The website's own copy (the cookie banner) ships in the slice…
+			expect(subset["Cookie preferences"]).toBe(full["Cookie preferences"]);
+			// …every entry is the full catalog's translation…
+			for (const [source, translation] of entries) {
+				expect<string | undefined>(translation).toBe(full[source]);
+			}
+			// …and other surfaces' copy stays out of the download.
+			expect(entries.length).toBeLessThan(Object.keys(full).length);
 		}
 	});
 });

@@ -1,7 +1,6 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
-	askBubble,
 	type InterfaceAgent,
 	type InterfaceAgentAct,
 	type InterfaceEvent,
@@ -12,6 +11,7 @@ import {
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { blockerEntries } from "./game3d-acts.ts";
+import { askBubble } from "./interface-act-messages.ts";
 
 export {
 	CARD_ORIGIN_Y,

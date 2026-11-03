@@ -1,17 +1,15 @@
 /* eslint-disable react/no-unknown-property */
 import { Html } from "@react-three/drei";
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
-import {
-	askAriaLabel,
-	type InterfaceAct,
-	type InterfaceAsk,
-} from "@ryuhq/protocol/interfaces";
+import type { InterfaceAct, InterfaceAsk } from "@ryuhq/protocol/interfaces";
 import type { OffStage } from "./game3d-acts.ts";
 import { ACT_ART } from "./game3d-acts-palette.ts";
 import { ToonMesh } from "./game3d-materials.tsx";
 import { MeterText, queuePlateText, WaitTimer3D } from "./game3d-meters.tsx";
 import type { Vec3 } from "./game3d-palette.ts";
 import { ActPlate, ActPlateButton, Post } from "./game3d-signs-plate.tsx";
+import { askAriaLabel } from "./interface-act-messages.ts";
 
 export {
 	SuggestionNote,
@@ -224,7 +222,7 @@ export function NoticePost({
 				onActivate={() => onOpen(ask.id)}
 				youSpot="slot"
 			>
-				{queuePlateText(ownerName ?? "Inbox", timer, nowMs)}
+				{queuePlateText(ownerName ?? tr("Inbox"), timer, nowMs)}
 			</ActPlate>
 		</group>
 	);

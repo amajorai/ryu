@@ -1,5 +1,6 @@
 import { Button } from "@ryu/ui/components/button";
 import { useEffect, useRef, useState } from "react";
+import { bidiAutoFor } from "./bidi-text.ts";
 import { isImeComposingKeyEvent } from "./composer-send-shortcut.ts";
 
 /**
@@ -49,6 +50,7 @@ export function UserMessageEditor({
 			>
 				<textarea
 					aria-label="Edit message"
+					{...bidiAutoFor(value)}
 					className="w-full resize-none bg-transparent text-foreground text-sm leading-5 outline-none"
 					onChange={(event) => {
 						setValue(event.target.value);

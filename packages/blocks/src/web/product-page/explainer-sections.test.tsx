@@ -21,6 +21,9 @@ function renderProduct(slug: string): string {
 
 test("a product with a full explainer renders every section in page order", () => {
 	const html = renderProduct("core");
+	// Core uses the infrastructure archetype, whose order keeps these four in
+	// sequence with other sections between them (./archetypes.ts).
+	expect(html).toContain('data-product-archetype="infrastructure"');
 	const positions = SECTION_IDS.map((id) =>
 		html.indexOf(`data-testid="${id}"`)
 	);

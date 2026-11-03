@@ -8,7 +8,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createElement, type FunctionComponent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { BIDI_AUTO, bidiAutoFor, withBidiAuto } from "./bidi-text.ts";
 import { MARKDOWN_COMPONENTS } from "./markdown-renderers.tsx";
+import { UserMessageEditor } from "./user-message-editor.tsx";
 
 const here = (path: string) => new URL(path, import.meta.url);
 const source = (path: string) => readFileSync(here(path), "utf8");
@@ -58,6 +60,92 @@ describe("chat markdown", () => {
 
 	test("table headers align to the inline start", () => {
 		expect(renderMarkdownElement("th")).toContain("text-start");
+	});
+});
+
+describe("chat text direction follows its content", () => {
+	test("prose blocks resolve their own direction", () => {
+		for (const tag of [
+			"p",
+			"li",
+			"h1",
+			"h2",
+			"h3",
+			"h4",
+			"blockquote",
+			"th",
+			"td",
+		]) {
+			expect(renderMarkdownElement(tag, "مرحبا")).toContain('dir="auto"');
+		}
+	});
+
+	test("list containers and inline runs keep the inherited direction", () => {
+		for (const tag of ["ul", "ol", "strong"]) {
+			expect(renderMarkdownElement(tag)).not.toContain('dir="auto"');
+		}
+	});
+
+	test("an explicit direction from the markdown pipeline still wins", () => {
+		const Paragraph: FunctionComponent<{
+			children?: ReactNode;
+			dir?: string;
+		}> = (props) => createElement("p", props);
+		const { p } = withBidiAuto({ p: Paragraph });
+		expect(renderToStaticMarkup(createElement(p, null, "x"))).toContain(
+			'dir="auto"'
+		);
+		expect(
+			renderToStaticMarkup(createElement(p, { dir: "ltr" }, "x"))
+		).toContain('dir="ltr"');
+	});
+
+	test("the user bubble text resolves its own direction", () => {
+		expect(source("./user-message.tsx")).toMatch(
+			/data-slot="bubble-content"\s*\{\.\.\.BIDI_AUTO\}/u
+		);
+		expect(BIDI_AUTO).toEqual({ dir: "auto" });
+	});
+
+	test("a text field follows its first letter in any script", () => {
+		for (const text of ["مرحبا", "שלום", "こんにちは", "Grüße", "  Hello"]) {
+			expect(bidiAutoFor(text)).toEqual({ dir: "auto" });
+		}
+	});
+
+	test("an empty or letterless field keeps the interface direction", () => {
+		for (const text of ["", "   ", "123", "🙂", "?!"]) {
+			expect(bidiAutoFor(text)).toEqual({});
+		}
+	});
+
+	test("the edit box resolves an Arabic message and inherits when empty", () => {
+		const render = (initialText: string) =>
+			renderToStaticMarkup(createElement(UserMessageEditor, { initialText }));
+		expect(render("مرحبا")).toMatch(/<textarea[^>]*dir="auto"/u);
+		expect(render("Guten Tag")).toMatch(/<textarea[^>]*dir="auto"/u);
+		expect(render("")).not.toContain('dir="auto"');
+	});
+
+	test("the composer textarea and its overlay share one direction", () => {
+		for (const file of [
+			"./input-bar-editor.tsx",
+			"./input-bar-input-content.tsx",
+		]) {
+			const text = source(file);
+			expect(text).toMatch(
+				/aria-hidden="true"\s*\{\.\.\.bidiAutoFor\(input\)\}\s*className="[^"]*absolute inset-0 whitespace-pre-wrap/u
+			);
+			expect(text).toMatch(
+				/<textarea\s*aria-label=\{textareaAriaLabel\}\s*\{\.\.\.bidiAutoFor\(input\)\}[\s\S]*?value=\{input\}/u
+			);
+		}
+	});
+
+	test("the question answer box resolves its own direction", () => {
+		expect(source("./question/question-prompt.tsx")).toMatch(
+			/<textarea\s*aria-label="[^"]+"\s*\{\.\.\.bidiAutoFor\(textValue\)\}[\s\S]*?value=\{textValue\}/u
+		);
 	});
 });
 

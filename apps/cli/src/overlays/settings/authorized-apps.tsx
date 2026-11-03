@@ -9,6 +9,7 @@ import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { coreAuthStatusWireSchema } from "../../core/auth-status-wire.ts";
 import { accountBackendTarget } from "../../core/authBackend.ts";
 import { useCore } from "../../core/CoreContext.tsx";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf } from "../../i18n/translate.ts";
 
 const authorizedAppSchema = z.object({
@@ -142,7 +143,7 @@ export function AuthorizedAppsPanel({ active }: { active: boolean }) {
 			if (!controller.signal.aborted) {
 				setMessage(
 					tf("Could not revoke: {error}", {
-						error: error instanceof Error ? error.message : String(error),
+						error: errorText(error),
 					})
 				);
 			}

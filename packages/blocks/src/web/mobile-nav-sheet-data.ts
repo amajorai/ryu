@@ -1,3 +1,4 @@
+import { COMPANY_ROUTES } from "./data/company.ts";
 import { FEATURE_NAV_GROUP } from "./data/feature-nav.ts";
 import { productMenuGroupsFor } from "./data/product-realms.ts";
 import {
@@ -51,7 +52,47 @@ export function productSheet(
 export const PRODUCT_SHEET: readonly SheetGroup[] =
 	productSheet(NO_HIDDEN_PRODUCTS);
 
-/** Plans, then the desktop Resources menu's Learn, Updates, and Community. */
+/**
+ * Who makes Ryu. The desktop header keeps its Resources menu to three groups
+ * and leaves these to the footer; on mobile there is no footer in reach, so the
+ * Resources sheet ends with them. Each summary restates the page's own
+ * description, so the row promises only what the page holds.
+ */
+export const COMPANY_SHEET_GROUP: SheetGroup = {
+	title: "Company",
+	links: [
+		{
+			label: "About",
+			description: "Who builds Ryu, and what is open source.",
+			href: COMPANY_ROUTES.about,
+			external: false,
+		},
+		{
+			label: "Careers",
+			description: "How the team works, open roles, and contributing.",
+			href: COMPANY_ROUTES.careers,
+			external: false,
+		},
+		{
+			label: "Press",
+			description: "Company facts, announcements, and brand files.",
+			href: COMPANY_ROUTES.press,
+			external: false,
+		},
+		{
+			label: "Events",
+			description:
+				"Scheduled events, on-demand Academy courses, and community links.",
+			href: COMPANY_ROUTES.events,
+			external: false,
+		},
+	],
+};
+
+/**
+ * Plans, then the desktop Resources menu's Learn, Updates, and Community, then
+ * Company (mobile only, see COMPANY_SHEET_GROUP).
+ */
 export const RESOURCE_SHEET: readonly SheetGroup[] = [
 	{
 		title: "Plans",
@@ -68,6 +109,7 @@ export const RESOURCE_SHEET: readonly SheetGroup[] = [
 			external: resource.external ?? false,
 		})),
 	})),
+	COMPANY_SHEET_GROUP,
 ];
 
 export const SHEET_TITLES = {

@@ -276,8 +276,8 @@ export function PreviewRail({
 							isHorizontal
 								? "top-1/2 left-1/2 h-5 w-fit max-w-full -translate-x-1/2 -translate-y-1/2 justify-center"
 								: previewSide === "before"
-									? "inset-y-0 right-16 left-4 content-center"
-									: "inset-y-0 right-4 left-16 content-center",
+									? "inset-y-0 start-4 end-16 content-center"
+									: "inset-y-0 start-16 end-4 content-center",
 							previewContainerClassName
 						),
 					].join(" ")}
@@ -302,7 +302,7 @@ export function PreviewRail({
 											? "absolute bottom-12 left-1/2 w-72 -translate-x-1/2"
 											: cn(
 													"w-full max-w-sm",
-													previewSide === "before" && "ml-auto"
+													previewSide === "before" && "ms-auto"
 												),
 										previewClassName
 									)}

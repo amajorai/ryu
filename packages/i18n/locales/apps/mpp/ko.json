@@ -120,7 +120,6 @@
   "This payment attempt cannot be retried.": "이 결제 시도는 다시 시도할 수 없습니다.",
   "This payment challenge already has a receipt.": "이 결제 요청에는 이미 영수증이 있습니다.",
   "To": "받는 곳",
-  "Tool": "도구",
   "Trusted origins": "신뢰할 수 있는 출처",
   "Unsupported HTTP method.": "지원되지 않는 HTTP 메서드입니다.",
   "Use at most six decimal places.": "소수점 이하 최대 6자리까지 사용하세요.",

@@ -161,7 +161,10 @@ export function FocusCard({
 				) : null}
 				{count > 1 ? (
 					<span className="ms-auto text-muted-foreground text-xs tabular-nums">
-						{index + 1} of {count}
+						{tr("{current} of {total}", {
+							current: index + 1,
+							total: count,
+						})}
 					</span>
 				) : null}
 			</div>

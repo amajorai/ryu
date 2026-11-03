@@ -274,7 +274,11 @@ mod tests {
         assert!(raw_json(&path, &item.id).starts_with("encb:v1:"));
         for file in [path.clone(), dir.path().join("activity.db-wal")] {
             assert!(!file_contains(&file, "Quillfeather"), "{}", file.display());
-            assert!(!file_contains(&file, "secret-body-marker"), "{}", file.display());
+            assert!(
+                !file_contains(&file, "secret-body-marker"),
+                "{}",
+                file.display()
+            );
         }
         let listed = store.list(10, None).await.unwrap();
         assert_eq!(listed[0].title, "Lunch with Dr. Quillfeather");
@@ -302,15 +306,23 @@ mod tests {
         assert!(sealed.starts_with("encb:v1:"));
         drop(store);
         for file in [path.clone(), dir.path().join("activity.db-wal")] {
-            assert!(!file_contains(&file, "legacy-title-marker"), "{}", file.display());
+            assert!(
+                !file_contains(&file, "legacy-title-marker"),
+                "{}",
+                file.display()
+            );
         }
 
         // A second open is a no-op: the sealed value is left byte-identical.
         let store = ActivityStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
         assert_eq!(raw_json(&path, &legacy.id), sealed);
         let conn = Connection::open(&path).unwrap();
-        ryu_crypto::content_sqlite::assert_all_open(&conn, &test_cipher(), &column_plans().unwrap())
-            .unwrap();
+        ryu_crypto::content_sqlite::assert_all_open(
+            &conn,
+            &test_cipher(),
+            &column_plans().unwrap(),
+        )
+        .unwrap();
         assert_eq!(store.list(10, None).await.unwrap().len(), 1);
     }
 
@@ -326,9 +338,11 @@ mod tests {
         {
             let conn = store.conn.lock().await;
             let sealed_a: String = conn
-                .query_row("SELECT json FROM activity_items WHERE id = ?1", params![a.id], |r| {
-                    r.get(0)
-                })
+                .query_row(
+                    "SELECT json FROM activity_items WHERE id = ?1",
+                    params![a.id],
+                    |r| r.get(0),
+                )
                 .unwrap();
             conn.execute(
                 "UPDATE activity_items SET json = ?1 WHERE id = ?2",
@@ -347,12 +361,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("activity.db");
         let store = ActivityStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
-        store.record(ActivityItem::new("note", "manual", "kept")).await.unwrap();
+        store
+            .record(ActivityItem::new("note", "manual", "kept"))
+            .await
+            .unwrap();
         drop(store);
         let other = ContentCipher::from_root(&[9u8; 32], STORE);
         let store = ActivityStore::open_with_cipher(path.clone(), other).unwrap();
         assert!(!store.writable());
-        assert!(store.record(ActivityItem::new("note", "manual", "x")).await.is_err());
+        assert!(store
+            .record(ActivityItem::new("note", "manual", "x"))
+            .await
+            .is_err());
         let store = ActivityStore::open_with_cipher(path, test_cipher()).unwrap();
         assert_eq!(store.list(10, None).await.unwrap()[0].title, "kept");
     }

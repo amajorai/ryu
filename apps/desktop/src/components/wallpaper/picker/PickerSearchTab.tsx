@@ -197,7 +197,7 @@ export function SearchTab({
 					return (
 						<Tile
 							key={hit.id}
-							label={`${hit.title || "Image"} · ${hit.attribution}`}
+							label={`${hit.title || tl("Image")} · ${hit.attribution}`}
 							onClick={() =>
 								saveOrWarn(() =>
 									update({

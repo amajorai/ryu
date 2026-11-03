@@ -64,6 +64,108 @@ describe("createAccountLocaleSync", () => {
 		expect(saved).toEqual([]);
 	});
 
+	it("saves a choice made while signed out once the person signs in", async () => {
+		let signedIn = false;
+		const { save, saved } = harness({ isSignedIn: async () => signedIn });
+		save("de");
+		await settle();
+		await save.flushPending();
+		expect(saved).toEqual([]);
+
+		signedIn = true;
+		await save.flushPending();
+		await save.flushPending();
+		expect(saved).toEqual(["de"]);
+	});
+
+	it("saves the same choice again for the next account after a sign-out", async () => {
+		let signedIn = true;
+		const { save, saved } = harness({ isSignedIn: async () => signedIn });
+		save("fr");
+		await settle();
+		signedIn = false;
+		save("fr");
+		await settle();
+		signedIn = true;
+		await save.flushPending();
+		expect(saved).toEqual(["fr", "fr"]);
+	});
+
+	it("drops a pending choice that a newer signed-in choice replaced", async () => {
+		let signedIn = false;
+		const { save, saved } = harness({ isSignedIn: async () => signedIn });
+		save("ja");
+		await settle();
+		signedIn = true;
+		save("ko");
+		await save.flushPending();
+		await settle();
+		await save.flushPending();
+		expect(saved).toEqual(["ko"]);
+	});
+
+	it("keeps a pending choice whose save failed for the next sign-in", async () => {
+		let signedIn = false;
+		let fail = true;
+		const saved: string[] = [];
+		const { errors, save } = harness({
+			isSignedIn: async () => signedIn,
+			saveLocale: async (locale) => {
+				if (fail) {
+					return { error: { status: 500 } };
+				}
+				saved.push(locale);
+				return {};
+			},
+		});
+		save("es");
+		await settle();
+		signedIn = true;
+		await save.flushPending();
+		fail = false;
+		await save.flushPending();
+		expect(errors).toEqual([{ status: 500 }]);
+		expect(saved).toEqual(["es"]);
+	});
+
+	it("saves once when two sign-in retries overlap (StrictMode remount)", async () => {
+		let signedIn = false;
+		const { save, saved } = harness({ isSignedIn: async () => signedIn });
+		save("ja");
+		await settle();
+		signedIn = true;
+		await Promise.all([save.flushPending(), save.flushPending()]);
+		expect(saved).toEqual(["ja"]);
+	});
+
+	it("saves a choice whose sign-out check was still running at sign-in", async () => {
+		let answer: (signedIn: boolean) => void = () => undefined;
+		let checks = 0;
+		const { save, saved } = harness({
+			isSignedIn: () => {
+				checks += 1;
+				if (checks === 1) {
+					return new Promise<boolean>((resolve) => {
+						answer = resolve;
+					});
+				}
+				return Promise.resolve(true);
+			},
+		});
+		save("ar");
+		await settle();
+		const retry = save.flushPending();
+		answer(false);
+		await retry;
+		expect(saved).toEqual(["ar"]);
+	});
+
+	it("has nothing to flush when no choice is pending", async () => {
+		const { save, saved } = harness();
+		await save.flushPending();
+		expect(saved).toEqual([]);
+	});
+
 	it("does not resave the locale it already saved", async () => {
 		const { save, saved } = harness();
 		save("ko");

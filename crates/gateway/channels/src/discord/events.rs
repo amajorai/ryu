@@ -3,6 +3,9 @@
 
 use super::*;
 
+mod command_menu;
+use command_menu::command_payload;
+
 impl DiscordChannel {
     /// Register Core's command registry as Discord application commands. The
     /// Gateway delivers the resulting `INTERACTION_CREATE` events to the same
@@ -17,17 +20,7 @@ impl DiscordChannel {
         if cmds.is_empty() {
             return Ok(());
         }
-        let commands: Vec<Value> = cmds
-            .iter()
-            .take(100)
-            .map(|command| {
-                json!({
-                    "name": command.name,
-                    "description": command.description,
-                    "type": 1,
-                })
-            })
-            .collect();
+        let commands: Vec<Value> = cmds.iter().take(100).map(command_payload).collect();
         self.http()
             .put(format!("{API_BASE}/applications/{application_id}/commands"))
             .header("Authorization", self.auth_header())

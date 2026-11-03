@@ -92,7 +92,10 @@ export function MailReader({
 							className="px-2 text-muted-foreground text-xs tabular-nums"
 							data-testid="mail-reader-position"
 						>
-							{model.position.index + 1} of {model.position.total}
+							{tl("{current} of {total}", {
+								current: model.position.index + 1,
+								total: model.position.total,
+							})}
 						</span>
 						<MailIconButton
 							disabled={!onNewer}

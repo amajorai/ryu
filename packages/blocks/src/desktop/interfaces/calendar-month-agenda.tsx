@@ -161,7 +161,7 @@ export function DayAgendaPopover({
 	items: readonly CalendarItem[];
 	/** Open the day's week; the week grid, already there, leaves it out. */
 	onOpenDay?: (key: string) => void;
-	side?: "bottom" | "right";
+	side?: "bottom" | "inline-end" | "right";
 	sideOffset?: number;
 	style?: CSSProperties;
 	tabStop: boolean;

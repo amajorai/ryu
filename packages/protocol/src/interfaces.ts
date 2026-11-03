@@ -4520,3 +4520,21 @@ export function redactSnapshot(snapshot: InterfaceSnapshot): InterfaceSnapshot {
 	}
 	return redacted;
 }
+
+/** @internal Shared with `interface-act-parts.ts`, which turns acts into data a host can localize. */
+export {
+	askText as actAskText,
+	calendarDay as actCalendarDay,
+	clampWords as actClampWords,
+	closed as actClosed,
+	DEFAULT_SHORT_LINE_WORDS as ACT_SHORT_LINE_WORDS,
+	firstWords as actFirstWords,
+	isToolCallWithTarget as actIsToolCallWithTarget,
+	lowerFirst as actLowerFirst,
+	MAX_ARIA_RISK_TAGS as ACT_MAX_RISK_TAGS,
+	parseMs as actParseMs,
+	plainText as actPlainText,
+	TOOL_VERBS as ACT_TOOL_VERBS,
+	TRAILING_STOP as ACT_TRAILING_STOP,
+	WORKING_TITLE_WORDS as ACT_WORKING_TITLE_WORDS,
+};

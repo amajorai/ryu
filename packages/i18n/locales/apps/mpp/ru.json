@@ -120,7 +120,6 @@
   "This payment attempt cannot be retried.": "Эту попытку оплаты нельзя повторить.",
   "This payment challenge already has a receipt.": "Для этого платежного запроса уже есть квитанция.",
   "To": "Куда",
-  "Tool": "Инструмент",
   "Trusted origins": "Доверенные источники",
   "Unsupported HTTP method.": "Неподдерживаемый метод HTTP.",
   "Use at most six decimal places.": "Используйте не более шести знаков после запятой.",

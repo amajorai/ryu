@@ -6,6 +6,7 @@ import { Wave } from "@ryu/ui/components/wave";
 import { cn } from "@ryu/ui/lib/utils";
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import { useCallback } from "react";
+import { bidiAutoFor } from "./bidi-text.ts";
 import type { SuggestionItem } from "./input/suggestions.tsx";
 import styles from "./input-bar.module.css";
 import { MentionToken } from "./mention-token.tsx";
@@ -179,6 +180,7 @@ export function ComposerInputContent({
 				{input && (
 					<div
 						aria-hidden="true"
+						{...bidiAutoFor(input)}
 						className="text-(length:--text-comfortable) pointer-events-none absolute inset-0 whitespace-pre-wrap break-words text-foreground leading-(--text-comfortable--line-height)"
 						ref={composerPreviewRef}
 					>
@@ -187,6 +189,7 @@ export function ComposerInputContent({
 				)}
 				<textarea
 					aria-label={textareaAriaLabel}
+					{...bidiAutoFor(input)}
 					className={cn(
 						"text-(length:--text-comfortable) relative w-full resize-none border-0 bg-transparent text-transparent leading-(--text-comfortable--line-height) caret-foreground outline-none placeholder:text-muted-foreground",
 						"overflow-hidden",

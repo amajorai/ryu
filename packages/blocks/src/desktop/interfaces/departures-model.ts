@@ -226,7 +226,7 @@ function threadRemark(
 						strong(tr("Held {waited}", { waited })),
 						plain(tr("Since {date}", { date: shortDate(time) })),
 					]
-				: [strong("Waiting for gate"), plain(waited)];
+				: [strong(tr("Waiting for gate")), plain(waited)];
 		}
 		case "delayed":
 			return [

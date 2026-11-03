@@ -2,6 +2,7 @@ import { Button } from "@ryu/ui/components/button";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { bidiAutoFor } from "../bidi-text.ts";
 import { VoiceInputButton } from "../input/voice-input-button.tsx";
 import { useVoiceRecorder } from "../useVoiceRecorder.ts";
 
@@ -364,6 +365,7 @@ export function QuestionPrompt({
 				<div className="flex items-end gap-1 rounded-md border border-border bg-background px-1">
 					<textarea
 						aria-label="Your answer"
+						{...bidiAutoFor(textValue)}
 						className="min-w-0 flex-1 resize-y border-0 bg-transparent px-1 py-1.5 text-foreground text-sm outline-none"
 						onChange={(event) => setTextValue(event.target.value)}
 						placeholder={activeQuestion.placeholder ?? "Type your answer"}

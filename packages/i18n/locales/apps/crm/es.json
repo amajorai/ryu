@@ -30,6 +30,7 @@
   "every option needs a label": "cada opción necesita una etiqueta",
   "field \"{id}\" is listed twice": "el campo \"{id}\" aparece dos veces",
   "list-specific fields cannot be unique": "los campos específicos de lista no pueden ser únicos",
+  "more records referenced the removed options than can be changed in one request": "más registros hacían referencia a las opciones eliminadas de los que se pueden cambiar en una sola solicitud",
   "no column is mapped to a field, so this import would write nothing": "ninguna columna está asignada a un campo, así que esta importación no escribiría nada",
   "no field \"{title}\" on the \"{slug}\" object": "no existe el campo \"{title}\" en el objeto \"{slug}\"",
   "no live record \"{id}\" on the target object": "no existe el registro activo \"{id}\" en el objeto de destino",
@@ -53,5 +54,6 @@
   "this import has already been applied and cannot be remapped — its outcome is on the job": "esta importación ya se aplicó y no se puede reasignar; su resultado está en el trabajo",
   "this relation field has no target object configured": "este campo de relación no tiene un objeto de destino configurado",
   "two columns map to \"{name}\" — the second would overwrite the first": "dos columnas se asignan a «{name}»: la segunda sobrescribiría la primera",
-  "unknown object \"{reference}\"": "objeto desconocido «{reference}»"
+  "unknown object \"{reference}\"": "objeto desconocido «{reference}»",
+  "{affected} records still use the options being removed, over the {maxOptionMigrationRecords} that can be changed in one request — clear those values in bulk first, then remove the options": "{affected} registros aún usan las opciones que se van a eliminar, más que los {maxOptionMigrationRecords} que se pueden cambiar en una sola solicitud: borra primero esos valores de forma masiva y luego elimina las opciones"
 }

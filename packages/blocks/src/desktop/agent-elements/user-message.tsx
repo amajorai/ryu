@@ -24,6 +24,7 @@ import { formatDateTime, formatTime } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import type { UIMessage } from "ai";
 import { memo, useRef, useState } from "react";
+import { BIDI_AUTO } from "./bidi-text.ts";
 import { CollapsibleText } from "./collapsible-text.tsx";
 import { ImageLightbox } from "./image-lightbox.tsx";
 import { FileAttachment } from "./input/file-attachment.tsx";
@@ -258,6 +259,7 @@ export const UserMessage = memo(function UserMessage({
 						)}
 						data-chat-prose=""
 						data-slot="bubble-content"
+						{...BIDI_AUTO}
 						data-testid="user-message-bubble"
 					>
 						{quote && <QuoteBlock text={quote} />}

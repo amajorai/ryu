@@ -119,7 +119,10 @@ export function RecordsPage({
 				{position ? (
 					<div className="flex shrink-0 items-center gap-1">
 						<span className="me-1 text-muted-foreground text-xs tabular-nums max-sm:hidden">
-							{position.index + 1} of {position.total}
+							{tr("{current} of {total}", {
+								current: position.index + 1,
+								total: position.total,
+							})}
 						</span>
 						<Button
 							aria-keyshortcuts="K"

@@ -271,7 +271,7 @@ export function layoutCssVariables({
 		"--desktop-inline4-opacity": floatOpen ? 1 : 0,
 	};
 	const cssVariables5: LayoutCssVariables = {
-		"--desktop-inline7-padding-Right": `${osProduct ? 0 : assistantDockReserve}px`,
+		"--desktop-inline7-padding-End": `${osProduct ? 0 : assistantDockReserve}px`,
 	};
 	const cssVariables6: LayoutCssVariables = {
 		// Both variants now start the content at the window's top edge (the

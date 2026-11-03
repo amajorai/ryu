@@ -43,12 +43,10 @@ import { AUTH_BACKEND_URL, accountBackendTarget } from "../core/authBackend.ts";
 import { useCore } from "../core/CoreContext.tsx";
 import { declareCliSurface } from "../core/device-approval-link.ts";
 import { refreshCliIdentityAfterAccountChange } from "../core/identity.ts";
-import {
-	nativeErrorMessage as errText,
-	humanizeError,
-} from "../core/native-errors.ts";
+import { humanizeError } from "../core/native-errors.ts";
 // Best-effort open of the device-login URL; the panel always shows it too.
 import { openBrowser } from "../core/openBrowser.ts";
+import { errorText } from "../i18n/error-text.ts";
 import { tf } from "../i18n/translate.ts";
 import { AccountSecurity } from "../overlays/settings/account-security.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
@@ -232,7 +230,7 @@ export function AccountTab({
 				scopeRef.current.target === target
 			) {
 				setLoginPending(false);
-				notify(tf("Sign-in failed: {0}", { 0: errText(err) }), "error");
+				notify(tf("Sign-in failed: {0}", { 0: errorText(err) }), "error");
 			}
 			return;
 		}
@@ -250,7 +248,10 @@ export function AccountTab({
 				scopeRef.current.target === target
 			) {
 				setLoginPending(false);
-				notify(tf("Sign-in failed: {error}", { error: start.error }), "error");
+				notify(
+					tf("Sign-in failed: {error}", { error: errorText(start.error) }),
+					"error"
+				);
 			}
 			return;
 		}
@@ -285,7 +286,7 @@ export function AccountTab({
 			);
 		} catch (err) {
 			if (mountedRef.current) {
-				notify(tf("Sign-out failed: {0}", { 0: errText(err) }), "error");
+				notify(tf("Sign-out failed: {0}", { 0: errorText(err) }), "error");
 			}
 			return;
 		}
@@ -310,13 +311,16 @@ export function AccountTab({
 				);
 				if (res.error) {
 					if (mountedRef.current) {
-						notify(tf("Switch failed: {error}", { error: res.error }), "error");
+						notify(
+							tf("Switch failed: {error}", { error: errorText(res.error) }),
+							"error"
+						);
 					}
 					return;
 				}
 			} catch (err) {
 				if (mountedRef.current) {
-					notify(tf("Switch failed: {0}", { 0: errText(err) }), "error");
+					notify(tf("Switch failed: {0}", { 0: errorText(err) }), "error");
 				}
 				return;
 			}
@@ -346,7 +350,7 @@ export function AccountTab({
 				if (res.error) {
 					if (mountedRef.current) {
 						notify(
-							tf("Sign-out failed: {error}", { error: res.error }),
+							tf("Sign-out failed: {error}", { error: errorText(res.error) }),
 							"error"
 						);
 					}
@@ -354,7 +358,7 @@ export function AccountTab({
 				}
 			} catch (err) {
 				if (mountedRef.current) {
-					notify(tf("Sign-out failed: {0}", { 0: errText(err) }), "error");
+					notify(tf("Sign-out failed: {0}", { 0: errorText(err) }), "error");
 				}
 				return;
 			}

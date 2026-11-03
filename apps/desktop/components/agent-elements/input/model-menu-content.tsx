@@ -164,7 +164,7 @@ function ModelRow({
 				<HoverCardContent
 					align="start"
 					className="z-[80] w-auto max-w-[18rem]"
-					side="right"
+					side="inline-end"
 					sideOffset={8}
 					spacing="rail"
 				>

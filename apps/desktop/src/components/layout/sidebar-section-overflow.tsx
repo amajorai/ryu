@@ -108,7 +108,7 @@ export function SectionOverflowPopover<T>({
 				align="start"
 				className="flex w-64 flex-col"
 				corners="rounded"
-				side="right"
+				side="inline-end"
 				sideOffset={8}
 				spacing="compact"
 			>

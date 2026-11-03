@@ -11,7 +11,6 @@
   "No visible chats yet": "暂无可见聊天",
   "Ready to send to {targetCount, plural, one {{targetLabel} chat} other {{targetLabel} chats}}.": "已准备好发送到 {targetCount, plural, other {{targetLabel} 个聊天}}。",
   "Refresh chats": "刷新聊天",
-  "Running": "运行中",
   "Running chats will continue with this instruction after their current turn.": "运行中的聊天将在当前轮次结束后继续执行此指令。",
   "Select chats, write one message, and review delivery before sending.": "选择聊天，编写一条消息，并在发送前检查投递情况。",
   "Select {chatTitle}": "选择 {chatTitle}",

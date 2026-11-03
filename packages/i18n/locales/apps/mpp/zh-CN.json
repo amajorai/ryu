@@ -120,7 +120,6 @@
   "This payment attempt cannot be retried.": "无法重试此付款尝试。",
   "This payment challenge already has a receipt.": "此付款质询已有收据。",
   "To": "到",
-  "Tool": "工具",
   "Trusted origins": "受信任的来源",
   "Unsupported HTTP method.": "不支持的 HTTP 方法。",
   "Use at most six decimal places.": "最多使用六位小数。",

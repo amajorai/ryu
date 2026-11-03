@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	InterfacePort,
 	WorldLayout,
@@ -115,7 +116,7 @@ export function World2dHud({
 			</span>
 		);
 	} else if (loading) {
-		prompt = "Loading villagers";
+		prompt = tr("Loading villagers");
 	}
 	let controls: ReactNode = null;
 	if (hint.open && settled) {

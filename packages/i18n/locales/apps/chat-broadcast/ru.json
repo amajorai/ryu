@@ -11,7 +11,6 @@
   "No visible chats yet": "Видимых чатов пока нет",
   "Ready to send to {targetCount, plural, one {{targetLabel} chat} other {{targetLabel} chats}}.": "Готово к отправке: {targetCount, plural, one {{targetLabel} чат} few {{targetLabel} чата} many {{targetLabel} чатов} other {{targetLabel} чата}}.",
   "Refresh chats": "Обновить чаты",
-  "Running": "Выполняется",
   "Running chats will continue with this instruction after their current turn.": "Активные чаты продолжат работу с этой инструкцией после текущей реплики.",
   "Select chats, write one message, and review delivery before sending.": "Выберите чаты, напишите одно сообщение и проверьте доставку перед отправкой.",
   "Select {chatTitle}": "Выбрать {chatTitle}",

@@ -44,6 +44,7 @@ import {
 	loadServices,
 	type ServicesSnapshot,
 } from "../core/services-snapshot.ts";
+import { errorText } from "../i18n/error-text.ts";
 import { tf } from "../i18n/translate.ts";
 import { ConfirmPrompt } from "../ui/ConfirmPrompt.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
@@ -215,7 +216,7 @@ export function ServicesTab({ active }: TabProps) {
 				notify(
 					tf("Install failed: {name} - {error}", {
 						name,
-						error: nativeErrorMessage(err),
+						error: errorText(err),
 					}),
 					"error"
 				)

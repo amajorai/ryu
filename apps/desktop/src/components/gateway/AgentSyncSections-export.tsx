@@ -133,8 +133,14 @@ export function AgentSyncExportSection({ target }: { target: ApiTarget }) {
 					profileId: selectedProfile?.id,
 				});
 				setResult(exportResult);
+				const exportIds = {
+					bundleHash: exportResult.bundleHash,
+					operationId: exportResult.operationId,
+				};
 				setMessage(
-					`${dryRun ? "Preview" : "Export"} ${exportResult.operationId} · ${exportResult.bundleHash}`
+					dryRun
+						? tl("Preview {operationId} · {bundleHash}", exportIds)
+						: tl("Export {operationId} · {bundleHash}", exportIds)
 				);
 				await refresh();
 			} catch (cause) {
@@ -151,6 +157,7 @@ export function AgentSyncExportSection({ target }: { target: ApiTarget }) {
 			refresh,
 			selectedProfile,
 			target,
+			tl,
 		]
 	);
 

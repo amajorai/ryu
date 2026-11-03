@@ -55,7 +55,6 @@
   "The recording has no audio data.": "रिकॉर्डिंग में कोई ऑडियो डेटा नहीं है।",
   "The recording is not a WAV file.": "रिकॉर्डिंग WAV फ़ाइल नहीं है।",
   "Use auto-scroll": "ऑटो-स्क्रॉल का उपयोग करें",
-  "Voice": "वॉइस",
   "Voice following isn't available in this window. Open Teleprompter in Ryu Desktop or Island, or switch to auto-scroll.": "इस विंडो में आवाज़ के साथ स्क्रॉलिंग उपलब्ध नहीं है। Ryu Desktop या Island में Teleprompter खोलें, या ऑटो-स्क्रॉल पर स्विच करें।",
   "Write or paste what you want to say.": "जो कहना चाहते हैं उसे लिखें या पेस्ट करें।",
   "{wordCount} words · about {speakingTime} at {wordsPerMinute} words per minute. Text in [brackets] is shown as a cue and never needs to be spoken.": "{wordCount} शब्द · {wordsPerMinute} शब्द प्रति मिनट पर लगभग {speakingTime}। [कोष्ठक] में लिखा टेक्स्ट संकेत के रूप में दिखता है और उसे बोलने की ज़रूरत नहीं होती।",

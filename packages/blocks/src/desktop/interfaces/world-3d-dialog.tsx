@@ -2,8 +2,6 @@ import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
-	askAriaLabel,
-	askKindWords,
 	type InterfaceAgent,
 	type InterfaceAgentAct,
 	type InterfaceAsk,
@@ -14,6 +12,7 @@ import {
 } from "@ryuhq/protocol/interfaces";
 import { type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
+import { askAriaLabel, askKindWords } from "./interface-act-messages.ts";
 import { plainText } from "./interface-ask-card.tsx";
 import { compactAge } from "./interface-renderer.ts";
 import { DialogComposer } from "./world-3d-dialog-composer.tsx";

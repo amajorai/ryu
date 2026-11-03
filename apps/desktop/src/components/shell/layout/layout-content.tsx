@@ -122,11 +122,11 @@ export function LayoutContent({
 	const isMobile = useIsMobile();
 	// On mobile the sidebar is a Sheet, so its open state is `openMobile`.
 	const sidebarShown = isMobile ? openMobile : open;
-	// Reserve room on the right when the "Ask Ryu" assistant is docked as a
+	// Reserve room at the inline end when the "Ask Ryu" assistant is docked as a
 	// sidebar, so the page content slides in beside it rather than under it.
 	const assistantMode = useAssistantStore((s) => s.mode);
 	const [sidebarVariant] = useSidebarVariant();
-	// Floating dock is inset 8px from the right edge (380 + 8); inset mode is a
+	// Floating dock is inset 8px from the inline-end edge (380 + 8); inset mode is a
 	// flush rail so only the panel width is reserved.
 	const assistantDockReserve =
 		assistantMode === "sidebar" && !isMobile
@@ -387,14 +387,14 @@ export function LayoutContent({
 					cn(
 						"relative flex flex-col overflow-hidden",
 						osProduct && "m-0",
-						// Inset mode normally keeps a right margin so the canvas clears the window
-						// edge; when the Ask Ryu rail is docked it plays the same role as
-						// the start sidebar (ms-0), so drop the right margin and let the
-						// canvas abut the flush rail (the rail is physically right).
+						// Inset mode normally keeps an inline-end margin so the canvas clears
+						// the window edge; when the Ask Ryu rail is docked it plays the same
+						// role as the start sidebar (ms-0), so drop the end margin and let
+						// the canvas abut the flush rail (the rail sits at the inline end).
 						assistantMode === "sidebar" &&
 							sidebarVariant === "inset" &&
 							!isMobile &&
-							"md:mr-0"
+							"md:me-0"
 					)
 				)}
 				id={layoutStyles.assistantReserve}

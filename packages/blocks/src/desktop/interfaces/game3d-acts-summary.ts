@@ -1,7 +1,5 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import {
-	askBubble,
-	blockerKindWord,
 	compareAsks,
 	type InterfaceAgentAct,
 	type InterfaceAsk,
@@ -11,6 +9,7 @@ import {
 	waitBand,
 } from "@ryuhq/protocol/interfaces";
 import type { ActTotals } from "./game3d-acts.ts";
+import { askBubble, blockerKindWord } from "./interface-act-messages.ts";
 
 /** The act layer's summary line, blocker entries and polite announcements. */
 
@@ -184,7 +183,7 @@ function askOwnerName(
 			return owner.agentName;
 		}
 	}
-	return "Inbox";
+	return tr("Inbox");
 }
 
 /**

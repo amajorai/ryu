@@ -120,7 +120,6 @@
   "This payment attempt cannot be retried.": "この支払いは再試行できません。",
   "This payment challenge already has a receipt.": "この支払い要求にはすでに領収書があります。",
   "To": "移動先",
-  "Tool": "ツール",
   "Trusted origins": "信頼済みオリジン",
   "Unsupported HTTP method.": "サポートされていない HTTP メソッドです。",
   "Use at most six decimal places.": "小数点以下は 6 桁までにしてください。",

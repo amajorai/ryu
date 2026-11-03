@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowUpRight, Check } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { InsideAppLabel } from "./app-showcase-inside-label.tsx";
 import { FeaturedAppsCount, OfficialAppLabel } from "./app-showcase-labels.tsx";
 import {
 	DashboardsMockup,
@@ -284,8 +285,8 @@ export function AppShowcaseDetail({
 			<section className="container mx-auto px-4 pb-20 md:pb-28">
 				<div className="grid gap-10 lg:grid-cols-[0.72fr_1.28fr] lg:gap-20">
 					<div>
-						<p className="type-caption font-mono text-muted-foreground tracking-(--tracking-table-label)">
-							INSIDE {app.name.toUpperCase()}
+						<p className="type-caption font-mono text-muted-foreground uppercase tracking-(--tracking-table-label)">
+							<InsideAppLabel app={app.name} />
 						</p>
 						<h2 className="mt-4 max-w-md font-heading font-medium text-3xl tracking-tight md:text-4xl">
 							A focused surface for this part of the work.

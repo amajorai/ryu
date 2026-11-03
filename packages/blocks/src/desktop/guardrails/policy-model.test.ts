@@ -131,7 +131,7 @@ describe("policy rules", () => {
 				{ ...emptyPolicyRules(), approvedModels: ["openai/gpt-5"] },
 				["approvedModels"]
 			)
-		).toEqual(["approved models", "locked fields"]);
+		).toEqual(["approvedModels", "locked"]);
 	});
 
 	test("lists split on commas and newlines and drop duplicates", () => {

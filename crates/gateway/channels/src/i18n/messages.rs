@@ -43,6 +43,8 @@ pub const SLACK_HELPFUL_MESSAGE: Template = |_| format!("Helpful answer");
 pub const SLACK_NEEDS_WORK_MESSAGE: Template = |_| format!("Needs work");
 /// Discord thread name when the message that opened it had no text.
 pub const DISCORD_THREAD_FALLBACK_MESSAGE: Template = |_| format!("Ryu reply");
+/// Title of the card a Telegram guest (inline mode) taps to see the answer.
+pub const TELEGRAM_GUEST_REPLY_TITLE_MESSAGE: Template = |_| format!("Ryu reply");
 
 // ---- phone calls -------------------------------------------------------------
 

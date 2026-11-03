@@ -60,7 +60,7 @@ function addLabel(unit: PathUnit, tl: LiteralMessage) {
 		};
 	}
 	if (unit.kind === "unfiled") {
-		return { label: "New thread", meta: "Pick an agent later" };
+		return { label: tl("New thread"), meta: tl("Pick an agent later") };
 	}
 	return {
 		label: tl("New thread with {title}", { title: unit.title }),

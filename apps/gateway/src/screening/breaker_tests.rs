@@ -61,7 +61,10 @@ fn failures_are_classified_by_what_they_say_about_the_engine() {
     assert!(!is_engine_outage(&BackendError::Timeout));
     // An engine that answered was not out, whatever it answered.
     for reason in ["busy", "redirect", "http_status"] {
-        assert!(!is_engine_outage(&BackendError::Unavailable(reason)), "{reason}");
+        assert!(
+            !is_engine_outage(&BackendError::Unavailable(reason)),
+            "{reason}"
+        );
     }
 }
 

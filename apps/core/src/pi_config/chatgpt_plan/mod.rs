@@ -30,9 +30,9 @@ mod protocol;
 #[cfg(test)]
 mod tests;
 
-use callback::{callback, CallbackState};
 #[cfg(test)]
 use callback::{accept, callback_page, Callback, CallbackOutcome};
+use callback::{callback, CallbackState};
 pub use errors::SignInFailure;
 pub use login::LoginAttempt;
 use protocol::{credential, endpoints, http_client, response_json, signing_keys, verify_identity};

@@ -1,6 +1,7 @@
 import { LazyComposerEditor } from "@ryu/ui/components/editor/composer-editor-lazy.tsx";
 import { Wave } from "@ryu/ui/components/wave";
 import { cn } from "@ryu/ui/lib/utils";
+import { bidiAutoFor } from "./bidi-text.ts";
 import styles from "./input-bar.module.css";
 import type { useComposerAutoGrow } from "./input-bar-auto-grow.ts";
 import { RECORDING_WAVE_BARS } from "./input-bar-helpers.tsx";
@@ -147,6 +148,7 @@ export function getInputBarEditor({
 				{input && (
 					<div
 						aria-hidden="true"
+						{...bidiAutoFor(input)}
 						className="text-(length:--text-comfortable) pointer-events-none absolute inset-0 whitespace-pre-wrap break-words text-foreground leading-(--text-comfortable--line-height)"
 						ref={composerPreviewRef}
 					>
@@ -155,6 +157,7 @@ export function getInputBarEditor({
 				)}
 				<textarea
 					aria-label={textareaAriaLabel}
+					{...bidiAutoFor(input)}
 					className={cn(
 						"text-(length:--text-comfortable) relative w-full resize-none border-0 bg-transparent text-transparent leading-(--text-comfortable--line-height) caret-foreground outline-none placeholder:text-muted-foreground",
 						"overflow-hidden",

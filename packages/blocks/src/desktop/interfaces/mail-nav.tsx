@@ -119,7 +119,7 @@ function NavItem({
 		<li>
 			<Tooltip>
 				<TooltipTrigger render={button} />
-				<TooltipContent side="right">{spoken}</TooltipContent>
+				<TooltipContent side="inline-end">{spoken}</TooltipContent>
 			</Tooltip>
 		</li>
 	);
@@ -159,7 +159,7 @@ function ComposeButton({
 	return (
 		<Tooltip>
 			<TooltipTrigger render={button} />
-			<TooltipContent side="right">Compose</TooltipContent>
+			<TooltipContent side="inline-end">Compose</TooltipContent>
 		</Tooltip>
 	);
 }

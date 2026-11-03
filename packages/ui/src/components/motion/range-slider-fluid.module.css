@@ -1,6 +1,10 @@
 .inline1 {
 	clip-path: var(--range-slider-fluid-1-clip-path);
 }
+/* Under RTL the fill grows from the right, so the clip uncovers the left. */
+.inline1:dir(rtl) {
+	clip-path: var(--range-slider-fluid-1-clip-path-rtl);
+}
 .inline2 {
 	color: var(--range-slider-fluid-2-color);
 }

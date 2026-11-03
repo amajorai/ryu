@@ -11,7 +11,6 @@
   "No visible chats yet": "表示できるチャットはまだありません",
   "Ready to send to {targetCount, plural, one {{targetLabel} chat} other {{targetLabel} chats}}.": "{targetCount, plural, other {{targetLabel} 件のチャット}}に送信する準備ができました。",
   "Refresh chats": "チャットを更新",
-  "Running": "実行中",
   "Running chats will continue with this instruction after their current turn.": "実行中のチャットは、現在のターンの後にこの指示で続行します。",
   "Select chats, write one message, and review delivery before sending.": "チャットを選び、メッセージを 1 つ書いて、送信前に配信内容を確認します。",
   "Select {chatTitle}": "{chatTitle} を選択",

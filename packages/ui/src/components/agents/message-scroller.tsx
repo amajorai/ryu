@@ -90,13 +90,13 @@ export function MessageScroller(componentProps: MessageScrollerProps) {
 					onItemSelect={scrollToRailItem}
 					previewClassName={
 						renderPreview
-							? "ml-1 w-72 max-w-full"
-							: "ml-1 w-64 max-w-full [&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-2 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"
+							? "ms-1 w-72 max-w-full"
+							: "ms-1 w-64 max-w-full [&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-2 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"
 					}
-					previewContainerClassName="right-3 left-8"
+					previewContainerClassName="end-3 start-8"
 					previewSide="after"
 					railClassName={cn(
-						"absolute inset-y-3 left-1 w-7 content-center py-1 [&_[data-slot=preview-rail-item]]:w-7 [&_[data-slot=preview-rail-item]]:justify-start [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-left rtl:[&_[data-slot=preview-rail-tick]]:origin-right",
+						"absolute inset-y-3 start-1 w-7 content-center py-1 [&_[data-slot=preview-rail-item]]:w-7 [&_[data-slot=preview-rail-item]]:justify-start [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-left rtl:[&_[data-slot=preview-rail-tick]]:origin-right",
 						railOverflowing
 							? "pointer-events-auto opacity-100"
 							: "pointer-events-none opacity-0",

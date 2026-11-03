@@ -1,6 +1,7 @@
-/* The compact rail (CompactRail.tsx) is fixed to the window's left edge and
-   marks the root with `data-ryu-compact-rail` while it is mounted. Everything
-   here is keyed to that attribute, so a window without the rail is untouched.
+/* The compact rail (CompactRail.tsx) is fixed to the window's inline-start
+   edge (left in LTR, right in RTL) and marks the root with
+   `data-ryu-compact-rail` while it is mounted. Everything here is keyed to
+   that attribute, so a window without the rail is untouched.
 
    The rail has no background of its own: it sits on whatever the shell paints
    behind the inset card (theme color, wallpaper, or native transparency), the
@@ -17,7 +18,7 @@
 /* The content clears the rail instead of sliding under it. Unlayered, so it
    wins over the inset's own Tailwind margin utilities. */
 :root[data-ryu-compact-rail] [data-slot="sidebar-inset"] {
-	margin-left: var(--ryu-compact-rail-width);
+	margin-inline-start: var(--ryu-compact-rail-width);
 }
 
 /* The title bar keeps a gap for the floating navigation cluster while the
@@ -27,7 +28,7 @@
 	display: none;
 }
 
-/* Hover-to-peek grows from the left edge, which is now the rail. The rail is
+/* Hover-to-peek grows from the inline-start edge, which is now the rail. The rail is
    the collapsed navigation at this width, so the peek panel stands down. */
 :root[data-ryu-compact-rail]
 	:has(> .ryu-sidebar-surface.absolute[data-sidebar-preview-boundary]) {

@@ -135,9 +135,9 @@ export const CORE_TO_BOX: Product[] = [
 				},
 				{
 					title: "Routing with fallback",
-					// gateway.md G7: the breaker opens after 5 consecutive failures.
-					description:
-						"Falls back to another model and pauses a provider after 5 failures in a row.",
+					// No public docs page states the breaker threshold, so the
+					// catalog does not quote a number for it.
+					description: "Falls back to another model when a provider fails.",
 				},
 				{
 					title: "Budgets and cost",

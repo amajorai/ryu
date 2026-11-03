@@ -123,7 +123,7 @@ function RailSections({
 											actSentence={sentence}
 											actTone={acts?.tone(id)}
 											seat={seat}
-											side="right"
+											side="inline-end"
 											trigger={trigger}
 											triggerContent={content}
 										/>

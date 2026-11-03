@@ -17,6 +17,7 @@ import {
 	coreMemorySettingsResponseSchema,
 	corePreferenceResponseSchema,
 } from "../../core/settings-response-codecs.ts";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf } from "../../i18n/translate.ts";
 
 const MODEL = "context.compact-model";
@@ -71,7 +72,7 @@ export function MemoryAdvancedPanel({
 			.catch((cause) => {
 				setConsentError(
 					tf("Sensitive-topic consent unavailable: {error}", {
-						error: cause instanceof Error ? cause.message : String(cause),
+						error: errorText(cause),
 					})
 				);
 			});
@@ -105,7 +106,7 @@ export function MemoryAdvancedPanel({
 		} catch (cause) {
 			setError(
 				tf("Couldn't load summarizer: {error}. Press r to retry.", {
-					error: cause instanceof Error ? cause.message : String(cause),
+					error: errorText(cause),
 				})
 			);
 		}
@@ -185,7 +186,7 @@ export function MemoryAdvancedPanel({
 				}
 				setError(
 					tf("Couldn't save: {error}. Press r to retry.", {
-						error: cause instanceof Error ? cause.message : String(cause),
+						error: errorText(cause),
 					})
 				);
 			} finally {

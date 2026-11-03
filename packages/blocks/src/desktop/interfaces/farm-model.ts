@@ -375,7 +375,7 @@ export function buildFarm(snapshot: InterfaceSnapshot): FarmModel {
 		fields.push({
 			fenced: false,
 			id: OPEN_FIELD_ID,
-			name: "Open plots",
+			name: tr("Open plots"),
 			plots: open,
 		});
 	}

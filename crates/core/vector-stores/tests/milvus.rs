@@ -114,7 +114,10 @@ async fn creates_upserts_searches_and_deletes() {
     assert_eq!(hits[0].id, "a");
     assert!((hits[0].score - 0.91).abs() < 1e-6);
     assert_eq!(hits[0].document.as_deref(), Some("alpha"));
-    assert_eq!(hits[0].metadata, *json!({"lang": "en"}).as_object().unwrap());
+    assert_eq!(
+        hits[0].metadata,
+        *json!({"lang": "en"}).as_object().unwrap()
+    );
     let delete = server.find("POST", "/v2/vectordb/entities/delete");
     assert_eq!(
         delete.body,
@@ -133,7 +136,10 @@ async fn existing_collection_is_described_and_envelope_errors_surface() {
                 "indexes": [{"metricType": "L2"}]
             }}),
         ),
-        _ => (200, json!({"code": 1100, "message": "collection not loaded"})),
+        _ => (
+            200,
+            json!({"code": 1100, "message": "collection not loaded"}),
+        ),
     })
     .await;
     let store = build(&config(&server.url)).unwrap();
@@ -157,7 +163,10 @@ async fn existing_collection_is_described_and_envelope_errors_surface() {
         )
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("collection not loaded"), "{error}");
+    assert!(
+        error.to_string().contains("collection not loaded"),
+        "{error}"
+    );
 }
 
 #[tokio::test]

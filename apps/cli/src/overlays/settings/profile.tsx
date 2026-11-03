@@ -1,5 +1,4 @@
 import { coreAuthStatusWireSchema } from "../../core/auth-status-wire.ts";
-import { nativeErrorMessage as errorText } from "../../core/native-errors.ts";
 import { profileNameResponseSchema } from "../../core/settings-response-codecs.ts";
 import { securitySessionResponseSchema } from "./account-security-response-contracts.ts";
 /* @jsxImportSource @opentui/react */
@@ -11,6 +10,7 @@ import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { accountBackendTarget } from "../../core/authBackend.ts";
 import { useCore } from "../../core/CoreContext.tsx";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf } from "../../i18n/translate.ts";
 import { PersonalContext } from "./personal-context.tsx";
 import { ProfileAvatar } from "./profile-avatar.tsx";

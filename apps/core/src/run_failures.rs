@@ -66,16 +66,25 @@ pub fn run_failed_payload(
 }
 
 /// Raise `core#run.failed`. Best-effort and non-blocking (see the module docs).
+///
+/// The payload also carries `locale`, the node's `ui-language` (an additive field an
+/// older consumer ignores), so a consumer writes model text the user reads, such as
+/// Healing's diagnosis, in the user's language. Reading that preference is async, so
+/// the emit runs on a spawned task and the failing run never waits for it.
 pub fn report_run_failed(source_id: &str, run: FailedRun, instruction: &str, failure: &str) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
     }
-    let payload = run_failed_payload(source_id, &run, instruction, failure);
-    if let Err(error) =
-        crate::sidecar::event_subscribers::emit_kernel_event(RUN_FAILED_EVENT, payload)
-    {
-        tracing::debug!(source_id, "run.failed not raised: {error}");
-    }
+    let mut payload = run_failed_payload(source_id, &run, instruction, failure);
+    let source_id = source_id.to_owned();
+    tokio::spawn(async move {
+        payload["locale"] = json!(crate::i18n::locale::node_locale().await);
+        if let Err(error) =
+            crate::sidecar::event_subscribers::emit_kernel_event(RUN_FAILED_EVENT, payload)
+        {
+            tracing::debug!(source_id, "run.failed not raised: {error}");
+        }
+    });
 }
 
 /// Scheduler path: a scheduled job failed. Only agent jobs are reported (a
@@ -181,9 +190,22 @@ pub fn spawn_bus_listener(state: ServerState) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::sidecar::event_subscribers::test_capture::emitted_for;
+
+    /// The payloads raised for `source_id`, once the spawned emit has run (the
+    /// emit awaits the node's locale first). Shared with other modules' tests.
+    pub(crate) async fn emitted_eventually(source_id: &str) -> Vec<Value> {
+        for _ in 0..500 {
+            let emitted = emitted_for(source_id);
+            if !emitted.is_empty() {
+                return emitted;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        emitted_for(source_id)
+    }
 
     #[test]
     fn payload_carries_kind_agent_and_truncated_context() {
@@ -230,9 +252,14 @@ mod tests {
                 ("assistant", "it broke"),
             ],
         );
-        let emitted = emitted_for(&run_id);
+        let emitted = emitted_eventually(&run_id).await;
         assert_eq!(emitted.len(), 1);
         assert_eq!(emitted[0]["kind"], SOURCE_KIND_AGENT);
+        assert_eq!(
+            emitted[0]["locale"],
+            crate::i18n::locale::node_locale().await,
+            "run.failed carries the node's UI locale"
+        );
         assert_eq!(emitted[0]["agent_id"], "agent-7");
         assert_eq!(emitted[0]["instruction"], "do the thing");
         assert_eq!(emitted[0]["failure"], "it broke");
@@ -271,7 +298,7 @@ mod tests {
             history: Vec::new(),
         };
         report_job_failure(&job, "gateway down");
-        let emitted = emitted_for(&format!("job:{id}"));
+        let emitted = emitted_eventually(&format!("job:{id}")).await;
         assert_eq!(emitted.len(), 1);
         assert_eq!(emitted[0]["agent_id"], "researcher");
         assert_eq!(emitted[0]["instruction"], "summarise");

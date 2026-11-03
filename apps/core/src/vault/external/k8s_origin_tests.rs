@@ -155,7 +155,11 @@ async fn kv_v1_with_kubernetes_auth_reads_and_writes_with_the_namespace() {
     assert!(fake.with(|f| !f.namespaces.is_empty() && f.namespaces.iter().all(|ns| ns == "team-b")));
 
     // A token file that is not a JWT is never sent, and errors name no path.
-    std::fs::write(&jwt_path, "placeholder service account token without JWT segments").unwrap();
+    std::fs::write(
+        &jwt_path,
+        "placeholder service account token without JWT segments",
+    )
+    .unwrap();
     let logins = fake.with(|f| f.logins);
     let error = store
         .external_store_test(&record.id, &actor())

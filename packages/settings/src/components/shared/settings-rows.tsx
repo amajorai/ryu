@@ -144,7 +144,7 @@ export function SettingsItem({
 					) : null}
 				</div>
 				{actions ? (
-					<ItemActions className="ml-auto shrink-0">{actions}</ItemActions>
+					<ItemActions className="ms-auto shrink-0">{actions}</ItemActions>
 				) : null}
 			</div>
 			{children}

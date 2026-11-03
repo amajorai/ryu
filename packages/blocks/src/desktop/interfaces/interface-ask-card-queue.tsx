@@ -1,10 +1,6 @@
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
-	askAriaLabel,
-	askBubble,
-	blockerAriaLabel,
-	blockerKindWord,
 	type ClockOptions,
 	compareAsks,
 	type InterfaceAgentAct,
@@ -23,6 +19,12 @@ import {
 } from "react";
 import { GAME_FOCUS, GAME_PLATE } from "./game-hud.tsx";
 import { type BlockerEntry, blockerEntries } from "./game3d-acts.ts";
+import {
+	askAriaLabel,
+	askBubble,
+	blockerAriaLabel,
+	blockerKindWord,
+} from "./interface-act-messages.ts";
 import {
 	askOwners,
 	isolateKeys,
@@ -205,6 +207,7 @@ export function AskQueueList({
 	});
 	const askButton = (ask: InterfaceAsk) => {
 		const owner = ownerName(ask, acts, owners);
+		const ownerLabel = owner ?? tl("Inbox");
 		return (
 			<li key={ask.id}>
 				<button
@@ -215,7 +218,7 @@ export function AskQueueList({
 					onClick={(event) => onAsk(ask.id, event.currentTarget)}
 					type="button"
 				>
-					{`${owner ?? "Inbox"}: ${askBubble(ask, privacy)}`}
+					{`${ownerLabel}: ${askBubble(ask, privacy)}`}
 				</button>
 			</li>
 		);
@@ -230,7 +233,7 @@ export function AskQueueList({
 	}
 	return (
 		<nav
-			aria-label="Ask queue"
+			aria-label={tl("Ask queue")}
 			className={cn(
 				"flex flex-col gap-2",
 				mode === "reveal" &&

@@ -6,10 +6,10 @@ import { request } from "@ryuhq/core-client/client";
 import { type Engine, fetchEngines } from "@ryuhq/core-client/engines";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCore } from "../../core/CoreContext.tsx";
+import { errorText } from "../../i18n/error-text.ts";
 import { tf } from "../../i18n/translate.ts";
 import {
 	editorText,
-	errorText,
 	type InferenceValue,
 	type JsonObject,
 	launchPreferenceKey,

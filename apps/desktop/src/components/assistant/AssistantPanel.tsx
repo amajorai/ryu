@@ -21,10 +21,7 @@ import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import { useBuilderRuntime } from "@/src/hooks/useBuilderRuntime.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
-import {
-	sidebarFloatingChrome,
-	useSidebarVariant,
-} from "@/src/hooks/useSidebarVariant.ts";
+import { useSidebarVariant } from "@/src/hooks/useSidebarVariant.ts";
 import { useTitleBarClearsContent } from "@/src/hooks/useTitleBarClearsContent.ts";
 import { engineForAgent } from "@/src/lib/agent-logos.tsx";
 import { cancelChat } from "@/src/lib/api/chat.ts";
@@ -50,6 +47,7 @@ import {
 import { useAssistantSend } from "./AssistantPanel-send.ts";
 import { useAssistantTransport } from "./AssistantPanel-transport.ts";
 import { useAssistantVoice } from "./AssistantPanel-voice.ts";
+import { assistantDockFrameClassName } from "./assistant-dock-frame.ts";
 import { assistantDisplayMessages } from "./assistant-message-display.ts";
 import { ASSISTANT_SURFACE_CONTENT } from "./skin.ts";
 
@@ -472,7 +470,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		);
 	}
 
-	// Docked sidebar: mirrors the left rail + workspace right dock. Floating
+	// Docked sidebar: a logical inline-end rail, opposite the main sidebar. Floating
 	// variant = inset rounded card (`rounded-3xl` tracks Appearance roundness);
 	// inset variant = flush rail (the main SidebarInset already wears the card).
 	// Both start below the titlebar while it's shown; with auto-hide the rail
@@ -482,16 +480,10 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 	return (
 		<RyuAssistantWidgetFrame
 			ariaLabel={builder ? "Ryu builder" : "Ask Ryu assistant"}
-			className={cn(
-				"fixed z-40 flex flex-col overflow-hidden bg-sidebar text-sidebar-foreground md:left-auto md:w-[380px]",
-				titleBarClearsContent
-					? floatingChrome
-						? cn("top-12 right-2 bottom-2 left-2", sidebarFloatingChrome)
-						: "top-[54px] right-0 bottom-0 left-0 md:left-auto"
-					: floatingChrome
-						? cn("inset-y-0 right-2 bottom-2 left-2", sidebarFloatingChrome)
-						: "inset-y-0 right-0 left-0 md:left-auto"
-			)}
+			className={assistantDockFrameClassName({
+				floatingChrome,
+				titleBarClearsContent,
+			})}
 			placement="docked"
 		>
 			{body}

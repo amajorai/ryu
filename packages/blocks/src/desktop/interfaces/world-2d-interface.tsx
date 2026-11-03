@@ -277,11 +277,11 @@ export function World2dInterface({
 				withActs
 					? [...acts].map(([agentId, act]) => [
 							agentId,
-							actorAct(act, nowMs, settings.overlayDensity),
+							actorAct(act, nowMs, settings.overlayDensity, clock),
 						])
 					: []
 			),
-		[acts, nowMs, settings.overlayDensity, withActs]
+		[acts, clock, nowMs, settings.overlayDensity, withActs]
 	);
 	const spritesKey = JSON.stringify([...rawSprites]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the sprites' content.
