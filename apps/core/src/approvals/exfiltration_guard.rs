@@ -581,8 +581,12 @@ mod tests {
     fn provider_tools_take_their_verbs_flow() {
         let manifests: Vec<crate::plugin_manifest::PluginManifest> = [
             include_str!("../plugin_manifest/fixtures/memory.manifest.json"),
-            include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/mem0/manifest.json"),
-            include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/honcho/manifest.json"),
+            include_str!(
+                "../../../../generated/ryu-runtime/plugins-store/plugins/mem0/manifest.json"
+            ),
+            include_str!(
+                "../../../../generated/ryu-runtime/plugins-store/plugins/honcho/manifest.json"
+            ),
         ]
         .into_iter()
         .map(|raw| serde_json::from_str(raw).expect("manifest parses"))

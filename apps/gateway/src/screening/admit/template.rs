@@ -66,13 +66,44 @@ const fn untrusted(class: LeafClass) -> bool {
     )
 }
 
+/// The first untrusted segment of this input that forges a chat-template
+/// turn on this surface.
+fn forging_segment(surface: Surface, input: &ScreenInput) -> Option<&str> {
+    if !matches!(surface, Surface::Chat | Surface::ToolRound) {
+        return None;
+    }
+    input
+        .segments
+        .iter()
+        .find(|segment| untrusted(segment.class) && forges_a_turn(&segment.text))
+        .map(|segment| segment.text.as_str())
+}
+
 /// Whether this input, on this surface, forges a chat-template turn.
 pub(super) fn forged_turn(surface: Surface, input: &ScreenInput) -> bool {
-    matches!(surface, Surface::Chat | Surface::ToolRound)
-        && input
-            .segments
-            .iter()
-            .any(|segment| untrusted(segment.class) && forges_a_turn(&segment.text))
+    forging_segment(surface, input).is_some()
+}
+
+/// The template-token detection behind prompt injection in `scores`, when
+/// [`score_forged_turns`] set that score. It is recorded as a violation event
+/// like a classifier's detection (G5), so a flag or a block the forged turn
+/// alone caused still carries an event id.
+pub(super) fn forged_turn_detection(
+    surface: Surface,
+    input: &ScreenInput,
+    scores: &BTreeMap<TaxonomyId, (f32, String)>,
+) -> Option<crate::screening::Detection> {
+    let (score, source) = scores.get(&TaxonomyId::PROMPT_INJECTION)?;
+    if source != FORGED_TURN_SOURCE {
+        return None;
+    }
+    let text = forging_segment(surface, input)?;
+    Some(crate::screening::Detection {
+        code: TaxonomyId::PROMPT_INJECTION,
+        backend_id: FORGED_TURN_SOURCE.to_owned(),
+        score: *score,
+        text: Some(std::sync::Arc::from(text)),
+    })
 }
 
 /// Raise prompt injection to at least [`FORGED_TURN_SCORE`] in `scores`

@@ -3,11 +3,20 @@ use super::*;
 use crate::fs_command_error::FsCommandErrorCode as Code;
 use std::fs;
 
+/// Run `git` in the fixture repository only. Inside a Git hook (the pre-commit
+/// gate runs this suite) the caller's `GIT_INDEX_FILE`/`GIT_DIR` are inherited,
+/// and `git add` would then write the fixture's blobs into the outer commit's
+/// index instead of the temporary repository's.
 fn git(root: &Path, arguments: &[&str]) {
     let result = std::process::Command::new("git")
         .arg("-C")
         .arg(root)
         .args(arguments)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_OBJECT_DIRECTORY")
+        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
         .output()
         .unwrap();
     assert!(

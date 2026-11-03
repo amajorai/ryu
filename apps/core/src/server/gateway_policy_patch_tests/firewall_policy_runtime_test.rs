@@ -18,8 +18,9 @@ use axum::{
 use serde_json::{json, Value};
 use std::{ffi::OsString, sync::Arc};
 
-const FIREWALL_MANIFEST: &str =
-    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/firewall/manifest.json");
+const FIREWALL_MANIFEST: &str = include_str!(
+    "../../../../../generated/ryu-runtime/plugins-store/plugins/firewall/manifest.json"
+);
 const CHILD_ENV: &str = "RYU_CORE_FIREWALL_POLICY_FIXTURE_CHILD";
 const TEST_NAME: &str =
     "shipped_firewall_policy_drives_loopback_gateway_patch_and_recovers_from_errors";

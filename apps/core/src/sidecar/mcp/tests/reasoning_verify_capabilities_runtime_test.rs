@@ -8,12 +8,16 @@
 use super::*;
 use axum::{extract::State, routing::post, Json, Router};
 use std::sync::Arc;
-const RAW: &str = include_str!("../../../../../../generated/ryu-runtime/apps-store/reasoning/manifest.json");
-const CLAIM_ADAPTER: &str =
-    include_str!("../../../../../../generated/ryu-runtime/apps-store/reasoning/adapters/verify.claim.js");
-const SCOPES_ADAPTER: &str =
-    include_str!("../../../../../../generated/ryu-runtime/apps-store/reasoning/adapters/verify.scopes.js");
-const CHECK_HOOK: &str = include_str!("../../../../../../generated/ryu-runtime/apps-store/reasoning/hooks/check.js");
+const RAW: &str =
+    include_str!("../../../../../../generated/ryu-runtime/apps-store/reasoning/manifest.json");
+const CLAIM_ADAPTER: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/apps-store/reasoning/adapters/verify.claim.js"
+);
+const SCOPES_ADAPTER: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/apps-store/reasoning/adapters/verify.scopes.js"
+);
+const CHECK_HOOK: &str =
+    include_str!("../../../../../../generated/ryu-runtime/apps-store/reasoning/hooks/check.js");
 const CHILD: &str = "RYU_REASONING_VERIFY_CANONICAL_CHILD";
 const TEST: &str = "sidecar::mcp::tests::reasoning_verify_capabilities_runtime::shipped_verify_adapters_map_verdicts_scopes_failures_and_grants";
 /// `(solver result, finding verdicts, notes, canonical headline, canonical claim verdicts)`.

@@ -515,9 +515,10 @@ mod tests {
     /// set, so a renamed `provides` row cannot silently unbind the hardware feed.
     #[test]
     fn the_shipped_manifest_provides_every_consumed_capability() {
-        let manifest: Value =
-            serde_json::from_str(include_str!("../../../generated/ryu-runtime/apps-store/dashboards/manifest.json"))
-                .unwrap();
+        let manifest: Value = serde_json::from_str(include_str!(
+            "../../../generated/ryu-runtime/apps-store/dashboards/manifest.json"
+        ))
+        .unwrap();
         let provided: Vec<&str> = manifest["provides"]
             .as_array()
             .unwrap()

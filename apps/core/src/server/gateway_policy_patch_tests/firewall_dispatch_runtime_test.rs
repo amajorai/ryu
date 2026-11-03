@@ -16,8 +16,9 @@ use super::firewall_policy_runtime::{
     config_response, ran_in_isolated_child, read_config_request, EnvOverride,
 };
 
-const FIREWALL_MANIFEST: &str =
-    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/firewall/manifest.json");
+const FIREWALL_MANIFEST: &str = include_str!(
+    "../../../../../generated/ryu-runtime/plugins-store/plugins/firewall/manifest.json"
+);
 const CHILD_ENV: &str = "RYU_CORE_FIREWALL_DISPATCH_FIXTURE_CHILD";
 const TEST_NAME: &str =
     "shipped_firewall_dispatch_preserves_live_state_and_fails_closed_until_retry";

@@ -278,7 +278,9 @@ pub async fn screen(
     let floor_screener = crate::platform_floor::binding_floor(state.custody, &state.platform_floor)
         .and_then(|floor| floor.screener.clone());
     let active = runtime.active(tier, floor_screener);
-    let result = run::run(state, ctx, surface, input, &active).await;
+    let result =
+        crate::screening::breaker::for_subject(ctx, run::run(state, ctx, surface, input, &active))
+            .await;
     runtime.publish_transitions(&state.traffic);
     result
 }

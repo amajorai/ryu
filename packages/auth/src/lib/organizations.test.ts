@@ -10,6 +10,7 @@ import {
 	ensurePersonalOrganization,
 	type OrganizationApi,
 	type PersonalOrganizationDeps,
+	personalOrganizationSlug,
 	resolveInitialActiveOrganization,
 } from "./organizations.ts";
 
@@ -174,6 +175,25 @@ function personalOrganizationHarness(
 	};
 	return { api, claims, creates, deps, members, released };
 }
+
+describe("personalOrganizationSlug", () => {
+	it("draws again when the random slug reads as a protected brand", () => {
+		// `9009131e` folds to "google"; beforeCreateOrganization would refuse it
+		// and the sign-up would be left without its default organization.
+		const ids = [
+			"9009131e-0000-4000-8000-000000000000",
+			"12345678-aaaa-4bbb-8ccc-dddddddddddd",
+		];
+		expect(personalOrganizationSlug(() => ids.shift() ?? "")).toBe(
+			"personal-12345678-aaaa-4bbb-8ccc-dddddddddddd"
+		);
+	});
+
+	it("keeps an ordinary random slug", () => {
+		const slug = personalOrganizationSlug();
+		expect(slug).toMatch(/^personal-[0-9a-f-]{36}$/);
+	});
+});
 
 describe("ensurePersonalOrganization", () => {
 	it("provisions a durable user with a server-side personal org", async () => {

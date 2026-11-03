@@ -4,7 +4,9 @@
 use super::*;
 use axum::{extract::State, routing::post, Json, Router};
 use std::sync::Arc;
-const RAW: &str = include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/scrapling/manifest.json");
+const RAW: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/scrapling/manifest.json"
+);
 const CHILD: &str = "RYU_SCRAPLING_CANONICAL_CHILD";
 const TEST: &str = "sidecar::mcp::tests::scrapling_capabilities_runtime::shipped_scrapling_adapter_routes_formats_chunks_failures_and_grants";
 const PAGE: &str = "https://fixture.invalid/page";

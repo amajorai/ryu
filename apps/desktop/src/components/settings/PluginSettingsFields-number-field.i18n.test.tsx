@@ -71,6 +71,7 @@ async function commitInGerman(
 			>
 				<NumberField
 					field={FIELD}
+					pluginId="fixture.plugin"
 					storedPreference="10"
 					target={{ url: "https://one.fixture", token: "one-token" }}
 				/>

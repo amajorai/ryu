@@ -11,8 +11,9 @@ use axum::{
 };
 use std::sync::Arc;
 
-const MANIFEST: &str =
-    include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/bytebot/manifest.json");
+const MANIFEST: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/bytebot/manifest.json"
+);
 const SCROLL_ADAPTER: &str =
     include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/bytebot/adapters/computer.scroll.js");
 const CHILD: &str = "RYU_BYTEBOT_REGISTRY_FIXTURE_CHILD";

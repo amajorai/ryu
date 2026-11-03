@@ -16,8 +16,9 @@ use axum::{
 };
 use std::{collections::HashSet, sync::Arc};
 
-const ADVISOR_MANIFEST: &str =
-    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/advisor/manifest.json");
+const ADVISOR_MANIFEST: &str = include_str!(
+    "../../../../../generated/ryu-runtime/plugins-store/plugins/advisor/manifest.json"
+);
 const TEST_NODE_TOKEN: &str = "4e9d1a72b5c84f038c016d32a67ef0419d7bc426f1058e3a7d94c2f6018ab35e";
 const ISOLATED_CHILD_ENV: &str = "RYU_CORE_ADVISOR_FIXTURE_CHILD";
 

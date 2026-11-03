@@ -20,8 +20,9 @@ use std::{
     sync::Arc,
 };
 
-const SPIDERCLOUD_MANIFEST: &str =
-    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/spidercloud/manifest.json");
+const SPIDERCLOUD_MANIFEST: &str = include_str!(
+    "../../../../../generated/ryu-runtime/plugins-store/plugins/spidercloud/manifest.json"
+);
 const TEST_NODE_TOKEN: &str = "a7218d743b2140ab90e75bd4f2fc0b31a62d5d2b";
 const ISOLATED_CHILD_ENV: &str = "RYU_CORE_SPIDERCLOUD_FIXTURE_CHILD";
 const LOCAL_URL: &str = "core:/crawl";

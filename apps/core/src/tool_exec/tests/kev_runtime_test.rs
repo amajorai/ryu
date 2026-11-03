@@ -17,7 +17,8 @@ use std::sync::{
     Arc,
 };
 
-const KEV_MANIFEST: &str = include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/kev/manifest.json");
+const KEV_MANIFEST: &str =
+    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/kev/manifest.json");
 
 #[tokio::test]
 async fn shipped_kev_runnables_preserve_keyless_http_contract_and_errors() {

@@ -3,7 +3,9 @@
 use super::*;
 use axum::{extract::State, routing::post, Json, Router};
 use std::sync::Arc;
-const RAW: &str = include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/ghost/manifest.json");
+const RAW: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/ghost/manifest.json"
+);
 const CHILD: &str = "RYU_GHOST_CANONICAL_CHILD";
 const TEST: &str = "sidecar::mcp::tests::ghost_capabilities_runtime::shipped_ghost_bindings_route_all_native_calls_and_refuse_unapproved_servers";
 #[derive(Default)]

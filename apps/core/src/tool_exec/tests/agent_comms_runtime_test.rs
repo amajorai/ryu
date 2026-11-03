@@ -16,8 +16,9 @@ use axum::{
 };
 use std::{collections::HashSet, sync::Arc};
 
-const AGENT_COMMS_MANIFEST: &str =
-    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/agent-comms/manifest.json");
+const AGENT_COMMS_MANIFEST: &str = include_str!(
+    "../../../../../generated/ryu-runtime/plugins-store/plugins/agent-comms/manifest.json"
+);
 const TEST_NODE_TOKEN: &str = "2c89de31a4b049cfbd9e04c80fd8a7a156ea12c0194b4305";
 const ISOLATED_CHILD_ENV: &str = "RYU_CORE_AGENT_COMMS_FIXTURE_CHILD";
 const LOCAL_EGRESS_GRANT: &str = "tool:http-egress:127.0.0.1";

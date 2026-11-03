@@ -101,11 +101,11 @@ describe("platformAdminRoles", () => {
 		// Dropping `ac`/`roles` falls back to Better Auth's default admin role,
 		// which grants every permission refused above.
 		const source = readFileSync(
-			new URL("../index.ts", import.meta.url),
+			new URL("../auth-options/session-plugins.ts", import.meta.url),
 			"utf8"
 		);
-		const adminCall = source.slice(source.indexOf("\t\tadmin({"));
-		const options = adminCall.slice(0, adminCall.indexOf("\t\t}),"));
+		const adminCall = source.slice(source.indexOf("\tadmin({"));
+		const options = adminCall.slice(0, adminCall.indexOf("\t}),"));
 		expect(options).toContain("ac: platformAdminAccessControl,");
 		expect(options).toContain("roles: platformAdminRoles,");
 		expect(options).not.toContain("adminUserIds");
@@ -156,7 +156,7 @@ async function fixture() {
 	> = { user: [], session: [], account: [], verification: [] };
 	const auth = betterAuth({
 		baseURL: "http://localhost:3000",
-		secret: "platform-admin-access-test-secret-at-least-32-characters",
+		secret: "platform-admin-access-test-secret-at-least-32-characters", // Test vector, not a credential. gitleaks:allow skipcq
 		database: memoryAdapter(database),
 		emailAndPassword: { enabled: true },
 		user: {
@@ -176,7 +176,7 @@ async function fixture() {
 	});
 	const signUp = async (email: string) => {
 		const response = await auth.api.signUpEmail({
-			body: { name: email, email, password: "test-password-1234" },
+			body: { name: email, email, password: "test-password-1234" }, // Test vector, not a credential. gitleaks:allow skipcq
 			asResponse: true,
 		});
 		return z

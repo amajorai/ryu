@@ -2,7 +2,8 @@ use super::schema::validate_runnable;
 use super::*;
 use crate::runnable::RunnableKind;
 
-const SAMPLE_JSON: &str = include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/sample/manifest.json");
+const SAMPLE_JSON: &str =
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/sample/manifest.json");
 
 /// Every apps-store satellite compiled into the hermetic test catalog must also
 /// be in the production runtime set; a test-only satellite cannot be installed
@@ -125,12 +126,18 @@ fn packaged_dirs(repo_root: &std::path::Path, root: &str) -> Vec<(String, std::p
             .map(|category| {
                 (
                     format!("{root}/{category}"),
-                    repo_root.join("generated/ryu-runtime").join(root).join(category),
+                    repo_root
+                        .join("generated/ryu-runtime")
+                        .join(root)
+                        .join(category),
                 )
             })
             .collect()
     } else {
-        vec![(root.to_owned(), repo_root.join("generated/ryu-runtime").join(root))]
+        vec![(
+            root.to_owned(),
+            repo_root.join("generated/ryu-runtime").join(root),
+        )]
     };
 
     let mut dirs = Vec::new();
@@ -584,8 +591,11 @@ fn packaged_manifests_have_one_home_and_only_system_manifests_are_embedded() {
             // The exact relative path, not just the file name: a wrong number of
             // `..` segments is a compile error, but a path pointing at the WRONG
             // package root would silently compile in someone else's manifest.
-            let expected = format!("include_str!(\"../../../../generated/ryu-runtime/{package_root}/manifest.json\")");
-            let multiline = format!("\"../../../../generated/ryu-runtime/{package_root}/manifest.json\"");
+            let expected = format!(
+                "include_str!(\"../../../../generated/ryu-runtime/{package_root}/manifest.json\")"
+            );
+            let multiline =
+                format!("\"../../../../generated/ryu-runtime/{package_root}/manifest.json\"");
             assert!(
                 sources.contains(&expected) || sources.contains(&multiline),
                 "system package {package_root} is not embedded in Core — no `include_str!` \
@@ -598,7 +608,11 @@ fn packaged_manifests_have_one_home_and_only_system_manifests_are_embedded() {
     // Gate the zero-escape on the DIRECTORIES being absent, not on reads failing:
     // otherwise a tree where every package vanished is indistinguishable from the
     // mirror, and this guard passes having checked nothing.
-    if repo_root.join("generated/ryu-runtime/apps-store").is_dir() || repo_root.join("generated/ryu-runtime/plugins-store").is_dir() {
+    if repo_root.join("generated/ryu-runtime/apps-store").is_dir()
+        || repo_root
+            .join("generated/ryu-runtime/plugins-store")
+            .is_dir()
+    {
         assert!(
             checked > 0,
             "a package root is present, so at least one manifest must have been checked"
@@ -1032,7 +1046,11 @@ fn packaged_plugin_manifests_declare_no_inline_output_style_source() {
         offenders.join("\n  ")
     );
 
-    if repo_root.join("generated/ryu-runtime/apps-store").is_dir() || repo_root.join("generated/ryu-runtime/plugins-store").is_dir() {
+    if repo_root.join("generated/ryu-runtime/apps-store").is_dir()
+        || repo_root
+            .join("generated/ryu-runtime/plugins-store")
+            .is_dir()
+    {
         assert!(
             checked > 0,
             "a package root is present but nothing was checked"
@@ -1194,7 +1212,11 @@ fn packaged_plugin_manifests_declare_no_inline_sandbox_code() {
         offenders.join("\n  ")
     );
 
-    if repo_root.join("generated/ryu-runtime/apps-store").is_dir() || repo_root.join("generated/ryu-runtime/plugins-store").is_dir() {
+    if repo_root.join("generated/ryu-runtime/apps-store").is_dir()
+        || repo_root
+            .join("generated/ryu-runtime/plugins-store")
+            .is_dir()
+    {
         assert!(
             checked > 0,
             "a package root is present but nothing was checked"

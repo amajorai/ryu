@@ -105,6 +105,7 @@ pub(super) enum InlineFlag {
 /// handled inside [`InspectorClient::inspect_rubric`].
 pub(super) async fn flag_inline_binding(
     ev: &Evaluator,
+    action: &FirewallPolicy,
     scanner: &FirewallScanner,
     text: &str,
     state: &Arc<AppState>,
@@ -190,9 +191,11 @@ pub(super) async fn flag_inline_binding(
             // A refusal (and, for a judge with no seed, any gap an attacker can
             // produce) is never a clean answer: it flags, and the binding's
             // action decides what happens (`judge_gap_flags`).
+            let closed_block = *action == FirewallPolicy::Block
+                && ins.effective_fail_mode() == crate::config::InspectorFailMode::Closed;
             let gap = !verdict.flagged
                 && !seed_hit
-                && super::inline_eval::judge_gap_flags(verdict.outcome, has_seed);
+                && super::inline_eval::judge_gap_flags(verdict.outcome, has_seed, closed_block);
             let flagged = backstop_flag(verdict.available, verdict.flagged, seed_hit) || gap;
             let reason = if seed_hit {
                 seed_reason

@@ -13,7 +13,11 @@
 //! the breaker and send every tenant's traffic to the degraded row. A broken
 //! engine is still caught by the 10 s readiness probe, whose canary failure
 //! force-opens the breaker. One request adds at most one failure to the
-//! window, so a request with hundreds of items cannot open it alone.
+//! window, so a request with hundreds of items cannot open it alone. A
+//! timeout is a health failure a payload can be sized to cause, so timeouts
+//! count at most once per subject (a tenant, else a credential) in the
+//! window ([`for_subject`]): one caller cannot open the breaker for every
+//! tenant with them. A slow engine still fails its readiness probe.
 
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
@@ -104,6 +108,40 @@ fn request_tag(correlation_id: &str) -> Option<u64> {
     Some(hasher.finish())
 }
 
+tokio::task_local! {
+    /// The keyed subject the screens of the current task are made for.
+    static SUBJECT: u64;
+}
+
+/// The breaker subject of a request: its tenant, else its credential. A
+/// hash only; it never reaches a backend.
+pub fn subject_tag(ctx: &crate::pipeline::RequestContext) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    match ctx.org_id.as_deref().filter(|org| !org.is_empty()) {
+        Some(org) => ("org", org).hash(&mut hasher),
+        None => ("credential", ctx.owner_binding.as_str()).hash(&mut hasher),
+    }
+    hasher.finish()
+}
+
+/// Run `screen` with `ctx`'s subject in scope: its backend timeouts count
+/// toward a breaker at most once per window for that subject.
+pub async fn for_subject<F: std::future::Future>(
+    ctx: &crate::pipeline::RequestContext,
+    screen: F,
+) -> F::Output {
+    SUBJECT.scope(subject_tag(ctx), screen).await
+}
+
+/// The tag a timeout is deduplicated by: the subject in scope, else the
+/// request.
+fn timeout_tag(correlation_id: &str) -> Option<u64> {
+    SUBJECT
+        .try_with(|subject| *subject)
+        .ok()
+        .or_else(|| request_tag(correlation_id))
+}
+
 /// What the breaker reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BreakerState {
@@ -177,6 +215,13 @@ impl Breaker {
     /// counted again.
     pub fn record_failure_for(&self, correlation_id: &str) {
         self.record_tagged(false, request_tag(correlation_id));
+    }
+
+    /// Record a timed-out call. While the breaker is closed the subject's
+    /// second and later timeouts in the window (see [`for_subject`]; the
+    /// request's when no subject is in scope) are not counted again.
+    pub fn record_timeout_for(&self, correlation_id: &str) {
+        self.record_tagged(false, timeout_tag(correlation_id));
     }
 
     fn record_tagged(&self, ok: bool, tag: Option<u64>) {
@@ -305,6 +350,9 @@ impl ScreenerBackend for Breakered {
         match &result {
             Ok(_) => self.breaker.record(true),
             Err(error) => match failure_kind(error) {
+                FailureKind::Health if matches!(error, BackendError::Timeout) => {
+                    self.breaker.record_timeout_for(req.correlation_id)
+                }
                 FailureKind::Health => self.breaker.record_failure_for(req.correlation_id),
                 // Content-driven: the request that caused it is refused by the
                 // fail rules; the engine's health is the probe's to judge.

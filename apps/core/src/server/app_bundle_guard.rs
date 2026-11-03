@@ -13,8 +13,12 @@
 
 use crate::identity_verify::permissions::{APP_ENABLE, APP_INSTALL, APP_UPDATE};
 
-/// The first-party scope whose app names are unique and Ryu-published.
-const FIRST_PARTY_SCOPE: &str = "@ryu/";
+/// The first-party scope whose app names are unique and Ryu-published. A scope
+/// prefix, not an app id, so it is not declared as an `@ryu/…` id constant (the
+/// `app_boundary_guard` inventory of per-app ids).
+fn first_party_name(plugin_id: &str) -> Option<&str> {
+    plugin_id.strip_prefix("@ryu/")
+}
 
 /// The node lifecycle permissions a local-bundle request must hold.
 pub(super) fn bundle_lifecycle_permissions(update: bool) -> &'static [&'static str] {
@@ -43,7 +47,7 @@ fn is_slug(value: &str) -> bool {
 /// The id prefix every app a sidecar of `caller_plugin_id` installs must carry,
 /// or `None` when that plugin may not install apps.
 pub(super) fn sidecar_bundle_id_prefix(caller_plugin_id: &str) -> Option<String> {
-    let name = caller_plugin_id.strip_prefix(FIRST_PARTY_SCOPE)?;
+    let name = first_party_name(caller_plugin_id)?;
     is_slug(name).then(|| format!("com.local.{name}."))
 }
 

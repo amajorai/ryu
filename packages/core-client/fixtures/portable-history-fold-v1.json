@@ -1,0 +1,67 @@
+[
+  {
+    "note": "every Cyrillic and Greek look-alike folds inside a token holding ASCII",
+    "input": "x\u0391\u0392\u0395\u0396\u0397\u0399\u039a\u039c\u039d\u039f\u03a1\u03a4\u03a5\u03a7\u03b1\u03b9\u03ba\u03bd\u03bf\u03c1\u03c5\u03c7\u0405\u0406\u0408\u0410\u0412\u0415\u041a\u041c\u041d\u041e\u0420\u0421\u0422\u0423\u0425\u0430\u0435\u043e\u0440\u0441\u0443\u0445\u0455\u0456\u0458\u04ae\u04bb\u04c0\u04cf\u0501\u051a\u051b\u051c\u051d",
+    "folded": "xABEZHIKMNOPTYXaikvopuxSIJABEKMHOPCTYXaeopcyxsijYhIldQqWw"
+  },
+  {
+    "note": "a mixed-script address reads as ASCII",
+    "input": "ava@\u0435\u0445\u0430mple.c\u043em",
+    "folded": "ava@example.com"
+  },
+  {
+    "note": "a token without an ASCII letter or digit keeps its letters",
+    "input": "\u043f\u0440\u0438\u0432\u0435\u0442 \u03b1\u03b2\u03b3 \u0430\u0441\u0435",
+    "folded": "\u043f\u0440\u0438\u0432\u0435\u0442 \u03b1\u03b2\u03b3 \u0430\u0441\u0435"
+  },
+  {
+    "note": "prose keeps its script while the mixed token beside it folds",
+    "input": "\u043f\u043e\u0447\u0442\u0430 ivan@\u0440ost.ru",
+    "folded": "\u043f\u043e\u0447\u0442\u0430 ivan@post.ru"
+  },
+  {
+    "note": "the ideographic full stop is a dot inside an ASCII token",
+    "input": "ava@example\u3002com",
+    "folded": "ava@example.com"
+  },
+  {
+    "note": "a halfwidth ideographic full stop folds the same way",
+    "input": "example\uff61com",
+    "folded": "example.com"
+  },
+  {
+    "note": "CJK prose keeps its full stop",
+    "input": "\u65e5\u672c\u8a9e\u3002",
+    "folded": "\u65e5\u672c\u8a9e\u3002"
+  },
+  {
+    "note": "combining marks on ASCII letters and digits are dropped",
+    "input": "a\u0301va@exa\u0308\u0323mple.com 4\u20e3",
+    "folded": "ava@example.com 4"
+  },
+  {
+    "note": "a mark on a non-ASCII letter, or opening the text, is kept",
+    "input": "\u0301x \u0438\u0306",
+    "folded": "\u0301x \u0438\u0306"
+  },
+  {
+    "note": "a mark on a folded look-alike is dropped",
+    "input": "x\u0430\u0301",
+    "folded": "xa"
+  },
+  {
+    "note": "tokens split on newlines and tabs too",
+    "input": "\u0430\u0441\u0435\n\u0430\u0441\u0435x\t\u0430",
+    "folded": "\u0430\u0441\u0435\nacex\t\u0430"
+  },
+  {
+    "note": "fullwidth, ignorable, dash and native-digit folds still apply",
+    "input": "\uff15\uff15\uff15\u2011\u0661\u0662\u200b3",
+    "folded": "555-123"
+  },
+  {
+    "note": "plain ASCII is unchanged",
+    "input": "ERROR boot failed at 127.0.0.1:7980",
+    "folded": "ERROR boot failed at 127.0.0.1:7980"
+  }
+]

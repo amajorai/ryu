@@ -55,7 +55,8 @@ async fn shipped_activation_matching_registration_and_failure_recovery() {
         return;
     }
     crate::runnable::reset_activation_events_for_test();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../generated/ryu-runtime/plugins-store");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../generated/ryu-runtime/plugins-store");
     let mut wildcard_count = 0;
     let mut all_shipped = Vec::new();
     for cluster in ["plugins", "lsp", "external_plugins"] {
@@ -95,7 +96,9 @@ async fn shipped_activation_matching_registration_and_failure_recovery() {
     }
     assert!(wildcard_count >= 40);
     let agent_comms_root = root.join("plugins/agent-comms").canonicalize().unwrap();
-    let authored = include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/agent-comms/manifest.json");
+    let authored = include_str!(
+        "../../../../generated/ryu-runtime/plugins-store/plugins/agent-comms/manifest.json"
+    );
     assert_eq!(
         std::fs::read_to_string(agent_comms_root.join("manifest.json")).unwrap(),
         authored
@@ -151,7 +154,9 @@ async fn shipped_activation_matching_registration_and_failure_recovery() {
     );
 
     let styles_root = root.join("plugins/output-styles").canonicalize().unwrap();
-    let authored = include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/manifest.json");
+    let authored = include_str!(
+        "../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/manifest.json"
+    );
     assert_eq!(
         std::fs::read_to_string(styles_root.join("manifest.json")).unwrap(),
         authored

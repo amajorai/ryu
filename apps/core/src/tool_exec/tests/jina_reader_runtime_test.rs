@@ -9,8 +9,9 @@ use std::sync::{
     Arc,
 };
 
-const MANIFEST: &str =
-    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/jina-reader/manifest.json");
+const MANIFEST: &str = include_str!(
+    "../../../../../generated/ryu-runtime/plugins-store/plugins/jina-reader/manifest.json"
+);
 const ADAPTER: &str =
     include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/jina-reader/adapters/web.extract.js");
 const KEY_ENV: &str = "RYU_PLUGIN__X40_RYU_X2F_JINA_X2D_READER_API_KEY";

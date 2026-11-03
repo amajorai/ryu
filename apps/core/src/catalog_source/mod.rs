@@ -14,6 +14,7 @@
 //! [`sources::Source`] enum, match-dispatched. See `sources.rs`.
 
 pub(crate) mod agent_registry;
+pub(crate) mod brand_guard;
 mod github_enrich;
 mod github_topic;
 pub(crate) mod license;

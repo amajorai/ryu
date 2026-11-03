@@ -17,7 +17,8 @@ use axum::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
-const EXA_MANIFEST: &str = include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/exa/manifest.json");
+const EXA_MANIFEST: &str =
+    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/exa/manifest.json");
 const TEST_API_KEY: &str = "exa-fixture-key-not-real";
 
 #[tokio::test]

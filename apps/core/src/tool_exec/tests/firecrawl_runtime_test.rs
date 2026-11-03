@@ -15,8 +15,9 @@ use axum::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
-const FIRECRAWL_MANIFEST: &str =
-    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/firecrawl/manifest.json");
+const FIRECRAWL_MANIFEST: &str = include_str!(
+    "../../../../../generated/ryu-runtime/plugins-store/plugins/firecrawl/manifest.json"
+);
 const TEST_API_KEY: &str = "fixture-secret-not-a-firecrawl-key";
 
 #[tokio::test]

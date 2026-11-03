@@ -2,8 +2,9 @@
 //! No process is started; lifecycle/respawn and real Headroom remain separate.
 use super::*;
 use std::collections::BTreeMap;
-const MANIFEST: &str =
-    include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/headroom/manifest.json");
+const MANIFEST: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/headroom/manifest.json"
+);
 const CHILD: &str = "RYU_HEADROOM_POLICY_RUNTIME_CHILD";
 const TEST:&str="sidecar::gateway::tests::headroom_policy_runtime::shipped_headroom_policy_sets_and_clears_spawn_contract";
 

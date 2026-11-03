@@ -75,10 +75,11 @@ test("confirms a reserved handle with one German message", async () => {
 		successTitles.push(String(options.title));
 		return "toast";
 	});
+	const german: Record<string, string> = {
+		"@{handle} is reserved": "@{handle} ist reserviert",
+	};
 	registerLiteralCatalogLoader((locale) =>
-		locale.startsWith("de")
-			? { "@{handle} is reserved": "@{handle} ist reserviert" }
-			: {}
+		locale.startsWith("de") ? german : {}
 	);
 	const container = document.createElement("div");
 	document.body.append(container);

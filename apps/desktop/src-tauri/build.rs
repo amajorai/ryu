@@ -1,5 +1,11 @@
 use std::{env, fs, path::PathBuf};
 
+// Windows DLL sideloading hardening: on MSVC targets, link Ryu.exe with
+// `/DEPENDENTLOADFLAG:0x800` so its static DLL imports resolve from System32
+// only, never from its per-user install directory. Shared with Core and Gateway;
+// tested in `ryu_sidecar_runtime::dll_search::link_arg`.
+include!("../../../crates/core/sidecar-runtime/src/dll_search/link_arg.rs");
+
 fn main() {
     println!("cargo:rerun-if-env-changed=RYU_STANDALONE_APP_ID");
     println!("cargo:rerun-if-env-changed=RYU_STANDALONE_APP_BUNDLE");
@@ -59,5 +65,6 @@ fn main() {
             app_id.to_string_lossy()
         );
     }
+    emit_dependent_load_flag_link_arg();
     tauri_build::build()
 }

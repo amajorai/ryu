@@ -85,17 +85,19 @@ describe("DownloadMenu", () => {
 			};
 		};
 
-		// No divider: the primary's end is trimmed and the chevron segment hugs
-		// the right end instead of sitting centered in a square.
+		// No divider: the chevron segment hugs the right end instead of sitting
+		// centered in a square, while the primary keeps a label gap of end
+		// padding so its hover fill never ends flush against the logo or arch.
 		const undivided = classesOf(false);
-		expect(undivided.primary).toContain("pe-1");
+		expect(undivided.primary).toContain("pe-2.5");
+		expect(undivided.primary).not.toContain("pe-1");
 		expect(undivided.trigger).toEqual(
-			expect.arrayContaining(["w-auto", "ps-0.5", "pe-2"])
+			expect.arrayContaining(["w-auto", "ps-0", "pe-2"])
 		);
 
 		// With a divider the segments stay separate, square-chevron buttons.
 		const divided = classesOf(true);
-		expect(divided.primary).not.toContain("pe-1");
+		expect(divided.primary).not.toContain("pe-2.5");
 		expect(divided.trigger).not.toContain("w-auto");
 		expect(divided.trigger).toContain("w-8");
 	});

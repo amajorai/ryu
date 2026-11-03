@@ -99,7 +99,7 @@ regexes = [
 ]
 
 [[allowlists]]
-description = "Dummy values inside #[cfg(test)] modules of production sources, and i18n text"
+description = "Dummy values inside #[cfg(test)] modules of production sources, i18n text, and doc examples"
 targetRules = ["generic-api-key"]
 # Exact placeholder values; production files are not path-allowlisted.
 regexes = [
@@ -131,4 +131,7 @@ regexes = [
   '''^tok-legacy-9c2e$''',
   # packages/i18n/locales/de.json: German UI text after "...arrow keys to rotate."
   '''^Ryu-3D-Geist\.?$''',
+  # packages/blocks/src/web/product-page/profiles-agent-api-b-messaging.ts: the
+  # `Idempotency-Key: order-1842-shipped` header of a documented curl example.
+  '''^order-1842-shipped$''',
 ]

@@ -905,7 +905,12 @@ fn every_builtin_fixture_grant_is_allowlisted() {
         }));
     }
     for root in ["apps-store", "plugins-store"] {
-        if let Ok(entries) = std::fs::read_dir(gateway.join("../..").join("generated/ryu-runtime").join(root)) {
+        if let Ok(entries) = std::fs::read_dir(
+            gateway
+                .join("../..")
+                .join("generated/ryu-runtime")
+                .join(root),
+        ) {
             manifest_paths.extend(
                 entries
                     .flatten()

@@ -13,9 +13,11 @@ use axum::{
 };
 use std::sync::Arc;
 
-const KEV: &str = include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/kev/manifest.json");
-const CLEF: &str =
-    include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/cloudflare-clef/manifest.json");
+const KEV: &str =
+    include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/kev/manifest.json");
+const CLEF: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/cloudflare-clef/manifest.json"
+);
 const CHILD: &str = "RYU_KEV_CLEF_CAPABILITIES_CHILD";
 const TOKEN: &str = "2c89de31a4b049cfbd9e04c80fd8a7a156ea12c0194b4305";
 const TEST_NAME: &str = "sidecar::mcp::tests::kev_clef_capabilities_runtime::kev_clef_canonical_selection_preserves_requests_grants_and_errors";

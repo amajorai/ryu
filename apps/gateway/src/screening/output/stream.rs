@@ -34,8 +34,9 @@ struct StreamScreen {
     active: Arc<ActiveChain>,
     scope: [u8; 32],
     model: Option<String>,
-    /// Partial SSE line carried across chunks.
-    line: String,
+    /// Partial SSE line carried across chunks, as raw bytes: only a whole
+    /// line is decoded, so a character split across chunks stays intact.
+    line: Vec<u8>,
     window: String,
     prior: String,
     pending: Option<BoxFuture<'static, (OutputVerdict, Option<String>)>>,
@@ -46,24 +47,40 @@ struct StreamScreen {
 }
 
 impl StreamScreen {
+    /// Read the complete lines of `chunk` into the window. Bytes are
+    /// buffered and decoded a whole line at a time: a multi-byte character
+    /// split across chunks is screened as itself, not as U+FFFD.
     fn absorb(&mut self, chunk: &[u8]) -> bool {
+        self.line.extend_from_slice(chunk);
         let mut saw_done = false;
-        self.line.push_str(&String::from_utf8_lossy(chunk));
-        while let Some(end) = self.line.find('\n') {
-            let line: String = self.line.drain(..=end).collect();
-            let Some(data) = line.trim_end().strip_prefix("data:") else {
-                continue;
-            };
-            let data = data.trim();
-            if data == "[DONE]" {
-                saw_done = true;
-                continue;
-            }
-            if let Ok(frame) = serde_json::from_str::<Value>(data) {
-                delta_text(&frame, &mut self.window);
-            }
+        while let Some(end) = self.line.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = self.line.drain(..=end).collect();
+            saw_done |= self.read_line(&line);
         }
         saw_done
+    }
+
+    /// At the end of the stream, a last line with no newline is still read:
+    /// the client receives it, so it is screened.
+    fn absorb_tail(&mut self) -> bool {
+        let line = std::mem::take(&mut self.line);
+        !line.is_empty() && self.read_line(&line)
+    }
+
+    /// One SSE line: `true` for `[DONE]`, else its delta text joins the window.
+    fn read_line(&mut self, line: &[u8]) -> bool {
+        let line = String::from_utf8_lossy(line);
+        let Some(data) = line.trim_end().strip_prefix("data:") else {
+            return false;
+        };
+        let data = data.trim();
+        if data == "[DONE]" {
+            return true;
+        }
+        if let Ok(frame) = serde_json::from_str::<Value>(data) {
+            delta_text(&frame, &mut self.window);
+        }
+        false
     }
 
     /// A window is sent at about 400 tokens, by characters or by estimated
@@ -91,15 +108,18 @@ impl StreamScreen {
         let node_closed = state.config.screening.node_fails_closed();
         self.pending = Some(
             async move {
-                let (verdict, detections) = classify(
-                    &active,
-                    &scope,
-                    &correlation,
-                    &text,
-                    &context,
-                    model.as_deref(),
-                    strict,
-                    node_closed,
+                let (verdict, detections) = crate::screening::breaker::for_subject(
+                    &ctx,
+                    classify(
+                        &active,
+                        &scope,
+                        &correlation,
+                        &text,
+                        &context,
+                        model.as_deref(),
+                        strict,
+                        node_closed,
+                    ),
                 )
                 .await;
                 let recorded = record_output(
@@ -189,7 +209,7 @@ pub fn guard_stream(
         active,
         scope,
         model,
-        line: String::new(),
+        line: Vec::new(),
         window: String::new(),
         prior: String::new(),
         pending: None,
@@ -223,7 +243,9 @@ pub fn guard_stream(
                 Step::Item(item) => item,
             };
             let Some(item) = next else {
-                // Upstream ended without `[DONE]`: classify what is left.
+                // Upstream ended without `[DONE]`: classify what is left,
+                // a last line with no newline included.
+                s.absorb_tail();
                 if let Some(frame) = s.finish_pending().await {
                     return Some((Ok(frame), s));
                 }
@@ -243,7 +265,9 @@ pub fn guard_stream(
             };
             let done = s.absorb(&chunk);
             if done {
-                // Hold the final frame until every window is classified.
+                // Hold the final frame until every window is classified,
+                // including any partial line after `[DONE]`.
+                s.absorb_tail();
                 if let Some(frame) = s.finish_pending().await {
                     return Some((Ok(frame), s));
                 }
@@ -266,3 +290,7 @@ pub fn guard_stream(
     });
     axum::body::Body::from_stream(stream)
 }
+
+#[cfg(test)]
+#[path = "stream_tests.rs"]
+mod stream_tests;

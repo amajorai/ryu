@@ -14,11 +14,14 @@ fn shipped_package_cards_project_canonical_identity_and_permissions() {
     ];
     let mut incoming_seen = std::collections::HashSet::new();
     for cluster in ["plugins", "lsp", "external_plugins"] {
-        let mut directories: Vec<_> =
-            std::fs::read_dir(repository.join("generated/ryu-runtime/plugins-store").join(cluster))
-                .unwrap()
-                .map(|entry| entry.unwrap().path())
-                .collect();
+        let mut directories: Vec<_> = std::fs::read_dir(
+            repository
+                .join("generated/ryu-runtime/plugins-store")
+                .join(cluster),
+        )
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
         directories.sort();
         for directory in directories {
             let path = directory.join("manifest.json");

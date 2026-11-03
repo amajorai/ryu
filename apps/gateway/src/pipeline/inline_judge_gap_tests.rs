@@ -14,7 +14,9 @@ use serde_json::{json, Value};
 use super::{flag_inline_binding, InlineFlag};
 use crate::{
     audit::AuditLogger,
-    config::{AuditConfig, FirewallConfig, GatewayConfig, ProviderId},
+    config::{
+        AuditConfig, FirewallConfig, FirewallPolicy, GatewayConfig, InspectorFailMode, ProviderId,
+    },
     evaluators::{Evaluator, EvaluatorImpl, EvaluatorRegistry},
     providers::Provider,
     state::AppState,
@@ -55,15 +57,26 @@ impl Provider for ReplyProvider {
 }
 
 fn state(reply: &'static str) -> (Arc<AppState>, Arc<ReplyProvider>) {
+    state_routed(reply, PROVIDER, None)
+}
+
+/// A state whose judge routes to `route`; a name with no registered provider
+/// leaves the judge unreachable.
+fn state_routed(
+    reply: &'static str,
+    route: &str,
+    fail_mode: Option<InspectorFailMode>,
+) -> (Arc<AppState>, Arc<ReplyProvider>) {
     let mut config = GatewayConfig::default();
-    config.routing.default_provider = ProviderId::from(PROVIDER);
-    config.routing.fallback_chain = vec![ProviderId::from(PROVIDER)];
+    config.routing.default_provider = ProviderId::from(route);
+    config.routing.fallback_chain = vec![ProviderId::from(route)];
     config.cache.enabled = false;
     config.firewall = FirewallConfig {
         enabled: true,
         ..FirewallConfig::default()
     };
     config.firewall.inspector.model = "judge-model".into();
+    config.firewall.inspector.fail_mode = fail_mode;
     let audit = AuditLogger::new(&AuditConfig {
         enabled: false,
         db_path: String::new(),
@@ -97,10 +110,18 @@ fn custom_judge() -> Evaluator {
 }
 
 async fn flag(ev: &Evaluator, reply: &'static str, text: &str) -> (bool, String, usize) {
-    let (state, provider) = state(reply);
+    flag_in(state(reply), ev, &FirewallPolicy::Block, text).await
+}
+
+async fn flag_in(
+    (state, provider): (Arc<AppState>, Arc<ReplyProvider>),
+    ev: &Evaluator,
+    action: &FirewallPolicy,
+    text: &str,
+) -> (bool, String, usize) {
     let ctx = super::test_support::plain_request_context();
     let scanner = state.resolved_scanner(&ctx);
-    let outcome = flag_inline_binding(ev, scanner.as_ref(), text, &state, &ctx).await;
+    let outcome = flag_inline_binding(ev, action, scanner.as_ref(), text, &state, &ctx).await;
     let calls = *provider.calls.lock().unwrap();
     match outcome {
         InlineFlag::Ran { flagged, reason } => (flagged, reason, calls),
@@ -160,4 +181,30 @@ async fn a_seeded_judge_flags_a_refusal_and_keeps_the_seed_for_other_gaps() {
             "{reply}: a non-answer over a seed-clean text stays open"
         );
     }
+}
+
+// inline-judge outage: a custom rubric bound to Block has no seed to fall
+// back on, so under a closed fail mode an unreachable judge flags it; an
+// open fail mode, or a binding that does not block, keeps serving.
+#[tokio::test]
+async fn an_unreachable_judge_flags_a_blocking_custom_rubric_under_a_closed_fail_mode() {
+    let unreachable = |fail_mode| state_routed("unused", "no-such-judge", fail_mode);
+    let block = FirewallPolicy::Block;
+    let (flagged, reason, _) = flag_in(unreachable(None), &custom_judge(), &block, RECORD).await;
+    assert!(flagged, "{reason}");
+    assert!(reason.contains("provider_unavailable"), "{reason}");
+
+    let open = Some(InspectorFailMode::Open);
+    let (flagged, _, _) = flag_in(unreachable(open), &custom_judge(), &block, RECORD).await;
+    assert!(!flagged, "an open fail mode serves through an outage");
+    let warn = FirewallPolicy::WarnAndContinue;
+    let (flagged, _, _) = flag_in(unreachable(None), &custom_judge(), &warn, RECORD).await;
+    assert!(!flagged, "a binding that does not block keeps serving");
+    let toxicity = EvaluatorRegistry::new()
+        .get("toxicity")
+        .expect("toxicity seeded")
+        .clone();
+    let benign = "Thanks for the lovely afternoon at the park with the family.";
+    let (flagged, _, _) = flag_in(unreachable(None), &toxicity, &block, benign).await;
+    assert!(!flagged, "a seeded judge keeps its seed as the floor");
 }

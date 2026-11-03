@@ -17,35 +17,38 @@
 //! unparseable reply, or a window budget that ran out before the oldest
 //! content is never a clean verdict ([`InspectorOutcome`]).
 //!
-//! Under the `Block` action the Inspector stage fails CLOSED on every missing
-//! verdict an attacker can steer or force ([`fail_closed`]): a refusal, a
-//! malformed or cut-off reply, plain prose with no verdict, a window budget
-//! that ran out, and a judge provider that is unreachable, errors or times out
-//! (a payload sized or shaped to time the judge out is as attacker-controlled
-//! as a refusal bait). The verdict comes back flagged with the
-//! [`UNAVAILABLE_CATEGORY`], so the stage's Block arm refuses the turn. Only a
-//! judge that flags nothing but topic words outside the declared vocabulary
-//! stays fail-open (logged, `available = false`): the shipped classify-tier
-//! default does that on benign turns. An operator who would rather keep
-//! serving while the classify tier is down sets the inspector action to
-//! `warn_and_continue`, which logs and audits flags without refusing. Rubric
-//! judges never fail closed here; `available = false` makes their caller run
-//! the deterministic seed backstop over the full text.
+//! With `inspector.fail_mode` closed (the default under the `Block` action)
+//! the Inspector stage fails CLOSED on every missing verdict an attacker can
+//! steer or force ([`fail_closed`]): a refusal, a malformed or cut-off reply,
+//! plain prose with no verdict, a window budget that ran out, and a judge
+//! provider that is unreachable, errors or times out (a payload sized or
+//! shaped to time the judge out is as attacker-controlled as a refusal bait).
+//! The verdict comes back flagged with the [`UNAVAILABLE_CATEGORY`], and the
+//! configured action applies to it: Block refuses the turn. Only a judge that
+//! flags nothing but topic words outside the declared vocabulary stays open
+//! (logged, `available = false`): the shipped classify-tier default does that
+//! on benign turns. An operator who would rather keep serving while the
+//! classify tier is down sets `fail_mode = "open"`. Rubric judges never fail
+//! closed here; `available = false` makes their caller run the deterministic
+//! seed backstop over the full text.
 
-use futures_util::future::join_all;
-use serde_json::json;
 use tracing::warn;
 
-use crate::config::{FirewallPolicy, InspectorConfig, InspectorMode};
+use crate::config::{FirewallPolicy, InspectorConfig, InspectorFailMode, InspectorMode};
 use crate::{error::GatewayError, pipeline::inference_governance::InferenceClient};
 // The prompts, the parser and the category check live in the screening
 // crate (`ryu_gw_screening::backends::inspector`), so the node-tier stage
 // here and the floor-tier screener adapter share one prompt and one parser.
-use ryu_gw_screening::backends::inspector::{self as judge, JudgeReply};
+use ryu_gw_screening::backends::inspector as judge;
 
-/// Windows judged per turn: about 60,000 characters with the overlap.
-/// Content past the budget is not judged, and the verdict says so.
-pub const MAX_INSPECT_WINDOWS: usize = 16;
+#[path = "inspector_windows.rs"]
+mod windows;
+use windows::{run_inspection, Judge};
+
+/// Windows judged per turn by default (about 60,000 characters); the stage
+/// reads `InspectorConfig::max_windows`. Past the budget is unjudged, and the
+/// verdict says so.
+pub const MAX_INSPECT_WINDOWS: usize = crate::config::DEFAULT_INSPECTOR_WINDOWS;
 /// Judge calls in flight at once for one turn.
 const WINDOW_CONCURRENCY: usize = 4;
 /// The category a fail-closed verdict carries.
@@ -148,21 +151,47 @@ impl InspectorVerdict {
     }
 }
 
-/// Under `Block`, turn a missing verdict that [`InspectorOutcome::fails_closed`]
-/// into a flag so the Block path refuses the turn. Other actions and
-/// outcomes pass through unchanged.
-pub fn fail_closed(mut verdict: InspectorVerdict, action: &FirewallPolicy) -> InspectorVerdict {
-    if verdict.flagged || *action != FirewallPolicy::Block || !verdict.outcome.fails_closed() {
+/// Where [`fail_closed`] reads the fail mode from: an [`InspectorConfig`]
+/// (its [`InspectorConfig::effective_fail_mode`]) or a bare action (the
+/// default for that action, closed only under Block).
+pub trait InspectorFailPolicy {
+    fn inspector_fail_mode(&self) -> InspectorFailMode;
+}
+
+impl InspectorFailPolicy for InspectorConfig {
+    fn inspector_fail_mode(&self) -> InspectorFailMode {
+        self.effective_fail_mode()
+    }
+}
+
+impl InspectorFailPolicy for FirewallPolicy {
+    fn inspector_fail_mode(&self) -> InspectorFailMode {
+        InspectorFailMode::default_for(self)
+    }
+}
+
+/// Under a closed fail mode, turn a missing verdict that
+/// [`InspectorOutcome::fails_closed`] into an [`UNAVAILABLE_CATEGORY`] flag so
+/// the configured action applies to the turn. An open fail mode and every
+/// other outcome pass through unchanged.
+pub fn fail_closed(
+    mut verdict: InspectorVerdict,
+    policy: &impl InspectorFailPolicy,
+) -> InspectorVerdict {
+    if verdict.flagged
+        || policy.inspector_fail_mode() != InspectorFailMode::Closed
+        || !verdict.outcome.fails_closed()
+    {
         return verdict;
     }
     warn!(
         outcome = verdict.outcome.label(),
-        "inspector: no verdict for the whole turn; failing closed under Block"
+        "inspector: no verdict for the whole turn; failing closed"
     );
     verdict.flagged = true;
     verdict.categories = vec![UNAVAILABLE_CATEGORY.to_owned()];
     verdict.reason = format!(
-        "the inspector could not judge the whole turn ({}); blocked fail-closed",
+        "the inspector could not judge the whole turn ({}); failed closed",
         verdict.outcome.label()
     );
     verdict
@@ -200,18 +229,18 @@ fn sanitize_semantics(mut verdict: InspectorVerdict, action: &FirewallPolicy) ->
 pub struct InspectorClient;
 
 impl InspectorClient {
-    /// The Inspector stage's verdict for `text` under `cfg.action`:
-    /// [`Self::assess`], then [`fail_closed`] and the Sanitize semantics.
+    /// The Inspector stage's verdict for `text` under `cfg`: [`Self::assess`],
+    /// then [`fail_closed`] under `cfg`'s fail mode and the Sanitize semantics.
     pub async fn inspect(
         text: &str,
         cfg: &InspectorConfig,
         inference: &dyn InferenceClient,
     ) -> Result<InspectorVerdict, GatewayError> {
-        let verdict = Self::assess(text, cfg, inference).await?;
-        Ok(sanitize_semantics(
-            fail_closed(verdict, &cfg.action),
-            &cfg.action,
-        ))
+        // Under Sanitize an injection-only window flag is set aside and the
+        // rest of the turn is still judged, so its gaps follow the fail mode.
+        let sanitize = cfg.action == FirewallPolicy::Sanitize;
+        let verdict = Self::judge_text(text, cfg, inference, sanitize).await?;
+        Ok(sanitize_semantics(fail_closed(verdict, cfg), &cfg.action))
     }
 
     /// The judge's verdict over all of `text`, with no action applied.
@@ -220,16 +249,29 @@ impl InspectorClient {
         cfg: &InspectorConfig,
         inference: &dyn InferenceClient,
     ) -> Result<InspectorVerdict, GatewayError> {
+        Self::judge_text(text, cfg, inference, false).await
+    }
+
+    async fn judge_text(
+        text: &str,
+        cfg: &InspectorConfig,
+        inference: &dyn InferenceClient,
+        injection_continues: bool,
+    ) -> Result<InspectorVerdict, GatewayError> {
         if !cfg.enabled || text.trim().is_empty() || text.chars().count() < cfg.min_chars {
             return Ok(InspectorVerdict::allow());
         }
         run_inspection(
             &system_prompt(cfg.mode),
             text,
-            &cfg.model,
-            cfg.timeout_ms,
+            Judge {
+                model: &cfg.model,
+                timeout_ms: cfg.timeout_ms,
+                max_windows: cfg.effective_max_windows(),
+                restrict_categories: true,
+                injection_continues,
+            },
             inference,
-            true,
         )
         .await
     }
@@ -245,165 +287,20 @@ impl InspectorClient {
             return Ok(InspectorVerdict::allow());
         }
         run_inspection(
-            &rubric_system_prompt(rubric),
+            // `flagged` only when the rubric's bad condition clearly holds.
+            &judge::rubric_system_prompt(rubric),
             text,
-            model,
-            timeout_ms,
+            Judge {
+                model,
+                timeout_ms,
+                max_windows: MAX_INSPECT_WINDOWS,
+                restrict_categories: false,
+                injection_continues: false,
+            },
             inference,
-            false,
         )
         .await
     }
-}
-
-/// Folds per-window results into one verdict.
-#[derive(Default)]
-struct Windows {
-    flagged: bool,
-    categories: Vec<String>,
-    reason: String,
-    worst: Option<InspectorOutcome>,
-}
-
-impl Windows {
-    fn add(&mut self, window: Result<judge::JudgeVerdict, InspectorOutcome>) {
-        match window {
-            Ok(verdict) if verdict.flagged => {
-                self.flagged = true;
-                for category in verdict.categories {
-                    if !self.categories.contains(&category) {
-                        self.categories.push(category);
-                    }
-                }
-                if self.reason.is_empty() {
-                    self.reason = verdict.reason;
-                }
-            }
-            Ok(verdict) => {
-                if self.reason.is_empty() {
-                    self.reason = verdict.reason;
-                }
-            }
-            Err(outcome) => self.worst = self.worst.max(Some(outcome)),
-        }
-    }
-
-    fn finish(self, complete: bool) -> InspectorVerdict {
-        let mut worst = self.worst;
-        if !complete {
-            worst = worst.max(Some(InspectorOutcome::Incomplete));
-        }
-        let outcome = match (self.flagged, worst) {
-            (true, _) | (false, None) => InspectorOutcome::Answered,
-            (false, Some(outcome)) => outcome,
-        };
-        InspectorVerdict {
-            flagged: self.flagged,
-            categories: self.categories,
-            reason: self.reason,
-            available: outcome == InspectorOutcome::Answered,
-            outcome,
-        }
-    }
-}
-
-/// Judge `text` window by window, newest content first, stopping at the
-/// first flag. Provider failures are an outcome, not a clean verdict;
-/// governance errors propagate. The client enforces DLP, budgets and
-/// accounting without recursion.
-async fn run_inspection(
-    system_prompt: &str,
-    text: &str,
-    model: &str,
-    timeout_ms: u64,
-    inference: &dyn InferenceClient,
-    restrict_categories: bool,
-) -> Result<InspectorVerdict, GatewayError> {
-    let (windows, complete) = judge::inspect_windows(
-        text,
-        judge::MAX_INSPECT_CHARS,
-        judge::WINDOW_OVERLAP_CHARS,
-        MAX_INSPECT_WINDOWS,
-    );
-    if !complete {
-        warn!(
-            chars = text.chars().count(),
-            windows = windows.len(),
-            "inspector: text exceeds the window budget; the oldest content is not judged"
-        );
-    }
-    let mut folded = Windows::default();
-    for batch in windows.chunks(WINDOW_CONCURRENCY) {
-        let results = join_all(batch.iter().map(|window| {
-            judge_window(
-                system_prompt,
-                window,
-                model,
-                timeout_ms,
-                inference,
-                restrict_categories,
-            )
-        }))
-        .await;
-        for result in results {
-            folded.add(result?);
-        }
-        if folded.flagged {
-            break;
-        }
-    }
-    Ok(folded.finish(complete))
-}
-
-/// One judge call over one window.
-async fn judge_window(
-    system_prompt: &str,
-    window: &str,
-    model: &str,
-    timeout_ms: u64,
-    inference: &dyn InferenceClient,
-    restrict_categories: bool,
-) -> Result<Result<judge::JudgeVerdict, InspectorOutcome>, GatewayError> {
-    let body = json!({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": judge::judge_user_content(window)},
-        ],
-        "temperature": 0,
-        "max_tokens": 200,
-        "stream": false,
-    });
-    let Some(response) = inference.complete(model, body, timeout_ms).await? else {
-        warn!("inspector: judge provider unavailable; this window has no verdict");
-        return Ok(Err(InspectorOutcome::ProviderUnavailable));
-    };
-    let outcome = match judge::classify_reply(&response, restrict_categories) {
-        JudgeReply::Verdict(verdict) => return Ok(Ok(verdict)),
-        JudgeReply::Refused(why) => {
-            warn!(why, "inspector: the judge refused; not a clean verdict");
-            InspectorOutcome::Refused
-        }
-        JudgeReply::Malformed(why) => {
-            warn!(why, "inspector: the judge gave no usable verdict");
-            InspectorOutcome::Malformed
-        }
-        JudgeReply::Unparseable => {
-            warn!("inspector: the judge answered in prose with no verdict");
-            InspectorOutcome::Unparseable
-        }
-        JudgeReply::OffVocabulary => {
-            warn!("inspector: the judge flagged only topic words; not a verdict");
-            InspectorOutcome::OffVocabulary
-        }
-    };
-    Ok(Err(outcome))
-}
-
-/// System prompt for an ad-hoc rubric judge. `flagged` is true only when the
-/// rubric's bad condition clearly holds, matching the inline-guardrail semantics.
-fn rubric_system_prompt(rubric: &str) -> String {
-    judge::rubric_system_prompt(rubric)
 }
 
 /// The fixed system prompt asking for a strict JSON verdict, shaped by the mode.
@@ -453,3 +350,11 @@ mod tests;
 #[cfg(test)]
 #[path = "inspector_window_tests.rs"]
 mod window_tests;
+
+#[cfg(test)]
+#[path = "inspector_fail_mode_tests.rs"]
+mod fail_mode_tests;
+
+#[cfg(test)]
+#[path = "inspector_sanitize_test.rs"]
+mod sanitize_test;

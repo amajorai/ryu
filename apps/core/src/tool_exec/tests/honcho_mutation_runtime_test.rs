@@ -13,7 +13,8 @@ use axum::{
 };
 use std::{collections::HashSet, sync::Arc};
 
-const MANIFEST: &str = include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/honcho/manifest.json");
+const MANIFEST: &str =
+    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/honcho/manifest.json");
 const KEY: &str = "honcho-mutation-synthetic-key-not-real";
 const TEST_NAME: &str = "tool_exec::tests::honcho_mutation_runtime::honcho_native_mutations_preserve_routes_bodies_state_and_errors";
 const CHILD: &str = "RYU_HONCHO_MUTATION_RUNTIME_CHILD";

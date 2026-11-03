@@ -5,7 +5,8 @@
 use super::*;
 use std::sync::Arc;
 
-const MANIFEST: &str = include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/spider/manifest.json");
+const MANIFEST: &str =
+    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/spider/manifest.json");
 const CHILD: &str = "RYU_SPIDER_REGISTRY_RUNTIME_CHILD";
 const TEST_NAME: &str = "tool_exec::tests::spider_runtime::spider_canonical_registry_preserves_grants_and_egress_refusal";
 const EGRESS_REFUSAL: &str = "command tool: egress URL refused: ";

@@ -1600,7 +1600,9 @@ const CORE_RUNTIME_BUILTIN_MANIFESTS: &[&str] = &[
 // are intentionally absent from the runtime manifest set until installation.
 const CORE_INSTALLABLE_BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/laya/manifest.json"),
-    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/functiongemma/manifest.json"),
+    include_str!(
+        "../../../../generated/ryu-runtime/plugins-store/plugins/functiongemma/manifest.json"
+    ),
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/needle3/manifest.json"),
 ];
 

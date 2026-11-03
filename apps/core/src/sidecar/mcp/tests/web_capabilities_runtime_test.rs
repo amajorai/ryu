@@ -19,31 +19,45 @@ const PAGE: &str = "https://fixture.invalid/page";
 const PACKAGES: &[(&str, &str)] = &[
     (
         "brave",
-        include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/brave/manifest.json"),
+        include_str!(
+            "../../../../../../generated/ryu-runtime/plugins-store/plugins/brave/manifest.json"
+        ),
     ),
     (
         "exa",
-        include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/exa/manifest.json"),
+        include_str!(
+            "../../../../../../generated/ryu-runtime/plugins-store/plugins/exa/manifest.json"
+        ),
     ),
     (
         "tavily",
-        include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/tavily/manifest.json"),
+        include_str!(
+            "../../../../../../generated/ryu-runtime/plugins-store/plugins/tavily/manifest.json"
+        ),
     ),
     (
         "firecrawl",
-        include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/firecrawl/manifest.json"),
+        include_str!(
+            "../../../../../../generated/ryu-runtime/plugins-store/plugins/firecrawl/manifest.json"
+        ),
     ),
     (
         "serper",
-        include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/serper/manifest.json"),
+        include_str!(
+            "../../../../../../generated/ryu-runtime/plugins-store/plugins/serper/manifest.json"
+        ),
     ),
     (
         "parallel",
-        include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/parallel/manifest.json"),
+        include_str!(
+            "../../../../../../generated/ryu-runtime/plugins-store/plugins/parallel/manifest.json"
+        ),
     ),
     (
         "deepseek",
-        include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/deepseek/manifest.json"),
+        include_str!(
+            "../../../../../../generated/ryu-runtime/plugins-store/plugins/deepseek/manifest.json"
+        ),
     ),
 ];
 

@@ -26,8 +26,9 @@
 //! stage is in the pipeline), the inspector also judges each appended item,
 //! composed into the async hazard hook: tool results and fetched pages are
 //! where indirect prompt injection arrives. The loop cannot redact, so a flag
-//! under `Block` or `Sanitize` ends it with the same 403, and `Block` fails
-//! closed on a missing verdict exactly as the inbound stage does.
+//! under `Block` or `Sanitize` ends it with the same 403. A missing verdict
+//! follows the request's `inspector.fail_mode` exactly as the inbound stage
+//! does: closed, it is a flag and ends the loop under `Block` or `Sanitize`.
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -127,10 +128,10 @@ async fn screen_inspector(
         .screened_text()
         .unwrap_or_else(|| appended.to_string());
     let inference = auxiliary::GovernedInference::new(Arc::clone(state), ctx.clone(), "inspector");
-    let verdict = fail_closed(
-        InspectorClient::assess(&text, cfg, &inference).await?,
-        &cfg.action,
-    );
+    // The request's `inspector.fail_mode` applies here as on the inbound
+    // turn: under a closed mode a missing verdict is a flag, and the loop
+    // cannot redact, so Block and Sanitize both end it.
+    let verdict = fail_closed(InspectorClient::assess(&text, cfg, &inference).await?, cfg);
     if !verdict.flagged {
         return Ok(());
     }

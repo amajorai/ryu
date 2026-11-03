@@ -3,8 +3,9 @@
 use super::*;
 use axum::{extract::State, http::HeaderMap, routing::post, Json, Router};
 use std::sync::Arc;
-const MANIFEST: &str =
-    include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/cloudflare-clef/manifest.json");
+const MANIFEST: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/cloudflare-clef/manifest.json"
+);
 const TEST_NAME: &str = "sidecar::mcp::tests::cloudflare_clef_runtime::shipped_clef_runs_through_registry_without_provider_headers";
 
 #[tokio::test]

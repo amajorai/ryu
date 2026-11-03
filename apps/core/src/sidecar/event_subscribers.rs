@@ -826,9 +826,10 @@ mod tests {
     /// requires the app to be enabled AND to hold the approved `runs:failures`.
     #[test]
     fn run_failed_reaches_healing_only_when_enabled_and_granted() {
-        let healing: PluginManifest =
-            serde_json::from_str(include_str!("../../../../generated/ryu-runtime/apps-store/healing/manifest.json"))
-                .expect("healing manifest parses");
+        let healing: PluginManifest = serde_json::from_str(include_str!(
+            "../../../../generated/ryu-runtime/apps-store/healing/manifest.json"
+        ))
+        .expect("healing manifest parses");
         healing
             .validate_event_subscriptions(KERNEL_EVENTS)
             .expect("healing's subscription is valid");

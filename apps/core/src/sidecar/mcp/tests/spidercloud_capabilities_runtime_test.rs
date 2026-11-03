@@ -12,7 +12,9 @@ use axum::{
 };
 use std::sync::Arc;
 
-const RAW: &str = include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/spidercloud/manifest.json");
+const RAW: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/spidercloud/manifest.json"
+);
 const CHILD: &str = "RYU_SPIDERCLOUD_CANONICAL_CHILD";
 const TEST: &str = "sidecar::mcp::tests::spidercloud_capabilities_runtime::shipped_spidercloud_canonical_crawl_maps_defaults_clamps_errors_and_grants";
 const PAGE: &str = "https://fixture.invalid/page";

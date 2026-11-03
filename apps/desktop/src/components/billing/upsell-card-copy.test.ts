@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import type { UpsellCard } from "@ryu/auth/lib/upsell";
 import { formatMessage } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { upsellCardCopy } from "./upsell-card-copy.ts";
 
-const germanNumbers = (source: string, values?: Record<string, unknown>) =>
-	formatMessage(source, values as never, "de");
+const germanNumbers: LiteralMessage = (source, values) =>
+	formatMessage(source, values, "de");
 
 const card = (overrides: Partial<UpsellCard>): UpsellCard => ({
 	headline: "English fallback",

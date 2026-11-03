@@ -3452,9 +3452,10 @@ mod tests {
         assert!(is_system_plugin(BROWSER_PLUGIN_ID));
         assert!(is_uninstall_protected(BROWSER_PLUGIN_ID));
 
-        let manifest: crate::plugin_manifest::PluginManifest =
-            serde_json::from_str(include_str!("../../../../generated/ryu-runtime/apps-store/browser/manifest.json"))
-                .expect("browser manifest parses");
+        let manifest: crate::plugin_manifest::PluginManifest = serde_json::from_str(include_str!(
+            "../../../../generated/ryu-runtime/apps-store/browser/manifest.json"
+        ))
+        .expect("browser manifest parses");
         let sidecar = manifest
             .sidecars
             .iter()

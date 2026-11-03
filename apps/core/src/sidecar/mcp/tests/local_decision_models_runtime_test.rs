@@ -12,8 +12,12 @@ use axum::{
 };
 use std::sync::Arc;
 
-const LAYA: &str = include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/laya/manifest.json");
-const OLLAYA: &str = include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/ollaya/manifest.json");
+const LAYA: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/laya/manifest.json"
+);
+const OLLAYA: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/ollaya/manifest.json"
+);
 const CHILD: &str = "RYU_LOCAL_DECISIONS_RUNTIME_CHILD";
 const TOKEN: &str = "2c89de31a4b049cfbd9e04c80fd8a7a156ea12c0194b4305";
 const TEST_NAME: &str = "sidecar::mcp::tests::local_decision_models_runtime::local_decision_models_dispatch_and_switch_through_canonical_facade";

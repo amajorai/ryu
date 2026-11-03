@@ -90,14 +90,24 @@ pub(crate) fn backstop_flag(available: bool, judge_flagged: bool, seed_hit: bool
 /// every judge. A judge with a lexical seed keeps that seed over the full text
 /// as its floor for the other gaps; a custom judge has no other floor, so any
 /// gap an attacker can produce (a verdict-shaped non-answer, plain prose, text
-/// past the window budget) flags too. A provider outage and topic words never
-/// flag here.
-pub(crate) fn judge_gap_flags(outcome: InspectorOutcome, has_seed: bool) -> bool {
+/// past the window budget) flags too. Topic words never flag here. A provider
+/// outage (no judge provider, an error, a timeout) flags only a custom judge
+/// whose binding blocks while `inspector.fail_mode` is closed
+/// (`closed_block`): a payload sized to time the judge out is as
+/// attacker-controlled as refusal bait, and a custom judge has no seed to fall
+/// back on. Everywhere else an outage stays open, so a node with no judge
+/// provider keeps serving.
+pub(crate) fn judge_gap_flags(
+    outcome: InspectorOutcome,
+    has_seed: bool,
+    closed_block: bool,
+) -> bool {
     match outcome {
         InspectorOutcome::Refused => true,
         InspectorOutcome::Malformed
         | InspectorOutcome::Incomplete
         | InspectorOutcome::Unparseable => !has_seed,
+        InspectorOutcome::ProviderUnavailable => !has_seed && closed_block,
         _ => false,
     }
 }
@@ -163,19 +173,29 @@ mod tests {
     #[test]
     fn judge_gaps_flag_refusals_everywhere_and_other_gaps_without_a_seed() {
         use InspectorOutcome::*;
-        for has_seed in [true, false] {
-            assert!(judge_gap_flags(Refused, has_seed));
-            for open in [Answered, Skipped, ProviderUnavailable, OffVocabulary] {
-                assert!(!judge_gap_flags(open, has_seed), "{open:?}");
+        for closed_block in [true, false] {
+            for has_seed in [true, false] {
+                assert!(judge_gap_flags(Refused, has_seed, closed_block));
+                for open in [Answered, Skipped, OffVocabulary] {
+                    assert!(!judge_gap_flags(open, has_seed, closed_block), "{open:?}");
+                }
+            }
+            for gap in [Malformed, Incomplete, Unparseable] {
+                assert!(
+                    judge_gap_flags(gap, false, closed_block),
+                    "{gap:?} flags a custom judge"
+                );
+                assert!(
+                    !judge_gap_flags(gap, true, closed_block),
+                    "{gap:?} keeps a seeded judge's floor"
+                );
             }
         }
-        for gap in [Malformed, Incomplete, Unparseable] {
-            assert!(judge_gap_flags(gap, false), "{gap:?} flags a custom judge");
-            assert!(
-                !judge_gap_flags(gap, true),
-                "{gap:?} keeps a seeded judge's floor"
-            );
-        }
+        // An outage flags only a custom judge bound to Block under a closed
+        // fail mode.
+        assert!(judge_gap_flags(ProviderUnavailable, false, true));
+        assert!(!judge_gap_flags(ProviderUnavailable, false, false));
+        assert!(!judge_gap_flags(ProviderUnavailable, true, true));
     }
 
     #[test]

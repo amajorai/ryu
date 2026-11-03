@@ -16,7 +16,9 @@ use std::{
     time::Duration,
 };
 
-const MANIFEST: &str = include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/headroom/manifest.json");
+const MANIFEST: &str = include_str!(
+    "../../../../../generated/ryu-runtime/plugins-store/plugins/headroom/manifest.json"
+);
 type Requests = Arc<tokio::sync::Mutex<Vec<Value>>>;
 #[derive(Clone)]
 struct ServiceState {

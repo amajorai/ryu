@@ -1707,8 +1707,9 @@ async fn bytebot_manifest_actions_reach_the_http_runtime_with_expected_payloads(
     let _lock = crate::sidecar::gateway::lock_gateway_env();
     let _env = CmdEnvGuard::armed();
 
-    const BYTEBOT_MANIFEST: &str =
-        include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/bytebot/manifest.json");
+    const BYTEBOT_MANIFEST: &str = include_str!(
+        "../../../../../generated/ryu-runtime/plugins-store/plugins/bytebot/manifest.json"
+    );
     let manifest: Value = serde_json::from_str(BYTEBOT_MANIFEST).unwrap();
     let observed = Arc::new(tokio::sync::Mutex::new(Vec::<Value>::new()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1885,8 +1886,9 @@ async fn mem0_manifest_tools_reach_the_http_runtime_with_expected_payloads() {
     let _env = CmdEnvGuard::armed();
     let _mem0_key = EnvOverride::set("RYU_MEM0_API_KEY", "mem0-local-fixture-key");
 
-    const MEM0_MANIFEST: &str =
-        include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/mem0/manifest.json");
+    const MEM0_MANIFEST: &str = include_str!(
+        "../../../../../generated/ryu-runtime/plugins-store/plugins/mem0/manifest.json"
+    );
     let manifest: Value = serde_json::from_str(MEM0_MANIFEST).unwrap();
     let observed = Arc::new(tokio::sync::Mutex::new(Vec::<Value>::new()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

@@ -147,3 +147,62 @@ async fn one_request_adds_at_most_one_failure() {
     }
     assert_eq!(backend.breaker.state(), BreakerState::Open);
 }
+
+fn subject_ctx(org: &str) -> crate::pipeline::RequestContext {
+    let mut ctx = crate::pipeline::test_support::plain_request_context();
+    ctx.org_id = Some(org.to_owned());
+    ctx
+}
+
+/// review-timeout-still-counts-toward-breaker: a timeout is a health failure,
+/// and a payload can be sized to cause one. One subject sending many such
+/// requests adds one failure to the window, so it cannot open the breaker for
+/// every tenant; failures from many subjects still open it.
+#[tokio::test]
+async fn one_subject_cannot_open_the_breaker_with_timeouts() {
+    let slow = || breakered(TestBackend::new("guard").fail_on("STALL", BackendError::Timeout));
+    let backend = slow();
+    let attacker = subject_ctx("org-attacker");
+    for request in 0..10 {
+        super::for_subject(
+            &attacker,
+            screen_once(&backend, &format!("req-{request}"), "STALL payload"),
+        )
+        .await;
+    }
+    assert_eq!(backend.breaker.state(), BreakerState::Closed);
+
+    let backend = slow();
+    for request in 0..10 {
+        let tenant = subject_ctx(&format!("org-{request}"));
+        super::for_subject(
+            &tenant,
+            screen_once(&backend, &format!("req-{request}"), "STALL payload"),
+        )
+        .await;
+    }
+    assert_eq!(backend.breaker.state(), BreakerState::Open);
+
+    // An unreachable engine still opens it from one subject.
+    let down =
+        breakered(TestBackend::new("guard").fail_on("STALL", BackendError::Unavailable("down")));
+    for request in 0..10 {
+        super::for_subject(
+            &attacker,
+            screen_once(&down, &format!("req-{request}"), "STALL payload"),
+        )
+        .await;
+    }
+    assert_eq!(down.breaker.state(), BreakerState::Open);
+}
+
+#[test]
+fn the_subject_is_the_tenant_else_the_credential() {
+    let mut first = crate::pipeline::test_support::plain_request_context();
+    let mut second = first.clone();
+    second.owner_binding = "another-credential".into();
+    assert_ne!(super::subject_tag(&first), super::subject_tag(&second));
+    first.org_id = Some("org-a".into());
+    second.org_id = Some("org-a".into());
+    assert_eq!(super::subject_tag(&first), super::subject_tag(&second));
+}

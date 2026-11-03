@@ -10,8 +10,8 @@ import {
 	jwtSessionBindingClaims,
 } from "./jwt-identity-claims.ts";
 
-const SECRET = "jwt-identity-claims-test-secret-long-enough";
-const PASSWORD = "correct-horse-battery";
+const SECRET = "jwt-identity-claims-test-secret-long-enough"; // Test vector, not a credential. gitleaks:allow skipcq
+const PASSWORD = "correct-horse-battery"; // Test vector, not a credential. gitleaks:allow skipcq
 const DEFINE_PAYLOAD_CALLBACK_PATTERN =
 	/definePayload: async \(\{[^}]*\buser\b[^}]*\}\) => \{/;
 
@@ -59,7 +59,7 @@ describe("jwtIdentityClaims", () => {
 
 	test("the production token payload is built from these claims", () => {
 		const source = readFileSync(
-			new URL("../index.ts", import.meta.url),
+			new URL("../auth-options/jwt-plugin.ts", import.meta.url),
 			"utf8"
 		);
 		// The callback may destructure more than `user` (it also reads the

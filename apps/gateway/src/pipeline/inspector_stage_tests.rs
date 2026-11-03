@@ -12,7 +12,9 @@ use serde_json::{json, Value};
 
 use crate::{
     audit::AuditLogger,
-    config::{AuditConfig, FirewallConfig, FirewallPolicy, GatewayConfig, ProviderId},
+    config::{
+        AuditConfig, FirewallConfig, FirewallPolicy, GatewayConfig, InspectorFailMode, ProviderId,
+    },
     error::GatewayError,
     firewall::inspector::UNAVAILABLE_CATEGORY,
     providers::Provider,
@@ -84,6 +86,15 @@ fn state_with_inspector(
     action: FirewallPolicy,
     judge: fn(&str) -> String,
 ) -> (Arc<AppState>, Arc<JudgeProvider>) {
+    state_with_fail_mode(enabled, action, None, judge)
+}
+
+fn state_with_fail_mode(
+    enabled: bool,
+    action: FirewallPolicy,
+    fail_mode: Option<InspectorFailMode>,
+    judge: fn(&str) -> String,
+) -> (Arc<AppState>, Arc<JudgeProvider>) {
     let mut config = GatewayConfig::default();
     config.routing.default_provider = ProviderId::from(PROVIDER);
     config.routing.fallback_chain = vec![ProviderId::from(PROVIDER)];
@@ -97,6 +108,7 @@ fn state_with_inspector(
     config.firewall.inspector.min_chars = 10;
     config.firewall.inspector.model = "judge-model".into();
     config.firewall.inspector.action = action;
+    config.firewall.inspector.fail_mode = fail_mode;
     let audit = AuditLogger::new(&AuditConfig {
         enabled: false,
         db_path: String::new(),
@@ -235,4 +247,53 @@ async fn the_tool_loop_judges_appended_tool_results() {
         .await
         .expect("no inspector, no judge");
     assert!(provider.judged.lock().unwrap().is_empty());
+}
+
+fn refuses(_: &str) -> String {
+    "I'm sorry, but I can't help with that request.".into()
+}
+
+// review-sanitize-action-gaps-open: under Sanitize with a closed fail mode, a
+// turn the judge would not answer used to reach the redactor, which passed it
+// once it had rewritten an email address. Nothing redacts a missing verdict.
+#[tokio::test]
+async fn sanitize_refuses_an_unjudged_turn_under_a_closed_fail_mode() {
+    let text = "please summarise this note and reply to jane.roe@example.com today";
+    let closed = Some(InspectorFailMode::Closed);
+    let (state, _) = state_with_fail_mode(true, FirewallPolicy::Sanitize, closed, refuses);
+    let mut body = chat(json!([{"role": "user", "content": text}]));
+    let message = blocked_message(pre_process(&state, &mut body).await);
+    assert!(message.contains(UNAVAILABLE_CATEGORY), "{message}");
+
+    // The default fail mode under Sanitize stays open.
+    let (state, _) = state_with_fail_mode(true, FirewallPolicy::Sanitize, None, refuses);
+    let mut body = chat(json!([{"role": "user", "content": text}]));
+    pre_process(&state, &mut body)
+        .await
+        .expect("an open fail mode serves the turn");
+}
+
+// The tool loop follows the configured fail mode too: closed under Sanitize
+// ends the loop on an unjudged result; open under Block lets it continue.
+#[tokio::test]
+async fn the_tool_loop_follows_the_configured_fail_mode() {
+    let ctx = super::super::test_support::plain_request_context();
+    let page = json!({"page": "a long enough tool page body"});
+    let closed = Some(InspectorFailMode::Closed);
+    let (state, _) = state_with_fail_mode(true, FirewallPolicy::Sanitize, closed, refuses);
+    let error = super::firewall(&state, &ctx)
+        .screen_hazard(&page, ToolRoundPart::ToolResult, 0)
+        .await
+        .expect_err("an unjudged result ends the loop under Sanitize");
+    assert!(
+        matches!(error, GatewayError::FirewallBlocked(..)),
+        "{error:?}"
+    );
+
+    let open = Some(InspectorFailMode::Open);
+    let (state, _) = state_with_fail_mode(true, FirewallPolicy::Block, open, refuses);
+    super::firewall(&state, &ctx)
+        .screen_hazard(&page, ToolRoundPart::ToolResult, 0)
+        .await
+        .expect("an open fail mode keeps the loop going");
 }

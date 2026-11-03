@@ -24,8 +24,9 @@ use std::{
 };
 use tokio::io::AsyncReadExt;
 
-const PARALLEL_MANIFEST: &str =
-    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/parallel/manifest.json");
+const PARALLEL_MANIFEST: &str = include_str!(
+    "../../../../../generated/ryu-runtime/plugins-store/plugins/parallel/manifest.json"
+);
 const TEST_API_KEY: &str = "parallel-fixture-key-not-real";
 const LOCAL_EGRESS_GRANT: &str = "tool:http-egress:127.0.0.1";
 

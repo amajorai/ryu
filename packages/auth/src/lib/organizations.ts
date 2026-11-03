@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isProtectedBrandName } from "@ryu/db/brand-guard";
 import { User } from "@ryu/db/models/auth.model";
 import {
 	Member,
@@ -270,6 +271,26 @@ const defaultPersonalOrganizationDeps: PersonalOrganizationDeps = {
  * personal, while a company-domain account is provisioned into the Teams
  * boundary and must verify before it can add members or check out.
  */
+/**
+ * A random `personal-` slug that does not read as a protected brand. The guard
+ * folds digits to letters, so about one random UUID in 270,000 reads as
+ * "google" (`9009..13`), and `beforeCreateOrganization` refuses that slug.
+ * Draw again rather than let that sign-up lose its default organization.
+ */
+export function personalOrganizationSlug(
+	nextId: () => string = randomUUID
+): string {
+	let slug = `personal-${nextId()}`;
+	for (
+		let attempt = 1;
+		attempt < 16 && isProtectedBrandName(slug, "publisher");
+		attempt++
+	) {
+		slug = `personal-${nextId()}`;
+	}
+	return slug;
+}
+
 export async function ensurePersonalOrganization(
 	userId: string,
 	api: OrganizationApi,
@@ -292,7 +313,7 @@ export async function ensurePersonalOrganization(
 		if (await deps.hasMembership(userId)) {
 			return { created: false };
 		}
-		const slug = `personal-${randomUUID()}`;
+		const slug = personalOrganizationSlug();
 		const organizationKind = businessEmailDomainDecision(user?.email).allowed
 			? "teams"
 			: "personal";

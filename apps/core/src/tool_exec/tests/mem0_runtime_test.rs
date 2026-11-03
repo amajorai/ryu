@@ -11,7 +11,8 @@ use axum::{
 };
 use std::sync::Arc;
 
-const MANIFEST: &str = include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/mem0/manifest.json");
+const MANIFEST: &str =
+    include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/mem0/manifest.json");
 const KEY: &str = "mem0-runtime-synthetic-key";
 const CHILD: &str = "RYU_MEM0_REGISTRY_RUNTIME_CHILD";
 const TEST_NAME: &str = "tool_exec::tests::mem0_runtime::mem0_canonical_registry_preserves_scope_state_permissions_and_recovery";

@@ -213,6 +213,7 @@ pub(super) async fn run(
     // whatever the classifier said: the classifier reads the same tokens.
     let mut scores = scores_of(&verdicts);
     super::template::score_forged_turns(surface, &input, &mut scores);
+    let forged = super::template::forged_turn_detection(surface, &input, &scores);
     for (code, (score, source)) in scores {
         let rule = screener.rule(code);
         let action = crate::enforcement::strict(
@@ -253,6 +254,25 @@ pub(super) async fn run(
         if (report.event_id.is_none() || (is_block && !blocked_event)) && recorded.is_some() {
             report.event_id = recorded;
             blocked_event = is_block;
+        }
+    }
+    // The template-token detector's own event, when its score decided.
+    if let Some(detection) =
+        forged.filter(|d| report.blocked.contains(&d.code) || report.flagged.contains(&d.code))
+    {
+        let recorded = super::super::record_detections(
+            state,
+            ctx,
+            active,
+            std::slice::from_ref(&detection),
+            &report.blocked,
+            crate::audit::EnforcementAction::Blocked,
+            surface.direction(),
+            &report.screening_id,
+        );
+        let is_block = report.blocked.contains(&detection.code);
+        if (report.event_id.is_none() || (is_block && !blocked_event)) && recorded.is_some() {
+            report.event_id = recorded;
         }
     }
     if !report.blocked.is_empty() {

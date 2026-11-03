@@ -352,15 +352,18 @@ pub async fn screen_buffered(
     let mut prior = String::new();
     for window in chars.chunks(WINDOW_CHARS * 4) {
         let window: String = window.iter().collect();
-        let (next, detections) = classify(
-            &active,
-            &scope,
-            &ctx.request_id,
-            &window,
-            tail(&prior),
-            model,
-            strict,
-            node_closed,
+        let (next, detections) = crate::screening::breaker::for_subject(
+            ctx,
+            classify(
+                &active,
+                &scope,
+                &ctx.request_id,
+                &window,
+                tail(&prior),
+                model,
+                strict,
+                node_closed,
+            ),
         )
         .await;
         let recorded = record_output(

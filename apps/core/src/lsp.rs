@@ -407,23 +407,33 @@ mod tests {
     const SHIPPED_LSP_MANIFESTS: &[(&str, &str)] = &[
         (
             "clangd-lsp",
-            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/clangd-lsp/manifest.json"),
+            include_str!(
+                "../../../generated/ryu-runtime/plugins-store/lsp/clangd-lsp/manifest.json"
+            ),
         ),
         (
             "csharp-lsp",
-            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/csharp-lsp/manifest.json"),
+            include_str!(
+                "../../../generated/ryu-runtime/plugins-store/lsp/csharp-lsp/manifest.json"
+            ),
         ),
         (
             "gopls-lsp",
-            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/gopls-lsp/manifest.json"),
+            include_str!(
+                "../../../generated/ryu-runtime/plugins-store/lsp/gopls-lsp/manifest.json"
+            ),
         ),
         (
             "jdtls-lsp",
-            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/jdtls-lsp/manifest.json"),
+            include_str!(
+                "../../../generated/ryu-runtime/plugins-store/lsp/jdtls-lsp/manifest.json"
+            ),
         ),
         (
             "kotlin-lsp",
-            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/kotlin-lsp/manifest.json"),
+            include_str!(
+                "../../../generated/ryu-runtime/plugins-store/lsp/kotlin-lsp/manifest.json"
+            ),
         ),
         (
             "lua-lsp",
@@ -435,7 +445,9 @@ mod tests {
         ),
         (
             "pyright-lsp",
-            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/pyright-lsp/manifest.json"),
+            include_str!(
+                "../../../generated/ryu-runtime/plugins-store/lsp/pyright-lsp/manifest.json"
+            ),
         ),
         (
             "ruby-lsp",
@@ -443,15 +455,21 @@ mod tests {
         ),
         (
             "rust-analyzer-lsp",
-            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/rust-analyzer-lsp/manifest.json"),
+            include_str!(
+                "../../../generated/ryu-runtime/plugins-store/lsp/rust-analyzer-lsp/manifest.json"
+            ),
         ),
         (
             "swift-lsp",
-            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/swift-lsp/manifest.json"),
+            include_str!(
+                "../../../generated/ryu-runtime/plugins-store/lsp/swift-lsp/manifest.json"
+            ),
         ),
         (
             "typescript-lsp",
-            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/typescript-lsp/manifest.json"),
+            include_str!(
+                "../../../generated/ryu-runtime/plugins-store/lsp/typescript-lsp/manifest.json"
+            ),
         ),
     ];
 

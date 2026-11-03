@@ -47,7 +47,8 @@ fn shipped_portable_packages_resolve_refuse_restore_and_preserve_native_preceden
         assert!(status.success());
         return;
     }
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../generated/ryu-runtime/plugins-store");
+    let source =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../generated/ryu-runtime/plugins-store");
     let mut packages = 0;
     let mut configs = 0;
     let incoming_ids = [

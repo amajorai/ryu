@@ -84,21 +84,22 @@ const LazyDownloadDropdownContent = lazy<
 
 // Without a divider the two segments read as one pill, so their padding must
 // read as one too. Left alone, the primary keeps its full end padding and the
-// chevron sits centered in a square segment: the gap before the chevron came
-// out twice the label's lead-in, and the chevron crowded the right end. These
-// trim the primary's end and let the chevron segment hug the edge, so the
-// chevron sits one label gap (10px) after the label and the right end matches
-// the left padding (the 16px chevron glyph carries 4px of air on each side).
+// chevron sits centered in a square segment, so the chevron crowded the right
+// end. The chevron segment therefore hugs the right edge (the 16px chevron
+// glyph carries 4px of air on each side, so its end matches the left padding).
+// Each segment still draws its own hover fill, so the primary keeps one label
+// gap (10px on sm/default) of end padding: the hover fill must not end flush
+// against the OS logo or the architecture that morphs in beside it.
 // Literal per size so Tailwind's scan sees every class.
 const UNDIVIDED_PRIMARY_CLASS = {
-	default: "pe-1",
-	lg: "pe-1.5",
-	sm: "pe-1",
+	default: "pe-2.5",
+	lg: "pe-4",
+	sm: "pe-2.5",
 } as const;
 const UNDIVIDED_TRIGGER_CLASS = {
-	default: "w-auto ps-0.5 pe-2",
+	default: "w-auto ps-0 pe-2",
 	lg: "w-auto ps-0 pe-5",
-	sm: "w-auto ps-0.5 pe-2",
+	sm: "w-auto ps-0 pe-2",
 } as const;
 
 export function DownloadMenu({

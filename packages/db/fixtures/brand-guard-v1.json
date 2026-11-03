@@ -1,0 +1,827 @@
+[
+  {
+    "name": "Claude Opus \u2014 Official Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "ChatGPT Pro",
+    "mode": "display",
+    "match": "chatgpt"
+  },
+  {
+    "name": "GPT-6 Astra",
+    "mode": "display",
+    "match": "gpt"
+  },
+  {
+    "name": "Open AI Desktop",
+    "mode": "display",
+    "match": "openai"
+  },
+  {
+    "name": "Gemini Ultra",
+    "mode": "display",
+    "match": "gemini"
+  },
+  {
+    "name": "Microsoft Copilot",
+    "mode": "display",
+    "match": "copilot"
+  },
+  {
+    "name": "Anthropic",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "Cl\u0430ude Opus",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "Anthr\u043epic",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "Claude\u200b Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "Cla\u202eude",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "Chat\u2060GPT",
+    "mode": "display",
+    "match": "chatgpt"
+  },
+  {
+    "name": "Clau\udb40\udc41de",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "\uff23\uff4c\uff41\uff55\uff44\uff45",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "Cla\u0302ude",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "C1aude",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "Gem1ni",
+    "mode": "display",
+    "match": "gemini"
+  },
+  {
+    "name": "0penAI",
+    "mode": "display",
+    "match": "openai"
+  },
+  {
+    "name": "G P T",
+    "mode": "display",
+    "match": "gpt"
+  },
+  {
+    "name": "rnicrosoft",
+    "mode": "display",
+    "match": "microsoft"
+  },
+  {
+    "name": "OpenAl Desktop",
+    "mode": "display",
+    "match": "openai"
+  },
+  {
+    "name": "CIaude Opus",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "Gemlni Pro",
+    "mode": "display",
+    "match": "gemini"
+  },
+  {
+    "name": "CopiIot",
+    "mode": "display",
+    "match": "copilot"
+  },
+  {
+    "name": "COPILOT",
+    "mode": "display",
+    "match": "copilot"
+  },
+  {
+    "name": "\u1d04\u029f\u1d00\u1d1c\u1d05\u1d07 Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "C\u04cfaude",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "\u13dflaude",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "\u13aanthropic",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "\u13c0oogle",
+    "mode": "display",
+    "match": "google"
+  },
+  {
+    "name": "\u03f9laude",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "\u03f2laude",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "RyuMail",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "MyGPTHelper",
+    "mode": "display",
+    "match": "gpt"
+  },
+  {
+    "name": "Custom GPTs",
+    "mode": "display",
+    "match": "gpt"
+  },
+  {
+    "name": "RyuTanaka",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "RyuTeam",
+    "mode": "publisher",
+    "match": "ryu"
+  },
+  {
+    "name": "Ryu Pro",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "RyuHQ",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "R y u",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "Ryu Weather",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "aMajor Labs",
+    "mode": "display",
+    "match": "amajor"
+  },
+  {
+    "name": "Ryuichi Sakamoto tribute",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Ryu",
+    "mode": "publisher",
+    "match": "ryu"
+  },
+  {
+    "name": "Ryu Team",
+    "mode": "publisher",
+    "match": "ryu"
+  },
+  {
+    "name": "The Official Ryu Store",
+    "mode": "publisher",
+    "match": "ryu"
+  },
+  {
+    "name": "ryu-hq",
+    "mode": "publisher",
+    "match": "ryu"
+  },
+  {
+    "name": "Amajor",
+    "mode": "publisher",
+    "match": "amajor"
+  },
+  {
+    "name": "Ryu Tanaka Consulting",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "OpenAI",
+    "mode": "publisher",
+    "match": "openai"
+  },
+  {
+    "name": "Weather Widget",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Weather Widget",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "Acme",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Acme",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "Personal",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Personal",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "personal-0a1b2c3d-4e5f-6789-abcd-ef0123456789",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "personal-0a1b2c3d-4e5f-6789-abcd-ef0123456789",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "Egypt travel planner",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Egypt travel planner",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "Sales pipeline",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Sales pipeline",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "Open Library",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Open Library",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "OpenAPI Explorer",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "OpenAPI Explorer",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "Billing Helper",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Billing Helper",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "Ryukyu Tools",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Ryukyu Tools",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "",
+    "mode": "publisher",
+    "match": null
+  },
+  {
+    "name": "evil/claude-desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "acme/ryu-thing",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "svgl:claude-ai",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "svgl:openai",
+    "mode": "display",
+    "match": "openai"
+  },
+  {
+    "name": "lucide:brain",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Thing Tool",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Canvas",
+    "mode": "display",
+    "match": null
+  },
+  {
+    "name": "Claude\u00adDesktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "Cha\u200btGPT",
+    "mode": "display",
+    "match": "chatgpt"
+  },
+  {
+    "name": "\u202eGemini",
+    "mode": "display",
+    "match": "gemini"
+  },
+  {
+    "name": "Ryu\ufe0f Mail",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "\u0430nthropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "claud\u0435 Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "claud\u0451 Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "ge\u043cini Desktop",
+    "mode": "display",
+    "match": "gemini"
+  },
+  {
+    "name": "ant\u043dropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthr\u043epic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthro\u0440ic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthropi\u0441 Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "an\u0442hropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "r\u0443u Desktop",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "anthrop\u0456c Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "ama\u0458or Desktop",
+    "mode": "display",
+    "match": "amajor"
+  },
+  {
+    "name": "micro\u0455oft Desktop",
+    "mode": "display",
+    "match": "microsoft"
+  },
+  {
+    "name": "clau\u0501e Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "ant\u04bbropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anth\u0491opic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "\u03b1nthropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "r\u03b3u Desktop",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "claud\u03b5 Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "a\u03b7thropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthrop\u03b9c Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthr\u03bfpic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthro\u03c1ic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "an\u03c4hropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "cla\u03c5de Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "ant\u0570ropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "a\u0578thropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "cla\u057dde Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "anthr\u0585pic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "c\u04cfaude Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "chat\u050dpt Desktop",
+    "mode": "display",
+    "match": "chatgpt"
+  },
+  {
+    "name": "r\u04afu Desktop",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "claud\u04bd Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "ama\u03f3or Desktop",
+    "mode": "display",
+    "match": "amajor"
+  },
+  {
+    "name": "anthrop\u0131c Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "c\u0142aude Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "\u0251nthropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "chat\u0261pt Desktop",
+    "mode": "display",
+    "match": "chatgpt"
+  },
+  {
+    "name": "chat\u0262pt Desktop",
+    "mode": "display",
+    "match": "chatgpt"
+  },
+  {
+    "name": "anthrop\u0269c Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthrop\u026ac Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "a\u0274thropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anth\u0280opic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "cla\u028bde Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "r\u028fu Desktop",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "ant\u029cropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "c\u029faude Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "\u1d00nthropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthropi\u1d04 Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "clau\u1d05e Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "claud\u1d07 Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "ama\u1d0aor Desktop",
+    "mode": "display",
+    "match": "amajor"
+  },
+  {
+    "name": "ge\u1d0dini Desktop",
+    "mode": "display",
+    "match": "gemini"
+  },
+  {
+    "name": "anthr\u1d0fpic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthro\u1d18ic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "an\u1d1bhropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "cla\u1d1cde Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "micro\ua731oft Desktop",
+    "mode": "display",
+    "match": "microsoft"
+  },
+  {
+    "name": "clau\u13a0e Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "anth\u13a1opic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "an\u13a2hropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthrop\u13a5c Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "r\u13a9u Desktop",
+    "mode": "display",
+    "match": "ryu"
+  },
+  {
+    "name": "\u13aanthropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "ama\u13abor Desktop",
+    "mode": "display",
+    "match": "amajor"
+  },
+  {
+    "name": "claud\u13ac Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "ge\u13b7ini Desktop",
+    "mode": "display",
+    "match": "gemini"
+  },
+  {
+    "name": "ant\u13bbropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "chat\u13c0pt Desktop",
+    "mode": "display",
+    "match": "chatgpt"
+  },
+  {
+    "name": "micro\u13daoft Desktop",
+    "mode": "display",
+    "match": "microsoft"
+  },
+  {
+    "name": "c\u13deaude Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "anthropi\u13df Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthro\u13e2ic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthr\u13ebpic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "anthr0pic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "claud3 Desktop",
+    "mode": "display",
+    "match": "claude"
+  },
+  {
+    "name": "4nthropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "micro5oft Desktop",
+    "mode": "display",
+    "match": "microsoft"
+  },
+  {
+    "name": "an7hropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  },
+  {
+    "name": "chat9pt Desktop",
+    "mode": "display",
+    "match": "chatgpt"
+  },
+  {
+    "name": "micro$oft Desktop",
+    "mode": "display",
+    "match": "microsoft"
+  },
+  {
+    "name": "@nthropic Desktop",
+    "mode": "display",
+    "match": "anthropic"
+  }
+]

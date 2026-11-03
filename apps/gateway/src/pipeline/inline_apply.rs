@@ -31,32 +31,40 @@ pub(super) async fn apply_inline_input_evaluators(
         if !ev.capabilities.inline || ev.target != EvaluatorTarget::Input {
             continue;
         }
-        let (flagged, reason) =
-            match flag_inline_binding(ev, scanner, prompt_text, state, ctx).await {
-                InlineFlag::Denied(error) => return Err(error),
-                InlineFlag::Skip => continue,
-                InlineFlag::Ran { flagged, reason } => (flagged, reason),
-                InlineFlag::ForceBlock { reason } => {
-                    // Fail-closed short-circuit: block regardless of the binding's
-                    // configured action (the wasm-policy fail-direction control).
-                    let model = body["model"].as_str().unwrap_or("unknown");
-                    state.metrics.inc_firewall_blocked();
-                    audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
-                    warn!(
-                        request_id = %ctx.request_id,
-                        evaluator = %ev.id,
-                        %reason,
-                        "inline evaluator: fail-closed block (inbound)"
-                    );
-                    return Err(GatewayError::FirewallBlocked(
-                        format!(
-                            "Inbound content blocked by evaluator '{}': {}",
-                            ev.id, reason
-                        ),
-                        firewall_policy_alert(scanner.config(), ctx, "block"),
-                    ));
-                }
-            };
+        let (flagged, reason) = match flag_inline_binding(
+            ev,
+            &inline_action_for(binding, ev),
+            scanner,
+            prompt_text,
+            state,
+            ctx,
+        )
+        .await
+        {
+            InlineFlag::Denied(error) => return Err(error),
+            InlineFlag::Skip => continue,
+            InlineFlag::Ran { flagged, reason } => (flagged, reason),
+            InlineFlag::ForceBlock { reason } => {
+                // Fail-closed short-circuit: block regardless of the binding's
+                // configured action (the wasm-policy fail-direction control).
+                let model = body["model"].as_str().unwrap_or("unknown");
+                state.metrics.inc_firewall_blocked();
+                audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
+                warn!(
+                    request_id = %ctx.request_id,
+                    evaluator = %ev.id,
+                    %reason,
+                    "inline evaluator: fail-closed block (inbound)"
+                );
+                return Err(GatewayError::FirewallBlocked(
+                    format!(
+                        "Inbound content blocked by evaluator '{}': {}",
+                        ev.id, reason
+                    ),
+                    firewall_policy_alert(scanner.config(), ctx, "block"),
+                ));
+            }
+        };
         let action = inline_action_for(binding, ev);
         match inline_outcome(flagged, &action) {
             InlineOutcome::Allow => {}
@@ -165,32 +173,40 @@ pub(super) async fn apply_inline_output_evaluators(
         if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
             continue;
         }
-        let (flagged, reason) =
-            match flag_inline_binding(ev, scanner.as_ref(), &response_text, state, ctx).await {
-                InlineFlag::Denied(error) => return Err(error),
-                InlineFlag::Skip => continue,
-                InlineFlag::Ran { flagged, reason } => (flagged, reason),
-                InlineFlag::ForceBlock { reason } => {
-                    // Fail-closed short-circuit on the outbound path too (a wasm
-                    // policy may be bound Output-target). Block regardless of action.
-                    let model = response["model"].as_str().unwrap_or("unknown");
-                    state.metrics.inc_firewall_blocked();
-                    audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
-                    warn!(
-                        request_id = %ctx.request_id,
-                        evaluator = %ev.id,
-                        %reason,
-                        "inline evaluator: fail-closed block (outbound)"
-                    );
-                    return Err(GatewayError::FirewallBlocked(
-                        format!(
-                            "Outbound response blocked by evaluator '{}': {}",
-                            ev.id, reason
-                        ),
-                        firewall_policy_alert(scanner.config(), ctx, "block"),
-                    ));
-                }
-            };
+        let (flagged, reason) = match flag_inline_binding(
+            ev,
+            &inline_action_for(binding, ev),
+            scanner.as_ref(),
+            &response_text,
+            state,
+            ctx,
+        )
+        .await
+        {
+            InlineFlag::Denied(error) => return Err(error),
+            InlineFlag::Skip => continue,
+            InlineFlag::Ran { flagged, reason } => (flagged, reason),
+            InlineFlag::ForceBlock { reason } => {
+                // Fail-closed short-circuit on the outbound path too (a wasm
+                // policy may be bound Output-target). Block regardless of action.
+                let model = response["model"].as_str().unwrap_or("unknown");
+                state.metrics.inc_firewall_blocked();
+                audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
+                warn!(
+                    request_id = %ctx.request_id,
+                    evaluator = %ev.id,
+                    %reason,
+                    "inline evaluator: fail-closed block (outbound)"
+                );
+                return Err(GatewayError::FirewallBlocked(
+                    format!(
+                        "Outbound response blocked by evaluator '{}': {}",
+                        ev.id, reason
+                    ),
+                    firewall_policy_alert(scanner.config(), ctx, "block"),
+                ));
+            }
+        };
         let action = inline_action_for(binding, ev);
         match inline_outcome(flagged, &action) {
             InlineOutcome::Allow | InlineOutcome::Warn => {
@@ -377,7 +393,16 @@ pub(super) async fn evaluate_output_inline_stream(
         if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
             continue;
         }
-        let (flagged, r) = match flag_inline_binding(ev, scanner, assembled, state, ctx).await {
+        let (flagged, r) = match flag_inline_binding(
+            ev,
+            &inline_action_for(binding, ev),
+            scanner,
+            assembled,
+            state,
+            ctx,
+        )
+        .await
+        {
             InlineFlag::Denied(error) => return (InlineOutcome::Block, error.to_string()),
             InlineFlag::Skip => continue,
             InlineFlag::Ran { flagged, reason } => (flagged, reason),

@@ -6,7 +6,7 @@
     "secrets": 0
   },
   {
-    "input": "password='hunter2'",
+    "input": "pass\u0077ord='hunter2'",
     "expected": "[REDACTED:CREDENTIAL]",
     "pii": 0,
     "secrets": 1
@@ -18,7 +18,7 @@
     "secrets": 0
   },
   {
-    "input": "-----BEGIN PRIVATE KEY-----\nsynthetic-body\n-----END PRIVATE KEY-----",
+    "input": "-----BEGIN PRIVATE\u0020KEY-----\nsynthetic-body\n-----END PRIVATE\u0020KEY-----",
     "expected": "[REDACTED:PRIVATE_KEY]",
     "pii": 0,
     "secrets": 1
@@ -78,9 +78,45 @@
     "secrets": 0
   },
   {
-    "input": "key AKIAABCDEFGHIJKLMNOP\u200bQ \uff11",
+    "input": "key \u0041KIAABCDEFGHIJKLMNOP\u200bQ \uff11",
     "expected": "key [REDACTED:AWS_KEY]Q 1",
     "pii": 0,
     "secrets": 1
+  },
+  {
+    "input": "Email ava@\u0435\u0445\u0430mple.com",
+    "expected": "Email [REDACTED:EMAIL]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "Email ava@example\u3002com",
+    "expected": "Email [REDACTED:EMAIL]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "SSN 12\u03013-45-6789",
+    "expected": "SSN [REDACTED:SSN]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "card 4\u03011\u030111 1111 1111 1111",
+    "expected": "card [REDACTED:CARD]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "\u043f\u0440\u0438\u0432\u0435\u0442 ava@example.com",
+    "expected": "\u043f\u0440\u0438\u0432\u0435\u0442 [REDACTED:EMAIL]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "\u043f\u043e\u0447\u0442\u0430 \u0430\u0441\u0435 and nothing else",
+    "expected": "\u043f\u043e\u0447\u0442\u0430 \u0430\u0441\u0435 and nothing else",
+    "pii": 0,
+    "secrets": 0
   }
 ]

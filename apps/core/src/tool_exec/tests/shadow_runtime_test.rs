@@ -18,9 +18,13 @@ use std::{
     sync::Arc,
 };
 
+#[path = "shadow_runtime_fixture.rs"]
+mod fixture;
+use fixture::shadow_fixture_request;
+
 const SHADOW_MANIFEST: &str =
     include_str!("../../../../../generated/ryu-runtime/plugins-store/plugins/shadow/manifest.json");
-const TEST_NODE_TOKEN: &str = "7f8f20bc1d034b8798474a0de10ef0bb21aaccff9c11d21e74c3b2d65e9a0871";
+const TEST_NODE_TOKEN: &str = "7f8f20bc1d034b8798474a0de10ef0bb21aaccff9c11d21e74c3b2d65e9a0871"; // Test vector, not a credential. gitleaks:allow skipcq
 const ISOLATED_CHILD_ENV: &str = "RYU_CORE_SHADOW_FIXTURE_CHILD";
 const LOCAL_EGRESS_GRANT: &str = "tool:http-egress:127.0.0.1";
 
@@ -256,8 +260,9 @@ async fn shipped_shadow_runnables_reach_core_http_runtime_with_expected_requests
         assert_eq!(request["method"], "GET");
         assert_eq!(request["path"], path);
         assert_eq!(
-            request["query"],
-            query.map(Value::from).unwrap_or(Value::Null)
+            query_pairs(request["query"].as_str()),
+            query_pairs(query),
+            "{path}"
         );
         assert_eq!(request["host"], local_host);
         assert_eq!(
@@ -408,6 +413,18 @@ async fn shipped_shadow_runnables_reach_core_http_runtime_with_expected_requests
     assert_eq!(observed.lock().await.len(), before_revoke + 1);
 }
 
+/// A query string's `key=value` pairs in sorted order, or `None` for no query.
+/// Parameter order is not part of the request contract: Core's `serde_json`
+/// keeps insertion order (`preserve_order`), so pairs follow the argument order
+/// the caller sent.
+fn query_pairs(query: Option<&str>) -> Option<Vec<&str>> {
+    query.map(|query| {
+        let mut pairs: Vec<&str> = query.split('&').collect();
+        pairs.sort_unstable();
+        pairs
+    })
+}
+
 fn runnable_config<'a>(manifest: &'a Value, slug: &str) -> &'a Value {
     manifest["runnables"]
         .as_array()
@@ -463,94 +480,4 @@ async fn call_shadow_tool(
         None,
     )
     .await
-}
-
-async fn shadow_fixture_request(
-    State(observed): State<Arc<tokio::sync::Mutex<Vec<Value>>>>,
-    request: Request<Body>,
-) -> Response {
-    let (parts, body) = request.into_parts();
-    let bytes = axum::body::to_bytes(body, 1024 * 1024)
-        .await
-        .expect("read Shadow fixture request body");
-    let body = String::from_utf8(bytes.to_vec()).expect("HTTP request body is UTF-8");
-    let query = parts.uri.query().map(str::to_owned);
-    let query_map = query
-        .as_deref()
-        .map(|query| {
-            url::form_urlencoded::parse(query.as_bytes())
-                .into_owned()
-                .collect::<BTreeMap<_, _>>()
-        })
-        .unwrap_or_default();
-    let query_value = query_map.get("q").map(String::as_str).unwrap_or_default();
-    let record = serde_json::json!({
-        "method": parts.method.as_str(),
-        "path": parts.uri.path(),
-        "query": query,
-        "host": parts.headers.get(header::HOST).and_then(|value| value.to_str().ok()),
-        "authorization": parts.headers.get(header::AUTHORIZATION).and_then(|value| value.to_str().ok()),
-        "body": body,
-    });
-    observed.lock().await.push(record);
-
-    let known_get = [
-        "/api/shadow/search",
-        "/api/shadow/search/semantic",
-        "/api/shadow/timeline",
-        "/api/shadow/context/recent",
-    ];
-    let computer_use = parts.method == axum::http::Method::POST
-        && parts.uri.path() == "/api/shadow/computer-use/run";
-    if !(computer_use
-        || (parts.method == axum::http::Method::GET && known_get.contains(&parts.uri.path())))
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    if parts
-        .headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        != Some(format!("Bearer {TEST_NODE_TOKEN}").as_str())
-    {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    if computer_use {
-        assert!(query.is_none());
-        let input: Value = serde_json::from_str(&body).expect("real computer-use POST JSON");
-        let goal = input["goal"].as_str().expect("goal is a string");
-        assert_eq!(
-            input.as_object().unwrap().len(),
-            1,
-            "no credential or model-only fields forwarded"
-        );
-        return match goal {
-            "fixture-unauthorized" => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error":"fixture rejected token"}))).into_response(),
-            "fixture-unavailable" => (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error":"fixture service unavailable"}))).into_response(),
-            "" => (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"goal required"}))).into_response(),
-            "Open the visible \"Settings\" panel\nwithout submitting a form" => Json(serde_json::json!({"planner":"native","status":"completed","steps":[{"action":"click","target":"Settings"}],"message":"Requested visible panel opened"})).into_response(),
-            _ => (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"unknown fixture goal"}))).into_response(),
-        };
-    }
-    match query_value {
-        "fixture-unauthorized" => (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({ "error": "fixture rejected token" })),
-        )
-            .into_response(),
-        "fixture-unavailable" => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "error": "fixture service unavailable" })),
-        )
-            .into_response(),
-        _ => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "ok": true,
-                "path": parts.uri.path(),
-                "query": query_map,
-            })),
-        )
-            .into_response(),
-    }
 }

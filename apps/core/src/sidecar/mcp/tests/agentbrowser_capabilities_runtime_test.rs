@@ -4,8 +4,9 @@
 use super::*;
 use axum::{extract::State, routing::post, Json, Router};
 use std::sync::Arc;
-const MANIFEST: &str =
-    include_str!("../../../../../../generated/ryu-runtime/plugins-store/plugins/agentbrowser/manifest.json");
+const MANIFEST: &str = include_str!(
+    "../../../../../../generated/ryu-runtime/plugins-store/plugins/agentbrowser/manifest.json"
+);
 const CHILD: &str = "RYU_AGENTBROWSER_CANONICAL_RPC_CHILD";
 const TEST_NAME: &str = "sidecar::mcp::tests::agentbrowser_capabilities_runtime::agentbrowser_canonical_routes_sequence_real_mcp_calls";
 #[derive(Default)]

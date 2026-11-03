@@ -187,6 +187,9 @@ mod subscriptions;
 mod support_access;
 mod system_info;
 mod telemetry;
+/// Clears inherited `GIT_*` repository variables before any test runs.
+#[cfg(test)]
+mod test_process_env;
 mod tool_exec;
 mod tool_registry_host;
 mod treg_catalog;
@@ -220,6 +223,13 @@ mod boot;
 use boot::core_main;
 
 fn main() {
+    // Windows DLL sideloading hardening (the Yoba pattern: a genuine signed
+    // executable beside a planted DLL). Restrict the search order before any
+    // code can load a library by name; the build-time /DEPENDENTLOADFLAG
+    // (build.rs) covers the static imports resolved before `main` runs.
+    if let Err(error) = ryu_sidecar_runtime::dll_search::harden_dll_search() {
+        eprintln!("ryu-core: could not restrict the DLL search order: {error}");
+    }
     // The agent sandbox runner enters Linux namespaces, which only a
     // single-threaded process may do, so it must run before the async runtime
     // starts its worker threads. It execs the agent and never returns here.

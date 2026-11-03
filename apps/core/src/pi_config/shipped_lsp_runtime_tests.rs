@@ -9,11 +9,15 @@ use std::collections::HashMap;
 const PACKAGES: &[(&str, &str)] = &[
     (
         "clangd-lsp",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/lsp/clangd-lsp/manifest.json"),
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/lsp/clangd-lsp/manifest.json"
+        ),
     ),
     (
         "csharp-lsp",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/lsp/csharp-lsp/manifest.json"),
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/lsp/csharp-lsp/manifest.json"
+        ),
     ),
     (
         "gopls-lsp",
@@ -25,7 +29,9 @@ const PACKAGES: &[(&str, &str)] = &[
     ),
     (
         "kotlin-lsp",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/lsp/kotlin-lsp/manifest.json"),
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/lsp/kotlin-lsp/manifest.json"
+        ),
     ),
     (
         "lua-lsp",
@@ -37,7 +43,9 @@ const PACKAGES: &[(&str, &str)] = &[
     ),
     (
         "pyright-lsp",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/lsp/pyright-lsp/manifest.json"),
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/lsp/pyright-lsp/manifest.json"
+        ),
     ),
     (
         "ruby-lsp",
@@ -45,7 +53,9 @@ const PACKAGES: &[(&str, &str)] = &[
     ),
     (
         "rust-analyzer-lsp",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/lsp/rust-analyzer-lsp/manifest.json"),
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/lsp/rust-analyzer-lsp/manifest.json"
+        ),
     ),
     (
         "swift-lsp",
@@ -53,7 +63,9 @@ const PACKAGES: &[(&str, &str)] = &[
     ),
     (
         "typescript-lsp",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/lsp/typescript-lsp/manifest.json"),
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/lsp/typescript-lsp/manifest.json"
+        ),
     ),
 ];
 
