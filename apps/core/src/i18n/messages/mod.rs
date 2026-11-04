@@ -245,6 +245,10 @@ pub const OAUTH_CONNECTED_DETAIL_MESSAGE: Template =
 pub const OAUTH_FAILED_TITLE_MESSAGE: Template = |_| format!("Connection failed");
 pub const OAUTH_FAILED_DETAIL_MESSAGE: Template =
     |_| format!("Return to Ryu for details and try connecting again.");
+pub const OAUTH_CONFIRM_TITLE_MESSAGE: Template = |_| format!("Enter this code in Ryu to finish");
+pub const OAUTH_CONFIRM_DETAIL_MESSAGE: Template = |_| {
+    format!("Enter it only in your own Ryu app. If someone sent you this sign-in link, close this window: giving them the code would connect your account to theirs.")
+};
 
 /// Every template in this file; [`all`] adds the sibling modules' lists.
 #[cfg(test)]
@@ -297,6 +301,8 @@ const ALL: &[Template] = &[
     OAUTH_CONNECTED_DETAIL_MESSAGE,
     OAUTH_FAILED_TITLE_MESSAGE,
     OAUTH_FAILED_DETAIL_MESSAGE,
+    OAUTH_CONFIRM_TITLE_MESSAGE,
+    OAUTH_CONFIRM_DETAIL_MESSAGE,
 ];
 
 /// Every Core template, for the catalog round-trip test.

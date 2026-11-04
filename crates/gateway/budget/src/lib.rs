@@ -21,6 +21,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
+mod exec_org;
 mod spend_store;
 mod window;
 
@@ -1640,6 +1641,8 @@ pub enum ExecBudgetResult {
 pub struct ExecBudgetEnforcer {
     config: ExecBudgetConfig,
     state: std::sync::Mutex<ExecWindowState>,
+    /// One window per org-bound caller (see `exec_org`), never the global one.
+    orgs: std::sync::Mutex<HashMap<String, ExecWindowState>>,
 }
 
 struct ExecWindowState {
@@ -1657,6 +1660,7 @@ impl ExecBudgetEnforcer {
                 exec_count: 0,
                 wall_clock_ms: 0,
             }),
+            orgs: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -1665,25 +1669,7 @@ impl ExecBudgetEnforcer {
     pub fn check(&self) -> ExecBudgetResult {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         self.maybe_reset_window(&mut state);
-
-        let count_ok = self.config.max_count == 0 || state.exec_count < self.config.max_count;
-        let wc_secs = state.wall_clock_ms / 1000;
-        let wc_ok =
-            self.config.max_wall_clock_secs == 0 || wc_secs < self.config.max_wall_clock_secs;
-
-        if count_ok && wc_ok {
-            return ExecBudgetResult::Allow;
-        }
-
-        match self.config.action {
-            ExecBudgetAction::Notify => ExecBudgetResult::Allow,
-            ExecBudgetAction::Stop => ExecBudgetResult::Deny {
-                exec_count: state.exec_count,
-                wall_clock_secs: wc_secs,
-                limit_count: self.config.max_count,
-                limit_wall_clock_secs: self.config.max_wall_clock_secs,
-            },
-        }
+        self.verdict(&state)
     }
 
     /// Record a completed execution. `duration_ms` is wall-clock time.

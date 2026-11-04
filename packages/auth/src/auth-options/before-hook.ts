@@ -12,6 +12,7 @@ import {
 	PRIMARY_OWNER_GUARDED_PATHS,
 	primaryOwnerHookDecision,
 } from "../lib/primary-owner-guard.ts";
+import { rejectReferredByUpdate } from "../lib/referral-attribution-guard.ts";
 import { authoritativeAuthContext } from "../lib/session-cache.ts";
 import {
 	isAllowedSocialSignInProvider,
@@ -67,6 +68,9 @@ export const beforeAuthHook = createAuthMiddleware(async (ctx) => {
 	// API-key metadata is server-only: a key's class and organization come
 	// from its stored configId/referenceId, never from client-written metadata.
 	rejectClientApiKeyMetadata(ctx);
+	// Referral attribution is fixed at sign-up: `/update-user` may not write
+	// `referredBy` (an `input: true` field only so sign-up can carry it).
+	rejectReferredByUpdate(ctx);
 	if (
 		ctx.path === "/organization/invite-member" &&
 		(ctx.headers?.get("authorization")?.startsWith("Bearer ") ||

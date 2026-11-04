@@ -71,6 +71,26 @@ pub(crate) fn is_unscoped_trusted(ctx: &crate::pipeline::RequestContext) -> bool
             && bound_forwarder_org(ctx).is_none())
 }
 
+/// Refuse provider-spending inference on a per-org Core relay key.
+///
+/// The key exists for Core's control routes (budget charges, sandbox ticks,
+/// exec audit, managed provider calls). It is a static, org-bound forwarder
+/// that never passes the control-plane admission a tenant's `rgw_` token does
+/// (standing, the credit pre-flight and reservation, plan limits, fail-closed
+/// debits), so it must never dispatch a model request on the fleet's
+/// provider credentials. A managed node's Core sends inference with its
+/// org's `rgw_` token instead.
+pub(crate) fn refuse_inference(
+    ctx: &crate::pipeline::RequestContext,
+) -> Result<(), crate::error::GatewayError> {
+    if bound_forwarder_org(ctx).is_some() {
+        return Err(crate::error::GatewayError::Unauthorized(
+            "The Core relay credential does not authorize inference".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 /// Refuse a request in which an org-bound forwarder names another org.
 pub(crate) fn require_forwarder_org(
     ctx: &crate::pipeline::RequestContext,

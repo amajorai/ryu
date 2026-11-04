@@ -19008,6 +19008,7 @@
   "The composer's model control overrides these for this session.": "このセッションでは、入力欄のモデル設定がこれらより優先されます。",
   "The confirmation link is invalid or expired": "確認リンクが無効か、有効期限が切れています",
   "The connection link expired or was invalid. Start again from Connect GitHub.": "接続リンクの有効期限が切れているか、無効でした。「GitHub を接続」からやり直してください。",
+  "The connection was cancelled.": "接続はキャンセルされました。",
   "The container image runs as an unprivileged user (UID 10001).": "コンテナイメージは非特権ユーザー (UID 10001) として実行されます。",
   "The control plane keeps one row per install and session, then totals the rows across the community.": "コントロールプレーンはインストールとセッションごとに 1 行を保持し、コミュニティ全体で行を合計します。",
   "The control plane returned invalid Fleet access.": "コントロールプレーンから無効な Fleet アクセスが返されました。",

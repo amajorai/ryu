@@ -66,6 +66,29 @@ pub fn hosted_redirect_uri() -> Option<String> {
     hosted_callback_url()
 }
 
+/// A tool call that needs an account on a hosted node (or in Passport remote
+/// mode) does not start a flow itself. A hosted flow is saved only when the
+/// person who started it enters the code the browser shows, which a sign-in
+/// link pasted into the model's transcript can never lead to; that link could
+/// also be opened by someone else. The model is told to have the user connect
+/// from the Connections card or the chat's connect card instead.
+pub fn hosted_connect_elicitation(server_name: Option<&str>) -> Option<serde_json::Value> {
+    (remote_configured() || hosted_redirect_uri().is_some())
+        .then(|| hosted_connect_envelope(server_name))
+}
+
+fn hosted_connect_envelope(server_name: Option<&str>) -> serde_json::Value {
+    crate::identity::to_envelope(&crate::tool_exec::Elicitation {
+        kind: "confirm".to_owned(),
+        message: format!(
+            "Ask the user to connect {} from Marketplace > Connections or the chat's connect card, then retry.",
+            server_name.unwrap_or("the account")
+        ),
+        url: None,
+        requested_schema: None,
+    })
+}
+
 pub struct McpOAuthManager;
 static MANAGER: McpOAuthManager = McpOAuthManager;
 static EMBEDDED: OnceLock<Arc<broker::McpOAuthManager>> = OnceLock::new();
@@ -138,13 +161,37 @@ impl McpOAuthManager {
         returned_state: Option<String>,
         returned_issuer: Option<String>,
         oauth_error: Option<String>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         if remote_configured() {
-            let _: serde_json::Value = remote("callback", serde_json::json!({"code":code,"state":returned_state,"iss":returned_issuer,"error":oauth_error})).await?;
-            return Ok(());
+            let value: serde_json::Value = remote("callback", serde_json::json!({"code":code,"state":returned_state,"iss":returned_issuer,"error":oauth_error})).await?;
+            return value
+                .get("confirmationCode")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .context("Passport returned no OAuth confirmation code");
         }
         embedded()?
             .complete_hosted_callback(code, returned_state, returned_issuer, oauth_error)
+            .await
+    }
+    /// Commit a hosted flow for the owner who started it, with the code its
+    /// callback page showed.
+    pub async fn confirm_hosted_flow(
+        &self,
+        owner_user_id: &str,
+        flow_id: &str,
+        code: &str,
+    ) -> Result<()> {
+        if remote_configured() {
+            let _: serde_json::Value = remote(
+                "confirm",
+                serde_json::json!({"ownerUserId":owner_user_id,"flowId":flow_id,"code":code}),
+            )
+            .await?;
+            return Ok(());
+        }
+        embedded()?
+            .confirm_hosted_flow(owner_user_id, flow_id, code)
             .await
     }
     pub async fn access_token(
@@ -235,4 +282,19 @@ pub async fn connections(owner: &str, plugin: &str) -> Result<Vec<serde_json::Va
         result.push(value);
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_hosted_connect_prompt_carries_no_sign_in_link() {
+        let envelope = super::hosted_connect_envelope(Some("mail"));
+        let inner = &envelope["__ryu_elicitation__"];
+        assert_eq!(inner["kind"], "confirm");
+        assert!(inner.get("url").is_none(), "{envelope}");
+        assert!(inner["message"]
+            .as_str()
+            .unwrap()
+            .contains("connect mail from Marketplace > Connections"));
+    }
 }

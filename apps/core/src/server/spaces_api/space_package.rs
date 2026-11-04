@@ -208,7 +208,9 @@ pub(in crate::server) async fn delete_space(
     ) {
         return resp;
     }
-    match state.spaces.delete_space(&id).await {
+    let deleted = state.spaces.delete_space(&id).await;
+    crate::server::realtime_ws::notify_access_changed();
+    match deleted {
         Ok(removed) => Json(json!({ "success": true, "removed": removed })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -309,7 +311,7 @@ pub(in crate::server) async fn set_space_visibility(
             Ok(value) => value,
             Err(message) => return json_error(StatusCode::BAD_REQUEST, message),
         };
-    match state
+    let updated = state
         .spaces
         .set_visibility(
             &id,
@@ -317,8 +319,9 @@ pub(in crate::server) async fn set_space_visibility(
             team_id,
             visibility_admin_authorized(caller.as_ref()),
         )
-        .await
-    {
+        .await;
+    crate::server::realtime_ws::notify_access_changed();
+    match updated {
         Ok(true) => Json(json!({
             "ok": true,
             "visibility": visibility,

@@ -2479,6 +2479,11 @@ pub(crate) async fn remove_local_sidecar_binaries(
         if env_override.is_some() {
             continue;
         }
+        // Only a bare name was ever downloaded into the managed bin dir. An absolute
+        // or `..` command would join OUT of it and delete an arbitrary user file.
+        if !binary::is_managed_bin_name(&local.command) {
+            continue;
+        }
         // A bundle install (`bundles`) lives in its own directory; remove it whole.
         // `remove_dir_all` does not follow the bundle's internal symlinks.
         let bundle_dir = managed_bundle_dir(&local.command);

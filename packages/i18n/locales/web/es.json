@@ -19008,6 +19008,7 @@
   "The composer's model control overrides these for this session.": "El selector de modelo del compositor los reemplaza en esta sesión.",
   "The confirmation link is invalid or expired": "El enlace de confirmación no es válido o ha caducado",
   "The connection link expired or was invalid. Start again from Connect GitHub.": "El enlace de conexión ha caducado o no es válido. Empieza de nuevo desde «Conectar GitHub».",
+  "The connection was cancelled.": "Se canceló la conexión.",
   "The container image runs as an unprivileged user (UID 10001).": "La imagen del contenedor se ejecuta como un usuario sin privilegios (UID 10001).",
   "The control plane keeps one row per install and session, then totals the rows across the community.": "El plano de control guarda una fila por instalación y sesión, y luego suma las filas de toda la comunidad.",
   "The control plane returned invalid Fleet access.": "El plano de control devolvió un acceso a Fleet no válido.",

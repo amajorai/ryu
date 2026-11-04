@@ -282,6 +282,33 @@ async fn no_auth_master_key_honors_bearer_prefix() {
     assert!(ctx.is_master_key);
 }
 
+/// A no-auth Gateway cannot tell a local tool from a DNS-rebound web page, so
+/// an anonymous caller must never pick the agent whose Core tool allowlist the
+/// tool loop executes under. A provisioned master key keeps it.
+#[tokio::test]
+async fn no_auth_anonymous_caller_cannot_choose_the_agent() {
+    let state = state_with_auth(AuthConfig {
+        require_auth: false,
+        api_keys: vec![api_key("sk-core", "ryu-core", true)],
+        master_key: Some("master-secret".to_string()),
+    });
+    let with_key = |key: Option<&'static str>| AuthInputs {
+        raw_api_key: key,
+        agent_id: Some("a1".to_string()),
+        ..Default::default()
+    };
+    for key in [None, Some("whatever"), Some("sk-core")] {
+        let ctx = authenticate(&state, with_key(key)).await.expect("accepted");
+        assert!(!ctx.is_master_key);
+        assert_eq!(ctx.agent_id, None, "{key:?}");
+    }
+    let master = authenticate(&state, with_key(Some("master-secret")))
+        .await
+        .expect("accepted");
+    assert!(master.is_master_key);
+    assert_eq!(master.agent_id.as_deref(), Some("a1"));
+}
+
 // ─── require_auth mode ───────────────────────────────────────────────────
 
 #[tokio::test]

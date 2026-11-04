@@ -56,7 +56,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 
 use super::ServerState;
 use crate::identity_verify::{can_access, Access, ResourceTenancy, VerifiedCaller};
@@ -439,23 +439,17 @@ async fn handle_socket(
     };
 
     // ── Access decision ──────────────────────────────────────────────────────
-    let access = match join.kind {
-        // `app:realtime` proves that the app may use the transport, not that it
-        // owns the model-selected room id. Until the app host supplies a
-        // Core-issued per-resource binding, fail closed instead of allowing one
-        // granted app to join another app's room namespace.
-        RoomKind::Application => AccessOutcome::Deny("application-resource-binding-required"),
-        RoomKind::Conversation => decide_access(
-            state.conversations.get_access_meta(&room_id).await,
-            caller.as_ref(),
-            peer_is_loopback,
-        ),
-        RoomKind::Document => decide_access(
-            super::spaces::doc_access_meta(&state.spaces, &room_id).await,
-            caller.as_ref(),
-            peer_is_loopback,
-        ),
-    };
+    // The epoch is read first so an ACL change racing this decision makes the
+    // socket re-check before it relays or applies anything.
+    let decided_epoch = live_access::access_epoch();
+    let access = live_access::decide_room_access(
+        &state,
+        join.kind,
+        &room_id,
+        caller.as_ref(),
+        peer_is_loopback,
+    )
+    .await;
     let access = match access {
         AccessOutcome::Grant(access) => access,
         AccessOutcome::Deny(reason) => {
@@ -467,6 +461,18 @@ async fn handle_socket(
         }
     };
     let can_write = matches!(access, Access::Write);
+    let access_guard = live_access::AccessGuard::new(
+        live_access::room_access_lookup(
+            state.clone(),
+            join.kind,
+            room_id.clone(),
+            caller.clone(),
+            peer_is_loopback,
+        ),
+        access,
+        decided_epoch,
+    );
+    let revoked = access_guard.revoked();
 
     // A unique per-connection member id also owns any seed claim this connection
     // wins. It is generated before claiming so teardown can release that exact
@@ -496,7 +502,7 @@ async fn handle_socket(
     // Race-safe join: get-or-create + member increment happen under the registry
     // lock, so a concurrent idle eviction can never orphan this membership.
     let membership = state.realtime.join(&room_key, member_id.clone());
-    let mut room_rx = membership.subscribe();
+    let room_rx = membership.subscribe();
     let application_room = application_app_id.is_some();
 
     // Ack the join with the resolved access level — stage-2's client reads this to
@@ -531,35 +537,13 @@ async fn handle_socket(
     });
 
     // ── Forward task: room broadcast -> this client ──────────────────────────
-    let forward_tx = out_tx.clone();
-    let forward_task = tokio::spawn(async move {
-        loop {
-            match room_rx.recv().await {
-                Ok(frame) => {
-                    if forward_tx
-                        .send(frame_to_message(frame, application_room))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(dropped)) => {
-                    if forward_tx
-                        .send(frame_to_message(
-                            Frame::ResyncRequired { dropped },
-                            application_room,
-                        ))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
+    // Re-authorizes after any ACL change before relaying (see `live_access`).
+    let forward_task = live_access::spawn_forward_task(
+        room_rx,
+        out_tx.clone(),
+        application_room,
+        access_guard.clone(),
+    );
 
     // Prime the interval so the first server ping is one full cadence after the
     // join acknowledgement, then require a pong before the bounded timeout.
@@ -628,6 +612,10 @@ async fn handle_socket(
     // ── Receive loop: client frames -> room ──────────────────────────────────
     loop {
         tokio::select! {
+            () = revoked.cancelled() => {
+                let _ = out_tx.send(live_access::revoked_close()).await;
+                break;
+            }
             _ = &mut jwt_expiry => {
                 let _ = out_tx
                     .send(close(CLOSE_POLICY, "user identity expired".into()))
@@ -698,7 +686,7 @@ async fn handle_socket(
                     Some("pong") => {
                         last_pong = Instant::now();
                     }
-                    Some("event") if application_room && can_write => {
+                    Some("event") if application_room && access_guard.can_write() => {
                         let Some(event) = ryu_realtime::decode_application_event(&value) else {
                             continue;
                         };
@@ -722,7 +710,12 @@ async fn handle_socket(
                 }
                 // Classify against the per-connection write-ACL. The drop for a
                 // read-only mutation is FAIL-CLOSED and happens BEFORE any apply.
-                match classify_doc_sync(&bytes, can_write) {
+                // Re-authorize first if an ACL changed since the last decision;
+                // a revoked socket's frame is dropped and the loop then closes.
+                if !access_guard.ensure_current().await {
+                    continue;
+                }
+                match classify_doc_sync(&bytes, access_guard.can_write()) {
                     DocSyncAction::Apply(update) => {
                         // Authoritative: apply to Core's replica + persist to the
                         // append log, then rebroadcast the canonical bytes to the
@@ -940,6 +933,10 @@ fn room_registry_key(
         (RoomKind::Conversation, _) => Ok(room_id.to_owned()),
     }
 }
+
+#[path = "realtime_ws_access.rs"]
+mod live_access;
+pub(crate) use live_access::notify_access_changed;
 
 #[cfg(test)]
 #[path = "realtime_ws_room_key_tests.rs"]

@@ -255,11 +255,12 @@ pub(in crate::server) async fn set_conversation_access_handler(
     if !conversation_team_scope_authorized(team_id, caller.as_ref(), node_org_id().as_deref()) {
         return json_error(StatusCode::FORBIDDEN, "team membership required".to_owned());
     }
-    match state
+    let updated = state
         .conversations
         .set_access(&id, visibility, team_id, &body.collaborators, true)
-        .await
-    {
+        .await;
+    crate::server::realtime_ws::notify_access_changed();
+    match updated {
         Ok(true) => Json(json!({
             "ok": true,
             "visibility": visibility,
@@ -314,11 +315,12 @@ pub(in crate::server) async fn set_conversation_visibility_handler(
     if !conversation_team_scope_authorized(team_id, caller.as_ref(), node_org_id().as_deref()) {
         return json_error(StatusCode::FORBIDDEN, "team membership required".to_owned());
     }
-    match state
+    let updated = state
         .conversations
         .set_visibility(&id, visibility, team_id, true)
-        .await
-    {
+        .await;
+    crate::server::realtime_ws::notify_access_changed();
+    match updated {
         Ok(true) => Json(json!({
             "ok": true,
             "visibility": visibility,

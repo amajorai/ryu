@@ -19008,6 +19008,7 @@
   "The composer's model control overrides these for this session.": "在此会话中，输入框的模型控件会覆盖这些设置。",
   "The confirmation link is invalid or expired": "确认链接无效或已过期",
   "The connection link expired or was invalid. Start again from Connect GitHub.": "连接链接已过期或无效。请从“连接 GitHub”重新开始。",
+  "The connection was cancelled.": "连接已取消。",
   "The container image runs as an unprivileged user (UID 10001).": "容器镜像以非特权用户（UID 10001）运行。",
   "The control plane keeps one row per install and session, then totals the rows across the community.": "控制平面为每个安装和会话保留一行，然后汇总整个社区的行。",
   "The control plane returned invalid Fleet access.": "控制平面返回了无效的 Fleet 访问权限。",

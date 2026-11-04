@@ -701,8 +701,11 @@ pub async fn ingest_exec_audit(
         return Ok(Json(json!({ "ok": true })));
     }
 
-    // Record the execution against the rolling exec-budget counter.
-    state.exec_budget.record(body.duration_ms);
+    // Record the execution against the rolling exec-budget counter: an
+    // org-bound relay's own window, so it never drains another org's.
+    state
+        .exec_budget
+        .record_scoped(forwarder_org.as_deref(), body.duration_ms);
 
     if state.audit.is_enabled() {
         let mut record = AuditLogger::make_exec_record(
@@ -719,13 +722,13 @@ pub async fn ingest_exec_audit(
         record.user_id = user_id;
         record.user_name = user_name;
         record.feature = feature;
-        record.org_id = forwarder_org;
+        record.org_id = forwarder_org.clone();
         state.log_audit(record);
     }
 
     Ok(Json(json!({
         "ok": true,
-        "exec_count": state.exec_budget.current_count(),
+        "exec_count": state.exec_budget.current_count_scoped(forwarder_org.as_deref()),
     })))
 }
 
@@ -751,8 +754,10 @@ pub async fn check_exec_budget(
         ));
     }
 
-    let result = state.exec_budget.check();
-    let current_count = state.exec_budget.current_count();
+    // An org-bound relay is checked against its own org's window only.
+    let org = crate::pipeline::org_core_relay::bound_forwarder_org(&ctx);
+    let result = state.exec_budget.check_scoped(org);
+    let current_count = state.exec_budget.current_count_scoped(org);
     let max_count = state.config.exec_budget.max_count;
 
     match result {

@@ -101,7 +101,9 @@ pub(in crate::server) async fn delete_document(
     ) {
         return resp;
     }
-    match state.spaces.delete_document(&doc_id).await {
+    let deleted = state.spaces.delete_document(&doc_id).await;
+    crate::server::realtime_ws::notify_access_changed();
+    match deleted {
         Ok(removed) => {
             // The content-index status lives Core-side (see
             // [`crate::space_file_index::FileIndexStore`]) and `delete_document` is in

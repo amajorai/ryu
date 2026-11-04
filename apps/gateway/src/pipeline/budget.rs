@@ -84,6 +84,8 @@ pub(super) fn enforce_budget_with(
     ceiling: OutputCeiling,
     in_flight: InFlightBudget,
 ) -> Result<BudgetOutcome, GatewayError> {
+    // Also refused at admission; no path may spend on a Core relay key.
+    super::org_core_relay::refuse_inference(ctx)?;
     // The coordinator's shared verdict and the key's lifetime token cap gate
     // every top-level request here, so streamed chat and media are covered as
     // well as buffered chat. A sub-call's parent request already passed them.

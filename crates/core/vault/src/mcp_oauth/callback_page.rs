@@ -81,6 +81,19 @@ pub fn render_callback_page(copy: &CallbackPageCopy) -> String {
     )
 }
 
+/// The hosted callback's page once the code exchange succeeded: the copy plus
+/// the one-time confirmation code the initiating owner must enter in Ryu.
+pub fn render_confirmation_page(copy: &CallbackPageCopy, code: &str) -> String {
+    let dir = if copy.dir == "rtl" { "rtl" } else { "ltr" };
+    format!(
+        "<!doctype html><html lang=\"{lang}\" dir=\"{dir}\"><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>{title}</title><h1>{title}</h1><p><code style=\"font-size:2em;letter-spacing:.15em\" dir=\"ltr\">{code}</code></p><p>{detail}</p></html>",
+        lang = escape_html(&copy.lang),
+        title = escape_html(&copy.title),
+        code = escape_html(code),
+        detail = escape_html(&copy.detail),
+    )
+}
+
 fn escape_html(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for c in value.chars() {
@@ -181,6 +194,21 @@ mod tests {
         let page = render_callback_page(&hostile);
         assert!(page.contains("lang=\"x&quot;&gt;&lt;script&gt;\" dir=\"ltr\""));
         assert!(page.contains("<h1>&lt;b&gt;</h1><p>a &amp; b</p>"));
+    }
+
+    #[test]
+    fn the_confirmation_page_shows_the_escaped_code() {
+        let copy = CallbackPageCopy {
+            lang: "en".to_owned(),
+            dir: "ltr".to_owned(),
+            title: "Almost done".to_owned(),
+            detail: "Enter this code in Ryu.".to_owned(),
+        };
+        let page = render_confirmation_page(&copy, "ABCD-EFGH");
+        assert!(page.contains(">ABCD-EFGH</code>"), "{page}");
+        assert!(page.contains("<h1>Almost done</h1>"));
+        let hostile = render_confirmation_page(&copy, "<script>");
+        assert!(hostile.contains("&lt;script&gt;"));
     }
 
     #[test]

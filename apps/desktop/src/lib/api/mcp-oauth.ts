@@ -69,8 +69,26 @@ export interface McpOAuthFlow {
 	profileId: string;
 	scopes: string[];
 	serverName: string;
-	status: "pending" | "connected" | "failed";
+	status: McpOAuthFlowStatus;
 }
+
+/**
+ * `awaiting_confirmation`: a hosted node exchanged the code and is holding the
+ * tokens until the user who started the flow enters the code the browser
+ * showed ({@link confirmMcpOAuthFlow}).
+ */
+export type McpOAuthFlowStatus =
+	| "pending"
+	| "awaiting_confirmation"
+	| "connected"
+	| "failed";
+
+const flowStatusCodec = z.union([
+	z.literal("pending"),
+	z.literal("awaiting_confirmation"),
+	z.literal("connected"),
+	z.literal("failed"),
+]);
 
 const mapConnection = (wire: ConnectionWire): McpOAuthConnection => ({
 	accessLevel: normalizeConnectionAccessLevel(wire.access_level),
@@ -193,45 +211,73 @@ export async function disconnectMcpOAuth(
 	);
 }
 
+interface FlowWire {
+	access_level?: unknown;
+	callback_mode: "loopback" | "hosted";
+	error?: string | null;
+	expires_at: number;
+	flow_id: string;
+	plugin_id: string;
+	profile_id: string;
+	scopes?: string[];
+	server_name: string;
+	status: McpOAuthFlowStatus;
+}
+
+const flowWireCodec = z
+	.object({
+		access_level: gatewayJsonValueSchema.optional(),
+		callback_mode: z.union([z.literal("loopback"), z.literal("hosted")]),
+		error: z.union([z.string(), z.null()]).optional(),
+		expires_at: z.number(),
+		flow_id: z.string(),
+		plugin_id: z.string(),
+		profile_id: z.string(),
+		scopes: z.array(z.string()).optional(),
+		server_name: z.string(),
+		status: flowStatusCodec,
+	})
+	.passthrough();
+
+const flowPath = (pluginId: string, flowId: string) =>
+	`/api/plugins/${encodeURIComponent(pluginId)}/auth/flows/${encodeURIComponent(flowId)}`;
+
 export async function fetchMcpOAuthFlow(
 	target: ApiTarget,
 	pluginId: string,
 	flowId: string
 ): Promise<McpOAuthFlow> {
-	const response = await request<{
-		access_level?: unknown;
-		callback_mode: "loopback" | "hosted";
-		error?: string | null;
-		expires_at: number;
-		flow_id: string;
-		plugin_id: string;
-		profile_id: string;
-		scopes?: string[];
-		server_name: string;
-		status: "pending" | "connected" | "failed";
-	}>(
-		target,
-		`/api/plugins/${encodeURIComponent(pluginId)}/auth/flows/${encodeURIComponent(flowId)}`,
-		{},
-		z
-			.object({
-				access_level: gatewayJsonValueSchema.optional(),
-				callback_mode: z.union([z.literal("loopback"), z.literal("hosted")]),
-				error: z.union([z.string(), z.null()]).optional(),
-				expires_at: z.number(),
-				flow_id: z.string(),
-				plugin_id: z.string(),
-				profile_id: z.string(),
-				scopes: z.array(z.string()).optional(),
-				server_name: z.string(),
-				status: z.union([
-					z.literal("pending"),
-					z.literal("connected"),
-					z.literal("failed"),
-				]),
-			})
-			.passthrough()
+	return mapFlow(
+		await request<FlowWire>(
+			target,
+			flowPath(pluginId, flowId),
+			{},
+			flowWireCodec
+		)
 	);
+}
+
+/**
+ * Save a hosted connection: send the code the browser showed after sign-in.
+ * Only the user who started the flow can confirm it.
+ */
+export async function confirmMcpOAuthFlow(
+	target: ApiTarget,
+	pluginId: string,
+	flowId: string,
+	code: string
+): Promise<McpOAuthFlow> {
+	return mapFlow(
+		await request<FlowWire>(
+			target,
+			`${flowPath(pluginId, flowId)}/confirm`,
+			{ body: { code: code.trim() }, method: "POST" },
+			flowWireCodec
+		)
+	);
+}
+
+function mapFlow(response: FlowWire): McpOAuthFlow {
 	return {
 		accessLevel: normalizeConnectionAccessLevel(response.access_level),
 		callbackMode: response.callback_mode,

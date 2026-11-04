@@ -183,6 +183,10 @@ pub(in crate::server) fn protected_routes_1(state: &ServerState) -> Router<Serve
             get(mcp_oauth_api::flow),
         )
         .route(
+            "/api/plugins/:plugin_id/auth/flows/:flow_id/confirm",
+            post(crate::server::mcp_oauth_confirm_api::confirm_flow),
+        )
+        .route(
             "/api/plugins/:plugin_id/auth/:server_name",
             delete(mcp_oauth_api::disconnect),
         )

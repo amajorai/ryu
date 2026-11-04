@@ -22,6 +22,9 @@ mod pi_widgets_fs_and_turns;
 mod plan_mode_option;
 #[path = "acp_tests/registry_and_wire_mappers.rs"]
 mod registry_and_wire_mappers;
+#[cfg(unix)]
+#[path = "acp_tests/scoped_fs_symlink_swap.rs"]
+mod scoped_fs_symlink_swap;
 #[path = "acp_tests/scoped_gateway_credentials.rs"]
 mod scoped_gateway_credentials;
 #[path = "acp_tests/spawn_and_failure_copy.rs"]

@@ -47,6 +47,11 @@ fn org_key(org: &str) -> String {
 
 /// A fleet Gateway that also keeps a legacy static `local-core` relay.
 fn fleet_state() -> Arc<AppState> {
+    fleet_state_with(GatewayConfig::default())
+}
+
+/// [`fleet_state`] over `base`, whose `auth` is replaced.
+fn fleet_state_with(base: GatewayConfig) -> Arc<AppState> {
     let static_core = ApiKeyConfig {
         key: SHARED_CORE_KEY.to_owned(),
         name: "local-core".to_owned(),
@@ -73,10 +78,7 @@ fn fleet_state() -> Arc<AppState> {
     .expect("disabled audit logger");
     let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
     Arc::new(AppState::new_for_test(
-        GatewayConfig {
-            auth,
-            ..GatewayConfig::default()
-        },
+        GatewayConfig { auth, ..base },
         audit,
         evals,
     ))
@@ -256,4 +258,159 @@ async fn an_org_relay_key_cannot_bill_another_orgs_sandbox() {
     )
     .await
     .is_ok());
+}
+
+async fn relay_ctx(state: &AppState, key: &str) -> crate::pipeline::RequestContext {
+    authenticate(
+        state,
+        AuthInputs {
+            raw_api_key: Some(key),
+            agent_id: Some("fleet-agent".to_owned()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn an_org_relay_key_is_refused_inference_before_dispatch() {
+    let _env = RelayMasterEnv::set(Some(MASTER)).await;
+    let state = fleet_state();
+    let relay = relay_ctx(&state, &org_key("org-a")).await;
+    let body =
+        || serde_json::json!({"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]});
+
+    // The shared inference admission refuses it, and so does the budget gate.
+    assert!(matches!(
+        crate::pipeline::admit_request(&state, &relay),
+        Err(GatewayError::Unauthorized(_))
+    ));
+    let mut decision = crate::router::RouteDecision {
+        provider: crate::config::ProviderId::from("openai"),
+        model: "gpt-4o".to_owned(),
+    };
+    assert!(matches!(
+        crate::pipeline::budget::enforce_budget(
+            &state,
+            &relay,
+            &mut body(),
+            &mut decision,
+            crate::budget::BudgetChargeKind::Model,
+            crate::pipeline::OutputCeiling::Clamp,
+        ),
+        Err(GatewayError::Unauthorized(_))
+    ));
+    // Buffered, streamed and embedding requests all stop before any provider.
+    assert!(matches!(
+        crate::pipeline::run(Arc::clone(&state), relay.clone(), body()).await,
+        Err(GatewayError::Unauthorized(_))
+    ));
+    assert!(matches!(
+        crate::pipeline::run_stream(Arc::clone(&state), relay.clone(), body()).await,
+        Err(GatewayError::Unauthorized(_))
+    ));
+    assert!(matches!(
+        crate::pipeline::run_embedding(
+            Arc::clone(&state),
+            relay,
+            serde_json::json!({"model": "text-embedding-3-small", "input": "hi"}),
+            crate::pipeline::EmbeddingOperation::Embed,
+        )
+        .await,
+        Err(GatewayError::Unauthorized(_))
+    ));
+
+    // The operator's own static Core relay is still admitted.
+    let local = relay_ctx(&state, SHARED_CORE_KEY).await;
+    assert!(crate::pipeline::admit_request(&state, &local).is_ok());
+    assert!(!matches!(
+        crate::pipeline::run(Arc::clone(&state), local, body()).await,
+        Err(GatewayError::Unauthorized(_))
+    ));
+}
+
+#[tokio::test]
+async fn an_org_relay_turn_never_runs_this_gateways_tool_loop() {
+    use crate::pipeline::tool_loop_select::{
+        effective_tool_allowlist, select_tool_loop, ToolLoopKind,
+    };
+    let _env = RelayMasterEnv::set(Some(MASTER)).await;
+    let state = fleet_state();
+    let cfg = crate::config::ToolsConfig::default();
+    let hinted = |mut ctx: crate::pipeline::RequestContext, header: bool| {
+        ctx.tools_header_present = header;
+        ctx.tool_actions = header.then(|| "fs.read".to_owned());
+        ctx.capability_hints = Some(r#"{"tools":["fs.read"],"skills":["s"]}"#.to_owned());
+        ctx
+    };
+
+    let relay = relay_ctx(&state, &org_key("org-a")).await;
+    let signaled = hinted(relay.clone(), true);
+    assert_eq!(
+        select_tool_loop(&signaled, true, true, &cfg, false),
+        ToolLoopKind::Plain
+    );
+    assert_eq!(
+        select_tool_loop(&signaled, false, true, &cfg, false),
+        ToolLoopKind::Plain
+    );
+    // No capability-hint grant either.
+    assert!(effective_tool_allowlist(&hinted(relay, false), &cfg).is_empty());
+
+    let local = relay_ctx(&state, SHARED_CORE_KEY).await;
+    assert_eq!(
+        select_tool_loop(&hinted(local.clone(), true), true, true, &cfg, false),
+        ToolLoopKind::Unified
+    );
+    assert!(
+        effective_tool_allowlist(&hinted(local, false), &cfg).contains(&"skills.load".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn one_orgs_exec_rows_do_not_exhaust_another_orgs_exec_budget() {
+    let _env = RelayMasterEnv::set(Some(MASTER)).await;
+    let state = fleet_state_with(GatewayConfig {
+        exec_budget: crate::budget::ExecBudgetConfig {
+            max_count: 1,
+            max_wall_clock_secs: 0,
+            window_secs: 3600,
+            action: crate::budget::ExecBudgetAction::Stop,
+        },
+        ..GatewayConfig::default()
+    });
+    let ingest = |key: String| {
+        let state = Arc::clone(&state);
+        async move {
+            let body = serde_json::from_value(serde_json::json!({
+                "backend": "local", "command": "ls", "duration_ms": 10, "exit_code": 0,
+            }))
+            .unwrap();
+            crate::api::audit::ingest_exec_audit(State(state), bearer(&key), Json(body)).await
+        }
+    };
+    let allowed = |key: String| {
+        let state = Arc::clone(&state);
+        async move {
+            let body =
+                serde_json::from_value(serde_json::json!({"backend": "local", "command": "ls"}))
+                    .unwrap();
+            crate::api::audit::check_exec_budget(State(state), bearer(&key), Json(body))
+                .await
+                .unwrap()
+                .0
+                .allowed
+        }
+    };
+
+    assert!(ingest(org_key("org-a")).await.is_ok());
+    assert!(!allowed(org_key("org-a")).await);
+    assert!(allowed(org_key("org-b")).await);
+    assert!(allowed(SHARED_CORE_KEY.to_owned()).await);
+
+    // The operator's own Core still counts against the global window.
+    assert!(ingest(SHARED_CORE_KEY.to_owned()).await.is_ok());
+    assert!(!allowed(SHARED_CORE_KEY.to_owned()).await);
+    assert!(allowed(org_key("org-b")).await);
 }

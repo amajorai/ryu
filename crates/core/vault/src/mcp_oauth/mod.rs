@@ -24,6 +24,9 @@ use crate::{McpOAuthConnectionRecord, McpOAuthConnectionStatus, SecretState};
 
 mod callback;
 mod callback_page;
+mod confirm;
+#[cfg(test)]
+mod confirm_tests;
 mod connect;
 #[cfg(test)]
 mod custody_fixtures;
@@ -40,7 +43,8 @@ mod tokens;
 
 use callback_page::*;
 pub use callback_page::{
-    render_callback_page, set_callback_page_copy, CallbackPageCopy, CallbackPageCopyFn,
+    render_callback_page, render_confirmation_page, set_callback_page_copy, CallbackPageCopy,
+    CallbackPageCopyFn,
 };
 use discovery::*;
 use requests::*;
@@ -144,6 +148,9 @@ pub struct ConnectStarted {
 #[serde(rename_all = "snake_case")]
 pub enum FlowState {
     Pending,
+    /// A hosted callback exchanged the code; the initiating owner must enter
+    /// the confirmation code the browser showed before anything is stored.
+    AwaitingConfirmation,
     Connected,
     Failed,
 }
@@ -274,6 +281,8 @@ struct PendingFlow {
     state: String,
     callback_claimed: bool,
     require_issuer_parameter: bool,
+    /// Tokens a hosted callback obtained, held until the owner confirms.
+    held: Option<confirm::HeldConnection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

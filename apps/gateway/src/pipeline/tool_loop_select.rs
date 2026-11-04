@@ -71,6 +71,11 @@ pub(super) fn select_tool_loop(
     if tools_restricted || ctx.raw_tools {
         return ToolLoopKind::Plain;
     }
+    // A per-org Core relay is not this Gateway's Core: its turn never runs
+    // tools in this Gateway's Core or on its Composio grants (as `/v1/exec/tool`).
+    if super::org_core_relay::bound_forwarder_org(ctx).is_some() {
+        return ToolLoopKind::Plain;
+    }
     // An unverified caller's turn gets managed tools only from an explicit
     // Core-stamped allowlist. Without one, the legacy loop would fall back to
     // the operator's global Composio grants.
@@ -196,13 +201,7 @@ pub(super) fn effective_tool_allowlist(
     // trusted-forwarder hint envelope is allowed to narrow the current turn to
     // exactly the locally-scoped suggestions, but an ordinary caller can never
     // use this path to self-grant a capability.
-    if !ctx.tools_header_present
-        && (ctx.is_master_key
-            || ctx
-                .key_config
-                .as_ref()
-                .is_some_and(|key| key.trusted_forwarder))
-    {
+    if !ctx.tools_header_present && super::org_core_relay::is_unscoped_trusted(ctx) {
         for id in crate::tools::capability_hint_tool_ids(ctx.capability_hints.as_deref()) {
             if !allowed.contains(&id) {
                 allowed.push(id);

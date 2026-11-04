@@ -253,6 +253,17 @@ pub(in crate::server) async fn run_job_now(
     {
         return json_error(StatusCode::FORBIDDEN, error);
     }
+    if let Err(error) = crate::server::scheduled_agent_access::authorize_scheduled_agent_target(
+        &state,
+        &caller,
+        &job.target,
+        true,
+        None,
+    )
+    .await
+    {
+        return json_error(StatusCode::FORBIDDEN, error);
+    }
     // An app job runs under the scheduler's app-job budget here too, so a run-now
     // never overlaps a scheduled run of the same job or exceeds its app's cap.
     let _budget_slot = match crate::scheduler::admit_manual_run(&job.id, &job.target) {

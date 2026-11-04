@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
+	confirmMcpOAuthFlow,
 	connectMcpOAuth,
 	disconnectMcpOAuth,
 	fetchMcpOAuth,
@@ -56,6 +57,26 @@ export const useConnectMcpOAuth = (pluginId: string) => {
 			await queryClient.invalidateQueries({
 				queryKey: ["mcp-oauth", target.url, pluginId],
 			});
+		},
+	});
+};
+
+/** Send the code a hosted sign-in showed in the browser, saving the connection. */
+export const useConfirmMcpOAuthFlow = (pluginId: string) => {
+	const target = useTarget();
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ code, flowId }: { code: string; flowId: string }) =>
+			confirmMcpOAuthFlow(target, pluginId, flowId, code),
+		onSettled: async (_data, _error, { flowId }) => {
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: ["mcp-oauth", target.url, pluginId],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["mcp-oauth-flow", target.url, pluginId, flowId],
+				}),
+			]);
 		},
 	});
 };

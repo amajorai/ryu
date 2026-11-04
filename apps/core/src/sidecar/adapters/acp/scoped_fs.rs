@@ -30,13 +30,6 @@ pub(super) fn path_within_root(root: &std::path::Path, path: &std::path::Path) -
     normalize_path(&abs).starts_with(normalize_path(root))
 }
 
-/// Serve `fs/read_text_file`, applying the optional 1-based `line` offset and
-/// `limit`. Confined to the session workspace root: an out-of-root path returns
-/// `""` (the ACP response carries only `content`; degrading to empty matches how
-/// a missing file behaves, and never feeds out-of-workspace secrets to the
-/// model). Existing targets are canonicalized, checked for symlink components,
-/// and checked against protected host paths before the read. Returns `""` on any
-/// read error likewise.
 fn scoped_path(roots: &[std::path::PathBuf], path: &std::path::Path) -> Option<std::path::PathBuf> {
     roots.iter().find_map(|root| {
         if path_within_root(root, path) {
@@ -68,15 +61,22 @@ fn path_has_symlink_component_below_root(path: &std::path::Path, root: &std::pat
     false
 }
 
-/// Resolve an existing client-hosted path only when both its lexical and
-/// canonical forms stay within one session root. The canonical result prevents
-/// the child filesystem from following a workspace symlink after the check, and
-/// the explicit component check rejects symlink aliases that still point inside
-/// the workspace.
-fn scoped_existing_path(
+/// A checked `fs/*` target: the canonical session root plus the plain relative
+/// path below it. It is opened only through `open_beneath`, never by name, so a
+/// symlink swapped in after the check cannot redirect the read or write.
+pub(super) struct ScopedTarget {
+    pub(super) root: std::path::PathBuf,
+    pub(super) rel: std::path::PathBuf,
+}
+
+/// Check an existing client-hosted path: both its lexical and canonical forms
+/// must stay within one session root, no component below the root may be a
+/// symlink, and the target must not be a protected host path. This is an early
+/// refusal only; `open_beneath` re-enforces the no-symlink walk at open time.
+pub(super) fn scoped_existing_target(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
-) -> Option<std::path::PathBuf> {
+) -> Option<ScopedTarget> {
     roots.iter().find_map(|root| {
         let candidate = scoped_path(std::slice::from_ref(root), path)?;
         let canonical_root = std::fs::canonicalize(root).ok()?;
@@ -87,17 +87,23 @@ fn scoped_existing_path(
         {
             return None;
         }
-        Some(canonical)
+        let rel = canonical.strip_prefix(&canonical_root).ok()?.to_path_buf();
+        Some(ScopedTarget {
+            root: canonical_root,
+            rel,
+        })
     })
 }
 
 /// Validate a write target without requiring the target itself to exist. Every
 /// existing ancestor must be a real, in-root directory; a missing suffix may be
-/// created, but a symlink anywhere below the session root is refused.
-fn scoped_write_path(
+/// created, but a symlink anywhere below the session root is refused. Like
+/// `scoped_existing_target`, this is an early refusal; `open_beneath` enforces
+/// the walk again when the file is created.
+pub(super) fn scoped_write_target(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
-) -> Option<std::path::PathBuf> {
+) -> Option<ScopedTarget> {
     roots.iter().find_map(|root| {
         let candidate = scoped_path(std::slice::from_ref(root), path)?;
         let canonical_root = std::fs::canonicalize(root).ok()?;
@@ -116,25 +122,48 @@ fn scoped_write_path(
         {
             return None;
         }
-        Some(candidate)
+        let rel = candidate
+            .strip_prefix(normalize_path(root))
+            .ok()?
+            .to_path_buf();
+        Some(ScopedTarget {
+            root: canonical_root,
+            rel,
+        })
     })
 }
 
+/// Serve `fs/read_text_file`, applying the optional 1-based `line` offset and
+/// `limit`. Confined to the session workspace root: an out-of-root path returns
+/// `""` (the ACP response carries only `content`; degrading to empty matches how
+/// a missing file behaves, and never feeds out-of-workspace secrets to the
+/// model). Returns `""` on any open or read error likewise.
 pub(super) fn read_text_file_scoped_in_roots(
     req: &ReadTextFileRequest,
     roots: &[std::path::PathBuf],
 ) -> String {
-    const MAX_READ_BYTES: usize = 4 * 1024 * 1024;
-    use std::io::Read as _;
-
-    let Some(path) = scoped_existing_path(roots, &req.path) else {
+    let Some(target) = scoped_existing_target(roots, &req.path) else {
         tracing::warn!(
             path = %req.path.display(),
             "fs/read_text_file refused: path is outside the session workspaces"
         );
         return String::new();
     };
-    let Ok(file) = std::fs::File::open(path) else {
+    read_scoped_target(&target, req.line, req.limit)
+}
+
+/// Read a checked target through `open_beneath`, applying the optional 1-based
+/// `line` offset and `limit`. Any open or read failure, including a symlink
+/// swapped in after the check, degrades to `""`.
+pub(super) fn read_scoped_target(
+    target: &ScopedTarget,
+    line: Option<u32>,
+    limit: Option<u32>,
+) -> String {
+    const MAX_READ_BYTES: usize = 4 * 1024 * 1024;
+    use std::io::Read as _;
+
+    let Ok(file) = super::scoped_open::open_beneath(&target.root, &target.rel, false) else {
         return String::new();
     };
     let mut bytes = Vec::new();
@@ -149,16 +178,15 @@ pub(super) fn read_text_file_scoped_in_roots(
         bytes.truncate(MAX_READ_BYTES);
     }
     let content = String::from_utf8_lossy(&bytes).into_owned();
-    if req.line.is_none() && req.limit.is_none() {
+    if line.is_none() && limit.is_none() {
         return content;
     }
     let lines: Vec<&str> = content.lines().collect();
-    let start = req.line.unwrap_or(1).saturating_sub(1) as usize;
+    let start = line.unwrap_or(1).saturating_sub(1) as usize;
     if start >= lines.len() {
         return String::new();
     }
-    let end = req
-        .limit
+    let end = limit
         .map(|l| (start + l as usize).min(lines.len()))
         .unwrap_or(lines.len());
     lines[start..end].join("\n")
@@ -171,17 +199,22 @@ pub(super) fn write_text_file_scoped_in_roots(
     req: &WriteTextFileRequest,
     roots: &[std::path::PathBuf],
 ) -> anyhow::Result<()> {
-    let Some(path) = scoped_write_path(roots, &req.path) else {
+    let Some(target) = scoped_write_target(roots, &req.path) else {
         return Err(anyhow::anyhow!(
             "refusing write outside the session workspaces: {}",
             req.path.display()
         ));
     };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(&path, &req.content)
-        .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))
+    write_scoped_target(&target, &req.content)
+        .map_err(|e| anyhow::anyhow!("write {}: {e}", req.path.display()))
+}
+
+/// Create or truncate a checked target through `open_beneath` and write
+/// `content`. Missing parents are created without following symlinks.
+pub(super) fn write_scoped_target(target: &ScopedTarget, content: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut file = super::scoped_open::open_beneath(&target.root, &target.rel, true)?;
+    file.write_all(content.as_bytes())
 }
 
 /// Collapse a tool call's `content` blocks (text/diff/terminal) into a JSON

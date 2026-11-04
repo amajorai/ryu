@@ -64,8 +64,11 @@ pub(super) fn provider_snapshot(
 /// the per-key requests-per-minute ceiling, then the org request ceiling, then
 /// the per-key burst bucket, each consumed only when the previous one admitted
 /// the request. A per-key refusal names its policy (`Retry-After` plus the IETF
-/// `RateLimit` / `RateLimit-Policy` headers); an org refusal stays bare.
+/// `RateLimit` / `RateLimit-Policy` headers); an org refusal stays bare. A
+/// per-org Core relay key is refused first: it authorizes Core's control
+/// routes only, never inference.
 pub(crate) fn admit_request(state: &AppState, ctx: &RequestContext) -> Result<(), GatewayError> {
+    super::org_core_relay::refuse_inference(ctx)?;
     let key_config = ctx.key_config.as_ref();
     if !state
         .rate_limiter

@@ -218,6 +218,7 @@ pub(in crate::server) async fn delete_conversation_with_residue(
     let checkpoint_folders =
         chat_checkpoints::conversation_workspaces(&state.conversations, id).await;
     let removed = state.conversations.delete_conversation(id).await?;
+    crate::server::realtime_ws::notify_access_changed();
     if removed {
         release_conversation_residue(id, checkpoint_folders).await;
     }

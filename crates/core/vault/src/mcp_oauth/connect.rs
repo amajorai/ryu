@@ -214,6 +214,7 @@ impl McpOAuthManager {
             verifier,
             state,
             callback_claimed: false,
+            held: None,
             require_issuer_parameter: metadata.authorization_response_iss_parameter_supported,
         };
         self.flows.write().await.insert(flow_id.clone(), pending);

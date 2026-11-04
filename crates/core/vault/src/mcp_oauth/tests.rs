@@ -29,6 +29,7 @@ pub(super) fn pending_flow(flow_id: &str) -> PendingFlow {
         verifier: "verifier".to_owned(),
         state: "one-time-state".to_owned(),
         callback_claimed: false,
+        held: None,
         require_issuer_parameter: false,
     }
 }

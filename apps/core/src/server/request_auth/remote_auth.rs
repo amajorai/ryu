@@ -249,6 +249,11 @@ pub(in crate::server) fn credential_route_policy(
     if is_member_voice_path(path) && !is_owner_or_member_session(context) {
         return RoutePolicy::OwnerOnly;
     }
+    if crate::server::node_lifecycle_routes::is_role_gated_lifecycle_mutation(method, path)
+        && !is_owner_or_member_session(context)
+    {
+        return RoutePolicy::OwnerOnly;
+    }
     route_policy(method, path)
 }
 

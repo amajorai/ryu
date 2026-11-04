@@ -19008,6 +19008,7 @@
   "The composer's model control overrides these for this session.": "इस सेशन के लिए कंपोज़र का मॉडल नियंत्रण इन्हें ओवरराइड करता है।",
   "The confirmation link is invalid or expired": "पुष्टि लिंक अमान्य है या उसकी समय-सीमा समाप्त हो गई है",
   "The connection link expired or was invalid. Start again from Connect GitHub.": "कनेक्शन लिंक की समय-सीमा खत्म हो गई या वह अमान्य था। \"GitHub कनेक्ट करें\" से फिर से शुरू करें।",
+  "The connection was cancelled.": "कनेक्शन रद्द कर दिया गया।",
   "The container image runs as an unprivileged user (UID 10001).": "कंटेनर इमेज एक बिना विशेषाधिकार वाले उपयोगकर्ता (UID 10001) के रूप में चलती है।",
   "The control plane keeps one row per install and session, then totals the rows across the community.": "कंट्रोल प्लेन हर इंस्टॉल और सेशन के लिए एक पंक्ति रखता है, फिर पूरी कम्युनिटी में पंक्तियों का कुल निकालता है।",
   "The control plane returned invalid Fleet access.": "कंट्रोल प्लेन ने अमान्य Fleet पहुँच लौटाई।",

@@ -128,13 +128,19 @@ async fn discovery_pkce_hosted_callback_and_metadata_roundtrip() {
         )
         .await
         .is_err());
-    manager
+    let confirmation = manager
         .complete_hosted_callback(
             Some("code".into()),
             Some(params["state"].clone()),
             Some(origin),
             None,
         )
+        .await
+        .unwrap();
+    let held = manager.flow("owner", &started.flow_id).await.unwrap();
+    assert_eq!(held.status, FlowState::AwaitingConfirmation);
+    manager
+        .confirm_hosted_flow("owner", &started.flow_id, &confirmation)
         .await
         .unwrap();
     let flow = manager.flow("owner", &started.flow_id).await.unwrap();
@@ -269,6 +275,9 @@ async fn callback_race_cannot_resurrect_an_uninstalled_connection() {
     let mut pending = super::tests::pending_flow("racing");
     pending.token_endpoint = format!("{base}/token");
     pending.view.plugin_id = "plugin".into();
+    // The loopback path commits on callback; hosted commits on confirmation,
+    // whose uninstall race `confirm_tests` covers.
+    pending.view.callback_mode = CallbackMode::Loopback;
     let state = pending.state.clone();
     manager.flows.write().await.insert("racing".into(), pending);
     let callback = manager.complete_callback(

@@ -54,6 +54,7 @@
 
 pub mod providers;
 
+mod bws_screen;
 mod model;
 mod resolve;
 mod rows;

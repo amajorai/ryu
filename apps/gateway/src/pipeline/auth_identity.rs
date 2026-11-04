@@ -163,9 +163,8 @@ pub(super) async fn authenticate_identity(
             // a caller presenting it is recognized as master (so the shared
             // control-plane admin gate — config/audit/budget-spend — honors it),
             // while everyone else remains anonymous exactly as before. Without a
-            // configured master key this is a no-op and the zero-config dev path
-            // is unchanged (P2 #2 — pairs with the `master_key_present` term in
-            // `admin_loopback_allowed`).
+            // configured master key this is a no-op (P2 #2 — pairs with the
+            // `master_key_present` term in `admin_loopback_allowed`).
             if let (Some(master), Some(raw)) = (&auth.master_key, raw_api_key) {
                 let key = raw.strip_prefix("Bearer ").unwrap_or(raw);
                 if ct_eq(key, master.as_str()) {
@@ -185,7 +184,7 @@ pub(super) async fn authenticate_identity(
                 None,
                 None,
                 user_id.clone(),
-                agent_id.clone(),
+                None, // anonymous: never act as a header-named agent
             ));
         }
 

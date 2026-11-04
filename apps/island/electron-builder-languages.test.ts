@@ -39,15 +39,29 @@ const nsisLang = requireFromBuilder(
 	"app-builder-lib/out/targets/nsis/nsisLang.js"
 ) as NsisLangModule;
 
-function configuredInstallerLanguages(): string[] {
+const windowsToolsets = requireFromBuilder(
+	"app-builder-lib/out/toolsets/windows.js"
+) as { nsisChecksums: Record<string, unknown> };
+
+interface BuilderConfig {
+	nsis?: { installerLanguages?: unknown };
+	toolsets?: { nsis?: unknown };
+}
+
+function builderConfig(): BuilderConfig {
 	const yaml = readFileSync(
 		join(import.meta.dir, "electron-builder.yml"),
 		"utf8"
 	);
-	const config = Bun.YAML.parse(yaml) as {
-		nsis?: { installerLanguages?: unknown };
-	};
-	const list = config.nsis?.installerLanguages;
+	return Bun.YAML.parse(yaml) as BuilderConfig;
+}
+
+function configuredNsisToolset(): unknown {
+	return builderConfig().toolsets?.nsis;
+}
+
+function configuredInstallerLanguages(): string[] {
+	const list = builderConfig().nsis?.installerLanguages;
 	if (!(Array.isArray(list) && list.every((it) => typeof it === "string"))) {
 		throw new Error("nsis.installerLanguages must be a list of strings");
 	}
@@ -111,6 +125,17 @@ describe("Island NSIS installer languages", () => {
 		expect(lines).toContain('!insertmacro MUI_LANGUAGE "Hindi"');
 		expect(lines).toContain('!insertmacro MUI_LANGUAGE "English"');
 		expect(lines).toHaveLength(installerLanguages.length);
+	});
+
+	test("builds Hindi with an NSIS toolset whose Hindi language file parses", () => {
+		// The legacy toolset ("0.0.0", NSIS 3.0.4.1) ships a Hindi.nsh with an
+		// unterminated string on the multi-user install-mode page, so makensis
+		// fails on any assisted installer that lists hi_IN. Keep hi_IN only with
+		// a toolset from electron-builder's own NSIS 3.12+ bundles.
+		expect(installerLanguages).toContain("hi_IN");
+		const toolset = configuredNsisToolset();
+		expect(toolset).not.toBe("0.0.0");
+		expect(Object.keys(windowsToolsets.nsisChecksums)).toContain(toolset);
 	});
 
 	test("a bare `hi` entry would not resolve to the Hindi LCID", () => {

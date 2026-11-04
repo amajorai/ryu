@@ -19008,6 +19008,7 @@
   "The composer's model control overrides these for this session.": "이 세션에서는 입력창의 모델 설정이 이 값을 재정의합니다.",
   "The confirmation link is invalid or expired": "확인 링크가 유효하지 않거나 만료되었습니다",
   "The connection link expired or was invalid. Start again from Connect GitHub.": "연결 링크가 만료되었거나 유효하지 않습니다. 'GitHub 연결'에서 다시 시작하세요.",
+  "The connection was cancelled.": "연결이 취소되었습니다.",
   "The container image runs as an unprivileged user (UID 10001).": "컨테이너 이미지는 권한 없는 사용자(UID 10001)로 실행됩니다.",
   "The control plane keeps one row per install and session, then totals the rows across the community.": "컨트롤 플레인은 설치 및 세션마다 한 행을 보관한 다음 커뮤니티 전체의 행을 합산합니다.",
   "The control plane returned invalid Fleet access.": "컨트롤 플레인이 잘못된 Fleet 액세스를 반환했습니다.",

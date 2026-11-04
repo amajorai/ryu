@@ -65,6 +65,7 @@ mod registry_curated;
 mod registry_lookup;
 mod sandbox_paths;
 mod scoped_fs;
+mod scoped_open;
 mod serve_dispatch;
 mod serve_finish;
 mod serve_instance;

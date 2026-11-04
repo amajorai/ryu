@@ -9,7 +9,9 @@ use axum::{
     response::{Html, IntoResponse},
     Extension, Json,
 };
-use ryu_vault::mcp_oauth::{render_callback_page, set_callback_page_copy, CallbackPageCopy};
+use ryu_vault::mcp_oauth::{
+    render_callback_page, render_confirmation_page, set_callback_page_copy, CallbackPageCopy,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -38,19 +40,37 @@ pub async fn hosted_callback(
     let completion = crate::mcp_oauth::global()
         .complete_hosted_callback(query.code, query.state, query.iss, query.error)
         .await;
-    let status = match completion {
-        Ok(()) => StatusCode::OK,
-        Err(_) => StatusCode::BAD_REQUEST,
-    };
     let accept_language = headers
         .get(header::ACCEPT_LANGUAGE)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    let copy = callback_page_copy(accept_language, completion.is_ok()).await;
-    callback_page_response(status, &copy)
+    // Nothing is stored yet: the page shows the code the initiating owner must
+    // enter in Ryu (see `mcp_oauth_confirm_api`).
+    match completion {
+        Ok(code) => {
+            let copy = super::mcp_oauth_confirm_api::confirmation_page_copy(accept_language).await;
+            callback_html_response(
+                StatusCode::OK,
+                &copy,
+                render_confirmation_page(&copy, &code),
+            )
+        }
+        Err(_) => {
+            let copy = callback_page_copy(accept_language, false).await;
+            callback_page_response(StatusCode::BAD_REQUEST, &copy)
+        }
+    }
 }
 
 fn callback_page_response(status: StatusCode, copy: &CallbackPageCopy) -> axum::response::Response {
+    callback_html_response(status, copy, render_callback_page(copy))
+}
+
+pub(super) fn callback_html_response(
+    status: StatusCode,
+    copy: &CallbackPageCopy,
+    html: String,
+) -> axum::response::Response {
     let content_language =
         HeaderValue::from_str(&copy.lang).unwrap_or(HeaderValue::from_static("en"));
     (
@@ -67,7 +87,7 @@ fn callback_page_response(status: StatusCode, copy: &CallbackPageCopy) -> axum::
             ),
             (header::CONTENT_LANGUAGE, content_language),
         ],
-        Html(render_callback_page(copy)),
+        Html(html),
     )
         .into_response()
 }
@@ -77,16 +97,7 @@ fn callback_page_response(status: StatusCode, copy: &CallbackPageCopy) -> axum::
 /// `Accept-Language`, else the node's locale. Registered with the vault for
 /// the desktop loopback page too (see [`install_callback_page_copy`]).
 async fn callback_page_copy(accept_language: Option<String>, connected: bool) -> CallbackPageCopy {
-    let locale = match locale::fixed_node_locale().await {
-        Some(locale) => locale,
-        None => match accept_language
-            .as_deref()
-            .and_then(locale::from_accept_language)
-        {
-            Some(locale) => locale,
-            None => locale::node_locale().await,
-        },
-    };
+    let locale = super::mcp_oauth_confirm_api::callback_locale(accept_language).await;
     callback_page_copy_for(locale, connected)
 }
 
@@ -150,11 +161,14 @@ pub async fn client_metadata() -> impl IntoResponse {
         .into_response()
 }
 
-fn error(status: StatusCode, message: impl std::fmt::Display) -> axum::response::Response {
+pub(super) fn error(
+    status: StatusCode,
+    message: impl std::fmt::Display,
+) -> axum::response::Response {
     (status, Json(json!({ "error": message.to_string() }))).into_response()
 }
 
-fn owner(caller: Option<&VerifiedCaller>) -> Result<String, axum::response::Response> {
+pub(super) fn owner(caller: Option<&VerifiedCaller>) -> Result<String, axum::response::Response> {
     crate::mcp_oauth::owner_for_caller(caller)
         .map_err(|message| error(StatusCode::UNAUTHORIZED, message))
 }

@@ -980,6 +980,11 @@ async fn oauth_elicitation(
     profile_id: &str,
     challenge: Option<String>,
 ) -> Result<Value> {
+    if let Some(envelope) =
+        crate::mcp_oauth::hosted_connect_elicitation(cfg.owner_server_name.as_deref())
+    {
+        return Ok(envelope);
+    }
     let access_level = if crate::mcp_oauth::remote_configured() {
         let plugin = cfg
             .owner_plugin_id
@@ -8137,15 +8142,25 @@ impl McpRegistry {
             }
             // A routine runs its agent with that agent's account access, so a
             // restricted agent may only schedule or run agents within its own.
+            let targets = routines_tool::routine_target_agents(tool, &arguments, agent_id)?;
             self.require_delegation_within_policy(
                 account_policy.as_ref(),
                 agent_id,
-                routines_tool::routine_target_agents(tool, &arguments, agent_id)?,
+                targets.clone(),
             )
             .await?;
             let principal =
                 ToolPrincipal::resolve_optional(self.conversations.as_ref(), host_conversation_id)
                     .await;
+            // The routine runs for this member, so they need `agent.run` on it.
+            if let ToolPrincipal::Owned { user_id, .. } = &principal {
+                crate::scheduler::agent_run_access::require_owner_may_run_agents(
+                    Some(user_id),
+                    &targets,
+                )
+                .await
+                .map_err(|error| anyhow!(error))?;
+            }
             return routines_tool::dispatch(
                 tool,
                 arguments,

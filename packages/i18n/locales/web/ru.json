@@ -19008,6 +19008,7 @@
   "The composer's model control overrides these for this session.": "Выбор модели в поле ввода переопределяет эти значения для этого сеанса.",
   "The confirmation link is invalid or expired": "Ссылка для подтверждения недействительна или устарела",
   "The connection link expired or was invalid. Start again from Connect GitHub.": "Ссылка для подключения истекла или недействительна. Начните заново с пункта «Подключить GitHub».",
+  "The connection was cancelled.": "Подключение отменено.",
   "The container image runs as an unprivileged user (UID 10001).": "Образ контейнера работает от непривилегированного пользователя (UID 10001).",
   "The control plane keeps one row per install and session, then totals the rows across the community.": "Плоскость управления хранит одну строку на установку и сессию, а затем суммирует строки по всему сообществу.",
   "The control plane returned invalid Fleet access.": "Плоскость управления вернула недействительный доступ к Fleet.",

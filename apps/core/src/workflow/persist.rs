@@ -286,4 +286,41 @@ mod tests {
         backfill_webhook_secrets(&mut wf);
         assert!(matches!(wf.triggers[0], WorkflowTrigger::Manual));
     }
+
+    #[tokio::test]
+    async fn org_bound_node_refuses_a_while_body_workflow_reference() {
+        use crate::sidecar::control_plane::{
+            with_test_node_binding, NodeScope, RegisteredNode, RegisteredOrg,
+        };
+        let org_node = RegisteredNode {
+            org: RegisteredOrg {
+                id: "org1".to_owned(),
+                name: "Org".to_owned(),
+                slug: None,
+            },
+            node_id: "node-1".to_owned(),
+            scope: NodeScope::Org,
+            team_id: None,
+            owner_user_id: None,
+        };
+        let looping = workflow(
+            String::new(),
+            "loop",
+            vec![crate::workflow::test_support::node(
+                "loop",
+                NodeKind::While {
+                    expr: "input == go".into(),
+                    body_workflow_id: Some("wf_b".into()),
+                    max_iterations: Some(1),
+                },
+            )],
+            Vec::new(),
+        );
+        let refused =
+            with_test_node_binding(true, Some(org_node), persist_workflow_guarded(looping)).await;
+        assert!(matches!(
+            refused,
+            Err(WorkflowPersistError::Invalid(message)) if message.contains("nested-workflow")
+        ));
+    }
 }

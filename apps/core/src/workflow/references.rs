@@ -29,30 +29,31 @@ pub fn accepts_chat_input(workflow: &Workflow) -> bool {
 /// Plugin runnables remain governed at their own dispatch boundary because a
 /// plugin manifest can resolve its agent at runtime rather than in the graph.
 pub fn referenced_agent_ids(workflow: &Workflow) -> Vec<String> {
-    let mut ids = Vec::new();
-    for node in &workflow.nodes {
-        let candidate = match &node.kind {
-            NodeKind::Prompt { agent_id, .. } => agent_id.as_deref(),
-            NodeKind::Agent { agent_id, .. } => Some(agent_id.as_str()),
-            NodeKind::Skill { agent_id, .. } => agent_id.as_deref(),
-            NodeKind::Script { agent_id, .. } => agent_id.as_deref(),
-            NodeKind::AgentDelegate { delegates, .. } => {
-                for delegate in delegates {
-                    if let Some(agent_id) = delegate.agent_id.as_deref() {
-                        ids.push(agent_id.to_owned());
-                    }
-                }
-                None
-            }
-            _ => None,
-        };
-        if let Some(agent_id) = candidate.filter(|id| !id.trim().is_empty()) {
-            ids.push(agent_id.to_owned());
-        }
-    }
+    let mut ids: Vec<String> = workflow
+        .nodes
+        .iter()
+        .flat_map(node_agent_ids)
+        .map(str::to_owned)
+        .collect();
     ids.sort_unstable();
     ids.dedup();
     ids
+}
+
+/// Every non-blank agent id a single node names explicitly.
+fn node_agent_ids(node: &WorkflowNode) -> Vec<&str> {
+    let ids: Vec<&str> = match &node.kind {
+        NodeKind::Prompt { agent_id, .. }
+        | NodeKind::Skill { agent_id, .. }
+        | NodeKind::Script { agent_id, .. } => agent_id.as_deref().into_iter().collect(),
+        NodeKind::Agent { agent_id, .. } => vec![agent_id.as_str()],
+        NodeKind::AgentDelegate { delegates, .. } => delegates
+            .iter()
+            .filter_map(|delegate| delegate.agent_id.as_deref())
+            .collect(),
+        _ => Vec::new(),
+    };
+    ids.into_iter().filter(|id| !id.trim().is_empty()).collect()
 }
 
 /// Reject a workflow that would invoke a draft or trial agent. Workflows are
@@ -126,31 +127,34 @@ pub fn nested_workflow_ids(node: &WorkflowNode) -> Vec<&str> {
     }
 }
 
-/// Validate, stamp, persist, and reconcile a workflow definition — the single
-/// write path shared by the REST `create_workflow` handler and the chat-driven
-/// [`crate::runnable::workflow_builder`] tools, so both behave identically
-/// (including Composio trigger reconciliation; no chat-vs-canvas drift).
+/// Whether a workflow reaches any resource that per-resource ACLs would have
+/// to govern: another workflow, a configured agent, or a tool dispatch.
 ///
-/// Steps: reject an invalid DAG, mint a `wf_…` id when empty, stamp
-/// `created_at`/`updated_at`, write the file, then reconcile declared triggers
-/// into external resources (scheduler jobs + Composio subscriptions). The
-/// reconcile step is best-effort — it never fails the save, mirroring the prior
-/// handler behaviour. Returns the persisted workflow (with its final id/stamps).
+/// Organization-bound nodes refuse to store such workflows until resource ACL
+/// propagation exists, because a run only checks `workflow.run` on the outer
+/// workflow. The predicate is derived from [`nested_workflow_ids`] and the
+/// explicit agent references so a node kind that gains a reference is covered
+/// automatically; the remaining kinds dispatch tools, agents or runnables
+/// chosen at run time (Script picks agent ids in its body, Plugin resolves a
+/// runnable, Recipe and GhostAction call ghost tools without the approval gate).
 pub fn has_unscoped_managed_nodes(workflow: &Workflow) -> bool {
     workflow.nodes.iter().any(|node| {
-        matches!(
-            &node.kind,
-            NodeKind::SubWorkflow { .. }
-                | NodeKind::ForEach { .. }
-                | NodeKind::Parallel { .. }
-                | NodeKind::Tool { .. }
-                | NodeKind::Mcp { .. }
-                | NodeKind::Agent { .. }
-                | NodeKind::Prompt {
-                    agent_id: Some(_),
-                    ..
-                }
-        )
+        !nested_workflow_ids(node).is_empty()
+            || !node_agent_ids(node).is_empty()
+            || matches!(
+                &node.kind,
+                NodeKind::SubWorkflow { .. }
+                    | NodeKind::ForEach { .. }
+                    | NodeKind::Parallel { .. }
+                    | NodeKind::Tool { .. }
+                    | NodeKind::Mcp { .. }
+                    | NodeKind::Agent { .. }
+                    | NodeKind::AgentDelegate { .. }
+                    | NodeKind::Script { .. }
+                    | NodeKind::Plugin { .. }
+                    | NodeKind::Recipe { .. }
+                    | NodeKind::GhostAction { .. }
+            )
     })
 }
 
@@ -258,5 +262,119 @@ mod tests {
                 "agent_skill",
             ]
         );
+    }
+
+    fn single(kind: NodeKind) -> Workflow {
+        workflow("wf_a", "a", vec![node("n", kind)], Vec::new())
+    }
+
+    fn reaching_kinds() -> Vec<(&'static str, NodeKind)> {
+        vec![
+            (
+                "while body",
+                NodeKind::While {
+                    expr: "input == go".into(),
+                    body_workflow_id: Some("wf_b".into()),
+                    max_iterations: Some(1),
+                },
+            ),
+            (
+                "skill with agent",
+                NodeKind::Skill {
+                    skill: "research".into(),
+                    agent_id: Some("agent_x".into()),
+                    task: None,
+                },
+            ),
+            (
+                "plugin",
+                NodeKind::Plugin {
+                    plugin_id: "com.example.app".into(),
+                    runnable_id: "wf".into(),
+                    args: serde_json::Value::Null,
+                },
+            ),
+            (
+                "script without agent",
+                NodeKind::Script {
+                    code: "return await agent({agent_id: 'agent_x'})".into(),
+                    agent_id: None,
+                    preset: None,
+                    allow_mutation: None,
+                },
+            ),
+            (
+                "agent delegate",
+                NodeKind::AgentDelegate {
+                    delegates: vec![delegation::DelegateSpec {
+                        id: "d".into(),
+                        task: "work".into(),
+                        agent_id: Some("agent_x".into()),
+                        preset: Default::default(),
+                        inline: None,
+                    }],
+                    caps: None,
+                },
+            ),
+            (
+                "recipe",
+                NodeKind::Recipe {
+                    recipe: "send-email".into(),
+                    params: serde_json::Value::Null,
+                },
+            ),
+            (
+                "ghost action",
+                NodeKind::GhostAction {
+                    action: "click".into(),
+                    target: serde_json::Value::Null,
+                    params: serde_json::Value::Null,
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn unscoped_guard_covers_every_reference_and_dispatching_kind() {
+        for (label, kind) in reaching_kinds() {
+            assert!(
+                has_unscoped_managed_nodes(&single(kind)),
+                "{label} must be refused on an org-bound node"
+            );
+        }
+    }
+
+    #[test]
+    fn unscoped_guard_allows_self_contained_graphs() {
+        let gate = single(NodeKind::While {
+            expr: "input == go".into(),
+            body_workflow_id: None,
+            max_iterations: None,
+        });
+        assert!(!has_unscoped_managed_nodes(&gate));
+        let skill = single(NodeKind::Skill {
+            skill: "research".into(),
+            agent_id: None,
+            task: None,
+        });
+        assert!(!has_unscoped_managed_nodes(&skill));
+        let plain = single(NodeKind::Prompt {
+            prompt: "hi".into(),
+            agent_id: None,
+        });
+        assert!(!has_unscoped_managed_nodes(&plain));
+    }
+
+    #[test]
+    fn unscoped_guard_covers_every_nested_workflow_and_agent_reference() {
+        for (_, kind) in reaching_kinds() {
+            let candidate = single(kind);
+            let references = candidate
+                .nodes
+                .iter()
+                .any(|n| !nested_workflow_ids(n).is_empty())
+                || !referenced_agent_ids(&candidate).is_empty();
+            assert!(!references || has_unscoped_managed_nodes(&candidate));
+        }
     }
 }

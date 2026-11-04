@@ -30,8 +30,9 @@
 //! [`redact_for_listing`], because the secret can start the workflow through its
 //! public webhook route). Bulk and read-only views (`GET /workflows`, a
 //! stored version, a restore preview) use [`redact_for_listing`], which also
-//! masks the trigger secret, so a list consumer (a dashboard widget that caches
-//! the list, say) never copies every signing key.
+//! masks the trigger secret and the Webhook node URL, so a list consumer (a
+//! dashboard widget that caches the list, say) never copies every signing key
+//! and a view-only reader never sees a token embedded in an outbound URL.
 
 use std::collections::HashMap;
 
@@ -182,7 +183,7 @@ pub(crate) fn open_from_storage(workflow: &mut Workflow) -> std::io::Result<bool
 
 /// The view of a definition an HTTP client may see: the ChannelSend bot token
 /// and webhook URL are replaced by [`redact::REDACTED`]. See the module docs for
-/// why the trigger signing secret and the Webhook node URL stay visible.
+/// why the trigger signing secret and the Webhook node URL stay visible to editors.
 pub fn redact_for_client(mut workflow: Workflow) -> Workflow {
     for node in &mut workflow.nodes {
         if let NodeKind::ChannelSend {
@@ -202,9 +203,9 @@ pub fn redact_for_client(mut workflow: Workflow) -> Workflow {
 }
 
 /// The view of a definition for bulk and read-only surfaces: everything
-/// [`redact_for_client`] masks, plus the webhook trigger signing secret. A save
-/// that echoes the placeholder keeps the stored secret ([`restore_redacted`]
-/// clears it and the save path reuses the stored one).
+/// [`redact_for_client`] masks, plus the webhook trigger signing secret and the
+/// Webhook node URL. A save that echoes a placeholder keeps the stored value
+/// ([`restore_redacted`]).
 pub fn redact_for_listing(workflow: Workflow) -> Workflow {
     let mut workflow = redact_for_client(workflow);
     for trigger in &mut workflow.triggers {
@@ -214,6 +215,13 @@ pub fn redact_for_listing(workflow: Workflow) -> Workflow {
         {
             if !secret.is_empty() {
                 *secret = redact::REDACTED.to_owned();
+            }
+        }
+    }
+    for node in &mut workflow.nodes {
+        if let NodeKind::Webhook { url, .. } = &mut node.kind {
+            if !url.is_empty() {
+                *url = redact::REDACTED.to_owned();
             }
         }
     }
@@ -294,11 +302,15 @@ fn missing_stored(node_id: &str, what: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "secrets_listing_tests.rs"]
+mod listing_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::workflow::{ChannelPlatform, WorkflowNode};
 
-    fn credential_workflow() -> Workflow {
+    pub(super) fn credential_workflow() -> Workflow {
         Workflow {
             id: "wf_secrets".into(),
             name: "secrets".into(),

@@ -1733,6 +1733,7 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
             ("zh-CN", "邮件主题：{subject}"),
         ],
     ),
+    ("Enter it only in your own Ryu app. If someone sent you this sign-in link, close this window: giving them the code would connect your account to theirs.", &[]),
     (
         "Enter the text to speak.",
         &[
@@ -1749,6 +1750,7 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
             ("zh-CN", "请输入要朗读的文本。"),
         ],
     ),
+    ("Enter this code in Ryu to finish", &[]),
     (
         "Every plan is out of room. The first to reopen is the {window} limit for {agent}, at {time} on {date}.",
         &[

@@ -18,6 +18,7 @@ import {
 } from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
 import { useIdentities } from "@/src/hooks/useIdentities.ts";
 import {
+	useConfirmMcpOAuthFlow,
 	useConnectMcpOAuth,
 	useDisconnectMcpOAuth,
 	useMcpOAuthConnections,
@@ -29,6 +30,7 @@ import type {
 	McpOAuthServerDeclaration,
 } from "@/src/lib/api/plugins.ts";
 import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
+import { McpOAuthCodeForm } from "./McpOAuthCodeForm.tsx";
 import { ConnectionStatusBadge } from "./ToolkitResults.tsx";
 
 export function OAuthConnections({
@@ -90,6 +92,8 @@ export function OAuthServerCard({
 	const flow = useMcpOAuthFlow(app.id, flowId);
 	const connect = useConnectMcpOAuth(app.id);
 	const disconnect = useDisconnectMcpOAuth(app.id);
+	const confirmFlow = useConfirmMcpOAuthFlow(app.id);
+	const [confirmError, setConfirmError] = useState<string | null>(null);
 	const serverStatus = status.data?.find(
 		(candidate) => candidate.serverName === server.name
 	);
@@ -97,7 +101,9 @@ export function OAuthServerCard({
 		(candidate) => candidate.profileId === profileId
 	);
 	const connected = connection?.status === "connected";
-	const pending = connect.isPending || flow.data?.status === "pending";
+	const awaitingCode = flow.data?.status === "awaiting_confirmation";
+	const pending =
+		connect.isPending || flow.data?.status === "pending" || awaitingCode;
 	const failedTitle = tl("{name} connection failed", { name: app.name });
 	const connectedTitle = tl("{name} connected", { name: app.name });
 
@@ -127,11 +133,30 @@ export function OAuthServerCard({
 			serverName: server.name,
 		});
 		setFlowId(started.flowId);
+		setConfirmError(null);
 		await openExternal(started.authorizationUrl);
 		sileo.success({
 			description: "Authorize in your browser, then return to Ryu.",
 			title: tl("Connecting {name}…", { name: app.name }),
 		});
+	};
+
+	const handleConfirm = async (code: string) => {
+		if (!flowId) {
+			return;
+		}
+		try {
+			await confirmFlow.mutateAsync({ code, flowId });
+			setConfirmError(null);
+		} catch (error) {
+			setConfirmError(
+				error instanceof ApiError
+					? (error.serverMessage ?? error.message)
+					: error instanceof Error
+						? error.message
+						: "Could not confirm the code."
+			);
+		}
 	};
 
 	const handleDisconnect = async () => {
@@ -205,6 +230,14 @@ export function OAuthServerCard({
 					level: accessLevelSummary(connection?.accessLevel),
 				})}
 			</Badge>
+			{awaitingCode ? (
+				<McpOAuthCodeForm
+					appName={app.name}
+					error={confirmError}
+					onSubmit={handleConfirm}
+					pending={confirmFlow.isPending}
+				/>
+			) : null}
 			<div className="mt-3 flex justify-end gap-2">
 				{app.enabled ? null : (
 					<span className="me-auto self-center text-muted-foreground text-xs">

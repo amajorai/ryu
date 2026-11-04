@@ -6,6 +6,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
+import { Input } from "@ryu/ui/components/input";
 import {
 	NativeSelect,
 	NativeSelectOption,
@@ -31,7 +32,18 @@ import {
 type ConnectPhase =
 	| { kind: "idle" }
 	| { kind: "connecting" }
+	// A hosted sign-in finished; the browser shows a code the user enters here.
+	| { kind: "code"; error: string | null }
 	| { kind: "failed"; message: string };
+
+interface CodeRequest {
+	reject: (error: unknown) => void;
+	resolve: (code: string) => void;
+}
+
+function cancelledError(): DOMException {
+	return new DOMException("The connection was cancelled.", "AbortError");
+}
 
 type AppInfoState =
 	| { status: "loading" }
@@ -66,6 +78,8 @@ export const ConnectAppCard = memo(function ConnectAppCard({
 		onFollowUp
 	);
 	const controllerRef = useRef<AbortController | null>(null);
+	const codeRequestRef = useRef<CodeRequest | null>(null);
+	const [code, setCode] = useState("");
 	// Set once a sign-in was opened from this card: the browser flow can still
 	// finish after the card stopped waiting, so a later "Not now" re-checks first.
 	const signInOpenedRef = useRef(false);
@@ -116,13 +130,48 @@ export const ConnectAppCard = memo(function ConnectAppCard({
 	const finishConnected = () =>
 		deliver({ kind: "connected" }, connectFollowUp(request.app, "connected"));
 
+	const requestCode = (previousError: string | null, signal: AbortSignal) =>
+		new Promise<string>((resolve, reject) => {
+			if (signal.aborted) {
+				reject(cancelledError());
+				return;
+			}
+			codeRequestRef.current = { reject, resolve };
+			setCode("");
+			setPhase({ error: previousError, kind: "code" });
+			signal.addEventListener(
+				"abort",
+				() => {
+					codeRequestRef.current = null;
+					reject(cancelledError());
+				},
+				{ once: true }
+			);
+		});
+
+	const submitCode = () => {
+		const waiting = codeRequestRef.current;
+		const typed = code.trim();
+		if (!waiting || typed.length === 0) {
+			return;
+		}
+		codeRequestRef.current = null;
+		setPhase({ kind: "connecting" });
+		waiting.resolve(typed);
+	};
+
 	const connect = async () => {
 		const controller = new AbortController();
 		controllerRef.current = controller;
 		signInOpenedRef.current = true;
 		setPhase({ kind: "connecting" });
 		try {
-			await actions.connectApp(request, accessLevel, controller.signal);
+			await actions.connectApp(
+				request,
+				accessLevel,
+				controller.signal,
+				requestCode
+			);
 			setPhase({ kind: "idle" });
 			await finishConnected();
 		} catch (error) {
@@ -234,6 +283,48 @@ export const ConnectAppCard = memo(function ConnectAppCard({
 				Stop waiting
 			</Button>
 		);
+	} else if (phase.kind === "code") {
+		const codeInputId = `consent-code-${toolCallId ?? request.app}`;
+		status = (
+			<form
+				className="flex flex-col gap-1"
+				onSubmit={(event) => {
+					event.preventDefault();
+					submitCode();
+				}}
+			>
+				<label className="text-muted-foreground text-xs" htmlFor={codeInputId}>
+					{tl("Enter the code your browser shows to finish connecting {name}", {
+						name,
+					})}
+				</label>
+				<Input
+					aria-invalid={phase.error ? true : undefined}
+					autoComplete="off"
+					id={codeInputId}
+					onChange={(event) => setCode(event.target.value)}
+					placeholder="ABCD-EFGH"
+					size="dense"
+					spellCheck={false}
+					value={code}
+				/>
+				{phase.error ? <InlineError message={phase.error} /> : null}
+			</form>
+		);
+		controls = (
+			<>
+				<Button onClick={stopWaiting} size="xs" variant="ghost">
+					Stop waiting
+				</Button>
+				<Button
+					disabled={code.trim().length === 0}
+					onClick={submitCode}
+					size="xs"
+				>
+					Finish
+				</Button>
+			</>
+		);
 	} else if (state.status === "error") {
 		// The app couldn't be looked up, so there is nothing reviewed to connect
 		// to yet: offer a retry, never a Connect built from the request alone.
@@ -308,6 +399,7 @@ export const ConnectAppCard = memo(function ConnectAppCard({
 		!(decision || pending || info?.connected) &&
 		info?.available === true &&
 		phase.kind !== "connecting" &&
+		phase.kind !== "code" &&
 		actions.accessOptions.length > 1;
 
 	return (

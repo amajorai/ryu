@@ -14,6 +14,7 @@
 //! listable. Each execution is appended to a bounded per-job history, so
 //! failures are recorded and surfaced over the API.
 
+pub(crate) mod agent_run_access;
 pub(crate) mod app_jobs;
 pub mod cron;
 pub(crate) mod legacy_quest_jobs;
@@ -847,6 +848,15 @@ async fn run_target_with_job(
             model,
             conversation_id,
         } => {
+            // The owner's exact-agent `agent.run` is re-read at every firing, so
+            // a routine stops once its owner loses access to the agent.
+            if let Some(job) = job {
+                agent_run_access::require_owner_may_run_agent(
+                    job.owner_user_id.as_deref(),
+                    agent_id,
+                )
+                .await?;
+            }
             // Route directly through the global agent runner so the *configured*
             // agent handles the prompt via the real chat path (its engine binding,
             // gateway routing, tools, persona). Returns the synthetic run id for

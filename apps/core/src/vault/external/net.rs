@@ -70,7 +70,7 @@ impl Egress {
     }
 }
 
-fn is_loopback_host(host: &str) -> bool {
+pub(crate) fn is_loopback_host(host: &str) -> bool {
     let bare = host.trim_start_matches('[').trim_end_matches(']');
     bare.eq_ignore_ascii_case("localhost")
         || bare.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())

@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, expect, test } from "bun:test";
 import {
+	confirmMcpOAuthFlow,
 	connectMcpOAuth,
 	disconnectMcpOAuth,
 	fetchMcpOAuth,
@@ -208,4 +209,34 @@ test("flow status reads the encoded flow path and normalizes the access level", 
 		serverName: "mail",
 		status: "failed",
 	});
+});
+
+test("a hosted flow awaiting confirmation is reported, and confirm posts the trimmed code", async () => {
+	payload = {
+		access_level: "read_only",
+		callback_mode: "hosted",
+		expires_at: 5,
+		flow_id: "f/1",
+		plugin_id: "@ryu/x",
+		profile_id: "p",
+		server_name: "mail",
+		status: "awaiting_confirmation",
+	};
+	const held = await fetchMcpOAuthFlow(target, "@ryu/x", "f/1");
+	expect(held.status).toBe("awaiting_confirmation");
+
+	payload = { ...(payload as object), status: "connected" };
+	const confirmed = await confirmMcpOAuthFlow(
+		target,
+		"@ryu/x",
+		"f/1",
+		"  abcd-efgh "
+	);
+	expect(calls[1]).toEqual({
+		body: { code: "abcd-efgh" },
+		method: "POST",
+		path: "/api/plugins/%40ryu%2Fx/auth/flows/f%2F1/confirm",
+		token: "Bearer node-token",
+	});
+	expect(confirmed.status).toBe("connected");
 });

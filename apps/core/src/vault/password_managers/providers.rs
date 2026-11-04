@@ -114,6 +114,7 @@ pub async fn fetch(
             Ok(output)
         }
         ProviderKind::BitwardenSm => {
+            super::bws_screen::screen_bws_address(account).await?;
             let id = reference.provider_ref();
             let output = run_cli(
                 account,
@@ -160,13 +161,16 @@ pub async fn check(account: &AccountRecord, token: &Secret) -> Result<(), Provid
         )
         .await
         .map(drop),
-        ProviderKind::BitwardenSm => run_cli(
-            account,
-            &["project", "list", "--output", "json"],
-            &bws_env(account, token),
-        )
-        .await
-        .map(drop),
+        ProviderKind::BitwardenSm => {
+            super::bws_screen::screen_bws_address(account).await?;
+            run_cli(
+                account,
+                &["project", "list", "--output", "json"],
+                &bws_env(account, token),
+            )
+            .await
+            .map(drop)
+        }
     }
 }
 

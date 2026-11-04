@@ -15,6 +15,19 @@ use std::path::{Component, Path, PathBuf};
 use super::{make_executable, owning_manifest, screen_https, url_filename};
 use crate::plugin_manifest::schema::BinarySpec;
 
+/// Whether a `Local` sidecar `command` names a file Core manages in its bin dir:
+/// one plain path segment (not empty, `.` or `..`, no separator or NUL, no
+/// Windows drive prefix, not absolute). Anything else is a path the manifest points at, never a file Core
+/// downloaded, so uninstall must not join it onto the bin dir and delete it.
+pub(super) fn is_managed_bin_name(command: &str) -> bool {
+    !command.trim().is_empty()
+        && command != "."
+        && command != ".."
+        && !command.contains(['/', '\\', '\0'])
+        && !(cfg!(windows) && command.contains(':'))
+        && !Path::new(command).is_absolute()
+}
+
 /// The per-version install directory for a binary sidecar:
 /// `<plugin_dir>/bin/<version>`. Namespacing by version means bumping `version`
 /// re-downloads/re-extracts into a fresh path.

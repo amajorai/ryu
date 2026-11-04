@@ -74,7 +74,10 @@ export interface SsoIdentityRejection {
 	errorDescription: string;
 }
 
-function providerDomainList(domain: string | null | undefined): string[] {
+/** A provider's comma-separated `domain` field as bare lowercase hostnames. */
+export function providerDomainList(
+	domain: string | null | undefined
+): string[] {
 	const domains: string[] = [];
 	for (const rawEntry of (domain ?? "").split(",")) {
 		let entry = rawEntry.trim().toLowerCase().replace(/^@/, "");

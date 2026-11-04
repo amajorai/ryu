@@ -145,6 +145,10 @@ pub(in crate::server) async fn validate_scheduled_target(
         }
         account_warmup::validate(provider_id, account_id, model.as_deref())?;
     }
+    crate::server::scheduled_agent_access::authorize_scheduled_agent_target(
+        state, caller, target, enabled, current,
+    )
+    .await?;
     workflow_access::authorize_scheduled_workflow_target(state, caller, target, enabled, current)
         .await
 }

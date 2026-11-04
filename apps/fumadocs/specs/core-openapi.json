@@ -16557,6 +16557,55 @@
         }
       }
     },
+    "/api/plugins/{plugin_id}/auth/flows/{flow_id}/confirm": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Save a hosted MCP OAuth connection for the caller who started it, using the code its callback page showed.",
+        "operationId": "confirm_flow",
+        "parameters": [
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "flow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmFlowBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Connection saved; the flow is connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/plugins/{plugin_id}/auth/{server_name}": {
       "delete": {
         "tags": [
@@ -34227,6 +34276,17 @@
         },
         "additionalProperties": false
       },
+      "ConfirmFlowBody": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        }
+      },
       "ConnectBody": {
         "type": "object",
         "properties": {
@@ -34825,6 +34885,7 @@
         "type": "string",
         "enum": [
           "pending",
+          "awaiting_confirmation",
           "connected",
           "failed"
         ]

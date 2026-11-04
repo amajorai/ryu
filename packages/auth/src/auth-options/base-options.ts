@@ -132,7 +132,9 @@ export const baseAuthOptions = {
 			// Referral. `referralCode` and `referralCount` are server-managed
 			// (input:false). `referredBy` is the only one accepted from the sign-up
 			// request: the referral code the new user arrived with (from a `?ref=`
-			// share link). The waitlist itself rides the admin-plugin `role` field.
+			// share link). `/update-user` may not write it afterwards
+			// (`rejectReferredByUpdate` in the global before hook), so attribution
+			// stays fixed at sign-up. The waitlist rides the admin-plugin `role` field.
 			referralCode: {
 				type: "string",
 				input: false,

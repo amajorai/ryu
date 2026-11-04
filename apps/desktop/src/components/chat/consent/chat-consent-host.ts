@@ -24,6 +24,7 @@ import {
 	initiateComposioConnection,
 } from "@/src/lib/api/composio.ts";
 import {
+	confirmMcpOAuthFlow,
 	connectMcpOAuth,
 	fetchMcpOAuth,
 	fetchMcpOAuthFlow,
@@ -47,6 +48,7 @@ import {
 	readEnabledBounded,
 	searchEntries,
 } from "./chat-consent-host-catalog.ts";
+import { waitForMcpOAuthConnection } from "./chat-consent-host-mcp.ts";
 import { pollUntilConnected } from "./chat-consent-host-polling.ts";
 
 export { candidateFromEntry } from "./chat-consent-host-catalog.ts";
@@ -250,7 +252,7 @@ export function useChatConsentActions(): ConsentActions {
 				return describeComposio(target, request);
 			},
 
-			async connectApp(request, accessLevel, signal) {
+			async connectApp(request, accessLevel, signal, requestCode) {
 				const level = normalizeConnectionAccessLevel(accessLevel);
 				const appName = request.app;
 				if (request.provider === "mcp" && request.pluginId) {
@@ -263,18 +265,14 @@ export function useChatConsentActions(): ConsentActions {
 						level
 					);
 					await openExternal(started.authorizationUrl);
-					await pollUntilConnected(
-						async () => {
-							const flow = await fetchMcpOAuthFlow(
-								target,
-								pluginId,
-								started.flowId
-							);
-							if (flow.status === "failed") {
-								throw new Error(flow.error ?? `Couldn't connect ${appName}.`);
-							}
-							return flow.status === "connected";
+					await waitForMcpOAuthConnection(
+						{
+							confirm: (code) =>
+								confirmMcpOAuthFlow(target, pluginId, started.flowId, code),
+							fetchFlow: () =>
+								fetchMcpOAuthFlow(target, pluginId, started.flowId),
 						},
+						requestCode,
 						signal,
 						appName
 					);

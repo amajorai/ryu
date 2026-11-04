@@ -151,6 +151,7 @@ use utoipa::OpenApi;
         super::mcp_oauth_api::list,
         super::mcp_oauth_api::connect,
         super::mcp_oauth_api::flow,
+        super::mcp_oauth_confirm_api::confirm_flow,
         super::mcp_oauth_api::disconnect,
         super::install_app_handler,
         super::enable_app_handler,

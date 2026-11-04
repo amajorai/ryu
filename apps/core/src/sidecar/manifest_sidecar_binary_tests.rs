@@ -183,3 +183,96 @@ async fn extract_archive_refuses_a_symlinked_staging_dir() {
         &dir.join("root").join("engine")
     ));
 }
+
+// ── Uninstall: only bare managed names are deleted from the bin dir ──────────
+
+fn local_sidecar(name: &str, command: &str) -> crate::plugin_manifest::schema::SidecarSpec {
+    let mut spec: crate::plugin_manifest::schema::SidecarSpec =
+        serde_json::from_value(serde_json::json!({
+            "name": name,
+            "process": { "kind": "local", "command": "placeholder" },
+            "port": 9098
+        }))
+        .expect("a minimal Local sidecar spec parses");
+    let crate::plugin_manifest::schema::SidecarProcess::Local(local) = &mut spec.process else {
+        panic!("expected a Local sidecar");
+    };
+    local.command = command.to_owned();
+    spec
+}
+
+#[test]
+fn managed_bin_name_accepts_only_one_plain_segment() {
+    assert!(is_managed_bin_name("ryu-mail"));
+    assert!(is_managed_bin_name("engine.v2"));
+    for command in [
+        "",
+        " ",
+        ".",
+        "..",
+        "../x",
+        "a/b",
+        "a\\b",
+        "/etc/passwd",
+        "x\0y",
+    ] {
+        assert!(
+            !is_managed_bin_name(command),
+            "{command:?} must be rejected"
+        );
+    }
+}
+
+#[tokio::test]
+async fn uninstall_never_deletes_files_outside_the_managed_bin_dir() {
+    let bin_dir = crate::sidecar::download_manager::bin_dir();
+    std::fs::create_dir_all(&bin_dir).expect("create the managed bin dir");
+    let tag = uuid::Uuid::new_v4();
+
+    // An absolute command pointing at a user file outside the data dir.
+    let outside = tempfile::tempdir().expect("tempdir");
+    let absolute_victim = outside.path().join("authorized_keys");
+    std::fs::write(&absolute_victim, b"keep").unwrap();
+    // A relative command that walks out of the bin dir with `..`.
+    let relative_name = format!("ryu-test-victim-{tag}");
+    let relative_victim = bin_dir
+        .parent()
+        .expect("bin dir has a parent")
+        .join(&relative_name);
+    std::fs::write(&relative_victim, b"keep").unwrap();
+    // A bare, Core-managed binary plus its version marker: still cleaned up.
+    let bare = format!("ryu-test-owned-{tag}");
+    let owned_bin = crate::sidecar::manifest_sidecar::managed_bin_path(&bare);
+    std::fs::write(&owned_bin, b"").unwrap();
+    std::fs::write(owned_bin.with_extension("version"), b"1").unwrap();
+
+    let manifest = crate::plugin_manifest::PluginManifest {
+        id: format!("com.test.uninstall-{tag}"),
+        sidecars: vec![
+            local_sidecar("abs", absolute_victim.to_str().unwrap()),
+            local_sidecar("rel", &format!("../{relative_name}")),
+            local_sidecar("bare", &bare),
+        ],
+        ..Default::default()
+    };
+    crate::sidecar::manifest_sidecar::remove_local_sidecar_binaries(&manifest).await;
+
+    let relative_survived = relative_victim.exists();
+    let _ = std::fs::remove_file(&relative_victim);
+    assert!(
+        absolute_victim.exists(),
+        "an absolute command must not delete a user file"
+    );
+    assert!(
+        relative_survived,
+        "a `..` command must not walk out of the bin dir"
+    );
+    assert!(
+        !owned_bin.exists(),
+        "a bare managed binary is still removed"
+    );
+    assert!(
+        !owned_bin.with_extension("version").exists(),
+        "its version marker too"
+    );
+}

@@ -19008,6 +19008,7 @@
   "The composer's model control overrides these for this session.": "يتجاوز عنصر التحكم بالنموذج في المحرر هذه الإعدادات لهذه الجلسة.",
   "The confirmation link is invalid or expired": "رابط التأكيد غير صالح أو منتهي الصلاحية",
   "The connection link expired or was invalid. Start again from Connect GitHub.": "انتهت صلاحية رابط الاتصال أو كان غير صالح. ابدأ من جديد من «ربط GitHub».",
+  "The connection was cancelled.": "تم إلغاء الاتصال.",
   "The container image runs as an unprivileged user (UID 10001).": "تعمل صورة الحاوية كمستخدم دون امتيازات (UID 10001).",
   "The control plane keeps one row per install and session, then totals the rows across the community.": "تحتفظ طبقة التحكم بصف واحد لكل تثبيت وجلسة، ثم تجمع الصفوف على مستوى المجتمع.",
   "The control plane returned invalid Fleet access.": "أعاد مستوى التحكم وصولًا غير صالح إلى Fleet.",

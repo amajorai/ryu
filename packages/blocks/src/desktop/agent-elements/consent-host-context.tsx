@@ -13,6 +13,12 @@ export interface ConsentAccessOption {
 	label: string;
 }
 
+/** Ask the user for the code their browser showed after a hosted sign-in. */
+export type RequestConfirmationCode = (
+	previousError: string | null,
+	signal: AbortSignal
+) => Promise<string>;
+
 /**
  * What a consent card needs from the shell to act on the user's choice.
  * `packages/blocks` draws the cards; the desktop owns the node target, the
@@ -29,11 +35,17 @@ export interface ConsentActions {
 	 * is active. The host opens the provider's sign-in page in the user's
 	 * browser and waits for the flow to finish. Rejects on failure, timeout or
 	 * when `signal` aborts (the user cancelled).
+	 *
+	 * A hosted node shows a one-time code in the browser after sign-in and
+	 * stores nothing until the user who started the flow enters it. The host
+	 * then calls `requestCode` (again, with the refusal, after a wrong code);
+	 * it resolves with what the user typed and rejects when `signal` aborts.
 	 */
 	connectApp(
 		request: ConnectAppRequest,
 		accessLevel: string,
-		signal: AbortSignal
+		signal: AbortSignal,
+		requestCode?: RequestConfirmationCode
 	): Promise<void>;
 	/** Resolve the app's display name, logo and whether it is already connected. */
 	describeApp(request: ConnectAppRequest): Promise<ConnectAppInfo>;
