@@ -108,14 +108,24 @@ jobs:
       # before the workspace test instead of letting the runner hit ENOSPC.
       - name: Reclaim clippy artifacts before tests
         run: cargo clean
-      - name: Test every Rust workspace member
-        # Linking every member's test binaries four at a time exhausted the
-        # hosted runner's memory, which kills the runner itself ("received a
-        # shutdown signal", exit 143) rather than failing a test. Two parallel
-        # jobs plus the swap added above keeps the build inside the VM.
+      # Building the workspace's test binaries in parallel exhausts the hosted
+      # runner's memory, which kills the runner itself ("received a shutdown
+      # signal", exit 143) rather than failing a test. Core's test binary is by
+      # far the largest compile, so it gets its own step with a single build
+      # job, after the other members. `vmstat` logs memory every 20 s so a
+      # runner loss still shows how close the build came.
+      - name: Test every Rust workspace member except Core
         env:
           CARGO_BUILD_JOBS: 2
-        run: cargo test --workspace --no-fail-fast -- --test-threads=1
+        run: |
+          vmstat -S M 20 | tee "$RUNNER_TEMP/vmstat-members.log" &
+          cargo test --workspace --exclude ryu-core --no-fail-fast -- --test-threads=1
+      - name: Test Core
+        env:
+          CARGO_BUILD_JOBS: 1
+        run: |
+          vmstat -S M 20 | tee "$RUNNER_TEMP/vmstat-core.log" &
+          cargo test -p ryu-core --no-fail-fast -- --test-threads=1
       - name: Install cargo-deny
         uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
