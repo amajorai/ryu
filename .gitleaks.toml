@@ -25,6 +25,11 @@ regexes = [
   # conversation-history redaction tests and the portable-history redaction
   # fixture feed in to prove it is redacted.
   '''AKIAABCDEFGHIJKLMNOP''',
+  # Synthetic AWS-key-shaped value (AKIA + 16 letters, not a real key) that the
+  # look-alike redaction-fold tests and fixtures (core-client redaction-fold
+  # test, portable-history-fold-v1.json) expect a Cyrillic/Greek look-alike to
+  # fold to, spelled with a A escape that gitleaks decodes.
+  '''AKIABEZHIKMNOPTYXSJC''',
 ]
 paths = [
   # Vendored single-file plugin-UI fixtures: minified/bundled third-party web apps
