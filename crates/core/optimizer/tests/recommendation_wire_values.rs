@@ -19,9 +19,19 @@ fn score(model: &str, quality: f64, cost: u64) -> ModelScore {
 
 #[test]
 fn model_recommendation_json_carries_the_values_its_sentence_needs() {
-    let scores = [score("big-model", 0.9, 1_000), score("small-model", 0.88, 250)];
-    let rec = recommend_model("agent-1", "big-model", &scores, 0.05, 12, "2026-11-03T00:00:00Z")
-        .expect("a cheaper model within tolerance is recommended");
+    let scores = [
+        score("big-model", 0.9, 1_000),
+        score("small-model", 0.88, 250),
+    ];
+    let rec = recommend_model(
+        "agent-1",
+        "big-model",
+        &scores,
+        0.05,
+        12,
+        "2026-11-03T00:00:00Z",
+    )
+    .expect("a cheaper model within tolerance is recommended");
     let json: Value = serde_json::to_value(&rec).unwrap();
 
     assert_eq!(json["kind"], "model");

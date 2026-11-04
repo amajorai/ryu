@@ -15,9 +15,9 @@ fn cursor_notice() -> String {
 
 #[test]
 fn cursor_history_notice_is_a_catalogued_import_message() {
-    assert!(super::ALL.iter().any(|template| {
-        crate::import::english(&Message::new(*template)) == cursor_notice()
-    }));
+    assert!(super::ALL
+        .iter()
+        .any(|template| { crate::import::english(&Message::new(*template)) == cursor_notice() }));
     let wire = Message::new(IMPORT_AGENT_SYNC_CURSOR_HISTORY_WARNING_MESSAGE).to_wire();
     assert_eq!(
         wire.get("message").and_then(serde_json::Value::as_str),
