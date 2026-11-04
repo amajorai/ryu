@@ -86,9 +86,11 @@ pub(super) async fn run_eval_case(
             .or(options.timeout_ms)
             .unwrap_or(DEFAULT_EVAL_TIMEOUT_MS)
             .clamp(100, DEFAULT_EVAL_TIMEOUT_MS);
+        // Boxed like the judge's run (`judge_call`): held inline, this ~56 KB
+        // future widens the case's poll frame under every evaluator it runs.
         match tokio::time::timeout(
             Duration::from_millis(timeout_ms),
-            pipeline::run(Arc::clone(&state), ctx.clone(), body),
+            Box::pin(pipeline::run(Arc::clone(&state), ctx.clone(), body)),
         )
         .await
         {

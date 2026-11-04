@@ -14,7 +14,8 @@
 //! minus signs to `-`, and Unicode decimal digits (`Nd`) to ASCII; inside every
 //! token (split on ASCII whitespace, NEL and the line/paragraph separators) that
 //! holds an ASCII letter or digit, an `@`, an `_` or an `=`, or that spells a
-//! credential name or PEM label wholly in look-alikes ([`folds_look_alikes`]),
+//! credential name, PEM label or secret prefix wholly in look-alikes
+//! ([`folds_look_alikes`]),
 //! fold Cyrillic and Greek look-alike letters
 //! ([`CONFUSABLES`]) and the ideographic full stop `U+3002` to ASCII; finally
 //! drop combining marks (`Mn`, `Me`) that sit on an ASCII character. The second
@@ -129,7 +130,9 @@ fn is_token_separator(c: char) -> bool {
 /// look-alike letters), or an `_` or `=` (a credential key such as `API_KEY` or
 /// `TOKEN=` written wholly in look-alike letters), or it is a look-alike
 /// spelling of a credential name or PEM label ([`is_look_alike_keyword`]), such
-/// as `TOKEN:` or `KEY-----`. Prose colons, hyphens and punctuation do not
+/// as `TOKEN:` or `KEY-----`, or of a secret prefix
+/// ([`is_look_alike_secret_prefix`]), such as `sk-` or `AKIA`. Prose colons,
+/// hyphens and punctuation do not
 /// qualify on their own, so ordinary Russian or Greek text keeps its script.
 /// Same rule as `isPiiShapedToken` beside `foldShareText` and
 /// `foldRedactionText`.
@@ -138,6 +141,7 @@ fn folds_look_alikes(token: &str) -> bool {
         .bytes()
         .any(|b| b.is_ascii_alphanumeric() || matches!(b, b'@' | b'_' | b'='))
         || is_look_alike_keyword(token)
+        || is_look_alike_secret_prefix(token)
 }
 
 /// The credential names and PEM labels the redaction patterns key on,
@@ -176,26 +180,97 @@ const LOOK_ALIKE_KEYWORDS: &[&str] = &[
     "token",
 ];
 
-/// Whether a token is spelled wholly in look-alike letters ([`CONFUSABLES`])
-/// and ASCII punctuation, and one of its punctuation-delimited words reads as a
-/// [`LOOK_ALIKE_KEYWORDS`] entry: `TOKEN = value`, `"API-KEY": value` or a PEM
-/// `KEY-----` armor line with every letter a look-alike, where no `@`, `_` or
-/// `=` sits in the token. Its fold looks the same as the token, so a Russian
-/// or Greek word that happens to match loses nothing visible.
+/// How a character of a token spelled wholly in look-alikes reads.
+enum LookAlike {
+    /// A [`CONFUSABLES`] letter, as its ASCII fold.
+    Letter(char),
+    /// Punctuation or a symbol, ASCII or not (`“`, `«`, `。`): it separates
+    /// words, as it would around the ASCII spelling.
+    Punctuation,
+    /// A combining mark, which the fold drops once its letter is ASCII.
+    Mark,
+}
+
+/// How `c` reads inside an all-look-alike token, or `None` for any other
+/// character (an ASCII letter or digit, or a letter with no look-alike).
+fn look_alike(c: char) -> Option<LookAlike> {
+    if c.is_ascii_punctuation() {
+        return Some(LookAlike::Punctuation);
+    }
+    if let Some(ascii) = confusable(c) {
+        return Some(LookAlike::Letter(ascii));
+    }
+    if c.is_ascii() {
+        None
+    } else if is_combining_mark(c) {
+        Some(LookAlike::Mark)
+    } else if is_punctuation_or_symbol(c) {
+        Some(LookAlike::Punctuation)
+    } else {
+        None
+    }
+}
+
+/// Whether a token is spelled wholly in look-alike letters ([`CONFUSABLES`]),
+/// combining marks and punctuation or symbols ([`look_alike`]), and one of its
+/// punctuation-delimited words reads as a [`LOOK_ALIKE_KEYWORDS`] entry:
+/// `TOKEN = value`, `"API-KEY": value`, `«TOKEN»:` or a PEM `KEY-----` armor
+/// line with every letter a look-alike, where no `@`, `_` or `=` sits in the
+/// token. Its fold looks the same as the token, so a Russian or Greek word
+/// that happens to match loses nothing visible.
 fn is_look_alike_keyword(token: &str) -> bool {
     let mut found = false;
     let mut word = String::new();
-    for c in token.chars().chain(std::iter::once(' ')) {
-        if c == ' ' || c.is_ascii_punctuation() {
-            found |= LOOK_ALIKE_KEYWORDS.contains(&word.as_str());
-            word.clear();
-        } else if let Some(ascii) = confusable(c) {
-            word.push(ascii.to_ascii_lowercase());
-        } else {
-            return false;
+    for c in token.chars() {
+        match look_alike(c) {
+            Some(LookAlike::Punctuation) => {
+                found |= LOOK_ALIKE_KEYWORDS.contains(&word.as_str());
+                word.clear();
+            }
+            Some(LookAlike::Letter(ascii)) => word.push(ascii.to_ascii_lowercase()),
+            Some(LookAlike::Mark) => {}
+            None => return false,
         }
     }
-    found
+    found || LOOK_ALIKE_KEYWORDS.contains(&word.as_str())
+}
+
+/// The literal prefixes the case-sensitive secret patterns key on, with no
+/// `_` in them (a token holding an `_` folds already): every alternative of a
+/// one-letter class written out. Same list as `LOOK_ALIKE_SECRET_PREFIXES`
+/// beside `foldShareText` and `foldRedactionText`;
+/// `packages/core-client/fixtures/look-alike-keywords-v1.json` pins the parity.
+const LOOK_ALIKE_SECRET_PREFIXES: &[&str] = &[
+    "AIza", "AKIA", "ASIA", "eyJ", "glpat-", "pypi-", "sk-", "xoxa-", "xoxb-", "xoxo-", "xoxp-",
+    "xoxr-", "xoxs-",
+];
+
+/// Whether a token is spelled wholly in look-alike letters ([`CONFUSABLES`]),
+/// combining marks and punctuation or symbols ([`look_alike`]), and its fold
+/// opens a word with a [`LOOK_ALIKE_SECRET_PREFIXES`] entry: an `sk-` or
+/// `AKIA` key, bare or quoted as `“sk-…”` or `«sk-…»`, whose every letter is a
+/// look-alike and that holds no digit, `@`, `_` or `=`. The fold looks the
+/// same as the token, so a Russian or Greek word that happens to match loses
+/// nothing visible.
+fn is_look_alike_secret_prefix(token: &str) -> bool {
+    // ASCII throughout: non-ASCII punctuation stands in as `!`, which opens
+    // no prefix, and marks are left out.
+    let mut folded = String::with_capacity(token.len());
+    for c in token.chars() {
+        match look_alike(c) {
+            Some(LookAlike::Punctuation) => folded.push(if c.is_ascii() { c } else { '!' }),
+            Some(LookAlike::Letter(ascii)) => folded.push(ascii),
+            Some(LookAlike::Mark) => {}
+            None => return false,
+        }
+    }
+    let bytes = folded.as_bytes();
+    (0..bytes.len()).any(|start| {
+        (start == 0 || bytes[start - 1].is_ascii_punctuation())
+            && LOOK_ALIKE_SECRET_PREFIXES
+                .iter()
+                .any(|prefix| folded[start..].starts_with(prefix))
+    })
 }
 
 fn fold_token(token: &str, out: &mut String) {
@@ -245,6 +320,15 @@ fn is_combining_mark(c: char) -> bool {
     let mark = MARK.get_or_init(|| Regex::new(r"\A[\p{Mn}\p{Me}]\z").expect("static mark regex"));
     let mut buf = [0u8; 4];
     mark.is_match(c.encode_utf8(&mut buf))
+}
+
+/// Unicode punctuation (`P`) or symbol (`S`): `“`, `«`, `。` and the like.
+fn is_punctuation_or_symbol(c: char) -> bool {
+    static PUNCTUATION: OnceLock<Regex> = OnceLock::new();
+    let punctuation = PUNCTUATION
+        .get_or_init(|| Regex::new(r"\A[\p{P}\p{S}]\z").expect("static punctuation regex"));
+    let mut buf = [0u8; 4];
+    punctuation.is_match(c.encode_utf8(&mut buf))
 }
 
 /// `Default_Ignorable_Code_Point` characters that split a matched run.

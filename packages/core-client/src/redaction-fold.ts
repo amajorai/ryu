@@ -173,6 +173,10 @@ export const LOOK_ALIKE_KEYWORDS: ReadonlySet<string> = new Set([
  * or `TOKEN=` written wholly in look-alike letters). */
 const PII_MARKER = /[A-Za-z0-9@_=]/;
 
+const COMBINING_MARK = /^[\p{Mn}\p{Me}]$/u;
+/** Unicode punctuation (`P`) or symbol (`S`): `“`, `«`, `。` and the like. */
+const PUNCTUATION_OR_SYMBOL = /^[\p{P}\p{S}]$/u;
+
 function isAsciiPunctuation(codePoint: number): boolean {
 	return (
 		(codePoint >= 0x21 && codePoint <= 0x2f) ||
@@ -182,42 +186,136 @@ function isAsciiPunctuation(codePoint: number): boolean {
 	);
 }
 
-/** Whether a token is spelled wholly in look-alike letters (`CONFUSABLES`) and
- * ASCII punctuation, and one of its punctuation-delimited words reads as a
- * `LOOK_ALIKE_KEYWORDS` entry: `TOKEN = value`, `"API-KEY": value` or a PEM
- * `KEY-----` armor line with every letter a look-alike, where no `@`, `_` or
- * `=` sits in the token. Its fold looks the same as the token, so a Russian or
- * Greek word that happens to match loses nothing visible. Same rule as Core's
+/** How a character of a token spelled wholly in look-alikes reads: a
+ * `CONFUSABLES` letter (as its ASCII fold), punctuation or a symbol, ASCII or
+ * not (`“`, `«`, `。`), which separates words as it would around the ASCII
+ * spelling, or a combining mark, which the fold drops once its letter is
+ * ASCII. `undefined` for any other character (an ASCII letter or digit, or a
+ * letter with no look-alike). Same rule as Core's `redaction_fold::look_alike`. */
+type LookAlike =
+	| { kind: "letter"; ascii: string }
+	| { kind: "punctuation" }
+	| { kind: "mark" };
+
+function lookAlike(character: string): LookAlike | undefined {
+	const codePoint = character.codePointAt(0) ?? 0;
+	if (isAsciiPunctuation(codePoint)) {
+		return { kind: "punctuation" };
+	}
+	const ascii = CONFUSABLES.get(codePoint);
+	if (ascii !== undefined) {
+		return { kind: "letter", ascii };
+	}
+	if (codePoint < 0x80) {
+		return;
+	}
+	if (COMBINING_MARK.test(character)) {
+		return { kind: "mark" };
+	}
+	if (PUNCTUATION_OR_SYMBOL.test(character)) {
+		return { kind: "punctuation" };
+	}
+	return;
+}
+
+/** Whether a token is spelled wholly in look-alike letters (`CONFUSABLES`),
+ * combining marks and punctuation or symbols (`lookAlike`), and one of its
+ * punctuation-delimited words reads as a `LOOK_ALIKE_KEYWORDS` entry:
+ * `TOKEN = value`, `"API-KEY": value`, `«TOKEN»:` or a PEM `KEY-----` armor
+ * line with every letter a look-alike, where no `@`, `_` or `=` sits in the
+ * token. Its fold looks the same as the token, so a Russian or Greek word
+ * that happens to match loses nothing visible. Same rule as Core's
  * `redaction_fold::is_look_alike_keyword`. */
 function isLookAlikeKeyword(token: string): boolean {
 	let found = false;
 	let word = "";
-	for (const character of `${token} `) {
-		const codePoint = character.codePointAt(0) ?? 0;
-		if (character === " " || isAsciiPunctuation(codePoint)) {
-			found ||= LOOK_ALIKE_KEYWORDS.has(word);
-			word = "";
-			continue;
-		}
-		const ascii = CONFUSABLES.get(codePoint);
-		if (ascii === undefined) {
+	for (const character of token) {
+		const read = lookAlike(character);
+		if (read === undefined) {
 			return false;
 		}
-		word += ascii.toLowerCase();
+		if (read.kind === "punctuation") {
+			found ||= LOOK_ALIKE_KEYWORDS.has(word);
+			word = "";
+		} else if (read.kind === "letter") {
+			word += read.ascii.toLowerCase();
+		}
 	}
-	return found;
+	return found || LOOK_ALIKE_KEYWORDS.has(word);
+}
+
+/** The literal prefixes the case-sensitive secret patterns key on, with no
+ * `_` in them (a token holding an `_` folds already): every alternative of a
+ * one-letter class written out. Same list as Core's
+ * `redaction_fold::LOOK_ALIKE_SECRET_PREFIXES` and the one beside
+ * `foldShareText`; `fixtures/look-alike-keywords-v1.json` in core-client pins the
+ * parity. Exported for that test. */
+export const LOOK_ALIKE_SECRET_PREFIXES: readonly string[] = [
+	"AIza",
+	"AKIA",
+	"ASIA",
+	"eyJ",
+	"glpat-",
+	"pypi-",
+	"sk-",
+	"xoxa-",
+	"xoxb-",
+	"xoxo-",
+	"xoxp-",
+	"xoxr-",
+	"xoxs-",
+];
+
+/** Whether a token is spelled wholly in look-alike letters (`CONFUSABLES`),
+ * combining marks and punctuation or symbols (`lookAlike`), and its fold opens
+ * a word with a `LOOK_ALIKE_SECRET_PREFIXES` entry: an `sk-` or `AKIA` key,
+ * bare or quoted as `“sk-…”` or `«sk-…»`, whose every letter is a look-alike
+ * and that holds no digit, `@`, `_` or `=`. The fold looks the same as the
+ * token, so a Russian or Greek word that happens to match loses nothing
+ * visible. Same rule as Core's `redaction_fold::is_look_alike_secret_prefix`. */
+function isLookAlikeSecretPrefix(token: string): boolean {
+	// ASCII throughout: non-ASCII punctuation stands in as `!`, which opens no
+	// prefix, and marks are left out.
+	let folded = "";
+	for (const character of token) {
+		const read = lookAlike(character);
+		if (read === undefined) {
+			return false;
+		}
+		if (read.kind === "letter") {
+			folded += read.ascii;
+		} else if (read.kind === "punctuation") {
+			folded += (character.codePointAt(0) ?? 0) < 0x80 ? character : "!";
+		}
+	}
+	for (let start = 0; start < folded.length; start += 1) {
+		const atWordStart =
+			start === 0 || isAsciiPunctuation(folded.charCodeAt(start - 1));
+		if (
+			atWordStart &&
+			LOOK_ALIKE_SECRET_PREFIXES.some((prefix) =>
+				folded.startsWith(prefix, start)
+			)
+		) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /** A token shaped like PII or a credential rather than prose: it holds a
  * `PII_MARKER` character or is a look-alike spelling of a credential name or
- * PEM label (`isLookAlikeKeyword`). Prose colons, hyphens and punctuation do
+ * PEM label (`isLookAlikeKeyword`) or of a secret prefix
+ * (`isLookAlikeSecretPrefix`). Prose colons, hyphens and punctuation do
  * not qualify on their own, so ordinary Russian or Greek text keeps its script.
  * Same rule as Core's `redaction_fold::folds_look_alikes` and `foldShareText`. */
 function isPiiShapedToken(token: string): boolean {
-	return PII_MARKER.test(token) || isLookAlikeKeyword(token);
+	return (
+		PII_MARKER.test(token) ||
+		isLookAlikeKeyword(token) ||
+		isLookAlikeSecretPrefix(token)
+	);
 }
-
-const COMBINING_MARK = /^[\p{Mn}\p{Me}]$/u;
 
 function foldToken(token: string): string {
 	if (!isPiiShapedToken(token)) {

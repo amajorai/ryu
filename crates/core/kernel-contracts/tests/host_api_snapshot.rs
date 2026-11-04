@@ -12,20 +12,33 @@
 //!   checked-in file (bless), then pass. The SAME env var re-blesses the manifest
 //!   schema, so one command regenerates both.
 
+mod support;
+
 use ryu_kernel_contracts::host_api::{HOST_API_METHODS, HOST_API_VERSION};
 
 const CONTRACT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/schemas/host-api.json");
 
-/// The contract exactly as it must appear on disk (pretty JSON + trailing newline).
+/// The contract exactly as it must appear on disk (sorted keys, pretty JSON +
+/// trailing newline; see `support`).
 fn generated_contract() -> String {
-    let doc = serde_json::json!({
+    support::blessed_json(serde_json::json!({
         "version": HOST_API_VERSION,
         "methods": HOST_API_METHODS,
+    }))
+}
+
+/// The rendering is the same whichever serde_json map order the build unified
+/// (`preserve_order` keeps insertion order; the blessed files sort).
+#[test]
+fn blessed_rendering_sorts_keys_at_every_depth() {
+    let value = serde_json::json!({
+        "zeta": [{ "b": 1, "a": 2 }],
+        "alpha": { "y": true, "x": null },
     });
-    let mut pretty =
-        serde_json::to_string_pretty(&doc).expect("host-API contract serialises to pretty JSON");
-    pretty.push('\n');
-    pretty
+    assert_eq!(
+        support::blessed_json(value),
+        "{\n  \"alpha\": {\n    \"x\": null,\n    \"y\": true\n  },\n  \"zeta\": [\n    {\n      \"a\": 2,\n      \"b\": 1\n    }\n  ]\n}\n"
+    );
 }
 
 #[test]

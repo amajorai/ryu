@@ -1,5 +1,5 @@
 {
-  "note": "The credential names and PEM labels a token spelled wholly in Cyrillic or Greek look-alikes may fold for: Core's redaction_fold::LOOK_ALIKE_KEYWORDS, foldShareText's and foldRedactionText's lists must all equal this one.",
+  "note": "The credential names and PEM labels (keywords) and the secret prefixes (prefixes) a token spelled wholly in Cyrillic or Greek look-alikes may fold for: Core's redaction_fold::LOOK_ALIKE_KEYWORDS and LOOK_ALIKE_SECRET_PREFIXES, and the lists beside foldShareText and foldRedactionText, must all equal these. Prefixes are \\u-escaped so a scanner does not read them as key fragments.",
   "keywords": [
     "accesskey",
     "accesstoken",
@@ -28,5 +28,20 @@
     "secret",
     "secretaccesskey",
     "token"
+  ],
+  "prefixes": [
+    "\u0041Iza",
+    "\u0041KIA",
+    "\u0041SIA",
+    "\u0065yJ",
+    "\u0067lpat-",
+    "\u0070ypi-",
+    "\u0073k-",
+    "\u0078oxa-",
+    "\u0078oxb-",
+    "\u0078oxo-",
+    "\u0078oxp-",
+    "\u0078oxr-",
+    "\u0078oxs-"
   ]
 }

@@ -105,6 +105,31 @@
     "folded": "асе: сосе ТОКЕНЫ:"
   },
   {
+    "note": "a prefix-keyed secret spelled wholly in look-alikes folds with no digit, @, _ or =",
+    "input": "\u0455\u03ba-\u0430\u0435\u043e\u0440\u0441\u0443\u0445\u0455\u0456\u0458\u04bb\u04cf\u0501\u051b\u051d\u0410\u0412\u0415\u041a\u041c\u041d\u041e",
+    "folded": "\u0073k-aeopcyxsijhldqwABEKMHO"
+  },
+  {
+    "note": "look-alike AKIA, xox, pypi and eyJ prefixes fold at a word start",
+    "input": "\u0410\u039a\u0406\u0410\u0412\u0415\u0396\u0397\u0406\u039a\u039c\u039d\u041e\u0420\u0422\u03a5\u0425\u0405\u0408\u0421 \u0445\u043e\u0445\u0440-\u0430\u0441\u0435 \u0440\u0443\u0440\u0456-\u0430\u0441\u0435 \"\u0435\u0443\u0408.\u0430\u0441\u0435\"",
+    "folded": "\u0041KIABEZHIKMNOPTYXSJC \u0078oxp-ace \u0070ypi-ace \"\u0065yJ.ace\""
+  },
+  {
+    "note": "look-alike words that only resemble a secret prefix keep their script",
+    "input": "\u0455\u03ba \u0410\u039a\u0406 \u0440\u0443\u0440\u0430-\u0441\u0430\u0441\u043e \u0435\u0443 \u0430\u0455\u03ba-\u0430\u0441\u0435",
+    "folded": "\u0455\u03ba \u0410\u039a\u0406 \u0440\u0443\u0440\u0430-\u0441\u0430\u0441\u043e \u0435\u0443 \u0430\u0455\u03ba-\u0430\u0441\u0435"
+  },
+  {
+    "note": "a look-alike secret prefix or credential name in non-ASCII quotes, under a combining mark or before U+3002 still folds",
+    "input": "\u201c\u0455\u03ba-\u0430\u0435\u043e\u0440\u0441\u0443\u0445\u0455\u0456\u0458\u04bb\u04cf\u0501\u051b\u051d\u0410\u0412\u0415\u041a\u041c\u041d\u041e\u201d \u00ab\u0410\u039a\u0406\u0410\u0412\u0415\u0396\u0397\u0406\u039a\u039c\u039d\u041e\u0420\u0422\u03a5\u0425\u0405\u0408\u0421\u00bb \u0455\u0301\u03ba-\u0430\u0441\u0435\u3002 \u00ab\u03a4\u039f\u039a\u0395\u039d\u00bb:",
+    "folded": "\u201c\u0073k-aeopcyxsijhldqwABEKMHO\u201d \u00ab\u0041KIABEZHIKMNOPTYXSJC\u00bb \u0073k-ace. \u00abTOKEN\u00bb:"
+  },
+  {
+    "note": "Russian prose in guillemets and curly quotes, with stress marks and look-alike near misses, keeps its script",
+    "input": "\u00ab\u0420\u043e\u0301\u0437\u0430\u00bb, \u0441\u043a\u0430\u0437\u0430\u0301\u043b \u043e\u043d. \u201c\u0410\u039a\u0406\u201d \u0438 \u00ab\u0455\u03ba\u00bb, \u00ab\u0441\u043e\u0441\u0435\u0301\u00bb.",
+    "folded": "\u00ab\u0420\u043e\u0301\u0437\u0430\u00bb, \u0441\u043a\u0430\u0437\u0430\u0301\u043b \u043e\u043d. \u201c\u0410\u039a\u0406\u201d \u0438 \u00ab\u0455\u03ba\u00bb, \u00ab\u0441\u043e\u0441\u0435\u0301\u00bb."
+  },
+  {
     "note": "fullwidth, ignorable, dash and native-digit folds still apply",
     "input": "\uff15\uff15\uff15\u2011\u0661\u0662\u200b3",
     "folded": "555-123"

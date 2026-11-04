@@ -186,7 +186,12 @@ async fn delegate_roles_are_screened_at_connect_and_manager_roles_are_not() {
         .dynamic_issue("cache", None, Some("user:a"), &actor)
         .await
         .unwrap_err();
-    assert!(refused.to_string().contains("public hosts"), "{refused:#}");
+    // The screen's reason is the cause under the connect context; callers see
+    // the whole chain (`vault_error` renders `{:#}`).
+    assert!(
+        format!("{refused:#}").contains("public hosts"),
+        "{refused:#}"
+    );
     assert!(store
         .dynamic_revoke(&issued.lease.id, &actor)
         .await

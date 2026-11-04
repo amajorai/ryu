@@ -11,6 +11,8 @@
 //! - `RYU_REGEN_SCHEMAS=1 cargo test -p ryu-kernel-contracts`: rewrite the
 //!   checked-in file (bless), then pass.
 
+mod support;
+
 use ryu_kernel_contracts::PluginManifest;
 
 const SCHEMA_PATH: &str = concat!(
@@ -18,14 +20,12 @@ const SCHEMA_PATH: &str = concat!(
     "/schemas/plugin-manifest.schema.json"
 );
 
-/// The schema exactly as it must appear on disk (pretty JSON + trailing newline).
+/// The schema exactly as it must appear on disk (sorted keys, pretty JSON +
+/// trailing newline; see `support`).
 fn generated_schema() -> String {
     let schema = serde_json::to_value(schemars::schema_for!(PluginManifest))
         .expect("PluginManifest JsonSchema serialises to a JSON value");
-    let mut pretty =
-        serde_json::to_string_pretty(&schema).expect("schema value serialises to pretty JSON");
-    pretty.push('\n');
-    pretty
+    support::blessed_json(schema)
 }
 
 #[test]

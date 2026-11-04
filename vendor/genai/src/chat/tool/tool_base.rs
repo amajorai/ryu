@@ -15,6 +15,8 @@ pub struct Tool {
     /// JSON Schema for the tool parameters.
     /// Example:
     /// ```rust
+    /// # use serde_json::json;
+    /// # let _schema =
     /// json!({
     /// "type": "object",
     /// "properties": {
@@ -34,6 +36,7 @@ pub struct Tool {
     /// },
     /// "required": ["city", "country", "unit"],
     /// })
+    /// # ;
     /// ```
     pub schema: Option<Value>,
 

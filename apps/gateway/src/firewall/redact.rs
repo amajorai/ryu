@@ -154,7 +154,10 @@ impl FirewallScanner {
     }
 
     /// Whether the normalized scan still finds PII / a secret in `text`.
-    pub(super) fn companion_survivors(&self, text: &str) -> (bool, bool) {
+    /// `AppState::record_violation` also runs it with the request's resolved
+    /// scanner, so an org, agent or request overlay's custom PII and secret
+    /// patterns drop an excerpt the node-level backend kept.
+    pub(crate) fn companion_survivors(&self, text: &str) -> (bool, bool) {
         (
             self.find_match(text, &self.pii_patterns, DetectionKind::Pii)
                 .is_some(),

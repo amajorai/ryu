@@ -49,7 +49,11 @@ pub(super) async fn judge_call(
         "messages": [{"role": "user", "content": judge_prompt}]
     });
 
-    match pipeline::run(state, ctx, body).await {
+    // Box the judge's pipeline future. An LLM-judge evaluator runs it nested
+    // under the case's own pipeline run; held inline, every enclosing async fn
+    // (judge, evaluator, case, run) carries its ~56 KB state, and in a debug
+    // build their poll frames overflowed a default 2 MiB Tokio worker stack.
+    match Box::pin(pipeline::run(state, ctx, body)).await {
         Ok(out) => judge_outcome(kind, &out.response),
         Err(e) => unexecuted(kind, &format!("judge error: {e}")),
     }

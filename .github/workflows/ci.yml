@@ -114,15 +114,31 @@ jobs:
       # far the largest compile, so it gets its own step with a single build
       # job, after the other members. `vmstat` logs memory every 20 s so a
       # runner loss still shows how close the build came.
+      # vendor/genai joins this workspace only because the Gateway path-depends
+      # on it (the monorepo's root workspace excludes it). Its tests_p_* targets
+      # call live providers with real API keys, so it runs its offline suite on
+      # its own: unit tests, the recorded-replay (yakbak) targets, and the
+      # doctests.
       - name: Test every Rust workspace member except Core
         env:
           CARGO_BUILD_JOBS: 2
         run: |
           vmstat -S M 20 | tee "$RUNNER_TEMP/vmstat-members.log" &
-          cargo test --workspace --exclude ryu-core --no-fail-fast -- --test-threads=1
+          cargo test --workspace --exclude ryu-core --exclude genai --no-fail-fast -- --test-threads=1
+      - name: Test the vendored genai client offline
+        env:
+          CARGO_BUILD_JOBS: 2
+        run: |
+          cargo test -p genai --lib --test 'tests_yakbak_*' --no-fail-fast
+          cargo test -p genai --doc --no-fail-fast
+      # Core's async runtime runs on 16 MiB worker stacks (apps/core/src/main.rs)
+      # because agent turns build deep futures; its tests get the same stack
+      # instead of libtest's 2 MiB default. The Gateway keeps Tokio's default,
+      # so its members step above runs with the default stack.
       - name: Test Core
         env:
           CARGO_BUILD_JOBS: 1
+          RUST_MIN_STACK: 16777216
         run: |
           vmstat -S M 20 | tee "$RUNNER_TEMP/vmstat-core.log" &
           cargo test -p ryu-core --no-fail-fast -- --test-threads=1

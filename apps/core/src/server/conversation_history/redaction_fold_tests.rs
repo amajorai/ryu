@@ -173,3 +173,119 @@ fn shared_fold_fixture_matches_core() {
         assert_eq!(fold(expected), expected, "idempotent: {note}");
     }
 }
+
+#[test]
+fn folds_secret_prefixes_spelled_wholly_in_look_alikes() {
+    // No digit, `@`, `_` or `=`: the look-alike prefix marks the token.
+    assert_eq!(
+        fold("\u{0455}\u{03BA}-\u{0430}\u{0435}\u{043E}\u{0440}\u{0441}\u{0443}\u{0445}\u{0455}\u{0456}\u{0458}\u{04BB}\u{04CF}\u{0501}\u{051B}\u{051D}\u{0410}\u{0412}\u{0415}\u{041A}\u{041C}\u{041D}\u{041E}"),
+        concat!("s", "k-aeopcyxsijhldqwABEKMHO") // Test vector, not a credential. gitleaks:allow skipcq
+    );
+    assert_eq!(
+        fold("\u{0410}\u{039A}\u{0406}\u{0410}\u{0412}\u{0415}\u{0396}\u{0397}\u{0406}\u{039A}\u{039C}\u{039D}\u{041E}\u{0420}\u{0422}\u{03A5}\u{0425}\u{0405}\u{0408}\u{0421}"),
+        concat!("AK", "IABEZHIKMNOPTYXSJC") // Test vector, not a credential. gitleaks:allow skipcq
+    );
+    assert_eq!(
+        fold("\u{0445}\u{043E}\u{0445}\u{0440}-\u{0430}\u{0441}\u{0435} \"\u{0435}\u{0443}\u{0408}.\u{0430}\u{0441}\u{0435}\""),
+        "xoxp-ace \"eyJ.ace\""
+    );
+}
+
+#[test]
+fn folds_look_alike_secrets_in_non_ascii_quotes_or_under_marks() {
+    // Curly quotes, guillemets, a combining mark or U+3002 around or inside an
+    // all-look-alike key do not keep it in its script.
+    assert_eq!(
+        fold("\u{201C}\u{0455}\u{03BA}-\u{0430}\u{0435}\u{043E}\u{0440}\u{0441}\u{0443}\u{0445}\u{0455}\u{0456}\u{0458}\u{04BB}\u{04CF}\u{0501}\u{051B}\u{051D}\u{201D}"),
+        concat!("\u{201C}s", "k-aeopcyxsijhldqw\u{201D}") // Test vector, not a credential. gitleaks:allow skipcq
+    );
+    assert_eq!(
+        fold("\u{00AB}\u{0410}\u{039A}\u{0406}\u{0410}\u{0412}\u{0415}\u{0396}\u{0397}\u{0406}\u{039A}\u{039C}\u{039D}\u{041E}\u{0420}\u{0422}\u{03A5}\u{0425}\u{0405}\u{0408}\u{0421}\u{00BB}"),
+        concat!("\u{00AB}AK", "IABEZHIKMNOPTYXSJC\u{00BB}") // Test vector, not a credential. gitleaks:allow skipcq
+    );
+    assert_eq!(
+        fold("\u{0455}\u{0301}\u{03BA}-\u{0430}\u{0441}\u{0435}\u{3002} \u{00AB}\u{03A4}\u{039F}\u{039A}\u{0395}\u{039D}\u{00BB}:"),
+        "sk-ace. \u{00AB}TOKEN\u{00BB}:"
+    );
+}
+
+#[test]
+fn prose_that_only_resembles_a_secret_prefix_keeps_its_script() {
+    // A prefix without its dash, a partial prefix, a prefix not at a word
+    // start, and Russian and Greek sentences all keep their script.
+    for prose in [
+        "\u{0455}\u{03BA} \u{0410}\u{039A}\u{0406} \u{0435}\u{0443} \u{0430}\u{0455}\u{03BA}-\u{0430}\u{0441}\u{0435}",
+        "\u{0440}\u{0443}\u{0440}\u{0430}-\u{0441}\u{0430}\u{0441}\u{043E}",
+        "\u{042D}\u{0442}\u{043E} \u{0441}\u{043E}\u{043A}, \u{0430} \u{043D}\u{0435} \u{0432}\u{043E}\u{0434}\u{0430}: \u{0441}\u{043E}\u{0441}\u{0435}\u{0434} \u{0443}\u{0448}\u{0451}\u{043B}.",
+        "\u{039A}\u{03B1}\u{03BB}\u{03B7}\u{03BC}\u{03AD}\u{03C1}\u{03B1} \u{03BA}\u{03CC}\u{03C3}\u{03BC}\u{03B5}, \u{03BF} \u{0386}\u{03BA}\u{03B7}\u{03C2} \u{03B5}\u{03AF}\u{03C0}\u{03B5} \u{03BD}\u{03B1}\u{03B9}.",
+        "\u{00AB}\u{0420}\u{043E}\u{0301}\u{0437}\u{0430}\u{00BB}, \u{0441}\u{043A}\u{0430}\u{0437}\u{0430}\u{0301}\u{043B} \u{043E}\u{043D}. \u{201C}\u{0410}\u{039A}\u{0406}\u{201D} \u{0438} \u{00AB}\u{0455}\u{03BA}\u{00BB}, \u{00AB}\u{0441}\u{043E}\u{0441}\u{0435}\u{0301}\u{00BB}.",
+    ] {
+        assert!(matches!(fold(prose), std::borrow::Cow::Borrowed(_)), "{prose}");
+    }
+}
+
+/// The literal prefixes a case-sensitive secret rule opens with, each
+/// alternative and one-letter class written out; `None` when the prefix holds
+/// an `_` (such a token folds already) or the rule opens otherwise.
+fn literal_prefixes(pattern: &str) -> Option<Vec<String>> {
+    let shape =
+        regex::Regex::new(r"^\\b(?:\(\?:([A-Za-z|]+)\)|([A-Za-z]+))(?:\[([a-z]+)\])?([-_]?)")
+            .expect("prefix shape");
+    let captures = shape.captures(pattern)?;
+    let separator = captures.get(4).map_or("", |m| m.as_str());
+    if separator == "_" {
+        return None;
+    }
+    let heads: Vec<&str> = match captures.get(1) {
+        Some(alternatives) => alternatives.as_str().split('|').collect(),
+        None => vec![captures.get(2)?.as_str()],
+    };
+    let tails: Vec<String> = captures.get(3).map_or_else(
+        || vec![String::new()],
+        |class| class.as_str().chars().map(String::from).collect(),
+    );
+    Some(
+        heads
+            .iter()
+            .flat_map(|head| {
+                tails
+                    .iter()
+                    .map(move |tail| format!("{head}{tail}{separator}"))
+            })
+            .collect(),
+    )
+}
+
+#[test]
+fn look_alike_secret_prefixes_cover_every_prefix_keyed_rule() {
+    let prefixes: Vec<String> = super::super::rules()
+        .iter()
+        .filter(|rule| matches!(rule.kind, super::super::Kind::Secret))
+        .filter_map(|rule| literal_prefixes(rule.pattern.as_str()))
+        .flatten()
+        .collect();
+    assert!(
+        prefixes.iter().any(|prefix| prefix == "sk-"),
+        "{prefixes:?}"
+    );
+    let uncovered: Vec<&String> = prefixes
+        .iter()
+        .filter(|prefix| !super::LOOK_ALIKE_SECRET_PREFIXES.contains(&prefix.as_str()))
+        .collect();
+    assert_eq!(uncovered, Vec::<&String>::new());
+}
+
+#[test]
+fn look_alike_secret_prefixes_match_the_shared_list() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../packages/core-client/fixtures/look-alike-keywords-v1.json"
+    ))
+    .expect("keyword fixture json");
+    let shared: Vec<&str> = fixture["prefixes"]
+        .as_array()
+        .expect("prefixes")
+        .iter()
+        .filter_map(|p| p.as_str())
+        .collect();
+    assert_eq!(super::LOOK_ALIKE_SECRET_PREFIXES, shared.as_slice());
+}

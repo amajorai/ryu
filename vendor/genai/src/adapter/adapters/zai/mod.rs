@@ -19,22 +19,26 @@
 //!
 //! ## For example
 //!
-//! ```rust
-//! use genai::resolver::{Endpoint, ServiceTargetResolver};
-//! use genai::{Client, AdapterKind, ModelIden};
+//! ```rust,no_run
+//! use genai::Client;
+//! use genai::chat::ChatRequest;
 //!
-//! let client = Client::builder().with_service_target_resolver(target_resolver).build();
+//! # async fn example() -> genai::Result<()> {
+//! let client = Client::default();
+//! let chat_request = ChatRequest::from_user("Say hello.");
 //!
 //! // Use regular API
-//! let response = client.exec_chat("glm-4.6", chat_request, None).await?;
+//! let response = client.exec_chat("glm-4.6", chat_request.clone(), None).await?;
 //! // Same, regular API
-//! let response = client.exec_chat("zai::glm-4.6", chat_request, None).await?;
+//! let response = client.exec_chat("zai::glm-4.6", chat_request.clone(), None).await?;
 //!
 //! // Use coding plan
 //! let response = client.exec_chat("zai_coding::glm-4.6", chat_request, None).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
-//! See `examples/c07-zai-dual-endpoints.rs` for a complete working example.
+//! See `examples/c99-zai.rs` for a complete working example.
 
 // region:    --- Modules
 

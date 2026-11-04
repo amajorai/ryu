@@ -44,6 +44,20 @@ describe("redactDiagnosticText on disguised values", () => {
 		expect(out).not.toContain("dXNlcjpodW50ZXIy");
 	});
 
+	test("redacts a prefix-keyed key spelled wholly in look-alikes", () => {
+		const out = redactDiagnosticText(
+			"key \u0455\u03ba-\u0430\u0435\u043e\u0440\u0441\u0443\u0445\u0455\u0456\u0458\u04bb\u04cf\u0501\u051b\u051d\u0410\u0412\u0415 retry"
+		);
+		expect(out).toBe("key [REDACTED KEY] retry");
+	});
+
+	test("redacts a look-alike key in curly quotes or under a combining mark", () => {
+		const out = redactDiagnosticText(
+			"key \u201c\u0455\u03ba-\u0430\u0435\u043e\u0440\u0441\u0443\u0445\u0455\u0456\u0458\u04bb\u04cf\u0501\u051b\u051d\u0410\u0412\u0415\u201d and \u0455\u0301\u03ba-\u0430\u0435\u043e\u0440\u0441\u0443\u0445\u0455\u0456\u0458\u04bb\u04cf\u0501\u051b\u051d\u0410\u0412\u0415"
+		);
+		expect(out).toBe("key \u201c[REDACTED KEY]\u201d and [REDACTED KEY]");
+	});
+
 	test("redacts tokens and keys split or widened to dodge the patterns", () => {
 		for (const [input, secret] of [
 			["auth ghp_abc​defghijklmnopqrstuvwxyz0123", "defghijklmnop"],

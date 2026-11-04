@@ -5,7 +5,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { foldRedactionText, LOOK_ALIKE_KEYWORDS } from "./redaction-fold.ts";
+import {
+	foldRedactionText,
+	LOOK_ALIKE_KEYWORDS,
+	LOOK_ALIKE_SECRET_PREFIXES,
+} from "./redaction-fold.ts";
 
 const foldFixture = new URL(
 	"../fixtures/portable-history-fold-v1.json",
@@ -54,6 +58,31 @@ function patternWords(source: string): string[] {
 }
 
 const listed = (word: string) => LOOK_ALIKE_KEYWORDS.has(word);
+
+const SECRET_PREFIX_RULE =
+	/\/\\b(?:\(\?:([A-Za-z|]+)\)|([A-Za-z]+))(?:\[([a-z]+)\])?([-_]?)[^\n]*\/([a-z]*)[,\s]/g;
+
+/** The literal prefixes every case-sensitive `/\b.../` rule in `source` opens
+ * with, each alternative and one-letter class written out; a prefix holding an
+ * `_` is skipped, since such a token folds already. */
+function literalSecretPrefixes(source: string): string[] {
+	const prefixes: string[] = [];
+	for (const [, group, word, oneOf, separator, flags] of source.matchAll(
+		SECRET_PREFIX_RULE
+	)) {
+		if (flags?.includes("i") || separator === "_") {
+			continue;
+		}
+		const heads = group ? group.split("|") : [word ?? ""];
+		const tails = oneOf ? [...oneOf] : [""];
+		for (const head of heads) {
+			for (const tail of tails) {
+				prefixes.push(`${head}${tail}${separator ?? ""}`);
+			}
+		}
+	}
+	return prefixes;
+}
 
 describe("foldRedactionText", () => {
 	test("folds fullwidth letters, digits and punctuation to ASCII", () => {
@@ -160,6 +189,65 @@ describe("foldRedactionText", () => {
 			.object({ keywords: z.array(z.string()) })
 			.parse(await Bun.file(keywordFixture).json());
 		expect([...LOOK_ALIKE_KEYWORDS]).toEqual(fixture.keywords);
+	});
+
+	test("folds a secret prefix spelled wholly in look-alikes", () => {
+		expect(
+			foldRedactionText(
+				"\u0455\u03ba-\u0430\u0435\u043e\u0440\u0441\u0443\u0445\u0455\u0456\u0458\u04bb\u04cf\u0501\u051b\u051d\u0410\u0412\u0415\u041a\u041c\u041d\u041e"
+			)
+		).toBe("\u0073k-aeopcyxsijhldqwABEKMHO");
+		expect(
+			foldRedactionText(
+				"\u0410\u039a\u0406\u0410\u0412\u0415\u0396\u0397\u0406\u039a\u039c\u039d\u041e\u0420\u0422\u03a5\u0425\u0405\u0408\u0421"
+			)
+		).toBe("\u0041KIABEZHIKMNOPTYXSJC");
+	});
+
+	test("folds a look-alike secret in non-ASCII quotes or under a combining mark", () => {
+		expect(
+			foldRedactionText(
+				"\u201c\u0455\u03ba-\u0430\u0435\u043e\u0440\u0441\u0443\u0445\u0455\u0456\u0458\u04bb\u04cf\u0501\u051b\u051d\u201d"
+			)
+		).toBe("\u201c\u0073k-aeopcyxsijhldqw\u201d");
+		expect(
+			foldRedactionText(
+				"\u00ab\u0410\u039a\u0406\u0410\u0412\u0415\u0396\u0397\u0406\u039a\u039c\u039d\u041e\u0420\u0422\u03a5\u0425\u0405\u0408\u0421\u00bb"
+			)
+		).toBe("\u00ab\u0041KIABEZHIKMNOPTYXSJC\u00bb");
+		expect(
+			foldRedactionText(
+				"\u0455\u0301\u03ba-\u0430\u0441\u0435\u3002 \u00ab\u03a4\u039f\u039a\u0395\u039d\u00bb:"
+			)
+		).toBe("\u0073k-ace. \u00abTOKEN\u00bb:");
+	});
+
+	test("leaves prose that only resembles a secret prefix unchanged", () => {
+		for (const prose of [
+			"\u0455\u03ba \u0410\u039a\u0406 \u0435\u0443 \u0430\u0455\u03ba-\u0430\u0441\u0435",
+			"Это сок, а не вода: сосед ушёл.",
+			"Καλημέρα κόσμε, ο Άκης είπε ναι.",
+			"\u00ab\u0420\u043e\u0301\u0437\u0430\u00bb, \u0441\u043a\u0430\u0437\u0430\u0301\u043b \u043e\u043d. \u201c\u0410\u039a\u0406\u201d \u0438 \u00ab\u0455\u03ba\u00bb.",
+		]) {
+			expect(foldRedactionText(prose)).toBe(prose);
+		}
+	});
+
+	test("lists every secret prefix the troubleshoot rules key on", async () => {
+		const prefixes = literalSecretPrefixes(
+			await Bun.file(troubleshootRedaction).text()
+		);
+		expect(prefixes).toContain("sk-");
+		expect(
+			prefixes.filter((prefix) => !LOOK_ALIKE_SECRET_PREFIXES.includes(prefix))
+		).toEqual([]);
+	});
+
+	test("lists the same look-alike secret prefixes as Core and the public share", async () => {
+		const fixture = z
+			.object({ prefixes: z.array(z.string()) })
+			.parse(await Bun.file(keywordFixture).json());
+		expect([...LOOK_ALIKE_SECRET_PREFIXES]).toEqual(fixture.prefixes);
 	});
 
 	test("is idempotent", () => {

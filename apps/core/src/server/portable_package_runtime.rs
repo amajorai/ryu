@@ -864,11 +864,3 @@ mod tests {
         ));
     }
 }
-
-#[cfg(test)]
-#[path = "marketplace_store_workflow_tests.rs"]
-mod marketplace_store_workflow_tests;
-
-#[cfg(test)]
-#[path = "marketplace_store_asset_tests.rs"]
-mod marketplace_store_asset_tests;

@@ -56,8 +56,23 @@ impl AppState {
     ) -> Option<String> {
         // Stored evidence is redacted whatever `redact_pii` / `redact_secrets`
         // say, with Unicode evasions folded; an excerpt the redactor cannot
-        // clean comes back empty and is dropped.
-        let redact = |text: &str| self.with_firewall(|fw| fw.redact_excerpt(text));
+        // clean comes back empty and is dropped. The active backend only
+        // knows the node's patterns, so the request's resolved scanner (node,
+        // org, team, agent and request overlays, as on the request path) then
+        // checks the normalized view and drops the excerpt on any PII or
+        // secret match.
+        let redact = |text: &str| {
+            let clean = self.with_firewall(|fw| fw.redact_excerpt(text));
+            if clean.is_empty() {
+                return clean;
+            }
+            let (pii, secret) = self.resolved_scanner(ctx).companion_survivors(&clean);
+            if pii || secret {
+                String::new()
+            } else {
+                clean
+            }
+        };
         // A stream cut is recorded after its handler returned, outside the
         // route scope; the route the request noted then stands in.
         let route =

@@ -361,8 +361,30 @@ async fn an_unjudged_reply_is_never_a_passing_score() {
 
 /// The dataset runner follows the same rule, and the run aggregate counts the
 /// unjudged evaluator as never executed.
-#[tokio::test]
-async fn a_refusing_judge_leaves_dataset_evaluators_unexecuted() {
+///
+/// An LLM-judge evaluator nests a second governed pipeline run inside the
+/// case's. The run must fit the 2 MiB stack of a default Tokio worker (the
+/// Gateway's runtime keeps that default) even in a debug build, so the fixture
+/// runs on a thread of exactly that size whatever `RUST_MIN_STACK` says.
+#[test]
+fn a_refusing_judge_leaves_dataset_evaluators_unexecuted() {
+    let worker = std::thread::Builder::new()
+        .name("dataset-judge-fixture".into())
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("create dataset judge fixture runtime")
+                .block_on(refusing_judge_dataset_fixture());
+        })
+        .expect("start dataset judge fixture worker");
+    if let Err(panic) = worker.join() {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn refusing_judge_dataset_fixture() {
     let state = online_state_with(
         Default::default(),
         JudgeStub::answering(json!({ "content": "", "refusal": "No." }), "stop"),
