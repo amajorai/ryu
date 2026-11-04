@@ -795,6 +795,7 @@
   "your browser": "浏览器",
   "{age} ago": "{age}前",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, other {# 个附件已就绪}}",
+  "{count, plural, one {# message} other {# messages}}": "{count, plural, other {# 条消息}}",
   "{count} more": "还有 {count} 个",
   "{recipients} · {status}": "{recipients} · {status}",
   "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {草稿} sending {正在发送} sent {已发送} failed {失败} inbound {已接收} outbound {外发} other {{value}}}"

@@ -626,6 +626,7 @@
   "Write": "Schreiben",
   "Write a caption…": "Bildunterschrift hinzufügen…",
   "Yes": "Ja",
+  "Your change was saved, but the plan could not refresh: {error}": "Die Änderung wurde gespeichert, aber der Plan konnte nicht aktualisiert werden: {error}",
   "Zoom": "Zoom",
   "Zoom In": "Vergrößern",
   "Zoom Out": "Verkleinern",

@@ -9,6 +9,10 @@
 
 import { translate as tl } from "@ryu/i18n/core";
 import type { AgentUnsupportedField } from "./policy-agent-blockers.ts";
+import {
+	formatUsdMicroInput,
+	parseUsdMicroInput,
+} from "./policy-money-input.ts";
 import type {
 	GuardrailFirewallAction,
 	GuardrailFirewallOverlay,
@@ -388,22 +392,14 @@ export function agentUnsupportedFields(
 	return fields;
 }
 
-/** Microdollars to a plain dollar string for an input. */
+/** Microdollars to an ungrouped dollar string for an input, in the UI locale. */
 export function usdFromMicro(usdMicro: number): string {
-	return String(usdMicro / 1_000_000);
+	return formatUsdMicroInput(usdMicro);
 }
 
-/** A dollar input to whole microdollars, or `null` when it is not a number. */
+/** A dollar input typed in the UI locale to whole microdollars, or `null`. */
 export function microFromUsd(text: string): number | null {
-	const trimmed = text.trim();
-	if (trimmed === "") {
-		return null;
-	}
-	const value = Number(trimmed);
-	if (!Number.isFinite(value) || value < 0) {
-		return null;
-	}
-	return Math.round(value * 1_000_000);
+	return parseUsdMicroInput(text);
 }
 
 const BOOL_FIREWALL_FIELDS = [

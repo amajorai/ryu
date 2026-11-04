@@ -14,14 +14,17 @@ fn member(user_id: &str) -> crate::sidecar::control_plane::NotifyTargetUser {
 
 #[test]
 fn a_fanned_out_alert_maps_onto_the_activity_feed_unchanged() {
-    let item = activity_item_from_alert(&serde_json::json!({
-        "title": "Site down",
-        "message": "HTTP 503",
-        "monitor_id": "m1",
-        "monitor_name": "Shop",
-        "kind": "uptime_down",
-        "created_at": "2026-10-10T12:00:00Z",
-    }));
+    let item = activity_item_from_alert(
+        &serde_json::json!({
+            "title": "Site down",
+            "message": "HTTP 503",
+            "monitor_id": "m1",
+            "monitor_name": "Shop",
+            "kind": "uptime_down",
+            "created_at": "2026-10-10T12:00:00Z",
+        }),
+        "en",
+    );
     assert_eq!(
         (item.kind.as_str(), item.source.as_str()),
         ("monitor_alert", "monitors")
@@ -33,8 +36,29 @@ fn a_fanned_out_alert_maps_onto_the_activity_feed_unchanged() {
     assert_eq!(item.metadata["alert_kind"], "uptime_down");
     assert_eq!(item.created_at, 1_791_633_600);
 
-    let info = activity_item_from_alert(&serde_json::json!({ "kind": "price_drop" }));
+    let info = activity_item_from_alert(&serde_json::json!({ "kind": "price_drop" }), "en");
     assert_eq!(info.level, ryu_activity::ActivityLevel::Info);
+}
+
+#[test]
+fn a_localizable_alert_lands_on_the_activity_feed_in_the_node_locale() {
+    let alert = serde_json::json!({
+        "title": "Approval needed",
+        "message": "HTTP 503",
+        "kind": "uptime_down",
+        "i18n": {
+            "title": { "message": "Approval needed", "args": {} },
+            "body": [{ "message": "{count} saved.", "args": { "count": 1234 } }],
+            "join": "sentences"
+        }
+    });
+    let german = activity_item_from_alert(&alert, "de");
+    assert_eq!(german.title, "Genehmigung erforderlich");
+    assert_eq!(german.body.as_deref(), Some("1.234 saved."));
+    assert_eq!(german.level, ryu_activity::ActivityLevel::Warning);
+    let english = activity_item_from_alert(&alert, "en");
+    assert_eq!(english.title, "Approval needed");
+    assert_eq!(english.body.as_deref(), Some("1,234 saved."));
 }
 
 #[test]

@@ -10,6 +10,7 @@ import type {
 	ModelRouterType,
 	SmartRoutingConfig,
 } from "@/src/lib/api/gateway.ts";
+import { routeWeightInvalid } from "@/src/lib/route-weight-input.ts";
 import type { RuleRow } from "./classify-tier.tsx";
 
 /**
@@ -99,6 +100,7 @@ export function SmartRoutingRulesEditor({
 									/>
 									{routerType === "random" ? (
 										<Input
+											aria-invalid={routeWeightInvalid(rule.weight)}
 											aria-label={tl("Rule {number} weight", {
 												number: idx + 1,
 											})}

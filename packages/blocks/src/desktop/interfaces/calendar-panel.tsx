@@ -58,7 +58,7 @@ export function CalendarThreadPanel({
 	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
-	const title = thread ? threadTitle(thread) : "New thread";
+	const title = thread ? threadTitle(thread) : tl("New thread");
 	const agents = thread ? threadAgents(snapshot, thread) : [];
 	const group = thread ? threadGroupName(snapshot, thread) : null;
 	const updatedMs = thread ? Date.parse(thread.updatedAt) : Number.NaN;

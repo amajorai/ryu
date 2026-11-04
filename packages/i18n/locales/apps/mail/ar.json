@@ -795,6 +795,7 @@
   "your browser": "متصفحك",
   "{age} ago": "منذ {age}",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, zero {لا توجد مرفقات جاهزة} one {مرفق واحد جاهز} two {مرفقان جاهزان} few {# مرفقات جاهزة} many {# مرفقًا جاهزًا} other {# مرفق جاهز}}",
+  "{count, plural, one {# message} other {# messages}}": "{count, plural, zero {# رسالة} one {رسالة واحدة} two {رسالتان} few {# رسائل} many {# رسالة} other {# رسالة}}",
   "{count} more": "{count} أخرى",
   "{recipients} · {status}": "{recipients} · {status}",
   "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {مسودة} sending {جارٍ الإرسال} sent {تم الإرسال} failed {فشل} inbound {مستلَمة} outbound {صادرة} other {{value}}}"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	ArrowLeftIcon,
@@ -18,11 +19,16 @@ const RAIL_TRANSITION = {
 	type: "spring" as const,
 };
 
-const LAYER_VARIANTS = {
-	enter: { opacity: 0, x: 12 },
-	exit: { opacity: 0, x: -12 },
-	present: { opacity: 1, x: 0 },
-};
+/** Layers slide in from the inline end and out toward the inline start. */
+export function layerVariants(inlineSign: 1 | -1) {
+	return {
+		enter: { opacity: 0, x: 12 * inlineSign },
+		exit: { opacity: 0, x: -12 * inlineSign },
+		present: { opacity: 1, x: 0 },
+	};
+}
+
+const LAYER_VARIANTS = { ltr: layerVariants(1), rtl: layerVariants(-1) };
 
 export interface NestedOverflowToolbarCategory {
 	content: ReactNode;
@@ -62,6 +68,7 @@ export function NestedOverflowToolbar({
 	placement = "fixed",
 }: NestedOverflowToolbarProps) {
 	const reduce = useReducedMotion();
+	const variants = LAYER_VARIANTS[useDirection() === "rtl" ? "rtl" : "ltr"];
 	const tl = useLiteralMessages();
 	const controlsId = useId();
 	const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -161,7 +168,7 @@ export function NestedOverflowToolbar({
 							initial="enter"
 							key={activeCategory.id}
 							transition={transition}
-							variants={LAYER_VARIANTS}
+							variants={variants}
 						>
 							<RailButton
 								ariaLabel="Back to editor tools"
@@ -186,7 +193,7 @@ export function NestedOverflowToolbar({
 							initial="enter"
 							key={isOpen ? "open" : "closed"}
 							transition={transition}
-							variants={LAYER_VARIANTS}
+							variants={variants}
 						>
 							{primary ? (
 								<div className="flex shrink-0 items-center gap-1">

@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { useInlineSign } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 /**
@@ -9,6 +10,7 @@ import { useReducedMotion } from "./reduced-motion.ts";
  */
 export function MomentsBackdrop() {
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	return (
 		<div
 			aria-hidden="true"
@@ -17,7 +19,9 @@ export function MomentsBackdrop() {
 		>
 			<div className="absolute inset-0 bg-linear-to-b from-muted/50 to-background" />
 			<motion.div
-				animate={reduceMotion ? undefined : { x: ["0%", "4%", "0%"] }}
+				animate={
+					reduceMotion ? undefined : { x: ["0%", `${4 * inlineSign}%`, "0%"] }
+				}
 				className="absolute -top-1/2 left-1/2 size-[140vmax] -translate-x-1/2 bg-radial from-primary/10 via-40% via-primary/5 to-70% to-transparent"
 				transition={{
 					duration: 48,

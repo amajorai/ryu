@@ -11,6 +11,7 @@
   "Elapsed": "已用时间",
   "Evaluated variants will appear as the campaign runs.": "活动运行时将显示已评估的变体。",
   "Every evaluated variant and the enforced winner decision.": "每个已评估的变体以及强制执行的胜出决定。",
+  "Expected {key} to be a non-empty string.": "{key} 应为非空字符串。",
   "Experiment campaigns could not be loaded.": "无法加载实验活动。",
   "Experiments could not be loaded": "无法加载实验",
   "Failed": "失败",

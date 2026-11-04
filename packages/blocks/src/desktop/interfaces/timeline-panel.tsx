@@ -38,7 +38,7 @@ export function TimelineThreadPanel({
 	threadView: ReactNode;
 }) {
 	const tl = useLiteralMessages();
-	const title = thread ? threadTitle(thread) : "New thread";
+	const title = thread ? threadTitle(thread) : tl("New thread");
 	const agents = thread ? threadAgents(snapshot, thread) : [];
 	const group = thread ? threadGroupName(snapshot, thread) : null;
 	const status = thread ? threadStatus(thread) : "quiet";

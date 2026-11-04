@@ -1,6 +1,11 @@
 // Pure view helpers for the Vault page: folder tree, status copy, and form
 // conversions. Kept free of React so they are unit-tested directly.
 
+import { translate as tl } from "@ryu/i18n/core";
+import {
+	formatLocaleNumberInput,
+	parseLocaleNumber,
+} from "@ryu/i18n/parse-number";
 import type {
 	VaultCapability,
 	VaultExportFormat,
@@ -113,22 +118,27 @@ export function parseTags(text: string): string[] {
 	return tags;
 }
 
-export function rotationDaysText(secs: number | null): string {
+export function rotationDaysText(
+	secs: number | null,
+	locale?: string | null
+): string {
 	if (!secs) {
 		return "";
 	}
-	const days = secs / SECONDS_PER_DAY;
-	return Number.isInteger(days) ? String(days) : days.toFixed(2);
+	return formatLocaleNumberInput(secs / SECONDS_PER_DAY, locale, 2);
 }
 
 /** Seconds from a day count; `null` when empty. Throws on invalid input. */
-export function rotationSecsFromDays(text: string): number | null {
+export function rotationSecsFromDays(
+	text: string,
+	locale?: string | null
+): number | null {
 	if (!text.trim()) {
 		return null;
 	}
-	const days = Number(text);
+	const days = parseLocaleNumber(text, locale);
 	if (!Number.isFinite(days) || days <= 0) {
-		throw new Error("Rotation period must be a positive number of days.");
+		throw new Error(tl("Rotation period must be a positive number of days."));
 	}
 	return Math.max(MIN_ROTATION_SECS, Math.round(days * SECONDS_PER_DAY));
 }

@@ -10,6 +10,7 @@ import { motion } from "motion/react";
 import type { ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusText } from "./board-card.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import { agentById } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
@@ -28,12 +29,13 @@ export function BoardThreadPanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
-	const title = thread
-		? thread.title.trim() || "Untitled thread"
-		: "New thread";
-	const lead = agentById(snapshot, thread?.agentIds[0]);
 	const tl = useLiteralMessages();
+	const title = thread
+		? thread.title.trim() || tl("Untitled thread")
+		: tl("New thread");
+	const lead = agentById(snapshot, thread?.agentIds[0]);
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	return (
 		<motion.aside
 			// A transform (not `x`) runs on the compositor, so the slide stays
@@ -43,7 +45,9 @@ export function BoardThreadPanel({
 			className="flex min-h-0 w-[clamp(360px,45%,880px)] shrink-0 flex-col border-border border-s bg-background max-md:absolute max-md:inset-0 max-md:z-20 max-md:w-full max-md:border-s-0"
 			data-testid="board-thread-panel"
 			initial={
-				reduceMotion ? false : { opacity: 0, transform: "translateX(16px)" }
+				reduceMotion
+					? false
+					: { opacity: 0, transform: `translateX(${16 * inlineSign}px)` }
 			}
 			transition={
 				reduceMotion

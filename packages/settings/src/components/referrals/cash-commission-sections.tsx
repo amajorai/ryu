@@ -2,6 +2,7 @@
 
 import { Wallet01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type { AffiliateStats, CommissionView } from "../../utils/api-client.ts";
@@ -10,6 +11,10 @@ import {
 	SettingsItem,
 	SettingsSection,
 } from "../shared/settings-rows.tsx";
+import {
+	commissionSourceLabel,
+	commissionStatusLabel,
+} from "./commission-labels.ts";
 import { commissionStatusVariant, formatMoney } from "./referrals-format.ts";
 
 export function CashCommissionSection({ stats }: { stats: AffiliateStats }) {
@@ -144,6 +149,7 @@ export function RecentCommissionsSection({
 }: {
 	commissions: CommissionView[];
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<SettingsSection title="Recent commissions">
 			{commissions.length === 0 ? (
@@ -158,10 +164,12 @@ export function RecentCommissionsSection({
 								// A badge only for the exceptional states (reversed,
 								// rejected); a normal status is plain muted text.
 								commissionStatusVariant(commission.status) === "destructive" ? (
-									<Badge variant="destructive">{commission.status}</Badge>
+									<Badge variant="destructive">
+										{commissionStatusLabel(commission.status, tl)}
+									</Badge>
 								) : (
 									<span className="text-muted-foreground text-sm">
-										{commission.status}
+										{commissionStatusLabel(commission.status, tl)}
 									</span>
 								)
 							}
@@ -174,7 +182,7 @@ export function RecentCommissionsSection({
 								</span>
 							}
 							key={commission.id}
-							title={commission.sourceType}
+							title={commissionSourceLabel(commission.sourceType, tl)}
 						/>
 					))}
 				</SettingsGroup>

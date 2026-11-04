@@ -11,6 +11,7 @@
   "Elapsed": "経過時間",
   "Evaluated variants will appear as the campaign runs.": "キャンペーンの実行に伴い、評価済みのバリアントが表示されます。",
   "Every evaluated variant and the enforced winner decision.": "評価されたすべてのバリアントと、適用された勝者の判定です。",
+  "Expected {key} to be a non-empty string.": "{key} は空でない文字列である必要があります。",
   "Experiment campaigns could not be loaded.": "実験キャンペーンを読み込めませんでした。",
   "Experiments could not be loaded": "実験を読み込めませんでした",
   "Failed": "失敗",

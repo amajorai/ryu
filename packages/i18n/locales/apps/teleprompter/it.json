@@ -7,6 +7,8 @@
   "Back to the start": "Torna all’inizio",
   "Back to the start (Home)": "Torna all’inizio (Home)",
   "Couldn't load saved scripts: {error}": "Impossibile caricare i copioni salvati: {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "Impossibile caricare la bozza da Ryu, quindi non viene salvata automaticamente: {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "Impossibile salvare le ultime modifiche in Ryu: {error}",
   "Delete script": "Elimina copione",
   "Delete this script?": "Eliminare questo copione?",
   "Display": "Schermo",

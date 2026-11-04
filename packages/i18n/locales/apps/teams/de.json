@@ -29,6 +29,7 @@
   "Group deleted": "Gruppe gelöscht",
   "Group updated": "Gruppe aktualisiert",
   "Groups couldn't load": "Gruppen konnten nicht geladen werden",
+  "Groups loaded, but agents could not: {error}": "Gruppen wurden geladen, Agenten jedoch nicht: {error}",
   "Groups returned an invalid group record.": "Gruppen hat einen ungültigen Gruppeneintrag zurückgegeben.",
   "Groups returned an invalid list.": "Gruppen hat eine ungültige Liste zurückgegeben.",
   "Groups returned an unexpected agent catalog.": "Gruppen hat einen unerwarteten Agentenkatalog zurückgegeben.",

@@ -145,6 +145,7 @@
   "The Ryu host bridge did not return a workspace.": "Il bridge host di Ryu non ha restituito alcuno spazio di lavoro.",
   "The Ryu host bridge is unavailable.": "Il bridge host di Ryu non è disponibile.",
   "The inbox is clear.": "La posta in arrivo è vuota.",
+  "The model returned an invalid {field}.": "Il modello ha restituito un campo {field} non valido.",
   "The public board could not complete that request.": "La bacheca pubblica non è riuscita a completare la richiesta.",
   "The public board did not confirm your request. Try again.": "La bacheca pubblica non ha confermato la richiesta. Riprova.",
   "The public board is taking a moment to respond. Try again.": "La bacheca pubblica sta impiegando un po’ a rispondere. Riprova.",

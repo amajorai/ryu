@@ -4,6 +4,3 @@
 [data-live-activity-progress] {
 	width: var(--live-activity-progress);
 }
-[data-live-activity-border] {
-	border-left-color: var(--live-activity-tint);
-}

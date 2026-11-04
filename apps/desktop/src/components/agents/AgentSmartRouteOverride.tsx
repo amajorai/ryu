@@ -36,6 +36,7 @@ import {
 	saveAgentRouteOverride,
 } from "@/src/lib/api/gateway.ts";
 import { setAgentSmartRoute } from "@/src/lib/api/preferences.ts";
+import { routeWeightText } from "@/src/lib/route-weight-input.ts";
 import {
 	ClassifyTierNote,
 	useClassifyTier,
@@ -125,7 +126,7 @@ export function AgentSmartRouteOverride({ agentId }: { agentId: string }) {
 						id: crypto.randomUUID(),
 						description: r.description,
 						model: r.model,
-						weight: String(r.weight ?? 1),
+						weight: routeWeightText(r.weight),
 					}))
 				);
 			})

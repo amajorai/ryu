@@ -11,6 +11,7 @@
   "Elapsed": "Verstrichen",
   "Evaluated variants will appear as the campaign runs.": "Bewertete Varianten erscheinen, während die Kampagne läuft.",
   "Every evaluated variant and the enforced winner decision.": "Jede bewertete Variante und die durchgesetzte Gewinnerentscheidung.",
+  "Expected {key} to be a non-empty string.": "{key} muss eine nicht leere Zeichenfolge sein.",
   "Experiment campaigns could not be loaded.": "Experimentkampagnen konnten nicht geladen werden.",
   "Experiments could not be loaded": "Experimente konnten nicht geladen werden",
   "Failed": "Fehlgeschlagen",

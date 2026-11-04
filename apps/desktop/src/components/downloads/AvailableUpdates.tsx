@@ -18,6 +18,7 @@
 // the shared skill-set confirmation. "Update all" asks once, and cancelling it
 // applies nothing.
 
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useRef, useState } from "react";
@@ -36,6 +37,7 @@ import {
 	useAvailableUpdates,
 } from "@/src/hooks/useAvailableUpdates.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
+import { versionArrow } from "@/src/lib/i18n/version-arrow.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { kindIcon } from "./kindIcons.ts";
 
@@ -53,9 +55,12 @@ const KIND_LABEL = {
 	model: "Model",
 } satisfies Record<AvailableUpdate["kind"], string>;
 
-function versionText(update: AvailableUpdate): string | null {
+function versionText(
+	update: AvailableUpdate,
+	tl: LiteralMessage
+): string | null {
 	if (update.currentVersion && update.latestVersion) {
-		return `${update.currentVersion} → ${update.latestVersion}`;
+		return versionArrow(update.currentVersion, update.latestVersion, tl);
 	}
 	if (update.latestVersion) {
 		return `v${update.latestVersion}`;
@@ -73,6 +78,7 @@ function CompactUpdateRow({
 	onApply: () => void;
 	update: AvailableUpdate;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<TrayRow
 			actions={
@@ -81,7 +87,7 @@ function CompactUpdateRow({
 				</Button>
 			}
 			icon={kindIcon(update.kind)}
-			meta={trayMeta(KIND_LABEL[update.kind], versionText(update))}
+			meta={trayMeta(KIND_LABEL[update.kind], versionText(update, tl))}
 			title={update.name}
 		/>
 	);
@@ -97,7 +103,8 @@ function PageUpdateRow({
 	onApply: () => void;
 	update: AvailableUpdate;
 }) {
-	const version = versionText(update);
+	const tl = useLiteralMessages();
+	const version = versionText(update, tl);
 	return (
 		<div className="flex items-center gap-2.5 rounded-xl px-3 py-2.5">
 			<TrayRowIcon icon={kindIcon(update.kind)} />

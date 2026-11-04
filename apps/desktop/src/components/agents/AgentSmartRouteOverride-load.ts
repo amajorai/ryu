@@ -11,6 +11,7 @@ import {
 	SmartRoutingUnavailableError,
 } from "@/src/lib/api/gateway.ts";
 import { getAgentSmartRoute } from "@/src/lib/api/preferences.ts";
+import { parseRouteWeight } from "@/src/lib/route-weight-input.ts";
 
 export interface RuleRow {
 	description: string;
@@ -58,7 +59,7 @@ export function buildSmartRoutingConfig(
 		.map((r) => ({
 			description: r.description.trim(),
 			model: r.model.trim(),
-			weight: r.weight.trim() === "" ? 1 : Number(r.weight),
+			weight: parseRouteWeight(r.weight, 1),
 		}))
 		.filter(
 			(r) =>

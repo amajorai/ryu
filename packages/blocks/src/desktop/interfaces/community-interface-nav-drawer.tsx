@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 
 /** The narrow-width navigation drawer and its scrim. */
 export function CommunityNavDrawer({
@@ -13,6 +14,7 @@ export function CommunityNavDrawer({
 	onClose: () => void;
 	reduceMotion: boolean;
 }) {
+	const inlineSign = useInlineSign();
 	return (
 		<AnimatePresence>
 			{navOpen ? (
@@ -33,8 +35,10 @@ export function CommunityNavDrawer({
 						animate={{ x: 0 }}
 						className="absolute inset-y-0 start-0 z-30 flex @[860px]/community:hidden w-[272px] max-w-[85%] flex-col border-border border-e bg-background shadow-lg"
 						data-testid="community-nav-drawer"
-						exit={reduceMotion ? { opacity: 0 } : { x: "-100%" }}
-						initial={reduceMotion ? false : { x: "-100%" }}
+						exit={
+							reduceMotion ? { opacity: 0 } : { x: `${-100 * inlineSign}%` }
+						}
+						initial={reduceMotion ? false : { x: `${-100 * inlineSign}%` }}
 						key="drawer"
 						transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
 					>

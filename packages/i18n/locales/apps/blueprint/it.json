@@ -626,6 +626,7 @@
   "Write": "Scrittura",
   "Write a caption…": "Aggiungi una didascalia…",
   "Yes": "Sì",
+  "Your change was saved, but the plan could not refresh: {error}": "La modifica è stata salvata, ma non è stato possibile aggiornare il piano: {error}",
   "Zoom": "Zoom",
   "Zoom In": "Ingrandisci",
   "Zoom Out": "Riduci",

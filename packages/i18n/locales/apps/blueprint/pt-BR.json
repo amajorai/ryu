@@ -626,6 +626,7 @@
   "Write": "Gravação",
   "Write a caption…": "Escreva uma legenda…",
   "Yes": "Sim",
+  "Your change was saved, but the plan could not refresh: {error}": "Sua alteração foi salva, mas não foi possível atualizar o plano: {error}",
   "Zoom": "Zoom",
   "Zoom In": "Ampliar",
   "Zoom Out": "Reduzir",

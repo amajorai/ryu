@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+	axisSlot,
 	computeReorderShifts,
+	physicalOffset,
 	type ReorderSlot,
 	reorderDestination,
 } from "./reorder-shift.ts";
@@ -60,5 +62,66 @@ describe("computeReorderShifts", () => {
 		// B ends where C ended: 64 → 88.
 		expect(shifts.get("b")).toBe(24);
 		expect(shifts.has("a")).toBe(false);
+	});
+});
+
+// The same three items as a right-to-left row: A is drawn rightmost (280-300),
+// B at 236-276, C leftmost (212-232), with 4px gaps.
+const rtlRects = {
+	a: { bottom: 20, left: 280, right: 300, top: 0 },
+	b: { bottom: 20, left: 236, right: 276, top: 0 },
+	c: { bottom: 20, left: 212, right: 232, top: 0 },
+};
+
+function rtlSlots(): ReorderSlot[] {
+	return Object.entries(rtlRects)
+		.map(([id, rect]) => axisSlot(id, rect, "x", true))
+		.sort((left, right) => left.start - right.start);
+}
+
+describe("axisSlot", () => {
+	test("LTR and vertical slots keep their physical coordinates", () => {
+		expect(axisSlot("a", rtlRects.a, "x", false)).toEqual({
+			id: "a",
+			start: 280,
+			end: 300,
+		});
+		expect(axisSlot("a", rtlRects.a, "y", true)).toEqual({
+			id: "a",
+			start: 0,
+			end: 20,
+		});
+	});
+
+	test("RTL slots sort in reading (DOM) order", () => {
+		expect(rtlSlots().map((slot) => slot.id)).toEqual(["a", "b", "c"]);
+	});
+});
+
+describe("computeReorderShifts under RTL", () => {
+	test("dropping A after C slides it leftwards into C's slot", () => {
+		const shifts = computeReorderShifts(rtlSlots(), "a", "c", false);
+		const screen = (id: string) =>
+			physicalOffset(shifts.get(id) ?? 0, "x", true);
+		// B and C step right by A's pitch (20px + 4px gap).
+		expect(screen("b")).toBe(24);
+		expect(screen("c")).toBe(24);
+		// A moves from 280-300 to C's old slot at 212-232.
+		expect(rtlRects.a.left + screen("a")).toBe(rtlRects.c.left);
+	});
+
+	test("dropping C before A slides it rightwards into A's slot", () => {
+		const shifts = computeReorderShifts(rtlSlots(), "c", "a", true);
+		const screen = (id: string) =>
+			physicalOffset(shifts.get(id) ?? 0, "x", true);
+		expect(screen("a")).toBe(-24);
+		expect(screen("b")).toBe(-24);
+		expect(rtlRects.c.right + screen("c")).toBe(rtlRects.a.right);
+	});
+
+	test("offsets are only mirrored for a right-to-left x axis", () => {
+		expect(physicalOffset(10, "x", false)).toBe(10);
+		expect(physicalOffset(10, "y", true)).toBe(10);
+		expect(physicalOffset(10, "x", true)).toBe(-10);
 	});
 });

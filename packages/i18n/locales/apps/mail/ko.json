@@ -795,6 +795,7 @@
   "your browser": "브라우저",
   "{age} ago": "{age} 전",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, other {첨부 파일 #개 준비됨}}",
+  "{count, plural, one {# message} other {# messages}}": "{count, plural, other {메시지 #개}}",
   "{count} more": "{count}개 더",
   "{recipients} · {status}": "{recipients} · {status}",
   "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {임시 보관} sending {보내는 중} sent {보냄} failed {실패} inbound {받음} outbound {발신} other {{value}}}"

@@ -27,6 +27,7 @@ import {
 	routingViewIncludesSmartRouting,
 	updateGatewayConfig,
 } from "@/src/lib/api/gateway.ts";
+import { routeWeightText } from "@/src/lib/route-weight-input.ts";
 import { type RuleRow, useClassifyTier } from "./classify-tier.tsx";
 import { SmartRouterAlgorithmFields } from "./smart-router-algorithm-fields.tsx";
 import { SmartRoutingRulesEditor } from "./smart-routing-rules-editor.tsx";
@@ -106,7 +107,7 @@ export function SmartRoutingCard({
 						id: crypto.randomUUID(),
 						description: r.description,
 						model: r.model,
-						weight: String(r.weight ?? 1),
+						weight: routeWeightText(r.weight),
 					}))
 				);
 				setLoadError(null);
@@ -213,7 +214,7 @@ export function SmartRoutingCard({
 					id: crypto.randomUUID(),
 					description: rule.description,
 					model: rule.model,
-					weight: String(rule.weight ?? 1),
+					weight: routeWeightText(rule.weight),
 				}))
 			);
 			setSaveOk(true);

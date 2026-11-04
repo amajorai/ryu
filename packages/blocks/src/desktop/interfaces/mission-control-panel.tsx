@@ -79,7 +79,7 @@ export function MissionThreadPanel({
 	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
-	const title = thread ? missionThreadTitle(thread) : "New thread";
+	const title = thread ? missionThreadTitle(thread) : tl("New thread");
 	const agents = (thread?.agentIds ?? [])
 		.map((id) => agentById(snapshot, id))
 		.filter((agent) => agent !== undefined);

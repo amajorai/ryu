@@ -13,6 +13,7 @@ import { motion } from "motion/react";
 import type { ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import { initials, threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type RecordsRow,
@@ -177,7 +178,8 @@ export function RecordsThreadPanel({
 }) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
-	const title = thread ? recordsThreadTitle(thread) : "New thread";
+	const title = thread ? recordsThreadTitle(thread) : tl("New thread");
+	const inlineSign = useInlineSign();
 	const agents = thread ? recordsThreadAgents(snapshot, thread) : [];
 	const status = thread ? threadStatus(thread) : null;
 	return (
@@ -191,7 +193,7 @@ export function RecordsThreadPanel({
 					: "w-[clamp(380px,40%,560px)]"
 			)}
 			data-testid="records-thread-panel"
-			initial={reduceMotion ? false : { opacity: 0, x: 12 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 12 * inlineSign }}
 			transition={{ duration: 0.16, ease: [0.2, 0, 0, 1] }}
 		>
 			<header

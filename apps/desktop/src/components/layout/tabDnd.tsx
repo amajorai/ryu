@@ -4,6 +4,10 @@ import {
 	useReorderShift,
 } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 import {
+	pointerBeforeOnAxis,
+	readingDirectionOf,
+} from "@ryu/ui/lib/pointer-before.ts";
+import {
 	createContext,
 	type DragEvent,
 	type ReactNode,
@@ -332,12 +336,15 @@ export function useTabDragProps(tabId: string, axis: "x" | "y" = "x") {
 				e.preventDefault();
 				e.stopPropagation();
 				e.dataTransfer.dropEffect = "move";
-				const rect = e.currentTarget.getBoundingClientRect();
 				dnd.onOver(
 					tabId,
-					axis === "x"
-						? e.clientX < rect.left + rect.width / 2
-						: e.clientY < rect.top + rect.height / 2
+					pointerBeforeOnAxis(
+						e.clientX,
+						e.clientY,
+						e.currentTarget.getBoundingClientRect(),
+						axis,
+						readingDirectionOf(e.currentTarget)
+					)
 				);
 			},
 			onDrop: (e: DragEvent) => {

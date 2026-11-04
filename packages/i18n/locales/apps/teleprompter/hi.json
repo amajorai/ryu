@@ -7,6 +7,8 @@
   "Back to the start": "शुरुआत पर वापस जाएँ",
   "Back to the start (Home)": "शुरुआत पर वापस जाएँ (Home)",
   "Couldn't load saved scripts: {error}": "सहेजी गई स्क्रिप्ट लोड नहीं हो सकीं: {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "Ryu से आपका ड्राफ़्ट लोड नहीं हो सका, इसलिए यह अपने-आप सहेजा नहीं जा रहा है: {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "आपके नवीनतम बदलाव Ryu में सहेजे नहीं जा सके: {error}",
   "Delete script": "स्क्रिप्ट हटाएँ",
   "Delete this script?": "यह स्क्रिप्ट हटाएँ?",
   "Display": "डिस्प्ले",

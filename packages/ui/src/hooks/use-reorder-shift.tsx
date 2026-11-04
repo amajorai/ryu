@@ -8,8 +8,11 @@ import {
 	useState,
 } from "react";
 import { EASE_OUT_CSS } from "../lib/ease.ts";
+import { readingDirectionOf } from "../lib/pointer-before.ts";
 import {
+	axisSlot,
 	computeReorderShifts,
+	physicalOffset,
 	type ReorderSlot,
 } from "../lib/reorder-shift.ts";
 import { useIsomorphicLayoutEffect } from "./use-isomorphic-layout-effect.ts";
@@ -90,6 +93,8 @@ interface Snapshot {
 	anchors: Map<string, { el: HTMLElement; start: number }>;
 	groupOf: Map<string, string>;
 	reducedMotion: boolean;
+	/** Groups laid out right to left, measured in mirrored coordinates. */
+	rtlGroups: Set<string>;
 	slotsByGroup: Map<string, ReorderSlot[]>;
 	/** Each item's own resting transition, so the shift adds to it. */
 	transitions: Map<string, string>;
@@ -113,7 +118,7 @@ function measure(
 	const groupOf = new Map<string, string>();
 	const transitions = new Map<string, string>();
 	const anchors = new Map<string, { el: HTMLElement; start: number }>();
-	const startOf = (rect: DOMRect) => (axis === "x" ? rect.left : rect.top);
+	const rtlGroups = new Set<string>();
 	const parentGroups = new Map<Element | null, string>();
 	for (const [id, registered] of items) {
 		const { el } = registered;
@@ -126,17 +131,20 @@ function measure(
 			group = parentGroups.get(parent) ?? `parent:${parentGroups.size}`;
 			parentGroups.set(parent, group);
 		}
-		const rect = el.getBoundingClientRect();
+		if (
+			!slotsByGroup.has(group) &&
+			readingDirectionOf(parent ?? el) === "rtl"
+		) {
+			rtlGroups.add(group);
+		}
+		const rtl = rtlGroups.has(group);
 		if (parent && !anchors.has(group)) {
 			anchors.set(group, {
 				el: parent,
-				start: startOf(parent.getBoundingClientRect()),
+				start: axisSlot(group, parent.getBoundingClientRect(), axis, rtl).start,
 			});
 		}
-		const slot =
-			axis === "x"
-				? { id, start: rect.left, end: rect.right }
-				: { id, start: rect.top, end: rect.bottom };
+		const slot = axisSlot(id, el.getBoundingClientRect(), axis, rtl);
 		const slots = slotsByGroup.get(group) ?? [];
 		slots.push(slot);
 		slotsByGroup.set(group, slots);
@@ -152,6 +160,7 @@ function measure(
 		reducedMotion:
 			typeof window !== "undefined" &&
 			window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true,
+		rtlGroups,
 		slotsByGroup,
 		transitions,
 	};
@@ -212,7 +221,12 @@ export function useReorderShift({
 			// where they are drawn, and a cancelled one snaps straight back.
 			return;
 		}
-		const offset = shifts.get(id) ?? 0;
+		const itemGroup = snapshot.groupOf.get(id);
+		const offset = physicalOffset(
+			shifts.get(id) ?? 0,
+			axis,
+			itemGroup !== undefined && snapshot.rtlGroups.has(itemGroup)
+		);
 		const resting = snapshot.transitions.get(id);
 		return {
 			transform: offset
@@ -252,12 +266,13 @@ export function useReorderShift({
 			return hoveredId;
 		}
 		const anchor = snapshot.anchors.get(group);
+		const rtl = snapshot.rtlGroups.has(group);
 		const drift = anchor?.el.isConnected
-			? (axis === "x"
-					? anchor.el.getBoundingClientRect().left
-					: anchor.el.getBoundingClientRect().top) - anchor.start
+			? axisSlot(group, anchor.el.getBoundingClientRect(), axis, rtl).start -
+				anchor.start
 			: 0;
-		const point = (axis === "x" ? clientX : clientY) - drift;
+		const point =
+			physicalOffset(axis === "x" ? clientX : clientY, axis, rtl) - drift;
 		const slots = snapshot.slotsByGroup.get(group) ?? [];
 		for (const [index, slot] of slots.entries()) {
 			const next = slots[index + 1];

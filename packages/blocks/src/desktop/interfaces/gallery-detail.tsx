@@ -10,6 +10,7 @@ import { GalleryAvatar } from "./gallery-avatar.tsx";
 import { GalleryCard } from "./gallery-card.tsx";
 import { GalleryCover } from "./gallery-cover.tsx";
 import { type GalleryItem, galleryColumns } from "./gallery-model.ts";
+import { useInlineSign } from "./inline-direction.ts";
 import { relativeAge, threadStatusLabel } from "./interface-renderer.ts";
 
 /** Gutter inside the "More like this" shelf. */
@@ -112,7 +113,8 @@ export function GalleryDetail({
 	threadView: ReactNode;
 }) {
 	const tl = useLiteralMessages();
-	const title = item?.thread.title ?? "New conversation";
+	const inlineSign = useInlineSign();
+	const title = item?.thread.title ?? tl("New conversation");
 	const conversation = (
 		<section
 			aria-label="Conversation"
@@ -153,7 +155,7 @@ export function GalleryDetail({
 				animate={{ opacity: 1, x: 0 }}
 				aria-label="Conversation details"
 				className="flex min-h-0 shrink-0 flex-col border-border border-e"
-				initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+				initial={reduceMotion ? false : { opacity: 0, x: -8 * inlineSign }}
 				style={{ width: columnWidth }}
 				transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
 			>

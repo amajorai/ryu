@@ -12,6 +12,7 @@ import { SeatAvatar, SuitGlyph } from "./card-table-pieces.tsx";
 import { useThreadReading } from "./card-table-rows.tsx";
 import { GAME_FOCUS, GameIconButton } from "./game-hud.tsx";
 import { GAME_SHEET_FULL_BELOW, gameSheetCover } from "./game-shell.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import { agentById } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
@@ -95,16 +96,19 @@ export function CardTableDrawer({
 }) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	// Only the drawer's first entrance slides; switching between beside and
 	// over the table later swaps the frame in place.
 	const [entered, setEntered] = useState(false);
 	useEffect(() => setEntered(true), []);
 	// Both modes set both properties, so neither inherits the other's width.
-	const closed = overlay ? { width: "100%", x: "100%" } : { width: 0, x: 0 };
+	const closed = overlay
+		? { width: "100%", x: `${100 * inlineSign}%` }
+		: { width: 0, x: 0 };
 	const shown = overlay ? { width: "100%", x: 0 } : { width, x: 0 };
 	const title = thread
-		? thread.title.trim() || "Untitled thread"
-		: "New thread";
+		? thread.title.trim() || tl("Untitled thread")
+		: tl("New thread");
 	const lead = agentById(snapshot, thread?.agentIds[0]);
 	const others = (thread?.agentIds.length ?? 0) - 1;
 	return (

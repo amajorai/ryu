@@ -7,6 +7,8 @@
   "Back to the start": "Voltar ao início",
   "Back to the start (Home)": "Voltar ao início (Home)",
   "Couldn't load saved scripts: {error}": "Não foi possível carregar os roteiros salvos: {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "Não foi possível carregar seu rascunho do Ryu, então ele não é salvo automaticamente: {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "Não foi possível salvar suas últimas alterações no Ryu: {error}",
   "Delete script": "Excluir roteiro",
   "Delete this script?": "Excluir este roteiro?",
   "Display": "Tela",

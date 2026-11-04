@@ -145,6 +145,7 @@
   "The Ryu host bridge did not return a workspace.": "Ryu ホストブリッジからワークスペースが返されませんでした。",
   "The Ryu host bridge is unavailable.": "Ryu ホストブリッジを利用できません。",
   "The inbox is clear.": "受信トレイは空です。",
+  "The model returned an invalid {field}.": "モデルが無効な {field} を返しました。",
   "The public board could not complete that request.": "公開ボードでそのリクエストを完了できませんでした。",
   "The public board did not confirm your request. Try again.": "公開ボードでリクエストが確認されませんでした。もう一度お試しください。",
   "The public board is taking a moment to respond. Try again.": "公開ボードの応答に時間がかかっています。もう一度お試しください。",

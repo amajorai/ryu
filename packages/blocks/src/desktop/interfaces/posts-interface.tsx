@@ -10,6 +10,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { PostsComposer } from "./posts-composer.tsx";
@@ -72,6 +73,7 @@ export function PostsInterface({
 	const rowElements = useRef(new Map<string, HTMLButtonElement>());
 	const lastOpenedId = useRef<string | null>(null);
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	const width = useElementWidth(rootRef);
 	const now = useMinuteClock();
 	const tl = useLiteralMessages();
@@ -408,8 +410,10 @@ export function PostsInterface({
 							<motion.div
 								animate={{ x: 0 }}
 								className="absolute inset-y-0 start-0 z-40 w-64 max-w-[85%] border-sidebar-border border-e shadow-lg"
-								exit={reduceMotion ? { opacity: 0 } : { x: "-100%" }}
-								initial={reduceMotion ? false : { x: "-100%" }}
+								exit={
+									reduceMotion ? { opacity: 0 } : { x: `${-100 * inlineSign}%` }
+								}
+								initial={reduceMotion ? false : { x: `${-100 * inlineSign}%` }}
 								key="sidebar"
 								transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
 							>

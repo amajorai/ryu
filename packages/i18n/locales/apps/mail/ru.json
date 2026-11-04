@@ -795,6 +795,7 @@
   "your browser": "браузере",
   "{age} ago": "{age} назад",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, one {# вложение готово} few {# вложения готовы} many {# вложений готово} other {# вложения готово}}",
+  "{count, plural, one {# message} other {# messages}}": "{count, plural, one {# сообщение} few {# сообщения} many {# сообщений} other {# сообщения}}",
   "{count} more": "Ещё {count}",
   "{recipients} · {status}": "{recipients} · {status}",
   "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {Черновик} sending {Отправка} sent {Отправлено} failed {Ошибка} inbound {Получено} outbound {Исходящее} other {{value}}}"

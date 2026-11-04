@@ -145,6 +145,7 @@
   "The Ryu host bridge did not return a workspace.": "لم يُرجع جسر مضيف Ryu أي مساحة عمل.",
   "The Ryu host bridge is unavailable.": "جسر مضيف Ryu غير متاح.",
   "The inbox is clear.": "صندوق الوارد فارغ.",
+  "The model returned an invalid {field}.": "أعاد النموذج قيمة {field} غير صالحة.",
   "The public board could not complete that request.": "تعذّر على اللوحة العامة إكمال هذا الطلب.",
   "The public board did not confirm your request. Try again.": "لم تؤكد اللوحة العامة طلبك. حاول مرة أخرى.",
   "The public board is taking a moment to respond. Try again.": "تستغرق اللوحة العامة بعض الوقت للاستجابة. أعد المحاولة.",

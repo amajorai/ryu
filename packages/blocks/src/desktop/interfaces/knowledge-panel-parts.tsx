@@ -10,6 +10,7 @@ import {
 import { motion } from "motion/react";
 import type { ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import {
 	agentById,
 	compactAge,
@@ -216,6 +217,7 @@ export function PanelFrame({
 	wide: boolean;
 }) {
 	const reduced = useReducedMotion();
+	const inlineSign = useInlineSign();
 	return (
 		<motion.aside
 			animate={{ opacity: 1, transform: "translateX(0px)" }}
@@ -225,7 +227,11 @@ export function PanelFrame({
 				wide && "@min-[1200px]/knowledge:w-[480px] sm:w-[440px]"
 			)}
 			data-testid={testId}
-			initial={reduced ? false : { opacity: 0, transform: "translateX(12px)" }}
+			initial={
+				reduced
+					? false
+					: { opacity: 0, transform: `translateX(${12 * inlineSign}px)` }
+			}
 			transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
 		>
 			{children}

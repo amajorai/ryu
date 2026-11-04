@@ -272,8 +272,8 @@ export function BankThreadPanel({
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread
-		? thread.title.trim() || "Untitled conversation"
-		: "New thread";
+		? thread.title.trim() || tl("Untitled conversation")
+		: tl("New thread");
 	const status = thread ? threadStatus(thread) : null;
 	return (
 		<motion.aside

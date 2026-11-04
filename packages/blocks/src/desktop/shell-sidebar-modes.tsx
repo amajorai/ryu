@@ -36,23 +36,26 @@ const BOT_MODE_AGENTS = [
 	},
 ] as const;
 
+/** Marks preview copy for the i18n extractor; the row translates it with tl() at render. */
+const t = (source: string): string => source;
+
 const TRUST_MODE_AI = [
 	{
 		id: "chatgpt",
 		name: "ChatGPT",
-		preview: "Subscription connected",
+		preview: t("Subscription connected"),
 		stamp: "Now",
 	},
 	{
 		id: "claude",
 		name: "Claude",
-		preview: "Context protected",
+		preview: t("Context protected"),
 		stamp: "Now",
 	},
 	{
 		id: "local",
 		name: "Ryu local",
-		preview: "Private fallback",
+		preview: t("Private fallback"),
 		stamp: "Local",
 	},
 ] as const;
@@ -135,11 +138,11 @@ function TrustModeAiRow({
 					<span className="flex min-w-0 items-center gap-2">
 						<span className="min-w-0 flex-1 truncate text-sm">{name}</span>
 						<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
-							{stamp}
+							{tl(stamp)}
 						</span>
 					</span>
 					<span className="truncate text-muted-foreground text-xs">
-						{preview}
+						{tl(preview)}
 					</span>
 				</span>
 			</button>

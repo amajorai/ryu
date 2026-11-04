@@ -11,6 +11,7 @@
   "Elapsed": "बीता समय",
   "Evaluated variants will appear as the campaign runs.": "अभियान चलने के साथ मूल्यांकित वैरिएंट दिखाई देंगे।",
   "Every evaluated variant and the enforced winner decision.": "हर मूल्यांकित वैरिएंट और लागू किया गया विजेता निर्णय।",
+  "Expected {key} to be a non-empty string.": "{key} एक गैर-रिक्त स्ट्रिंग होनी चाहिए।",
   "Experiment campaigns could not be loaded.": "प्रयोग अभियान लोड नहीं हो सके।",
   "Experiments could not be loaded": "प्रयोग लोड नहीं किए जा सके",
   "Failed": "विफल",

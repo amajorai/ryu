@@ -15,6 +15,7 @@ import {
 	parseDocument,
 } from "@/src/lib/api/documents.ts";
 import { stageImageUpload } from "@/src/lib/api/uploads.ts";
+import { attachmentErrors } from "@/src/lib/composer/attachment-errors.ts";
 
 /** A staged composer attachment. Images and documents share one list and one chip. */
 export type ComposerAttachment = AttachedImage & {
@@ -251,12 +252,10 @@ export async function readTextAttachment(
 	file: File
 ): Promise<StagedComposerFile> {
 	if (file.size > MAX_TEXT_ATTACHMENT_BYTES) {
-		throw new Error(
-			`${file.name} is too large to attach (max ${MAX_TEXT_ATTACHMENT_BYTES / (1024 * 1024)} MB)`
-		);
+		throw attachmentErrors.tooLarge(file.name, MAX_TEXT_ATTACHMENT_BYTES);
 	}
 	if (!(await looksLikeUtf8Text(file))) {
-		throw new Error(`${file.name} doesn't look like a text file`);
+		throw attachmentErrors.notText(file.name);
 	}
 	const text = await file.text();
 	return {
@@ -283,9 +282,7 @@ export function stageImageAndTextFiles(
 	const unsupported: string[] = [];
 	for (const file of files) {
 		const readError = (err: unknown) =>
-			err instanceof Error
-				? err.message
-				: tl("Could not read {name}", { name: file.name });
+			attachmentErrors.message(err, file.name, tl);
 		if (file.type.startsWith("image/")) {
 			void stageImageUpload(target, file)
 				.then(({ dataUrl, upload }) =>

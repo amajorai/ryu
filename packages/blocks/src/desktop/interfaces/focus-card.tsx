@@ -24,6 +24,7 @@ import {
 	focusAuthor,
 	focusReason,
 } from "./focus-model.ts";
+import { useInlineSign } from "./inline-direction.ts";
 import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
@@ -276,8 +277,9 @@ export function FocusCard({
 	upNext: FocusItem | undefined;
 }) {
 	const titleId = useId();
+	const inlineSign = useInlineSign();
 	const reduceMotion = useReducedMotion();
-	const offset = reduceMotion ? 0 : 24;
+	const offset = reduceMotion ? 0 : 24 * inlineSign;
 	return (
 		<div className="flex w-full flex-col gap-4">
 			<article

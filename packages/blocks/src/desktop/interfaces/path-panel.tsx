@@ -25,8 +25,8 @@ export function PathThreadPanel({
 	unit: PathUnit | undefined;
 }) {
 	const tl = useLiteralMessages();
-	const title = stop ? stopTitle(stop) : "New thread";
-	const meta = stop ? stopMeta(stop) : "Not started";
+	const title = stop ? stopTitle(stop) : tl("New thread");
+	const meta = stop ? stopMeta(stop) : tl("Not started");
 	const lead = stop?.agents[0];
 	return (
 		<GameSheet

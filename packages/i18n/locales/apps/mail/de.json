@@ -795,6 +795,7 @@
   "your browser": "dem Browser",
   "{age} ago": "vor {age}",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, one {# Anhang} other {# Anhänge}} bereit",
+  "{count, plural, one {# message} other {# messages}}": "{count, plural, one {# Nachricht} other {# Nachrichten}}",
   "{count} more": "{count} weitere",
   "{recipients} · {status}": "{recipients} · {status}",
   "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {Entwurf} sending {Wird gesendet} sent {Gesendet} failed {Fehlgeschlagen} inbound {Empfangen} outbound {Ausgehend} other {{value}}}"

@@ -51,13 +51,13 @@ export function ArenaThreadPanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
+	const tl = useLiteralMessages();
 	const title = thread
-		? thread.title.trim() || "Untitled thread"
-		: "New thread";
+		? thread.title.trim() || tl("Untitled thread")
+		: tl("New thread");
 	const lead = agentById(snapshot, leadAgentId);
 	const others = (thread?.agentIds.length ?? 0) - 1;
 	const status = thread ? threadStatus(thread) : null;
-	const tl = useLiteralMessages();
 	return (
 		<aside
 			aria-label={tl("Thread: {title}", { title })}

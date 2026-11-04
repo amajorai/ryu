@@ -9,6 +9,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { NotebookHome } from "./notebook-home.tsx";
 import {
@@ -63,6 +64,7 @@ export function NotebookInterface({
 	const size = useElementSize(rootRef);
 	const now = useMinuteClock();
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	// Unmeasured (server render, tests): assume a desktop window.
 	const overlay = size.width > 0 && size.width < OVERLAY_BELOW;
 
@@ -373,8 +375,8 @@ export function NotebookInterface({
 							<motion.aside
 								animate={{ x: 0 }}
 								className="absolute inset-y-0 start-0 z-30 w-[min(17rem,86%)] overflow-hidden border-sidebar-border border-e shadow-2xl"
-								exit={{ x: "-100%" }}
-								initial={{ x: "-100%" }}
+								exit={{ x: `${-100 * inlineSign}%` }}
+								initial={{ x: `${-100 * inlineSign}%` }}
 								key="drawer"
 								ref={drawerRef}
 								transition={slide}

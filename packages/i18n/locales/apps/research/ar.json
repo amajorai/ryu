@@ -11,6 +11,7 @@
   "Elapsed": "المدة المنقضية",
   "Evaluated variants will appear as the campaign runs.": "ستظهر المتغيرات التي تم تقييمها أثناء تشغيل الحملة.",
   "Every evaluated variant and the enforced winner decision.": "كل متغير تم تقييمه وقرار الفائز المطبَّق.",
+  "Expected {key} to be a non-empty string.": "يجب أن يكون {key} سلسلة نصية غير فارغة.",
   "Experiment campaigns could not be loaded.": "تعذّر تحميل حملات التجارب.",
   "Experiments could not be loaded": "تعذر تحميل التجارب",
   "Failed": "فشل",

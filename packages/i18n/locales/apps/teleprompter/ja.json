@@ -7,6 +7,8 @@
   "Back to the start": "最初に戻る",
   "Back to the start (Home)": "最初に戻る (Home)",
   "Couldn't load saved scripts: {error}": "保存済みの原稿を読み込めませんでした: {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "Ryu から下書きを読み込めなかったため、自動保存されません: {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "最新の変更を Ryu に保存できませんでした: {error}",
   "Delete script": "台本を削除",
   "Delete this script?": "この台本を削除しますか？",
   "Display": "ディスプレイ",

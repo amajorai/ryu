@@ -15,6 +15,7 @@
     "./media-recording": "./src/media-recording.ts",
     "./standalone": "./src/standalone.ts",
     "./companion-contracts": "./src/companion-contracts.ts",
+    "./companion-locale": "./src/companion-locale.ts",
     "./companion-theme": "./src/companion-theme.ts",
     "./notification-privacy": "./src/notification-privacy.ts",
     "./rpc": "./src/rpc.ts",

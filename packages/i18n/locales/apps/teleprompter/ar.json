@@ -7,6 +7,8 @@
   "Back to the start": "العودة إلى البداية",
   "Back to the start (Home)": "العودة إلى البداية (Home)",
   "Couldn't load saved scripts: {error}": "تعذّر تحميل النصوص المحفوظة: {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "تعذّر تحميل المسودة من Ryu، لذا لن يتم حفظها تلقائيًا: {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "تعذّر حفظ أحدث تغييراتك في Ryu: {error}",
   "Delete script": "حذف النص",
   "Delete this script?": "حذف هذا النص؟",
   "Display": "الشاشة",

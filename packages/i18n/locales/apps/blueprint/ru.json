@@ -626,6 +626,7 @@
   "Write": "Запись",
   "Write a caption…": "Добавьте подпись…",
   "Yes": "Да",
+  "Your change was saved, but the plan could not refresh: {error}": "Изменение сохранено, но не удалось обновить план: {error}",
   "Zoom": "Масштаб",
   "Zoom In": "Увеличить",
   "Zoom Out": "Уменьшить",

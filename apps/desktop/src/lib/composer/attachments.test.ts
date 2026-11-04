@@ -15,16 +15,16 @@ describe("readTextAttachment", () => {
 		const file = new File([new Uint8Array([0x00, 0x01, 0xff])], "notes.txt", {
 			type: "text/plain",
 		});
-		await expect(readTextAttachment(file)).rejects.toThrow(
-			"doesn't look like a text file"
-		);
+		await expect(readTextAttachment(file)).rejects.toMatchObject({
+			code: "not-text",
+		});
 	});
 
 	test("rejects invalid UTF-8 without NUL bytes", async () => {
 		const file = new File([new Uint8Array([0x41, 0xff, 0xfe, 0x42])], "a.log");
-		await expect(readTextAttachment(file)).rejects.toThrow(
-			"doesn't look like a text file"
-		);
+		await expect(readTextAttachment(file)).rejects.toMatchObject({
+			code: "not-text",
+		});
 	});
 
 	test("keeps TypeScript sources typed as video/mp2t", async () => {

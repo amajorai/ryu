@@ -7,6 +7,8 @@
   "Back to the start": "Revenir au début",
   "Back to the start (Home)": "Revenir au début (Début)",
   "Couldn't load saved scripts: {error}": "Impossible de charger les scripts enregistrés : {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "Impossible de charger votre brouillon depuis Ryu ; il n’est donc pas enregistré automatiquement : {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "Impossible d’enregistrer vos dernières modifications dans Ryu : {error}",
   "Delete script": "Supprimer le script",
   "Delete this script?": "Supprimer ce script ?",
   "Display": "Écran",

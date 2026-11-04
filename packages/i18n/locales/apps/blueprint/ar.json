@@ -626,6 +626,7 @@
   "Write": "كتابة",
   "Write a caption…": "اكتب تعليقًا توضيحيًا…",
   "Yes": "نعم",
+  "Your change was saved, but the plan could not refresh: {error}": "تم حفظ التغيير، لكن تعذّر تحديث الخطة: {error}",
   "Zoom": "التكبير",
   "Zoom In": "تكبير",
   "Zoom Out": "تصغير",

@@ -262,6 +262,22 @@ pub const APPROVAL_REPLY_SENDER_MESSAGE: Template = |_| format!("the sender of t
 pub const APPROVAL_REPLY_EVERYONE_MESSAGE: Template =
     |_| format!("the sender and everyone else on the message");
 
+// ---- activity feed row for a decided request --------------------------------
+// `{title}` is the request's own title, already in the reader's language.
+
+pub const APPROVAL_ACTIVITY_APPROVED_MESSAGE: Template =
+    |arg| format!("Request approved: {title}", title = arg("title"));
+pub const APPROVAL_ACTIVITY_REJECTED_MESSAGE: Template =
+    |arg| format!("Request rejected: {title}", title = arg("title"));
+pub const APPROVAL_ACTIVITY_EXPIRED_MESSAGE: Template = |arg| {
+    format!(
+        "Request expired without a decision: {title}",
+        title = arg("title")
+    )
+};
+pub const APPROVAL_ACTIVITY_CANCELLED_MESSAGE: Template =
+    |arg| format!("Request cancelled: {title}", title = arg("title"));
+
 /// Every template in this module, for the catalog round-trip test; add each
 /// new `*_MESSAGE` here too.
 #[cfg(test)]
@@ -324,4 +340,8 @@ pub(super) const ALL: &[Template] = &[
     APPROVAL_REPLY_TO_MESSAGE_ANONYMOUS_SUMMARY_MESSAGE,
     APPROVAL_REPLY_SENDER_MESSAGE,
     APPROVAL_REPLY_EVERYONE_MESSAGE,
+    APPROVAL_ACTIVITY_APPROVED_MESSAGE,
+    APPROVAL_ACTIVITY_REJECTED_MESSAGE,
+    APPROVAL_ACTIVITY_EXPIRED_MESSAGE,
+    APPROVAL_ACTIVITY_CANCELLED_MESSAGE,
 ];

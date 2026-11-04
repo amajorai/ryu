@@ -4,6 +4,7 @@ import {
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import {
@@ -22,6 +23,7 @@ import type {
 	SkillRelationGraph,
 	SkillRelationNode,
 } from "@/src/lib/skill-relations.ts";
+import { skillRelationNodeLabel } from "./skill-relation-node-label.ts";
 
 // The skill-relations graph's node renderer, layout and edge/label helpers.
 
@@ -72,6 +74,7 @@ export function nodeSize(node: SkillRelationNode): number {
 }
 
 export function RelationNode({ data, selected }: NodeProps<FlowRelationNode>) {
+	const tl = useLiteralMessages();
 	const usage =
 		data.usageCount === undefined
 			? null
@@ -81,7 +84,7 @@ export function RelationNode({ data, selected }: NodeProps<FlowRelationNode>) {
 	} = { "--skill-relation-size": `${nodeSize(data)}px` };
 	return (
 		<div
-			aria-label={`${data.kind}: ${data.label}`}
+			aria-label={skillRelationNodeLabel(data.kind, data.label, tl)}
 			className={`relative flex shrink-0 flex-col items-center justify-center rounded-full border px-2 py-2 text-center transition-[opacity,filter] ${relationNodeClass(data)} ${data.dimmed ? "opacity-20 grayscale" : ""} ${selected ? "ring-2 ring-ring ring-offset-2 ring-offset-background" : ""}`}
 			data-skill-relation-size=""
 			data-testid={`skill-relation-node-${data.kind}`}

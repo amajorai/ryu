@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode, RefObject } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import { type Ticket, ticketStatusHint } from "./tickets-model.ts";
 import { TicketsSidebar } from "./tickets-page-sidebar.tsx";
@@ -64,6 +65,7 @@ export function TicketsPage({
 	threadView: ReactNode;
 }) {
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const subject = ticket?.thread.title || tr("New ticket");
 	const messages = ticket?.thread.messageCount ?? 0;
@@ -222,8 +224,8 @@ export function TicketsPage({
 							<motion.div
 								animate={{ opacity: 1, x: 0 }}
 								className="absolute inset-y-0 end-0 z-20 flex max-w-full"
-								exit={{ opacity: 0, x: reduceMotion ? 0 : 24 }}
-								initial={{ opacity: 0, x: reduceMotion ? 0 : 24 }}
+								exit={{ opacity: 0, x: reduceMotion ? 0 : 24 * inlineSign }}
+								initial={{ opacity: 0, x: reduceMotion ? 0 : 24 * inlineSign }}
 								key="details"
 								transition={{
 									duration: reduceMotion ? 0 : 0.18,

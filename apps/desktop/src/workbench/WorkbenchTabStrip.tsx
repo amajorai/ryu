@@ -8,6 +8,7 @@ import {
 } from "@ryu/ui/components/context-menu.tsx";
 import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { useReorderShift } from "@ryu/ui/hooks/use-reorder-shift.tsx";
+import { pointerBefore } from "@ryu/ui/lib/pointer-before.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type {
 	WorkbenchGroup,
@@ -198,8 +199,14 @@ export function WorkbenchTabStrip({
 		if (!(tab && overItemId)) {
 			return { before: false, overItemId: null };
 		}
-		const rect = tab.getBoundingClientRect();
-		return { before: event.clientX < rect.left + rect.width / 2, overItemId };
+		return {
+			before: pointerBefore(
+				event.clientX,
+				tab.getBoundingClientRect(),
+				direction
+			),
+			overItemId,
+		};
 	};
 
 	const onStripDragOver = (event: DragEvent<HTMLDivElement>) => {

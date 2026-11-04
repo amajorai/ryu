@@ -32,7 +32,7 @@ export function reorderDestination(
 
 /**
  * Per-item offsets (px along the axis) that preview `activeId` moving next to
- * `overId`. `slots` must be in visual order. Items that do not move are left
+ * `overId`. `slots` must be in reading order (see {@link axisSlot}). Items that do not move are left
  * out of the map.
  */
 export function computeReorderShifts(
@@ -80,4 +80,34 @@ export function computeReorderShifts(
 	}
 	shifts.set(source.id, landing.start - source.start);
 	return shifts;
+}
+
+/**
+ * The slot an item at `rect` fills along `axis`, in reading order. A
+ * right-to-left row is measured in mirrored coordinates (negated, so its
+ * first item has the smallest start) so slots sort in DOM order and the
+ * logical `before` a surface reports lines up with the preview; offsets
+ * computed in that space are negated back with {@link physicalOffset}.
+ */
+export function axisSlot(
+	id: string,
+	rect: { bottom: number; left: number; right: number; top: number },
+	axis: "x" | "y",
+	rtl: boolean
+): ReorderSlot {
+	if (axis === "y") {
+		return { id, start: rect.top, end: rect.bottom };
+	}
+	return rtl
+		? { id, start: -rect.right, end: -rect.left }
+		: { id, start: rect.left, end: rect.right };
+}
+
+/** An offset computed in {@link axisSlot} space, as a screen translation. */
+export function physicalOffset(
+	offset: number,
+	axis: "x" | "y",
+	rtl: boolean
+): number {
+	return axis === "x" && rtl ? -offset : offset;
 }

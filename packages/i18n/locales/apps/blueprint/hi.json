@@ -626,6 +626,7 @@
   "Write": "लेखन",
   "Write a caption…": "कैप्शन लिखें…",
   "Yes": "हाँ",
+  "Your change was saved, but the plan could not refresh: {error}": "आपका बदलाव सहेजा गया, लेकिन प्लान रीफ़्रेश नहीं हो सका: {error}",
   "Zoom": "ज़ूम",
   "Zoom In": "ज़ूम इन करें",
   "Zoom Out": "ज़ूम आउट करें",

@@ -46,6 +46,7 @@ import {
 	HubThreadSheet,
 	useHubClock,
 } from "./hub-parts.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
@@ -64,6 +65,7 @@ export function HubInterface({
 }: InterfaceRendererProps<Record<string, never>>) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	const now = useHubClock();
 	const isOpen = threadView !== null && threadView !== undefined;
 	const [awakeState, setAwake] = useState(isOpen);
@@ -270,7 +272,7 @@ export function HubInterface({
 		);
 	}
 
-	const slide = reduceMotion ? 0 : 56;
+	const slide = reduceMotion ? 0 : 56 * inlineSign;
 
 	return (
 		<div

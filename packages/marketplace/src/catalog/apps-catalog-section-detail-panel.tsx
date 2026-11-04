@@ -4,7 +4,7 @@ import {
 	SquareLock01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	Empty,
@@ -163,9 +163,12 @@ export function AppDetailPanel({
 	// surface as "undocumented, unlicensed" — technically true of the card, and
 	// completely misleading about the listing. So no detail ⇒ no grade shown.
 	// Memoized so scrolling the panel does not re-run every check per frame.
+	// runScorecard translates when it runs, so the active language's version is
+	// a dependency: switching languages or a late catalog load regrades it.
+	const i18nVersion = useOptionalI18n()?.version;
 	const scorecard = useMemo(
 		() => (detail ? runScorecard(item?.entry ?? null, detail) : null),
-		[item?.entry, detail]
+		[item?.entry, detail, i18nVersion]
 	);
 
 	if (!(selectedId && item)) {

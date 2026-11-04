@@ -93,10 +93,10 @@ export function logicalSpan(
  * ArrowLeft moves toward the inline end, so it is reported as ArrowRight
  * (and vice versa). Other keys pass through unchanged.
  */
-export function logicalArrowKey(
-	key: string,
+export function logicalArrowKey<Key extends string>(
+	key: Key,
 	element: Element | null | undefined
-): string {
+): Key | "ArrowLeft" | "ArrowRight" {
 	if (key !== "ArrowLeft" && key !== "ArrowRight") {
 		return key;
 	}

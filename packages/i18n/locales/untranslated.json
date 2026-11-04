@@ -13744,6 +13744,25 @@
     ],
     "reason": "French word is 'tests'"
   },
+  "the {name}": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders and symbols only; the language has no article or reorders nothing"
+  },
+  "the {name} ({price}, {duration})": {
+    "locales": [
+      "hi",
+      "ko",
+      "ru"
+    ],
+    "reason": "Placeholders and symbols only; the language has no article or reorders nothing"
+  },
   "tokens": {
     "locales": [
       "es",
@@ -14745,6 +14764,21 @@
     ],
     "reason": "unit"
   },
+  "{from} → {to}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders and symbols only; the language has no article or reorders nothing"
+  },
   "{fruit} · {plotName}": {
     "locales": [
       "ar",
@@ -14846,6 +14880,12 @@
       "zh-CN"
     ],
     "reason": "Only placeholders; the key name and the translated verb are filled in."
+  },
+  "{kind, select, agent {Agent: {name}} skill {Skill: {name}} other {Tool: {name}}}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Agent, Skill and Tool are the same words in German"
   },
   "{kindLabel} — Ryu Marketplace": {
     "locales": [
@@ -15297,6 +15337,21 @@
     ],
     "reason": "Only placeholders and punctuation."
   },
+  "{name}: {problem}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders and symbols only; the language has no article or reorders nothing"
+  },
   "{name}: {summary}": {
     "locales": [
       "ar",
@@ -15373,6 +15428,21 @@
       "ko"
     ],
     "reason": "The translation uses a range mark (\"{start}~{end}\") with no words to translate."
+  },
+  "{parent} → {child}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders and symbols only; the language has no article or reorders nothing"
   },
   "{path}: {reason}": {
     "locales": [
@@ -16127,6 +16197,21 @@
       "pt-BR"
     ],
     "reason": "'tokens' is the glossary term in these locales"
+  },
+  "{toolkit} → {provider}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders and symbols only; the language has no article or reorders nothing"
   },
   "{total, plural, one {# contribution} other {# contributions}}": {
     "locales": [

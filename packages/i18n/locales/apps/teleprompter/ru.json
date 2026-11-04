@@ -7,6 +7,8 @@
   "Back to the start": "В начало",
   "Back to the start (Home)": "В начало (Home)",
   "Couldn't load saved scripts: {error}": "Не удалось загрузить сохранённые сценарии: {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "Не удалось загрузить черновик из Ryu, поэтому он не сохраняется автоматически: {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "Не удалось сохранить последние изменения в Ryu: {error}",
   "Delete script": "Удалить сценарий",
   "Delete this script?": "Удалить этот сценарий?",
   "Display": "Дисплей",

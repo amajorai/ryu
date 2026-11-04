@@ -5,6 +5,7 @@ import type {
 	SmartRoutingConfig,
 } from "@/src/lib/api/gateway.ts";
 import { parsePoolList } from "@/src/lib/api/gateway.ts";
+import { parseRouteWeight } from "@/src/lib/route-weight-input.ts";
 import type { RuleRow } from "./classify-tier.tsx";
 
 /**
@@ -20,7 +21,7 @@ export function smartRoutingRulesError(
 	const hasInvalidRule =
 		ruleEditorVisible &&
 		rules.some((rule) => {
-			const weight = Number(rule.weight);
+			const weight = parseRouteWeight(rule.weight, 0);
 			return (
 				(routerType !== "random" && !rule.description.trim()) ||
 				!rule.model.trim() ||
@@ -34,7 +35,7 @@ export function smartRoutingRulesError(
 	if (
 		routerType === "random" &&
 		rules.filter((rule) => {
-			const weight = Number(rule.weight);
+			const weight = parseRouteWeight(rule.weight, 0);
 			return rule.model.trim() && Number.isFinite(weight) && weight > 0;
 		}).length < 2
 	) {
@@ -67,7 +68,7 @@ export function buildSmartRoutingConfig({
 		.map((r) => ({
 			description: r.description.trim(),
 			model: r.model.trim(),
-			weight: Number(r.weight),
+			weight: parseRouteWeight(r.weight, 0),
 		}))
 		.filter(
 			(r) =>

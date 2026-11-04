@@ -29,6 +29,7 @@
   "Group deleted": "Группа удалена",
   "Group updated": "Группа обновлена",
   "Groups couldn't load": "Не удалось загрузить группы",
+  "Groups loaded, but agents could not: {error}": "Группы загружены, но агенты — нет: {error}",
   "Groups returned an invalid group record.": "Группы вернули недопустимую запись группы.",
   "Groups returned an invalid list.": "Группы вернули недопустимый список.",
   "Groups returned an unexpected agent catalog.": "Группы вернули непредвиденный каталог агентов.",

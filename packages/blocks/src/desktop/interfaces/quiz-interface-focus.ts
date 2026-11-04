@@ -7,6 +7,7 @@ import {
 	useLayoutEffect,
 	useRef,
 } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import { focusTile, revealTile, type TileHandlers } from "./quiz-board.tsx";
 import type { FocusTarget, Overlay } from "./quiz-interface-state.ts";
@@ -186,7 +187,12 @@ export function quizTileHandlers({
 				return;
 			}
 			event.preventDefault();
-			const to = moveOnBoard(board, from, event.key, toBoardEdge);
+			const to = moveOnBoard(
+				board,
+				from,
+				logicalArrowKey(event.key, rootRef.current),
+				toBoardEdge
+			);
 			const next = tileAt(board, to);
 			if (next) {
 				setRovingId(next.thread.id);

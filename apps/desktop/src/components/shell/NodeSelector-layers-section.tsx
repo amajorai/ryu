@@ -13,6 +13,7 @@ import {
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { TUNNEL_CAPABILITY } from "@/src/lib/api/mesh.ts";
 import { enableApp } from "@/src/lib/api/plugins.ts";
+import { providerArrow } from "@/src/lib/i18n/version-arrow.ts";
 import { type LayerOption, NodeLayerMenu } from "./NodeLayerMenu.tsx";
 import { PanelSection } from "./NodePanelNav.tsx";
 import {
@@ -73,7 +74,7 @@ export function LayersSection({
 		try {
 			await enableApp(target, provider.id);
 			await refresh();
-			sileo.success({ title: `${label} → ${provider.name}` });
+			sileo.success({ title: providerArrow(label, provider.name, tl) });
 		} catch (e) {
 			sileo.error({
 				title:
@@ -98,7 +99,7 @@ export function LayersSection({
 		}
 		try {
 			await select(entry.capability, provider.id);
-			sileo.success({ title: `${label} → ${provider.name}` });
+			sileo.success({ title: providerArrow(label, provider.name, tl) });
 		} catch (e) {
 			// Core's 409 names the plugin that would break and the binding_error
 			// code; surface both rather than a bare "request failed".
@@ -227,7 +228,7 @@ export function DecisionModelsSection({
 			} finally {
 				await refresh();
 			}
-			sileo.success({ title: `${label} → ${provider.name}` });
+			sileo.success({ title: providerArrow(label, provider.name, tl) });
 		} catch (error) {
 			sileo.error({
 				title:
@@ -248,7 +249,7 @@ export function DecisionModelsSection({
 		}
 		try {
 			await select(entry.capability, provider.id);
-			sileo.success({ title: `${label} → ${provider.name}` });
+			sileo.success({ title: providerArrow(label, provider.name, tl) });
 		} catch (error) {
 			sileo.error({ title: describeBindingFailure(error, provider.name, tl) });
 		}

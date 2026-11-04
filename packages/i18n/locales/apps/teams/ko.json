@@ -29,6 +29,7 @@
   "Group deleted": "그룹을 삭제했습니다",
   "Group updated": "그룹을 업데이트했습니다",
   "Groups couldn't load": "그룹을 불러올 수 없습니다",
+  "Groups loaded, but agents could not: {error}": "그룹은 로드되었지만 에이전트를 로드하지 못했습니다: {error}",
   "Groups returned an invalid group record.": "그룹에서 잘못된 그룹 레코드를 반환했습니다.",
   "Groups returned an invalid list.": "그룹에서 잘못된 목록을 반환했습니다.",
   "Groups returned an unexpected agent catalog.": "그룹에서 예상치 못한 에이전트 카탈로그를 반환했습니다.",

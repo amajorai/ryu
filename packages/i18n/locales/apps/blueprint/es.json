@@ -626,6 +626,7 @@
   "Write": "Escritura",
   "Write a caption…": "Añadir un pie de foto…",
   "Yes": "Sí",
+  "Your change was saved, but the plan could not refresh: {error}": "El cambio se guardó, pero no se pudo actualizar el plan: {error}",
   "Zoom": "Zoom",
   "Zoom In": "Acercar",
   "Zoom Out": "Alejar",

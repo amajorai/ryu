@@ -9,6 +9,7 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import type { ModelRouterType } from "@/src/lib/api/gateway.ts";
+import { routeWeightInvalid } from "@/src/lib/route-weight-input.ts";
 import type { RuleRow } from "./AgentSmartRouteOverride-load.ts";
 
 export function RulesSection({
@@ -73,6 +74,7 @@ export function RulesSection({
 								/>
 								{routerType === "random" ? (
 									<Input
+										aria-invalid={routeWeightInvalid(rule.weight)}
 										aria-label={tl("Rule {number} weight", { number: idx + 1 })}
 										inputMode="decimal"
 										min={0}

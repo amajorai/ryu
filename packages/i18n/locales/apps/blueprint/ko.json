@@ -626,6 +626,7 @@
   "Write": "쓰기",
   "Write a caption…": "캡션 입력…",
   "Yes": "예",
+  "Your change was saved, but the plan could not refresh: {error}": "변경 사항은 저장되었지만 계획을 새로 고치지 못했습니다: {error}",
   "Zoom": "확대/축소",
   "Zoom In": "확대",
   "Zoom Out": "축소",

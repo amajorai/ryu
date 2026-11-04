@@ -795,6 +795,7 @@
   "your browser": "ブラウザ",
   "{age} ago": "{age} 前",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, other {添付ファイル # 件の準備完了}}",
+  "{count, plural, one {# message} other {# messages}}": "{count, plural, other {# 件のメッセージ}}",
   "{count} more": "ほか {count} 件",
   "{recipients} · {status}": "{recipients} · {status}",
   "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {下書き} sending {送信中} sent {送信済み} failed {失敗} inbound {受信} outbound {発信} other {{value}}}"

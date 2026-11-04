@@ -145,6 +145,7 @@
   "The Ryu host bridge did not return a workspace.": "Die Ryu-Host-Bridge hat keinen Workspace zurückgegeben.",
   "The Ryu host bridge is unavailable.": "Die Ryu-Host-Bridge ist nicht verfügbar.",
   "The inbox is clear.": "Der Posteingang ist leer.",
+  "The model returned an invalid {field}.": "Das Modell hat ein ungültiges Feld „{field}“ zurückgegeben.",
   "The public board could not complete that request.": "Das öffentliche Board konnte diese Anfrage nicht abschließen.",
   "The public board did not confirm your request. Try again.": "Das öffentliche Board hat die Anfrage nicht bestätigt. Erneut versuchen.",
   "The public board is taking a moment to respond. Try again.": "Das öffentliche Board antwortet verzögert. Erneut versuchen.",

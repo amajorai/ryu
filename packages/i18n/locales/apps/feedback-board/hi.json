@@ -145,6 +145,7 @@
   "The Ryu host bridge did not return a workspace.": "Ryu होस्ट ब्रिज ने कोई वर्कस्पेस नहीं लौटाया।",
   "The Ryu host bridge is unavailable.": "Ryu होस्ट ब्रिज उपलब्ध नहीं है.",
   "The inbox is clear.": "इनबॉक्स खाली है।",
+  "The model returned an invalid {field}.": "मॉडल ने अमान्य {field} लौटाया।",
   "The public board could not complete that request.": "सार्वजनिक बोर्ड वह अनुरोध पूरा नहीं कर सका।",
   "The public board did not confirm your request. Try again.": "सार्वजनिक बोर्ड ने आपके अनुरोध की पुष्टि नहीं की। फिर से कोशिश करें।",
   "The public board is taking a moment to respond. Try again.": "सार्वजनिक बोर्ड जवाब देने में समय ले रहा है. फिर से कोशिश करें.",

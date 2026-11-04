@@ -238,6 +238,10 @@ export function GameSheet({
 }) {
 	const tl = useLiteralMessages();
 	const reduced = useReducedMotion();
+	// Callers pass English catalog literals (or already-translated text, which
+	// passes through), so translate the word before it fills the tooltip.
+	const backText = tl(backLabel ?? "Back");
+	const closeText = tl(closeLabel);
 	return (
 		<motion.aside
 			animate={{ opacity: 1, transform: "translateX(0px)" }}
@@ -258,9 +262,9 @@ export function GameSheet({
 			<header className="flex shrink-0 items-center gap-2.5 py-2.5 ps-2.5 pe-2.5">
 				{onBack ? (
 					<GameIconButton
-						label={backLabel ?? "Back"}
+						label={backText}
 						onClick={onBack}
-						title={tl("{label} (Esc)", { label: backLabel ?? "Back" })}
+						title={tl("{label} (Esc)", { label: backText })}
 					>
 						<ArrowLeft
 							aria-hidden="true"
@@ -302,9 +306,9 @@ export function GameSheet({
 					) : null}
 				</div>
 				<GameIconButton
-					label={closeLabel}
+					label={closeText}
 					onClick={onClose}
-					title={tl("{label} (Esc)", { label: closeLabel })}
+					title={tl("{label} (Esc)", { label: closeText })}
 				>
 					<X aria-hidden="true" className="size-5" strokeWidth={2.5} />
 				</GameIconButton>

@@ -7,6 +7,8 @@
   "Back to the start": "Volver al inicio",
   "Back to the start (Home)": "Volver al inicio (Inicio)",
   "Couldn't load saved scripts: {error}": "No se pudieron cargar los guiones guardados: {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "No se pudo cargar el borrador desde Ryu, por lo que no se guarda automáticamente: {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "No se pudieron guardar los últimos cambios en Ryu: {error}",
   "Delete script": "Eliminar guion",
   "Delete this script?": "¿Eliminar este guion?",
   "Display": "Pantalla",

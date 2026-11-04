@@ -11,6 +11,7 @@
   "Elapsed": "Прошло",
   "Evaluated variants will appear as the campaign runs.": "Оцененные варианты будут появляться по ходу кампании.",
   "Every evaluated variant and the enforced winner decision.": "Каждый оцененный вариант и примененное решение о победителе.",
+  "Expected {key} to be a non-empty string.": "{key} должно быть непустой строкой.",
   "Experiment campaigns could not be loaded.": "Не удалось загрузить кампании экспериментов.",
   "Experiments could not be loaded": "Не удалось загрузить эксперименты",
   "Failed": "Ошибка",

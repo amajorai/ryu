@@ -145,6 +145,7 @@
   "The Ryu host bridge did not return a workspace.": "Мост хоста Ryu не вернул рабочее пространство.",
   "The Ryu host bridge is unavailable.": "Мост хоста Ryu недоступен.",
   "The inbox is clear.": "Входящие пусты.",
+  "The model returned an invalid {field}.": "Модель вернула недопустимое поле {field}.",
   "The public board could not complete that request.": "Публичной доске не удалось выполнить этот запрос.",
   "The public board did not confirm your request. Try again.": "Публичная доска не подтвердила ваш запрос. Повторите попытку.",
   "The public board is taking a moment to respond. Try again.": "Публичная доска отвечает с задержкой. Повторите попытку.",

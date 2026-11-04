@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import {
 	gatewayAccountErrorMessage,
 	ProviderRow,
@@ -175,11 +176,13 @@ async function mirrorProviderKey(
 		return null;
 	} catch (cause) {
 		const detail = gatewayAccountErrorMessage(cause, "unknown error");
-		const change = mirror.outcome === "saved" ? "saved to" : "removed from";
-		return new Error(
-			`Key ${change} the Gateway, but the OS credential store could not be updated: ${detail}`,
-			{ cause }
+		const message = tl(
+			mirror.outcome === "saved"
+				? "Key saved to the Gateway, but the OS credential store could not be updated: {detail}"
+				: "Key removed from the Gateway, but the OS credential store could not be updated: {detail}",
+			{ detail }
 		);
+		return new Error(message, { cause });
 	}
 }
 

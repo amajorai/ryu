@@ -7,6 +7,8 @@
   "Back to the start": "처음으로 돌아가기",
   "Back to the start (Home)": "처음으로 돌아가기 (Home)",
   "Couldn't load saved scripts: {error}": "저장된 원고를 불러올 수 없습니다: {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "Ryu에서 초안을 불러오지 못해 자동으로 저장되지 않습니다: {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "최근 변경 사항을 Ryu에 저장하지 못했습니다: {error}",
   "Delete script": "스크립트 삭제",
   "Delete this script?": "이 스크립트를 삭제할까요?",
   "Display": "디스플레이",

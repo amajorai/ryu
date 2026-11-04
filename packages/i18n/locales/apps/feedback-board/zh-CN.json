@@ -145,6 +145,7 @@
   "The Ryu host bridge did not return a workspace.": "Ryu 主机桥未返回工作区。",
   "The Ryu host bridge is unavailable.": "Ryu 主机桥接不可用。",
   "The inbox is clear.": "收件箱已清空。",
+  "The model returned an invalid {field}.": "模型返回了无效的 {field}。",
   "The public board could not complete that request.": "公开看板无法完成该请求。",
   "The public board did not confirm your request. Try again.": "公开看板未确认你的请求。请重试。",
   "The public board is taking a moment to respond. Try again.": "公开看板响应较慢。请重试。",

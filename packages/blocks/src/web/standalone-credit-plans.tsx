@@ -32,6 +32,7 @@ import {
 	Zap,
 } from "lucide-react";
 import { useState } from "react";
+import { creditPlanKeyTarget } from "./credit-plan-keys.ts";
 import { depositFeeAmounts } from "./pricing-deposit-fee-format.ts";
 import motionStyles from "./pricing-motion.module.css";
 
@@ -66,7 +67,9 @@ export function StandaloneCreditPlans({
 	balanceMicroUsd?: number | null;
 }) {
 	const tl = useLiteralMessages();
-	const locale = useOptionalI18n()?.locale;
+	const i18n = useOptionalI18n();
+	const locale = i18n?.locale;
+	const direction = i18n?.direction === "rtl" ? "rtl" : "ltr";
 	const fees = depositFeeAmounts(locale);
 	const money = (cents: number) => formatCents(locale, cents);
 	const [choice, setChoice] = useState<"topup" | StandaloneCreditTierId>(
@@ -152,16 +155,12 @@ export function StandaloneCreditPlans({
 												"accelerate",
 											] as const;
 											const index = keys.indexOf(choice);
-											const next =
-												event.key === "Home"
-													? 0
-													: event.key === "End"
-														? 2
-														: ["ArrowRight", "ArrowDown"].includes(event.key)
-															? (index + 1) % 3
-															: ["ArrowLeft", "ArrowUp"].includes(event.key)
-																? (index + 2) % 3
-																: null;
+											const next = creditPlanKeyTarget(
+												event.key,
+												index,
+												keys.length,
+												direction
+											);
 											if (next === null) {
 												return;
 											}

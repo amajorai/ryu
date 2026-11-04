@@ -626,6 +626,7 @@
   "Write": "Écriture",
   "Write a caption…": "Ajoutez une légende…",
   "Yes": "Oui",
+  "Your change was saved, but the plan could not refresh: {error}": "Votre modification a été enregistrée, mais le plan n’a pas pu être actualisé : {error}",
   "Zoom": "Zoom",
   "Zoom In": "Zoom avant",
   "Zoom Out": "Zoom arrière",

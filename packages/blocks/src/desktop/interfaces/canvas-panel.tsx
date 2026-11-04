@@ -14,6 +14,7 @@ import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
 import { isTypingTarget } from "./canvas-hooks.ts";
 import type { CanvasCardModel } from "./canvas-model.ts";
+import { useInlineSign } from "./inline-direction.ts";
 import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
@@ -70,11 +71,12 @@ export function CanvasThreadPanel({
 }) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	const title = card
-		? card.thread.title.trim() || "Untitled thread"
-		: "New thread";
+		? card.thread.title.trim() || tl("Untitled thread")
+		: tl("New thread");
 	const lead = card?.lead;
-	const offset = reduceMotion ? 0 : 24;
+	const offset = reduceMotion ? 0 : 24 * inlineSign;
 	return (
 		<motion.aside
 			animate={{ opacity: 1, x: 0 }}

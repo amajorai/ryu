@@ -32,12 +32,14 @@ fn epoch_secs(rfc3339: &str) -> i64 {
 // authenticated caller (`plugin_host::record_app_event_activity`). Core holds no
 // per-app mapping or subscribe-loop for them.
 
-/// An approval-inbox event (a request was raised or decided).
-pub fn from_approval_event(event: &ApprovalEvent) -> ActivityItem {
+/// An approval-inbox event (a request was raised or decided), worded in
+/// `locale` (see [`super::localized`]).
+pub fn from_approval_event(event: &ApprovalEvent, locale: &str) -> ActivityItem {
     match event {
         ApprovalEvent::Created { request } => {
-            ActivityItem::new("approval", "approvals", request.title.clone())
-                .with_body(Some(request.summary.clone()))
+            let (title, body) = super::localized::approval_activity_text(request, locale);
+            ActivityItem::new("approval", "approvals", title)
+                .with_body(Some(body))
                 .with_agent(request.agent_id.clone())
                 .with_session(request.conversation_id.clone())
                 .with_level(ActivityLevel::Info)
@@ -60,20 +62,17 @@ pub fn from_approval_event(event: &ApprovalEvent) -> ActivityItem {
                 .as_deref()
                 .map(epoch_secs)
                 .unwrap_or_else(|| chrono::Utc::now().timestamp());
-            ActivityItem::new(
-                "approval",
-                "approvals",
-                format!("Approval {}: {}", request.status.as_str(), request.title),
-            )
-            .with_body(Some(request.summary.clone()))
-            .with_agent(request.agent_id.clone())
-            .with_session(request.conversation_id.clone())
-            .with_level(level)
-            .with_metadata(serde_json::json!({
-                "approval_id": request.id,
-                "status": request.status,
-            }))
-            .with_created_at(created)
+            let (title, body) = super::localized::approval_activity_text(request, locale);
+            ActivityItem::new("approval", "approvals", title)
+                .with_body(Some(body))
+                .with_agent(request.agent_id.clone())
+                .with_session(request.conversation_id.clone())
+                .with_level(level)
+                .with_metadata(serde_json::json!({
+                    "approval_id": request.id,
+                    "status": request.status,
+                }))
+                .with_created_at(created)
         }
     }
 }
@@ -94,7 +93,8 @@ pub fn spawn(activity: ActivityStore, approvals: &crate::approvals::ApprovalEngi
             loop {
                 match rx.recv().await {
                     Ok(event) => {
-                        if let Err(e) = act.record(from_approval_event(&event)).await {
+                        let locale = crate::i18n::locale::node_locale().await;
+                        if let Err(e) = act.record(from_approval_event(&event, locale)).await {
                             tracing::warn!("activity: failed to record approval event: {e:#}");
                         }
                     }

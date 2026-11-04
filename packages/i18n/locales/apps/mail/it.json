@@ -795,6 +795,7 @@
   "your browser": "il browser",
   "{age} ago": "{age} fa",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, one {# allegato pronto} other {# allegati pronti}}",
+  "{count, plural, one {# message} other {# messages}}": "{count, plural, one {# messaggio} other {# messaggi}}",
   "{count} more": "Altri {count}",
   "{recipients} · {status}": "{recipients} · {status}",
   "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {Bozza} sending {Invio in corso} sent {Inviato} failed {Non riuscito} inbound {Ricevuto} outbound {In uscita} other {{value}}}"

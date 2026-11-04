@@ -29,6 +29,7 @@
   "Group deleted": "已删除群组",
   "Group updated": "已更新群组",
   "Groups couldn't load": "无法加载群组",
+  "Groups loaded, but agents could not: {error}": "群组已加载，但智能体无法加载：{error}",
   "Groups returned an invalid group record.": "群组返回了无效的群组记录。",
   "Groups returned an invalid list.": "群组返回了无效的列表。",
   "Groups returned an unexpected agent catalog.": "群组返回了意外的智能体目录。",

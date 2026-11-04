@@ -1,4 +1,3 @@
-import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -44,8 +43,8 @@ export function TickerThreadPanel({
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread
-		? thread.title.trim() || tr("Untitled thread")
-		: "New thread";
+		? thread.title.trim() || tl("Untitled thread")
+		: tl("New thread");
 	const status = thread ? threadStatus(thread) : null;
 	return (
 		<motion.aside

@@ -7,6 +7,8 @@
   "Back to the start": "回到开头",
   "Back to the start (Home)": "回到开头 (Home)",
   "Couldn't load saved scripts: {error}": "无法加载已保存的稿件：{error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "无法从 Ryu 加载草稿，因此不会自动保存：{error}",
+  "Couldn't save your latest changes to Ryu: {error}": "无法将最新更改保存到 Ryu：{error}",
   "Delete script": "删除脚本",
   "Delete this script?": "删除此脚本？",
   "Display": "显示器",

@@ -143,7 +143,7 @@ export function TeamMark({
 
 export function threadTitle(thread: InterfaceThread | undefined): string {
 	if (!thread) {
-		return "New thread";
+		return tr("New thread");
 	}
 	return thread.title.trim() || tr("Untitled thread");
 }

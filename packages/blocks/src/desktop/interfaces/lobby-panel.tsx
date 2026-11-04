@@ -28,8 +28,8 @@ export function LobbyThreadPanel({
 }) {
 	const tl = useLiteralMessages();
 	const title = thread
-		? thread.title.trim() || "Untitled thread"
-		: "New thread";
+		? thread.title.trim() || tl("Untitled thread")
+		: tl("New thread");
 	const lead = agentById(snapshot, thread?.agentIds[0]);
 	const others = Math.max(0, (thread?.agentIds.length ?? 0) - 1);
 	const status = thread ? threadStatus(thread) : null;

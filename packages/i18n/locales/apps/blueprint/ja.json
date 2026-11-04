@@ -626,6 +626,7 @@
   "Write": "書き込み",
   "Write a caption…": "キャプションを入力…",
   "Yes": "はい",
+  "Your change was saved, but the plan could not refresh: {error}": "変更は保存されましたが、プランを更新できませんでした: {error}",
   "Zoom": "ズーム",
   "Zoom In": "拡大",
   "Zoom Out": "縮小",

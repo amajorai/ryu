@@ -29,6 +29,7 @@
   "Group deleted": "تم حذف المجموعة",
   "Group updated": "تم تحديث المجموعة",
   "Groups couldn't load": "تعذّر تحميل المجموعات",
+  "Groups loaded, but agents could not: {error}": "تم تحميل المجموعات، لكن تعذّر تحميل الوكلاء: {error}",
   "Groups returned an invalid group record.": "أعادت المجموعات سجل مجموعة غير صالح.",
   "Groups returned an invalid list.": "أعادت المجموعات قائمة غير صالحة.",
   "Groups returned an unexpected agent catalog.": "أعادت المجموعات كتالوج وكلاء غير متوقع.",

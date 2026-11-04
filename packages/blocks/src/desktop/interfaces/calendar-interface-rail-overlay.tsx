@@ -8,6 +8,7 @@ import type {
 	RunItem,
 } from "./calendar-model.ts";
 import { CalendarRail } from "./calendar-rail.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 
 interface CalendarRailOverlayProps {
 	activeDayKeys: ReadonlySet<string>;
@@ -53,6 +54,7 @@ export function CalendarRailOverlay({
 	todayKey,
 	toggleLayer,
 }: CalendarRailOverlayProps) {
+	const inlineSign = useInlineSign();
 	return (
 		<AnimatePresence>
 			{railOverlay && railOverlayOpen ? (
@@ -67,8 +69,8 @@ export function CalendarRailOverlay({
 					<motion.div
 						animate={{ x: 0 }}
 						className="flex h-full shrink-0 border-border border-e bg-background shadow-xl"
-						exit={reduceMotion ? {} : { x: -16 }}
-						initial={reduceMotion ? false : { x: -16 }}
+						exit={reduceMotion ? {} : { x: -16 * inlineSign }}
+						initial={reduceMotion ? false : { x: -16 * inlineSign }}
 						ref={railOverlayRef}
 						transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
 					>

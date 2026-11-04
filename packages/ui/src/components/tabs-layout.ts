@@ -14,6 +14,10 @@ import {
 	isNativeNumber,
 	isNativeText,
 } from "../lib/native-primitive-observation.ts";
+import {
+	pointerBeforeOnAxis,
+	readingDirectionOf,
+} from "../lib/pointer-before.ts";
 import type { TabsValue } from "./tabs-root.tsx";
 
 // Internal clone attributes are exact authored data-* slots; the complete native
@@ -205,12 +209,14 @@ function resolveTabsDrop(
 		const key = shift.resolveOver(hoveredKey, event.clientX, event.clientY);
 		return { before: order.indexOf(key) < order.indexOf(source), key };
 	}
-	const rect = event.currentTarget.getBoundingClientRect();
 	return {
-		before:
-			axis === "x"
-				? event.clientX < rect.left + rect.width / 2
-				: event.clientY < rect.top + rect.height / 2,
+		before: pointerBeforeOnAxis(
+			event.clientX,
+			event.clientY,
+			event.currentTarget.getBoundingClientRect(),
+			axis,
+			readingDirectionOf(event.currentTarget)
+		),
 		key: hoveredKey,
 	};
 }

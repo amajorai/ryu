@@ -8,6 +8,7 @@
 //! depending back on `apps/core`.
 
 pub mod ingest;
+mod localized;
 pub mod sealed_store;
 
 /// Whether a feed item carries approval content: the request's title, summary,
@@ -67,7 +68,7 @@ mod tests {
                 },
             ),
         };
-        ingest::from_approval_event(&event)
+        ingest::from_approval_event(&event, "en")
     }
 
     #[test]

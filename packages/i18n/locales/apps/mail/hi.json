@@ -795,6 +795,7 @@
   "your browser": "आपके ब्राउज़र",
   "{age} ago": "{age} पहले",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, one {# अटैचमेंट तैयार} other {# अटैचमेंट तैयार}}",
+  "{count, plural, one {# message} other {# messages}}": "{count, plural, one {# संदेश} other {# संदेश}}",
   "{count} more": "{count} और",
   "{recipients} · {status}": "{recipients} · {status}",
   "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {ड्राफ़्ट} sending {भेजा जा रहा है} sent {भेजा गया} failed {विफल} inbound {प्राप्त} outbound {आउटगोइंग} other {{value}}}"

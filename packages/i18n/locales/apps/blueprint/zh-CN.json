@@ -626,6 +626,7 @@
   "Write": "写入",
   "Write a caption…": "添加说明文字…",
   "Yes": "是",
+  "Your change was saved, but the plan could not refresh: {error}": "更改已保存，但无法刷新计划：{error}",
   "Zoom": "缩放",
   "Zoom In": "放大",
   "Zoom Out": "缩小",

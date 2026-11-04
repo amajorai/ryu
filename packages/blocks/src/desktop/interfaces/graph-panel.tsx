@@ -409,8 +409,8 @@ export function GraphThreadPanel({
 }) {
 	const tl = useLiteralMessages();
 	const title = thread
-		? thread.title.trim() || "Untitled thread"
-		: "New thread";
+		? thread.title.trim() || tl("Untitled thread")
+		: tl("New thread");
 	const lead = agentById(snapshot, thread?.agentIds[0]);
 	return (
 		<aside

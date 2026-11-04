@@ -21,6 +21,7 @@ import { motion } from "motion/react";
 import { type ReactNode, type RefObject, useEffect, useState } from "react";
 import type { GlanceAgentState } from "./glance-model.ts";
 import { glanceThreadTitle } from "./glance-model.ts";
+import { useInlineSign } from "./inline-direction.ts";
 import { agentById, threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
@@ -166,7 +167,8 @@ export function GlanceThreadSheet({
 }) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
-	const title = thread ? glanceThreadTitle(thread) : "New thread";
+	const title = thread ? glanceThreadTitle(thread) : tl("New thread");
+	const inlineSign = useInlineSign();
 	const agents = (thread?.agentIds ?? [])
 		.map((id) => agentById(snapshot, id))
 		.filter((agent): agent is InterfaceAgent => agent !== undefined);
@@ -178,8 +180,8 @@ export function GlanceThreadSheet({
 			aria-label={tl("Thread: {title}", { title })}
 			className="relative flex min-h-0 w-[clamp(22rem,38%,40rem)] shrink-0 flex-col border-border border-s bg-background max-md:absolute max-md:inset-0 max-md:z-30 max-md:w-full max-md:border-s-0"
 			data-testid="glance-thread-sheet"
-			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 32 }}
-			initial={reduceMotion ? false : { opacity: 0, x: 32 }}
+			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 32 * inlineSign }}
+			initial={reduceMotion ? false : { opacity: 0, x: 32 * inlineSign }}
 			ref={sheetRef}
 			transition={{ duration: 0.32, ease: GLANCE_EASE }}
 		>

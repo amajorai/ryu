@@ -3,6 +3,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { ArrowLeft } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 import { ExpandedCard, FocusCard } from "./moments-flow-cards.tsx";
 import { ModuleList, ModuleStrip } from "./moments-flow-modules.tsx";
 import { MOMENTS_FOCUS } from "./moments-glyph.tsx";
@@ -46,6 +47,8 @@ export function MomentsFlowView({
 	onSelect: (index: number) => void;
 	threadView: ReactNode | null;
 }) {
+	// Next slides in from the inline end, so the travel flips under RTL.
+	const travel = direction * useInlineSign();
 	const modules = flow?.modules ?? [];
 	const item = modules[focusIndex];
 	const [composeOnOpen, setComposeOnOpen] = useState(false);
@@ -115,12 +118,12 @@ export function MomentsFlowView({
 							title={item?.thread.title ?? title}
 						/>
 					) : (
-						<AnimatePresence custom={direction} initial={false}>
+						<AnimatePresence custom={travel} initial={false}>
 							{item ? (
 								<FocusCard
 									context={contextFor(item)}
 									count={count}
-									direction={direction}
+									direction={travel}
 									index={focusIndex}
 									item={item}
 									key={item.thread.id}

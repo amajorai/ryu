@@ -29,6 +29,7 @@ import {
 	hubThreadTitle,
 } from "./hub-model.ts";
 import { HubAvatar, HubWorkflowDisc } from "./hub-parts.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 export interface HubThreadCardProps {
@@ -214,6 +215,7 @@ export function HubWorkingCard({
  */
 function HubLiveTrack() {
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	return (
 		<span
 			aria-hidden="true"
@@ -224,9 +226,9 @@ function HubLiveTrack() {
 				<span className="absolute inset-0 rounded-full bg-success/40" />
 			) : (
 				<motion.span
-					animate={{ x: ["-100%", "300%"] }}
+					animate={{ x: [`${-100 * inlineSign}%`, `${300 * inlineSign}%`] }}
 					className="absolute inset-y-0 start-0 w-1/3 rounded-full bg-success"
-					initial={{ x: "-100%" }}
+					initial={{ x: `${-100 * inlineSign}%` }}
 					transition={{
 						duration: 1.8,
 						ease: [0.4, 0, 0.2, 1],

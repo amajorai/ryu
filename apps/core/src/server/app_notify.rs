@@ -375,7 +375,8 @@ pub(crate) async fn host_notify_fanout(
     }
 
     // (2) Unified activity feed.
-    if let Err(e) = state.activity.record(activity_item_from_alert(alert)).await {
+    let item = activity_item_from_alert(alert, crate::i18n::locale::node_locale().await);
+    if let Err(e) = state.activity.record(item).await {
         tracing::warn!("activity: failed to record monitor alert: {e:#}");
     }
 
@@ -423,8 +424,8 @@ fn alert_inbox_text(alert: &serde_json::Value, locale: &str) -> (String, String)
     (text("title"), text("message"))
 }
 
-/// Map a fired alert into an activity item, `uptime_down` → Warning.
-fn activity_item_from_alert(alert: &serde_json::Value) -> ryu_activity::ActivityItem {
+/// Map a fired alert into an activity item worded like its inbox copy in `locale`.
+fn activity_item_from_alert(alert: &serde_json::Value, locale: &str) -> ryu_activity::ActivityItem {
     let text = |key: &str| {
         alert
             .get(key)
@@ -437,8 +438,9 @@ fn activity_item_from_alert(alert: &serde_json::Value) -> ryu_activity::Activity
     } else {
         ryu_activity::ActivityLevel::Info
     };
-    ryu_activity::ActivityItem::new("monitor_alert", "monitors", text("title").to_owned())
-        .with_body(Some(text("message").to_owned()))
+    let (title, body) = alert_inbox_text(alert, locale);
+    ryu_activity::ActivityItem::new("monitor_alert", "monitors", title)
+        .with_body(Some(body))
         .with_level(level)
         .with_metadata(json!({
             "monitor_id": text("monitor_id"),

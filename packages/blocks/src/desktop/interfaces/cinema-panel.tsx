@@ -40,7 +40,7 @@ export function CinemaPanel({
 }: CinemaPanelProps) {
 	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
-	const heading = title?.thread.title ?? "New thread";
+	const heading = title?.thread.title ?? tl("New thread");
 	const names = title ? cinemaNames(title.agents) : "";
 	return (
 		<motion.aside

@@ -7,6 +7,8 @@
   "Back to the start": "Zurück zum Anfang",
   "Back to the start (Home)": "Zurück zum Anfang (Pos1)",
   "Couldn't load saved scripts: {error}": "Gespeicherte Skripte konnten nicht geladen werden: {error}",
+  "Couldn't load your draft from Ryu, so it isn't saved automatically: {error}": "Der Entwurf konnte nicht aus Ryu geladen werden und wird daher nicht automatisch gespeichert: {error}",
+  "Couldn't save your latest changes to Ryu: {error}": "Die letzten Änderungen konnten nicht in Ryu gespeichert werden: {error}",
   "Delete script": "Skript löschen",
   "Delete this script?": "Dieses Skript löschen?",
   "Display": "Bildschirm",

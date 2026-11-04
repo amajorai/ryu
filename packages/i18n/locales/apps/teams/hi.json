@@ -29,6 +29,7 @@
   "Group deleted": "समूह हटाया गया",
   "Group updated": "समूह अपडेट किया गया",
   "Groups couldn't load": "समूह लोड नहीं हो सके",
+  "Groups loaded, but agents could not: {error}": "समूह लोड हो गए, लेकिन एजेंट लोड नहीं हो सके: {error}",
   "Groups returned an invalid group record.": "समूहों ने अमान्य समूह रिकॉर्ड लौटाया।",
   "Groups returned an invalid list.": "समूहों ने अमान्य सूची लौटाई।",
   "Groups returned an unexpected agent catalog.": "समूहों ने अप्रत्याशित एजेंट कैटलॉग लौटाया।",

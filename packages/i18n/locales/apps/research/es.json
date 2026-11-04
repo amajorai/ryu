@@ -11,6 +11,7 @@
   "Elapsed": "Transcurrido",
   "Evaluated variants will appear as the campaign runs.": "Las variantes evaluadas aparecerán a medida que avance la campaña.",
   "Every evaluated variant and the enforced winner decision.": "Cada variante evaluada y la decisión aplicada sobre la ganadora.",
+  "Expected {key} to be a non-empty string.": "Se esperaba que {key} fuera una cadena no vacía.",
   "Experiment campaigns could not be loaded.": "No se pudieron cargar las campañas de experimentos.",
   "Experiments could not be loaded": "No se pudieron cargar los experimentos",
   "Failed": "Fallido",
