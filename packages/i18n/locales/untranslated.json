@@ -7369,6 +7369,12 @@
     ],
     "reason": "'No.' is the conventional number abbreviation in Japanese and Korean"
   },
+  "Node offline.": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Node and offline are used as-is in German"
+  },
   "Node.js (npm)": {
     "locales": [
       "ar",
@@ -8846,6 +8852,15 @@
       "fr"
     ],
     "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Quiz": {
+    "locales": [
+      "de",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Quiz is the same word in these languages"
   },
   "Quota": {
     "locales": [
@@ -14695,6 +14710,20 @@
     ],
     "reason": "French word is 'version'"
   },
+  "{feature}: {count}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Placeholders and separators only"
+  },
   "{field} · {count}": {
     "locales": [
       "ar",
@@ -15201,6 +15230,22 @@
       "zh-CN"
     ],
     "reason": "unit abbreviation"
+  },
+  "{modality} · {tagline}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders and separators only"
   },
   "{modelId} · {count, plural, one {# participant} other {# participants}}": {
     "locales": [
@@ -15855,6 +15900,22 @@
       "zh-CN"
     ],
     "reason": "Only placeholders."
+  },
+  "{station} · {status}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders and separators only"
   },
   "{status} {count}": {
     "locales": [

@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "{frameCount} fotogramas · composición lista para deslizar",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, one {A # fotograma le falta el texto o el prompt visual} other {A # fotogramas les falta el texto o el prompt visual}}.",
   "{projectName} canvas": "Lienzo de {projectName}",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, fotograma {frameNumber} de {frameTotal}",
-  "← Gallery": "← Galería"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, fotograma {frameNumber} de {frameTotal}"
 }

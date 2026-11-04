@@ -24,6 +24,7 @@
   "Align": "정렬",
   "All": "전체",
   "All messages": "모든 메시지",
+  "All provider lanes": "모든 공급자 레인",
   "All scheduled job status for {date}": "{date} 모든 예약 작업 상태",
   "All scheduled jobs": "모든 예약된 작업",
   "Allow": "허용",
@@ -778,6 +779,5 @@
   "{jobCount} tracked": "{jobCount}개 추적 중",
   "{jobName} run status for {date}": "{date} {jobName} 실행 상태",
   "{runCount} runs": "실행 {runCount}회",
-  "· Paused": "· 일시 중지됨",
-  "← All provider lanes": "← 모든 제공업체 레인"
+  "· Paused": "· 일시 중지됨"
 }

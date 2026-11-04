@@ -103,12 +103,17 @@ export interface ProactiveOpeningResponse {
 	status: "already_completed" | "completed" | "pending";
 }
 
-/** Start or resume the one-time assistant-first opening for a conversation. */
+/**
+ * Start or resume the one-time assistant-first opening for a conversation.
+ * `locale` names the language to write it in; without it Core uses the node's
+ * UI language.
+ */
 export async function startProactiveOpening(
 	target: ApiTarget,
 	conversationId: string,
 	agentId = "ryu",
-	idempotencyKey?: string
+	idempotencyKey?: string,
+	locale?: string
 ): Promise<ProactiveOpeningResponse> {
 	return request(
 		target,
@@ -119,6 +124,7 @@ export async function startProactiveOpening(
 				conversation_id: conversationId,
 				agent_id: agentId,
 				idempotency_key: idempotencyKey,
+				...(locale ? { locale } : {}),
 			},
 		},
 		openingResponseSchema

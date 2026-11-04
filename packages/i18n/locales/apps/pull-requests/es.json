@@ -878,7 +878,5 @@
   "{count} layers": "{count} capas",
   "{count} more": "{count} más",
   "{count} pull requests": "{count} solicitudes de extracción",
-  "{repository} #{number} · {age}": "{repository} #{number} · {age}",
-  "← Issues": "← Incidencias",
-  "← Pull requests": "← Solicitudes de incorporación"
+  "{repository} #{number} · {age}": "{repository} #{number} · {age}"
 }

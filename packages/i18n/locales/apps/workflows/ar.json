@@ -37,6 +37,7 @@
   "All messages": "كل الرسائل",
   "All must ack": "يجب أن يؤكد الجميع",
   "All passes (JSON)": "جميع التمريرات (JSON)",
+  "All provider lanes": "كل مسارات المزوّدين",
   "Allow": "سماح",
   "Allowed": "مسموح",
   "Alpha": "ألفا",
@@ -1086,6 +1087,5 @@
   "{count} selected people": "{count} من الأشخاص المحددين",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {تم نقل العقدة المحددة إلى الأعلى. الموضع الجديد، x: {x}، y: {y}} down {تم نقل العقدة المحددة إلى الأسفل. الموضع الجديد، x: {x}، y: {y}} left {تم نقل العقدة المحددة إلى اليسار. الموضع الجديد، x: {x}، y: {y}} right {تم نقل العقدة المحددة إلى اليمين. الموضع الجديد، x: {x}، y: {y}} other {تم نقل العقدة المحددة. الموضع الجديد، x: {x}، y: {y}}}",
   "{event} (not installed)": "{event} (غير مثبت)",
-  "{size} selected": "تم تحديد {size}",
-  "← All provider lanes": "← كل مسارات المزودين"
+  "{size} selected": "تم تحديد {size}"
 }

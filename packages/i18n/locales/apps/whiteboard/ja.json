@@ -22,6 +22,7 @@
   "Align": "配置",
   "All": "すべて",
   "All messages": "すべてのメッセージ",
+  "All provider lanes": "すべてのプロバイダーレーン",
   "Allow": "許可",
   "Allowed": "許可済み",
   "Alpha": "アルファ",
@@ -1041,6 +1042,5 @@
   "working": "件が作業中",
   "your browser": "ブラウザ",
   "{age} ago": "{age} 前",
-  "{count} more": "ほか {count} 件",
-  "← All provider lanes": "← すべてのプロバイダレーン"
+  "{count} more": "ほか {count} 件"
 }

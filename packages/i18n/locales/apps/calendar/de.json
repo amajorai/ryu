@@ -24,6 +24,7 @@
   "Align": "Ausrichtung",
   "All": "Alle",
   "All messages": "Alle Nachrichten",
+  "All provider lanes": "Alle Anbieter-Lanes",
   "All scheduled job status for {date}": "Status aller geplanten Jobs am {date}",
   "All scheduled jobs": "Alle geplanten Jobs",
   "Allow": "Zulassen",
@@ -778,6 +779,5 @@
   "{jobCount} tracked": "{jobCount} erfasst",
   "{jobName} run status for {date}": "{jobName}-Ausführungsstatus für {date}",
   "{runCount} runs": "{runCount} Ausführungen",
-  "· Paused": "· Pausiert",
-  "← All provider lanes": "← Alle Anbieterkanäle"
+  "· Paused": "· Pausiert"
 }

@@ -20,6 +20,7 @@
   "Align": "配置",
   "All": "すべて",
   "All messages": "すべてのメッセージ",
+  "All provider lanes": "すべてのプロバイダーレーン",
   "Allow": "許可",
   "Allowed": "許可済み",
   "Alpha": "アルファ",
@@ -740,6 +741,5 @@
   "{gaps}. The overnight gap is intentional — a middle-of-the-night ping opens a window that expires before you start work.": "{gaps}。夜間の間隔は意図的なものです — 深夜に ping を送るとウィンドウが開き、仕事を始める前に期限切れになってしまいます。",
   "{modelName} — cheapest": "{modelName} — 最安",
   "{providerName} lists no models yet, so its accounts cannot be pinged.": "{providerName} にはまだモデルがないため、そのアカウントに ping を送信できません。",
-  "{windowLabel} · {usedPercent}% used": "{windowLabel} · {usedPercent}% 使用済み",
-  "← All provider lanes": "← すべてのプロバイダレーン"
+  "{windowLabel} · {usedPercent} used": "{windowLabel} · {usedPercent} 使用済み"
 }

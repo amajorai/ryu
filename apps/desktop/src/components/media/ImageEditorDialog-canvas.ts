@@ -7,6 +7,8 @@ import {
 	type ImageResizeAspect,
 	localImageResizeDimensions,
 } from "@/src/lib/api/image-resize.ts";
+import { markupCommentLayout } from "./ImageEditorDialog-comment-direction.ts";
+import { imageStatusLine } from "./ImageEditorDialog-status.ts";
 import type { ImageMarkup } from "./ImageEditorDialog-types.ts";
 import {
 	imageDimensionError,
@@ -249,14 +251,22 @@ export function drawMarkups(
 		const fontSize = Math.max(14, Math.min(width, height) * 0.022);
 		const comment = markup.text.slice(0, 80);
 		context.font = `500 ${fontSize}px sans-serif`;
-		context.textAlign = "left";
+		context.textAlign = "start";
 		const textWidth = context.measureText(comment).width;
-		const boxX = Math.max(4, Math.min(width - textWidth - 16, x + radius + 5));
+		const layout = markupCommentLayout({
+			canvasWidth: width,
+			comment,
+			pinRadius: radius,
+			pinX: x,
+			textWidth,
+		});
+		context.direction = layout.direction;
+		const boxX = layout.boxX;
 		const boxY = Math.max(fontSize, Math.min(height - fontSize, y));
 		context.fillStyle = "rgba(17, 24, 39, 0.88)";
 		context.fillRect(boxX, boxY - fontSize, textWidth + 12, fontSize * 2);
 		context.fillStyle = "white";
-		context.fillText(comment, boxX + 6, boxY);
+		context.fillText(comment, layout.textX, boxY);
 	}
 }
 
@@ -272,8 +282,5 @@ export function safeBaseName(filename: string | undefined): string {
 export function messageForStatus(
 	status: BrowserImageRuntimeStatus | null
 ): string | null {
-	if (!status) {
-		return null;
-	}
-	return status.statusMessage;
+	return imageStatusLine(status);
 }

@@ -16,6 +16,7 @@
   "Agent-assisted refinement isn't available here yet. Use Edit plan to update this case.": "Уточнение с помощью агента здесь пока недоступно. Чтобы обновить этот случай, используйте «Изменить план».",
   "All Tests": "Все тесты",
   "All projects": "Все проекты",
+  "All provider lanes": "Все каналы провайдеров",
   "All statuses": "Все статусы",
   "Attach a text context file": "Прикрепить текстовый файл контекста",
   "Attention": "Требует внимания",
@@ -389,6 +390,5 @@
   "{type} tests": "Тесты: {type}",
   "{uiTests} UI · {apiTests} API": "{uiTests} UI · {apiTests} API",
   "{url} · Last run {lastRun}": "{url} · Последний запуск {lastRun}",
-  "{url} · The target is checked after the project is saved": "{url} · Цель проверяется после сохранения проекта",
-  "← All provider lanes": "← Все линии провайдеров"
+  "{url} · The target is checked after the project is saved": "{url} · Цель проверяется после сохранения проекта"
 }

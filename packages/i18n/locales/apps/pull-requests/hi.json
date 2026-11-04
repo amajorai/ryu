@@ -878,7 +878,5 @@
   "{count} layers": "{count} लेयर",
   "{count} more": "{count} और",
   "{count} pull requests": "{count} पुल अनुरोध",
-  "{repository} #{number} · {age}": "{repository} #{number} · {age}",
-  "← Issues": "← इश्यूज़",
-  "← Pull requests": "← पुल रिक्वेस्ट"
+  "{repository} #{number} · {age}": "{repository} #{number} · {age}"
 }

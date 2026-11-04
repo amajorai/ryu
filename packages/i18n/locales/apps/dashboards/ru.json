@@ -12,7 +12,5 @@
   "Widget “{title}” recovered": "Виджет «{title}» восстановлен",
   "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "Виджеты рабочих процессов пока недоступны: нет возможности хоста, позволяющей приложению запускать сохранённый рабочий процесс. Используйте источник http, composio или статический источник.",
   "dashboard not found": "панель мониторинга не найдена",
-  "kind is required": "требуется указать тип",
-  "name is required": "требуется имя",
   "not found": "не найдено"
 }

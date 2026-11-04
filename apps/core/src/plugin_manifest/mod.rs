@@ -35,10 +35,6 @@ pub(crate) use builtin_code::builtin_pi_extension_sources;
 mod builtin_plugin_assets;
 pub(crate) mod public_mount_policy;
 pub mod schema;
-#[cfg(test)]
-#[path = "shipped_portable_loader_runtime_test.rs"]
-mod shipped_portable_loader_runtime;
-
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 

@@ -12,3 +12,5 @@ mod channel_command_registry;
 pub(in crate::server) use channel_command_registry::*;
 mod worktree_diff;
 pub(in crate::server) use worktree_diff::*;
+#[cfg(test)]
+mod assistant_first_opening_tests;

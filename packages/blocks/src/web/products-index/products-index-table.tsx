@@ -6,6 +6,7 @@ import { LinkArrow } from "../link-arrow.tsx";
 import { nextLinkHref } from "../next-link-href.ts";
 import { ScrollRegion } from "../product-page/sections/scroll-region.tsx";
 import { sectionChipClass } from "../product-page/sections/section-shell.tsx";
+import { ProductsCategoryCaption } from "./products-category-caption.tsx";
 import type {
 	ProductsIndexAvailability,
 	ProductsIndexGroup,
@@ -158,7 +159,7 @@ export function ProductsIndexTable({
 			<ScrollRegion label={category}>
 				<table className="w-full min-w-4xl border-collapse border-border border-t text-start text-sm">
 					<caption className="sr-only">
-						{tl("{category} products", { category })}
+						<ProductsCategoryCaption category={category} />
 					</caption>
 					<thead>
 						<tr className="border-border border-b">

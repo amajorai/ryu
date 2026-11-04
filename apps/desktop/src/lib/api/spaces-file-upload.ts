@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { type ApiTarget, apiUrl, request, requestHeaders } from "./client.ts";
 import { toFileIndex } from "./spaces.ts";
@@ -82,7 +83,11 @@ export async function uploadSpaceFile(
 	// costs neither the base64 expansion nor the round trip it would be rejected on.
 	if (file.size > SPACE_UPLOAD_MAX_BYTES) {
 		throw new Error(
-			`${file.name} is ${formatBytes(file.size)} — the limit is ${formatBytes(SPACE_UPLOAD_MAX_BYTES)}.`
+			opts.tl("{name} is {size} — the limit is {limit}.", {
+				limit: formatBytes(SPACE_UPLOAD_MAX_BYTES),
+				name: file.name,
+				size: formatBytes(file.size),
+			})
 		);
 	}
 	const dataBase64 = await readAsBase64(file, file.name);
@@ -183,7 +188,10 @@ export async function replaceSpaceFileBlob(
 ): Promise<UploadedSpaceFile> {
 	if (blob.size > SPACE_UPLOAD_MAX_BYTES) {
 		throw new Error(
-			`This file is ${formatBytes(blob.size)} — the limit is ${formatBytes(SPACE_UPLOAD_MAX_BYTES)}.`
+			tl("This file is {size} — the limit is {limit}.", {
+				limit: formatBytes(SPACE_UPLOAD_MAX_BYTES),
+				size: formatBytes(blob.size),
+			})
 		);
 	}
 	const dataBase64 = await readAsBase64(blob, "the edited file");

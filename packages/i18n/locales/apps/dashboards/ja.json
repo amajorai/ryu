@@ -12,7 +12,5 @@
   "Widget “{title}” recovered": "ウィジェット「{title}」が復旧しました",
   "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "ワークフローウィジェットはまだ利用できません。アプリが保存済みワークフローを実行できるホスト機能がありません。代わりに http、composio、または静的ソースを使用してください。",
   "dashboard not found": "ダッシュボードが見つかりません",
-  "kind is required": "種類は必須です",
-  "name is required": "名前は必須です",
   "not found": "見つかりません"
 }

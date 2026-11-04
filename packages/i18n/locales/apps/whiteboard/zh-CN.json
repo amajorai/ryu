@@ -22,6 +22,7 @@
   "Align": "对齐",
   "All": "全部",
   "All messages": "所有消息",
+  "All provider lanes": "所有提供商通道",
   "Allow": "允许",
   "Allowed": "已允许",
   "Alpha": "透明度",
@@ -1041,6 +1042,5 @@
   "working": "个工作中",
   "your browser": "浏览器",
   "{age} ago": "{age}前",
-  "{count} more": "还有 {count} 个",
-  "← All provider lanes": "← 所有提供商通道"
+  "{count} more": "还有 {count} 个"
 }

@@ -90,8 +90,10 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # ripgrep: Core's command-tool tests run the real `rg` (the @ryu/ripgrep
+      # workspace-boundary check), and the hosted image does not ship it.
       - name: Install Linux build deps
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libasound2-dev libdbus-1-dev
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libasound2-dev libdbus-1-dev ripgrep
       - name: Format check
         run: |
           while IFS= read -r manifest; do

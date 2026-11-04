@@ -6,30 +6,39 @@ import type {
 } from "@huggingface/transformers";
 
 import { type BrowserImageTask, isValidBrowserModelId } from "./catalog.ts";
+import type { BrowserImageStatusDetail } from "./status-codes.ts";
 
 export type BrowserImageRuntimeStatus =
 	| {
 			modelId: string;
 			phase: "loading";
 			progress?: number;
+			/** The line as a code plus values, for a localized UI. */
+			status?: BrowserImageStatusDetail;
 			statusMessage: string;
 			task: BrowserImageTask;
 	  }
 	| {
 			modelId: string;
 			phase: "running";
+			/** The line as a code plus values, for a localized UI. */
+			status?: BrowserImageStatusDetail;
 			statusMessage: string;
 			task: BrowserImageTask;
 	  }
 	| {
 			modelId: string;
 			phase: "ready";
+			/** The line as a code plus values, for a localized UI. */
+			status?: BrowserImageStatusDetail;
 			statusMessage: string;
 			task: BrowserImageTask;
 	  }
 	| {
 			modelId: string;
 			phase: "failed";
+			/** The line as a code plus values, for a localized UI. */
+			status?: BrowserImageStatusDetail;
 			statusMessage: string;
 			task: BrowserImageTask;
 	  };
@@ -84,6 +93,13 @@ function progressFrom(value: ProgressInfo): number | undefined {
 
 function errorMessage(cause: unknown): string {
 	return cause instanceof Error ? cause.message : "The image model failed.";
+}
+
+function failedStatus(
+	code: "background.failed" | "segmentation.failed",
+	cause: unknown
+): BrowserImageStatusDetail {
+	return { code, values: { detail: errorMessage(cause) } };
 }
 
 function validateModelId(modelId: string): void {
@@ -196,6 +212,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 			this.publish({
 				modelId,
 				phase: "loading",
+				status: { code: "segmentation.preparing", values: { device } },
 				statusMessage: `Preparing segmentation on ${device}.`,
 				task: "image-segmentation",
 			});
@@ -208,6 +225,10 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 							modelId,
 							phase: "loading",
 							progress,
+							status: {
+								code: "segmentation.downloading",
+								values: { device, progress },
+							},
 							statusMessage:
 								progress === undefined
 									? `Downloading segmentation model files on ${device}…`
@@ -239,6 +260,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 			this.publish({
 				modelId,
 				phase: "loading",
+				status: { code: "background.preparing", values: { device } },
 				statusMessage: `Preparing background removal on ${device}.`,
 				task: "background-removal",
 			});
@@ -251,6 +273,10 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 							modelId,
 							phase: "loading",
 							progress,
+							status: {
+								code: "background.downloading",
+								values: { device, progress },
+							},
 							statusMessage:
 								progress === undefined
 									? `Downloading background-removal model files on ${device}…`
@@ -278,6 +304,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 					this.publish({
 						modelId,
 						phase: "ready",
+						status: { code: "segmentation.ready" },
 						statusMessage: "Segmentation model ready in this browser.",
 						task: "image-segmentation",
 					});
@@ -288,6 +315,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 					this.publish({
 						modelId,
 						phase: "failed",
+						status: failedStatus("segmentation.failed", error),
 						statusMessage: errorMessage(error),
 						task: "image-segmentation",
 					});
@@ -308,6 +336,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 					this.publish({
 						modelId,
 						phase: "ready",
+						status: { code: "background.ready" },
 						statusMessage: "Background-removal model ready in this browser.",
 						task: "background-removal",
 					});
@@ -318,6 +347,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 					this.publish({
 						modelId,
 						phase: "failed",
+						status: failedStatus("background.failed", error),
 						statusMessage: errorMessage(error),
 						task: "background-removal",
 					});
@@ -341,6 +371,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 			this.publish({
 				modelId,
 				phase: "running",
+				status: { code: "segmentation.running" },
 				statusMessage: "Finding subjects…",
 				task: "image-segmentation",
 			});
@@ -356,6 +387,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 			this.publish({
 				modelId,
 				phase: "ready",
+				status: { code: "segments.found", values: { count: segments.length } },
 				statusMessage: `${segments.length} subject${segments.length === 1 ? "" : "s"} found.`,
 				task: "image-segmentation",
 			});
@@ -364,6 +396,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 			this.publish({
 				modelId,
 				phase: "failed",
+				status: failedStatus("segmentation.failed", error),
 				statusMessage: errorMessage(error),
 				task: "image-segmentation",
 			});
@@ -384,6 +417,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 			this.publish({
 				modelId,
 				phase: "running",
+				status: { code: "background.running" },
 				statusMessage: "Removing background…",
 				task: "background-removal",
 			});
@@ -392,6 +426,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 			this.publish({
 				modelId,
 				phase: "ready",
+				status: { code: "background.removed" },
 				statusMessage: "Background removed.",
 				task: "background-removal",
 			});
@@ -400,6 +435,7 @@ export class BrowserLocalImageRuntime implements BrowserImageEngine {
 			this.publish({
 				modelId,
 				phase: "failed",
+				status: failedStatus("background.failed", error),
 				statusMessage: errorMessage(error),
 				task: "background-removal",
 			});

@@ -47,6 +47,7 @@
   "All kinds": "Tutti i tipi",
   "All messages": "Tutti i messaggi",
   "All platforms": "Tutte le piattaforme",
+  "All provider lanes": "Tutte le corsie dei provider",
   "All tabs": "Tutte le schede",
   "All {total}": "Tutti ({total})",
   "Allow": "Consenti",
@@ -573,7 +574,6 @@
   "No templates": "Nessun modello",
   "No text — this post was scheduled without a draft body.": "Nessun testo: questo post è stato programmato senza corpo della bozza.",
   "No workspaces": "Nessuno spazio di lavoro",
-  "No.": "N.",
   "None": "Nessuno",
   "None of these accounts is connected yet — scheduled posts will queue but never publish.": "Nessuno di questi account è ancora collegato: i post programmati verranno messi in coda ma non saranno mai pubblicati.",
   "Normal": "Normale",
@@ -1328,6 +1328,5 @@
   "· already out": "· già pubblicato",
   "“{name}” created": "“{name}” creato",
   "“{name}” deleted": "“{name}” eliminato",
-  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "«{text}» verrà eliminato definitivamente. I post già programmati a partire da esso conservano la propria copia del contenuto e non sono interessati.",
-  "← All provider lanes": "← Tutte le corsie dei provider"
+  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "«{text}» verrà eliminato definitivamente. I post già programmati a partire da esso conservano la propria copia del contenuto e non sono interessati."
 }

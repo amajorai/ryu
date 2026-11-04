@@ -12,7 +12,5 @@
   "Widget “{title}” recovered": "O widget “{title}” se recuperou",
   "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "Widgets de fluxo de trabalho ainda não estão disponíveis: nenhuma capacidade do host permite que um app execute um fluxo de trabalho salvo. Use uma fonte http, composio ou estática.",
   "dashboard not found": "painel não encontrado",
-  "kind is required": "o tipo é obrigatório",
-  "name is required": "o nome é obrigatório",
   "not found": "não encontrado"
 }

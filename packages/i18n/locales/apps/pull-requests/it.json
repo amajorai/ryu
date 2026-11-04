@@ -878,7 +878,5 @@
   "{count} layers": "{count} livelli",
   "{count} more": "Altri {count}",
   "{count} pull requests": "{count} pull request",
-  "{repository} #{number} · {age}": "{repository} #{number} · {age}",
-  "← Issues": "← Issue",
-  "← Pull requests": "← Pull request"
+  "{repository} #{number} · {age}": "{repository} #{number} · {age}"
 }

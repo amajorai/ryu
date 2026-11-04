@@ -74,12 +74,14 @@ export function safeActionsRequest(
 	const resolved = resolveSafeActionsPath(input.path);
 	if (!resolved) {
 		return Promise.reject(
+			// i18n-extract: developer-error
 			new Error("Refusing a request outside the Safe Actions API mount.")
 		);
 	}
 	const method = input.method ?? "GET";
 	if (!ALLOWED_METHODS.has(method)) {
 		return Promise.reject(
+			// i18n-extract: developer-error
 			new Error(`Refusing a Safe Actions request with method "${method}".`)
 		);
 	}

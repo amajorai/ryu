@@ -83,7 +83,7 @@ test("opens a record from the Harbor dock, preserves a successful write across t
 		"desktop-crm-record-detail-timeline-refresh-error-keeps-save"
 	);
 
-	await page.getByRole("button", { name: "← Back" }).click();
+	await page.getByRole("button", { name: "Back", exact: true }).click();
 	await page.getByRole("button", { name: "Renewal Acme" }).click();
 	await expect(
 		page.getByRole("heading", { name: "Renewal Acme" })
@@ -309,7 +309,7 @@ test("task completion and activity deletion roll back on failure, retry, and sur
 		fixture.activities.some((activity) => activity.id === "note_kickoff")
 	).toBe(false);
 
-	await page.getByRole("button", { name: "← Back" }).click();
+	await page.getByRole("button", { name: "Back", exact: true }).click();
 	await page.getByRole("button", { name: "Renewal Acme" }).click();
 	await expect(
 		page.getByRole("checkbox", { name: "Reopen this task" })

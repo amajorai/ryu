@@ -22,6 +22,7 @@
   "Align": "संरेखण",
   "All": "सभी",
   "All messages": "सभी संदेश",
+  "All provider lanes": "सभी प्रोवाइडर लेन",
   "Allow": "अनुमति दें",
   "Allowed": "अनुमत",
   "Alpha": "अल्फ़ा",
@@ -1041,6 +1042,5 @@
   "working": "काम कर रहे हैं",
   "your browser": "आपके ब्राउज़र",
   "{age} ago": "{age} पहले",
-  "{count} more": "{count} और",
-  "← All provider lanes": "← सभी प्रदाता लेन"
+  "{count} more": "{count} और"
 }

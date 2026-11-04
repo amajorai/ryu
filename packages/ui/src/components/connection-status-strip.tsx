@@ -1,7 +1,8 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useRef } from "react";
 import { cn } from "../lib/utils.ts";
+import { useTitleFromText } from "./connection-status-strip-title.ts";
 
 /** The status colour of a strip's icon. The strip itself is never tinted. */
 export type StatusStripTone =
@@ -45,13 +46,10 @@ export function StatusStrip({
 	tone = "neutral",
 	...props
 }: StatusStripProps) {
-	// The sentence truncates to one line; keep the whole of it on hover when it
-	// is plain text.
-	const fullText =
-		typeof title === "string" &&
-		(detail === undefined || typeof detail === "string")
-			? [title, detail].filter(Boolean).join(" ")
-			: undefined;
+	// The sentence truncates to one line; keep the whole of it on hover, read
+	// from the rendered (translated) text rather than joined English props.
+	const textRef = useRef<HTMLParagraphElement>(null);
+	useTitleFromText(textRef);
 	return (
 		<div
 			aria-live="polite"
@@ -79,7 +77,7 @@ export function StatusStrip({
 			<p
 				className="min-w-0 flex-1 truncate"
 				data-slot="status-strip-text"
-				title={fullText}
+				ref={textRef}
 			>
 				{title ? (
 					<span className="text-foreground" data-slot="status-strip-title">

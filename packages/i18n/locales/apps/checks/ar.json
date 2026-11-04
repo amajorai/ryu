@@ -16,6 +16,7 @@
   "Agent-assisted refinement isn't available here yet. Use Edit plan to update this case.": "التحسين بمساعدة الوكيل غير متاح هنا بعد. استخدم «تعديل الخطة» لتحديث هذه الحالة.",
   "All Tests": "كل الاختبارات",
   "All projects": "كل المشاريع",
+  "All provider lanes": "كل مسارات المزوّدين",
   "All statuses": "كل الحالات",
   "Attach a text context file": "إرفاق ملف سياق نصي",
   "Attention": "يحتاج إلى انتباه",
@@ -389,6 +390,5 @@
   "{type} tests": "اختبارات {type}",
   "{uiTests} UI · {apiTests} API": "{uiTests} UI · {apiTests} API",
   "{url} · Last run {lastRun}": "{url} · آخر تشغيل {lastRun}",
-  "{url} · The target is checked after the project is saved": "{url} · يتم فحص الهدف بعد حفظ المشروع",
-  "← All provider lanes": "← كل مسارات المزودين"
+  "{url} · The target is checked after the project is saved": "{url} · يتم فحص الهدف بعد حفظ المشروع"
 }

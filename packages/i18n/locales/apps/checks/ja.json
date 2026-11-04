@@ -16,6 +16,7 @@
   "Agent-assisted refinement isn't available here yet. Use Edit plan to update this case.": "エージェントによる改善はまだここでは利用できません。このケースを更新するには「計画を編集」を使用してください。",
   "All Tests": "すべてのテスト",
   "All projects": "すべてのプロジェクト",
+  "All provider lanes": "すべてのプロバイダーレーン",
   "All statuses": "すべてのステータス",
   "Attach a text context file": "テキストのコンテキストファイルを添付",
   "Attention": "要確認",
@@ -389,6 +390,5 @@
   "{type} tests": "{type} テスト",
   "{uiTests} UI · {apiTests} API": "{uiTests} UI · {apiTests} API",
   "{url} · Last run {lastRun}": "{url} · 前回の実行 {lastRun}",
-  "{url} · The target is checked after the project is saved": "{url} · ターゲットはプロジェクトの保存後に確認されます",
-  "← All provider lanes": "← すべてのプロバイダレーン"
+  "{url} · The target is checked after the project is saved": "{url} · ターゲットはプロジェクトの保存後に確認されます"
 }

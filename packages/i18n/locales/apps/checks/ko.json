@@ -16,6 +16,7 @@
   "Agent-assisted refinement isn't available here yet. Use Edit plan to update this case.": "에이전트 지원 다듬기는 아직 여기서 사용할 수 없습니다. 이 케이스를 업데이트하려면 계획 편집을 사용하세요.",
   "All Tests": "모든 테스트",
   "All projects": "모든 프로젝트",
+  "All provider lanes": "모든 공급자 레인",
   "All statuses": "모든 상태",
   "Attach a text context file": "텍스트 컨텍스트 파일 첨부",
   "Attention": "확인 필요",
@@ -389,6 +390,5 @@
   "{type} tests": "{type} 테스트",
   "{uiTests} UI · {apiTests} API": "{uiTests} UI · {apiTests} API",
   "{url} · Last run {lastRun}": "{url} · 마지막 실행 {lastRun}",
-  "{url} · The target is checked after the project is saved": "{url} · 프로젝트를 저장한 후 대상을 확인합니다",
-  "← All provider lanes": "← 모든 제공업체 레인"
+  "{url} · The target is checked after the project is saved": "{url} · 프로젝트를 저장한 후 대상을 확인합니다"
 }

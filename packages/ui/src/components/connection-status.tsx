@@ -70,6 +70,8 @@ export function ConnectionStatusDot({
 
 interface ConnectionStatusCopy {
 	detail: string;
+	/** The strip's lead, a whole sentence with its own punctuation. */
+	stripTitle: string;
 	title: string;
 }
 
@@ -178,13 +180,15 @@ function copyForPhase(
 	if (restored) {
 		return {
 			detail: tl("Reconnected to {nodeName}.", { nodeName }),
-			title: "Connection restored",
+			stripTitle: tl("Connection restored."),
+			title: tl("Connection restored"),
 		};
 	}
 	if (phase === "offline") {
 		return {
-			detail: "Waiting for connectivity…",
-			title: "Offline mode",
+			detail: tl("Waiting for connectivity…"),
+			stripTitle: tl("Offline mode."),
+			title: tl("Offline mode"),
 		};
 	}
 	if (phase === "node-unreachable") {
@@ -192,12 +196,15 @@ function copyForPhase(
 			detail: tl("Can’t reach {nodeName}. Reconnecting automatically…", {
 				nodeName,
 			}),
-			title: "Node offline",
+			stripTitle: tl("Node offline."),
+			title: tl("Node offline"),
 		};
 	}
+	const connecting = tl("Connecting to {nodeName}", { nodeName });
 	return {
-		detail: "Checking the node and keeping this window available…",
-		title: tl("Connecting to {nodeName}", { nodeName }),
+		detail: tl("Checking the node and keeping this window available…"),
+		stripTitle: connecting,
+		title: connecting,
 	};
 }
 
@@ -315,7 +322,7 @@ function ConnectionStatusStrip({
 			data-testid="connection-status-toast"
 			detail={copy.detail}
 			icon={phaseIcon(phase, restored, "size-4")}
-			title={`${copy.title}.`}
+			title={copy.stripTitle}
 			tone={phaseTone(phase, restored)}
 		/>
 	);

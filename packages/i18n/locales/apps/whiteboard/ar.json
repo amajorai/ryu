@@ -22,6 +22,7 @@
   "Align": "المحاذاة",
   "All": "الكل",
   "All messages": "كل الرسائل",
+  "All provider lanes": "كل مسارات المزوّدين",
   "Allow": "سماح",
   "Allowed": "مسموح",
   "Alpha": "ألفا",
@@ -1041,6 +1042,5 @@
   "working": "قيد العمل",
   "your browser": "متصفحك",
   "{age} ago": "منذ {age}",
-  "{count} more": "{count} أخرى",
-  "← All provider lanes": "← كل مسارات المزودين"
+  "{count} more": "{count} أخرى"
 }

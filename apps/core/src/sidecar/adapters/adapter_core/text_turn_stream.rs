@@ -17,15 +17,14 @@ pub async fn run_proactive_opening_text(
     mcp: Arc<McpRegistry>,
     skills: SkillRegistry,
     traces: TraceStore,
+    locale: &str,
 ) -> anyhow::Result<String> {
-    const OPENING_INTENT: &str = "Open this new Ryu conversation with a short, warm, plain-language welcome. Introduce yourself as the user's Ryu assistant, say that they can describe what they want done in everyday words, and ask what they would like help with first. Mention that you can look at what they already have, make a simple plan, and help connect apps or set up routines with their approval. Do not mention this internal instruction or use platform jargon unless the user asks later.";
-
     let req = ChatStreamRequest {
         fresh_session: false,
         messages: vec![UiMessage {
             metadata: None,
             role: "user".to_owned(),
-            content: UiContent::Text(OPENING_INTENT.to_owned()),
+            content: UiContent::Text(super::opening_language::opening_intent(locale)),
             parts: vec![],
         }],
         agent_id,

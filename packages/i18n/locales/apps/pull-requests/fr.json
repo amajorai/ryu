@@ -878,7 +878,5 @@
   "{count} layers": "{count} couches",
   "{count} more": "{count} de plus",
   "{count} pull requests": "{count} demandes de fusion",
-  "{repository} #{number} · {age}": "{repository} #{number} · {age}",
-  "← Issues": "← Tickets",
-  "← Pull requests": "← Demandes de tirage"
+  "{repository} #{number} · {age}": "{repository} #{number} · {age}"
 }

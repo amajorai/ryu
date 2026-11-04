@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "프레임 {frameCount}개 · 스와이프용 구성",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, other {프레임 #개에 본문 또는 시각적 프롬프트가 없습니다}}.",
   "{projectName} canvas": "{projectName} 캔버스",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, 프레임 {frameNumber}/{frameTotal}",
-  "← Gallery": "← 갤러리"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, 프레임 {frameNumber}/{frameTotal}"
 }

@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "{frameCount} fotogrammi · composizione pronta per lo scorrimento",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, one {A # fotogramma manca il testo o il prompt visivo} other {A # fotogrammi manca il testo o il prompt visivo}}.",
   "{projectName} canvas": "Area di disegno di {projectName}",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, fotogramma {frameNumber} di {frameTotal}",
-  "← Gallery": "← Galleria"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, fotogramma {frameNumber} di {frameTotal}"
 }

@@ -16,6 +16,7 @@
   "Agent-assisted refinement isn't available here yet. Use Edit plan to update this case.": "Agentengestützte Verfeinerung ist hier noch nicht verfügbar. Zum Aktualisieren dieses Falls „Plan bearbeiten“ verwenden.",
   "All Tests": "Alle Tests",
   "All projects": "Alle Projekte",
+  "All provider lanes": "Alle Anbieter-Lanes",
   "All statuses": "Alle Status",
   "Attach a text context file": "Textkontextdatei anhängen",
   "Attention": "Aufmerksamkeit erforderlich",
@@ -389,6 +390,5 @@
   "{type} tests": "{type}-Tests",
   "{uiTests} UI · {apiTests} API": "{uiTests} UI · {apiTests} API",
   "{url} · Last run {lastRun}": "{url} · Letzte Ausführung {lastRun}",
-  "{url} · The target is checked after the project is saved": "{url} · Das Ziel wird nach dem Speichern des Projekts geprüft",
-  "← All provider lanes": "← Alle Anbieterkanäle"
+  "{url} · The target is checked after the project is saved": "{url} · Das Ziel wird nach dem Speichern des Projekts geprüft"
 }

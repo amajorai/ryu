@@ -24,6 +24,7 @@
   "Align": "Alinear",
   "All": "Todo",
   "All messages": "Todos los mensajes",
+  "All provider lanes": "Todos los carriles de proveedores",
   "All scheduled job status for {date}": "Estado de todas las tareas programadas el {date}",
   "All scheduled jobs": "Todas las tareas programadas",
   "Allow": "Permitir",
@@ -778,6 +779,5 @@
   "{jobCount} tracked": "{jobCount} con seguimiento",
   "{jobName} run status for {date}": "Estado de ejecución de {jobName} el {date}",
   "{runCount} runs": "{runCount} ejecuciones",
-  "· Paused": "· En pausa",
-  "← All provider lanes": "← Todos los carriles de proveedores"
+  "· Paused": "· En pausa"
 }

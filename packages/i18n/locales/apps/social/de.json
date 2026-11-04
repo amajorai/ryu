@@ -47,6 +47,7 @@
   "All kinds": "Alle Arten",
   "All messages": "Alle Nachrichten",
   "All platforms": "Alle Plattformen",
+  "All provider lanes": "Alle Anbieter-Lanes",
   "All tabs": "Alle Tabs",
   "All {total}": "Alle {total}",
   "Allow": "Zulassen",
@@ -573,7 +574,6 @@
   "No templates": "Keine Vorlagen",
   "No text — this post was scheduled without a draft body.": "Kein Text – dieser Beitrag wurde ohne Entwurfstext geplant.",
   "No workspaces": "Keine Workspaces",
-  "No.": "Nr.",
   "None": "Keine",
   "None of these accounts is connected yet — scheduled posts will queue but never publish.": "Keines dieser Konten ist bisher verbunden – geplante Beiträge werden eingereiht, aber nie veröffentlicht.",
   "Normal": "Normal",
@@ -1328,6 +1328,5 @@
   "· already out": "· bereits veröffentlicht",
   "“{name}” created": "„{name}“ erstellt",
   "“{name}” deleted": "„{name}“ gelöscht",
-  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "„{text}“ wird endgültig gelöscht. Bereits daraus geplante Beiträge behalten ihre eigene Kopie des Inhalts und sind nicht betroffen.",
-  "← All provider lanes": "← Alle Anbieterkanäle"
+  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "„{text}“ wird endgültig gelöscht. Bereits daraus geplante Beiträge behalten ihre eigene Kopie des Inhalts und sind nicht betroffen."
 }

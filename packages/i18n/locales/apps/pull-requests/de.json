@@ -878,7 +878,5 @@
   "{count} layers": "{count} Ebenen",
   "{count} more": "{count} weitere",
   "{count} pull requests": "{count} Pull Requests",
-  "{repository} #{number} · {age}": "{repository} #{number} · {age}",
-  "← Issues": "← Tickets",
-  "← Pull requests": "← Pull-Requests"
+  "{repository} #{number} · {age}": "{repository} #{number} · {age}"
 }

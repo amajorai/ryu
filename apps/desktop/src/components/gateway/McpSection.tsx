@@ -45,27 +45,31 @@ import { SettingsNotice } from "./SettingsNotice.tsx";
 
 // Load failures read as one plain sentence; the request summary stays as a
 // muted second line so it can still be matched against Core logs.
-function McpLoadError({
+/** Each kind is one whole sentence so translators never see an English noun
+ *  spliced into a translated frame. */
+export function McpLoadError({
 	error,
 	onRetry,
-	subject,
+	kind,
 }: {
 	error: string;
+	kind: "servers" | "tools";
 	onRetry: () => void;
-	subject: string;
 }) {
 	const tl = useLiteralMessages();
 	return (
 		<SettingsNotice
 			action={
 				<Button onClick={onRetry} size="sm" variant="outline">
-					Retry
+					{tl("Retry")}
 				</Button>
 			}
 			role="alert"
 			secondary={error}
 		>
-			{tl("Couldn’t load {subject}.", { subject })}
+			{kind === "servers"
+				? tl("Couldn’t load MCP servers.")
+				: tl("Couldn’t load MCP tools.")}
 		</SettingsNotice>
 	);
 }
@@ -104,9 +108,7 @@ function ServersList({
 		return <SkeletonRows label="Loading…" spacing="panel" />;
 	}
 	if (error) {
-		return (
-			<McpLoadError error={error} onRetry={onRetry} subject="MCP servers" />
-		);
+		return <McpLoadError error={error} kind="servers" onRetry={onRetry} />;
 	}
 	if (servers.length === 0) {
 		return (
@@ -197,7 +199,7 @@ function ToolsList({
 		return <SkeletonRows label="Loading…" spacing="panel" />;
 	}
 	if (error) {
-		return <McpLoadError error={error} onRetry={onRetry} subject="MCP tools" />;
+		return <McpLoadError error={error} kind="tools" onRetry={onRetry} />;
 	}
 	if (tools.length === 0) {
 		return (

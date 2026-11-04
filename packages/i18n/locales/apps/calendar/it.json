@@ -24,6 +24,7 @@
   "Align": "Allineamento",
   "All": "Tutto",
   "All messages": "Tutti i messaggi",
+  "All provider lanes": "Tutte le corsie dei provider",
   "All scheduled job status for {date}": "Stato di tutti i job pianificati il {date}",
   "All scheduled jobs": "Tutti i job pianificati",
   "Allow": "Consenti",
@@ -778,6 +779,5 @@
   "{jobCount} tracked": "{jobCount} monitorati",
   "{jobName} run status for {date}": "Stato di esecuzione di {jobName} per il {date}",
   "{runCount} runs": "{runCount} esecuzioni",
-  "· Paused": "· In pausa",
-  "← All provider lanes": "← Tutte le corsie dei provider"
+  "· Paused": "· In pausa"
 }

@@ -163,11 +163,11 @@ test("gallery search, sort, favorites, trash, restore, and permanent removal upd
 }) => {
 	const app = await mountApp(page);
 	await makeProject(app, "Beta notes");
-	await app.getByRole("button", { name: "← Gallery" }).click();
+	await app.getByRole("button", { name: "Gallery", exact: true }).click();
 	await makeProject(app, "Alpha cover");
-	await app.getByRole("button", { name: "← Gallery" }).click();
+	await app.getByRole("button", { name: "Gallery", exact: true }).click();
 	await makeProject(app, "Gamma demo");
-	await app.getByRole("button", { name: "← Gallery" }).click();
+	await app.getByRole("button", { name: "Gallery", exact: true }).click();
 	await waitForProjectCount(page, 3);
 
 	await app.getByRole("button", { name: "Add Beta notes favorite" }).click();
@@ -302,7 +302,7 @@ test("carousel design, host-backed model drafting, preview navigation, and image
 		prompt: "A small paper kite over a blue sea",
 		size: "1280x1080",
 	});
-	await app.getByRole("button", { name: "Open reader preview →" }).click();
+	await app.getByRole("button", { name: "Open reader preview" }).click();
 	await expect(
 		app.getByRole("heading", { name: "Clear launch story" })
 	).toBeVisible();
@@ -316,7 +316,7 @@ test("carousel design, host-backed model drafting, preview navigation, and image
 	await saveEvidence(page, "slides-carousel-reader-preview.png");
 	await app.getByRole("button", { name: "Close preview" }).click();
 	await expect(
-		app.getByRole("button", { name: "Open reader preview →" })
+		app.getByRole("button", { name: "Open reader preview" })
 	).toBeVisible();
 
 	// SAFETY: This proof mounts the exact Playwright-built native Slides bundle against its private scoped storage Map. App saveState persists model.serializeState projects/trash from the actual normalized Project and Layer constructors; this observer reads those authored bytes through the scoped storage RPC. No foreign storage JSON is validated by this view.

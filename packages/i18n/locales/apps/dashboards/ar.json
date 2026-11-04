@@ -12,7 +12,5 @@
   "Widget “{title}” recovered": "استعادت الأداة «{title}» عملها",
   "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "أدوات سير العمل غير متاحة بعد: لا توجد قدرة في المضيف تتيح لتطبيق تشغيل سير عمل محفوظ. استخدم مصدر http أو composio أو مصدرًا ثابتًا بدلًا من ذلك.",
   "dashboard not found": "لم يتم العثور على لوحة المعلومات",
-  "kind is required": "النوع مطلوب",
-  "name is required": "الاسم مطلوب",
   "not found": "غير موجود"
 }

@@ -20,6 +20,7 @@
   "Align": "संरेखण",
   "All": "सभी",
   "All messages": "सभी संदेश",
+  "All provider lanes": "सभी प्रोवाइडर लेन",
   "Allow": "अनुमति दें",
   "Allowed": "अनुमत",
   "Alpha": "अल्फ़ा",
@@ -740,6 +741,5 @@
   "{gaps}. The overnight gap is intentional — a middle-of-the-night ping opens a window that expires before you start work.": "{gaps}. रात का अंतराल जान-बूझकर रखा गया है — आधी रात का पिंग एक ऐसी विंडो खोलता है जो आपके काम शुरू करने से पहले ही समाप्त हो जाती है।",
   "{modelName} — cheapest": "{modelName} — सबसे सस्ता",
   "{providerName} lists no models yet, so its accounts cannot be pinged.": "{providerName} में अभी कोई मॉडल सूचीबद्ध नहीं है, इसलिए इसके खातों को पिंग नहीं किया जा सकता।",
-  "{windowLabel} · {usedPercent}% used": "{windowLabel} · {usedPercent}% उपयोग किया गया",
-  "← All provider lanes": "← सभी प्रदाता लेन"
+  "{windowLabel} · {usedPercent} used": "{windowLabel} · {usedPercent} उपयोग हुआ"
 }

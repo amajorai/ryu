@@ -20,6 +20,7 @@
   "Align": "정렬",
   "All": "전체",
   "All messages": "모든 메시지",
+  "All provider lanes": "모든 공급자 레인",
   "Allow": "허용",
   "Allowed": "허용됨",
   "Alpha": "알파",
@@ -786,6 +787,5 @@
   "{age} ago": "{age} 전",
   "{count} more": "{count}개 더",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {선택한 노드를 위로 이동했습니다. 새 위치, x: {x}, y: {y}} down {선택한 노드를 아래로 이동했습니다. 새 위치, x: {x}, y: {y}} left {선택한 노드를 왼쪽으로 이동했습니다. 새 위치, x: {x}, y: {y}} right {선택한 노드를 오른쪽으로 이동했습니다. 새 위치, x: {x}, y: {y}} other {선택한 노드를 이동했습니다. 새 위치, x: {x}, y: {y}}}",
-  "{label} note": "{label} 메모",
-  "← All provider lanes": "← 모든 제공업체 레인"
+  "{label} note": "{label} 메모"
 }

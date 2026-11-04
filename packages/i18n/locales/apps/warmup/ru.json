@@ -20,6 +20,7 @@
   "Align": "Выравнивание",
   "All": "Все",
   "All messages": "Все сообщения",
+  "All provider lanes": "Все каналы провайдеров",
   "Allow": "Разрешить",
   "Allowed": "Разрешено",
   "Alpha": "Альфа",
@@ -740,6 +741,5 @@
   "{gaps}. The overnight gap is intentional — a middle-of-the-night ping opens a window that expires before you start work.": "{gaps}. Ночной перерыв сделан намеренно — пинг посреди ночи открывает окно, которое истечёт ещё до начала вашей работы.",
   "{modelName} — cheapest": "{modelName} — самая дешёвая",
   "{providerName} lists no models yet, so its accounts cannot be pinged.": "У {providerName} пока нет моделей, поэтому его аккаунты нельзя пинговать.",
-  "{windowLabel} · {usedPercent}% used": "{windowLabel} · использовано {usedPercent}%",
-  "← All provider lanes": "← Все линии провайдеров"
+  "{windowLabel} · {usedPercent} used": "{windowLabel} · использовано {usedPercent}"
 }

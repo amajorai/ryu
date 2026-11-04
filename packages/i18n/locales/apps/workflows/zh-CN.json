@@ -37,6 +37,7 @@
   "All messages": "所有消息",
   "All must ack": "全部必须确认",
   "All passes (JSON)": "所有轮次(JSON)",
+  "All provider lanes": "所有提供商通道",
   "Allow": "允许",
   "Allowed": "已允许",
   "Alpha": "透明度",
@@ -1086,6 +1087,5 @@
   "{count} selected people": "已选 {count} 人",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {已将所选节点上移。新位置，x：{x}，y：{y}} down {已将所选节点下移。新位置，x：{x}，y：{y}} left {已将所选节点左移。新位置，x：{x}，y：{y}} right {已将所选节点右移。新位置，x：{x}，y：{y}} other {已移动所选节点。新位置，x：{x}，y：{y}}}",
   "{event} (not installed)": "{event}（未安装）",
-  "{size} selected": "已选择 {size} 项",
-  "← All provider lanes": "← 所有提供商通道"
+  "{size} selected": "已选择 {size} 项"
 }

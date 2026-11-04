@@ -16,6 +16,7 @@
   "Agent-assisted refinement isn't available here yet. Use Edit plan to update this case.": "L'affinage assisté par agent n'est pas encore disponible ici. Utilisez Modifier le plan pour mettre à jour ce cas.",
   "All Tests": "Tous les tests",
   "All projects": "Tous les projets",
+  "All provider lanes": "Toutes les voies de fournisseurs",
   "All statuses": "Tous les statuts",
   "Attach a text context file": "Joindre un fichier de contexte texte",
   "Attention": "À examiner",
@@ -389,6 +390,5 @@
   "{type} tests": "Tests {type}",
   "{uiTests} UI · {apiTests} API": "{uiTests} UI · {apiTests} API",
   "{url} · Last run {lastRun}": "{url} · Dernière exécution {lastRun}",
-  "{url} · The target is checked after the project is saved": "{url} · La cible est vérifiée après l’enregistrement du projet",
-  "← All provider lanes": "← Toutes les voies des fournisseurs"
+  "{url} · The target is checked after the project is saved": "{url} · La cible est vérifiée après l’enregistrement du projet"
 }

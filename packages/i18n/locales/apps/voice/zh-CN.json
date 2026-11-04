@@ -393,7 +393,6 @@
   "not installed": "未安装",
   "nothing to speak after removing tags": "移除标签后没有可朗读的内容",
   "pause tags may add at most {maxTotalPauseS}s of silence in total": "pause 标签总共最多可添加 {maxTotalPauseS} 秒静音",
-  "required TTS engine '{engineId}' is missing from the registry": "注册表中缺少必需的 TTS 引擎 '{engineId}'",
   "synthesis failed in '{engine}': {error}": "在 '{engine}' 中合成失败：{error}",
   "unknown model '{modelName}' for engine '{engine}'": "引擎 '{engine}' 的未知模型 '{modelName}'",
   "{displayName} cannot be installed alongside {others}": "{displayName} 无法与 {others} 同时安装",

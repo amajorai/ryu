@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "{frameCount} フレーム · スワイプ対応の構成",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, other {# 個のフレームに本文またはビジュアルプロンプトがありません}}。",
   "{projectName} canvas": "{projectName} のキャンバス",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}、フレーム {frameNumber}/{frameTotal}",
-  "← Gallery": "← ギャラリー"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}、フレーム {frameNumber}/{frameTotal}"
 }

@@ -878,7 +878,5 @@
   "{count} layers": "{count} 层",
   "{count} more": "还有 {count} 个",
   "{count} pull requests": "{count} 个拉取请求",
-  "{repository} #{number} · {age}": "{repository} #{number} · {age}",
-  "← Issues": "← 议题",
-  "← Pull requests": "← 拉取请求"
+  "{repository} #{number} · {age}": "{repository} #{number} · {age}"
 }

@@ -47,6 +47,7 @@
   "All kinds": "كل الأنواع",
   "All messages": "كل الرسائل",
   "All platforms": "جميع الأنظمة الأساسية",
+  "All provider lanes": "كل مسارات المزوّدين",
   "All tabs": "جميع علامات التبويب",
   "All {total}": "الكل ({total})",
   "Allow": "سماح",
@@ -573,7 +574,6 @@
   "No templates": "لا توجد قوالب",
   "No text — this post was scheduled without a draft body.": "بلا نص — جُدول هذا المنشور دون نص مسودة.",
   "No workspaces": "لا توجد مساحات عمل",
-  "No.": "رقم",
   "None": "لا شيء",
   "None of these accounts is connected yet — scheduled posts will queue but never publish.": "لم يُربط أي من هذه الحسابات بعد — ستدخل المنشورات المجدولة قائمة الانتظار لكنها لن تُنشر أبدًا.",
   "Normal": "عادية",
@@ -1328,6 +1328,5 @@
   "· already out": "· نُشر بالفعل",
   "“{name}” created": "تم إنشاء “{name}”",
   "“{name}” deleted": "تم حذف “{name}”",
-  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "سيُحذف «{text}» نهائيًا. تحتفظ المنشورات المجدولة منه مسبقًا بنسختها الخاصة من المحتوى ولن تتأثر.",
-  "← All provider lanes": "← كل مسارات المزودين"
+  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "سيُحذف «{text}» نهائيًا. تحتفظ المنشورات المجدولة منه مسبقًا بنسختها الخاصة من المحتوى ولن تتأثر."
 }

@@ -20,6 +20,7 @@
   "Align": "Alinear",
   "All": "Todo",
   "All messages": "Todos los mensajes",
+  "All provider lanes": "Todos los carriles de proveedores",
   "Allow": "Permitir",
   "Allowed": "Permitido",
   "Alpha": "Alfa",
@@ -740,6 +741,5 @@
   "{gaps}. The overnight gap is intentional — a middle-of-the-night ping opens a window that expires before you start work.": "{gaps}. El intervalo nocturno es intencionado — un ping en mitad de la noche abre una ventana que caduca antes de que empieces a trabajar.",
   "{modelName} — cheapest": "{modelName} — el más barato",
   "{providerName} lists no models yet, so its accounts cannot be pinged.": "{providerName} aún no tiene modelos, por lo que no se puede hacer ping a sus cuentas.",
-  "{windowLabel} · {usedPercent}% used": "{windowLabel} · {usedPercent} % usado",
-  "← All provider lanes": "← Todos los carriles de proveedores"
+  "{windowLabel} · {usedPercent} used": "{windowLabel} · {usedPercent} usado"
 }

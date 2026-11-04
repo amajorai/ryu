@@ -104,7 +104,8 @@ export function buildArguments(
 		if (type === "number" || type === "integer") {
 			const number = Number(value);
 			if (!Number.isFinite(number)) {
-				throw new Error(`${property.title ?? name} must be a number.`);
+				const field = property.title ?? name;
+				throw new Error(tl("{field} must be a number.", { field }));
 			}
 			argumentsValue[name] = number;
 		} else if (type === "boolean") {

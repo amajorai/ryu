@@ -47,6 +47,7 @@
   "All kinds": "所有类型",
   "All messages": "所有消息",
   "All platforms": "所有平台",
+  "All provider lanes": "所有提供商通道",
   "All tabs": "所有标签页",
   "All {total}": "全部 ({total})",
   "Allow": "允许",
@@ -573,7 +574,6 @@
   "No templates": "暂无模板",
   "No text — this post was scheduled without a draft body.": "无文本——此帖子排期时没有草稿正文。",
   "No workspaces": "没有工作区",
-  "No.": "编号",
   "None": "无",
   "None of these accounts is connected yet — scheduled posts will queue but never publish.": "这些账号均尚未关联——已排期的帖子会进入队列，但永远不会发布。",
   "Normal": "普通",
@@ -1328,6 +1328,5 @@
   "· already out": "· 已发布",
   "“{name}” created": "已创建“{name}”",
   "“{name}” deleted": "已删除“{name}”",
-  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "“{text}”将被永久删除。已基于它排期的帖子保留各自的内容副本，不受影响。",
-  "← All provider lanes": "← 所有提供商通道"
+  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "“{text}”将被永久删除。已基于它排期的帖子保留各自的内容副本，不受影响。"
 }

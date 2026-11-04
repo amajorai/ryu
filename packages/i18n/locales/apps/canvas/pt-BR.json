@@ -20,6 +20,7 @@
   "Align": "Alinhamento",
   "All": "Tudo",
   "All messages": "Todas as mensagens",
+  "All provider lanes": "Todas as faixas de provedores",
   "Allow": "Permitir",
   "Allowed": "Permitido",
   "Alpha": "Alfa",
@@ -786,6 +787,5 @@
   "{age} ago": "há {age}",
   "{count} more": "Mais {count}",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {Nó selecionado movido para cima. Nova posição, x: {x}, y: {y}} down {Nó selecionado movido para baixo. Nova posição, x: {x}, y: {y}} left {Nó selecionado movido para a esquerda. Nova posição, x: {x}, y: {y}} right {Nó selecionado movido para a direita. Nova posição, x: {x}, y: {y}} other {Nó selecionado movido. Nova posição, x: {x}, y: {y}}}",
-  "{label} note": "Nota de {label}",
-  "← All provider lanes": "← Todas as faixas de provedores"
+  "{label} note": "Nota de {label}"
 }

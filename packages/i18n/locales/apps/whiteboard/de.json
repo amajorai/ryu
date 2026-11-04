@@ -22,6 +22,7 @@
   "Align": "Ausrichtung",
   "All": "Alle",
   "All messages": "Alle Nachrichten",
+  "All provider lanes": "Alle Anbieter-Lanes",
   "Allow": "Zulassen",
   "Allowed": "Erlaubt",
   "Alpha": "Deckkraft",
@@ -1041,6 +1042,5 @@
   "working": "arbeiten",
   "your browser": "dem Browser",
   "{age} ago": "vor {age}",
-  "{count} more": "{count} weitere",
-  "← All provider lanes": "← Alle Anbieterkanäle"
+  "{count} more": "{count} weitere"
 }

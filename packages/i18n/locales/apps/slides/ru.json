@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "Кадров: {frameCount} · композиция для пролистывания",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, one {В # кадре нет текста или визуального промпта} few {В # кадрах нет текста или визуального промпта} many {В # кадрах нет текста или визуального промпта} other {В # кадра нет текста или визуального промпта}}.",
   "{projectName} canvas": "Холст {projectName}",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, кадр {frameNumber} из {frameTotal}",
-  "← Gallery": "← Галерея"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, кадр {frameNumber} из {frameTotal}"
 }

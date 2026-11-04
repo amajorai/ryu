@@ -47,6 +47,7 @@
   "All kinds": "सभी प्रकार",
   "All messages": "सभी संदेश",
   "All platforms": "सभी प्लेटफ़ॉर्म",
+  "All provider lanes": "सभी प्रोवाइडर लेन",
   "All tabs": "सभी टैब",
   "All {total}": "सभी ({total})",
   "Allow": "अनुमति दें",
@@ -573,7 +574,6 @@
   "No templates": "कोई टेम्पलेट नहीं",
   "No text — this post was scheduled without a draft body.": "कोई टेक्स्ट नहीं — यह पोस्ट बिना ड्राफ़्ट बॉडी के शेड्यूल की गई थी।",
   "No workspaces": "कोई वर्कस्पेस नहीं",
-  "No.": "क्र.",
   "None": "कोई नहीं",
   "None of these accounts is connected yet — scheduled posts will queue but never publish.": "इनमें से कोई भी खाता अभी कनेक्ट नहीं है — शेड्यूल की गई पोस्ट कतार में तो जाएँगी, लेकिन कभी पब्लिश नहीं होंगी।",
   "Normal": "सामान्य",
@@ -1328,6 +1328,5 @@
   "· already out": "· पहले ही पब्लिश",
   "“{name}” created": "“{name}” बनाया गया",
   "“{name}” deleted": "“{name}” हटाया गया",
-  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "“{text}” स्थायी रूप से हटा दिया जाएगा. इससे पहले से शेड्यूल की गई पोस्ट सामग्री की अपनी कॉपी रखती हैं और प्रभावित नहीं होतीं.",
-  "← All provider lanes": "← सभी प्रदाता लेन"
+  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "“{text}” स्थायी रूप से हटा दिया जाएगा. इससे पहले से शेड्यूल की गई पोस्ट सामग्री की अपनी कॉपी रखती हैं और प्रभावित नहीं होतीं."
 }

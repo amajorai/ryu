@@ -488,7 +488,7 @@ test("selection, denied bulk deletion, retry, full-view CSV export, and record c
 			.filter((request) => request.path === "/api/crm/objects/deal/records")
 			.map((request) => request.body)
 	).toEqual([{ values: {} }, { values: {} }]);
-	await page.getByRole("button", { name: "← Back" }).click();
+	await page.getByRole("button", { name: "Back", exact: true }).click();
 	await expect(page.getByText("52 Deals", { exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "Next", exact: true }).click();
 	await page
@@ -507,7 +507,7 @@ test("selection, denied bulk deletion, retry, full-view CSV export, and record c
 				request.path === "/api/crm/records/deal_created"
 		)
 	).toHaveLength(2);
-	await page.getByRole("button", { name: "← Back" }).click();
+	await page.getByRole("button", { name: "Back", exact: true }).click();
 	await page
 		.getByRole("textbox", { name: "Search all records" })
 		.fill("Untitled");

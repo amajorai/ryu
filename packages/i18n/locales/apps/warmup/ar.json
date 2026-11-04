@@ -20,6 +20,7 @@
   "Align": "المحاذاة",
   "All": "الكل",
   "All messages": "كل الرسائل",
+  "All provider lanes": "كل مسارات المزوّدين",
   "Allow": "سماح",
   "Allowed": "مسموح",
   "Alpha": "ألفا",
@@ -740,6 +741,5 @@
   "{gaps}. The overnight gap is intentional — a middle-of-the-night ping opens a window that expires before you start work.": "{gaps}. الفجوة الليلية مقصودة — فإرسال ping في منتصف الليل يفتح نافذة تنتهي قبل أن تبدأ العمل.",
   "{modelName} — cheapest": "{modelName} — الأرخص",
   "{providerName} lists no models yet, so its accounts cannot be pinged.": "لا يعرض {providerName} أي نماذج بعد، لذا لا يمكن إرسال ping إلى حساباته.",
-  "{windowLabel} · {usedPercent}% used": "{windowLabel} · تم استخدام {usedPercent}%",
-  "← All provider lanes": "← كل مسارات المزودين"
+  "{windowLabel} · {usedPercent} used": "{windowLabel} · تم استخدام {usedPercent}"
 }

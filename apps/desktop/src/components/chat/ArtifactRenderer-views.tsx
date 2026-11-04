@@ -58,7 +58,16 @@ async function compileMermaid(
 	return svg;
 }
 
-export function ArtifactError({ message }: { message: string }) {
+/** `message` is the translated lead; `detail` is optional third-party engine
+ *  text (e.g. a Mermaid parser error) shown verbatim and kept away from the
+ *  DOM localizer. */
+export function ArtifactError({
+	message,
+	detail,
+}: {
+	message: string;
+	detail?: string | null;
+}) {
 	return (
 		<div className="flex h-full items-center justify-center p-6">
 			<div className="flex max-w-sm items-start gap-2 text-muted-foreground text-xs">
@@ -67,7 +76,18 @@ export function ArtifactError({ message }: { message: string }) {
 					className="mt-0.5 size-4 shrink-0 text-status-destructive"
 					icon={AlertCircleIcon}
 				/>
-				<span className="whitespace-pre-wrap break-words">{message}</span>
+				<div className="flex min-w-0 flex-col gap-1">
+					<span className="whitespace-pre-wrap break-words">{message}</span>
+					{detail ? (
+						<span
+							className="whitespace-pre-wrap break-words font-mono opacity-80"
+							data-ryu-i18n="off"
+							data-testid="artifact-error-detail"
+						>
+							{detail}
+						</span>
+					) : null}
+				</div>
 			</div>
 		</div>
 	);
@@ -157,8 +177,12 @@ export function MermaidBody({
 	theme: ArtifactTheme | undefined;
 	onContentHeight?: ArtifactContentHeightHandler;
 }) {
+	const tl = useLiteralMessages();
 	const [mermaidDoc, setMermaidDoc] = useState<string | null>(null);
-	const [error, setError] = useState<string | null>(null);
+	// `failed` drives the translated lead; `errorDetail` is Mermaid's own
+	// (English, dynamic) parser message, shown only as a secondary line.
+	const [failed, setFailed] = useState(false);
+	const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (artifact.kind !== "mermaid") {
@@ -166,7 +190,8 @@ export function MermaidBody({
 		}
 		let cancelled = false;
 		setMermaidDoc(null);
-		setError(null);
+		setFailed(false);
+		setErrorDetail(null);
 		compileMermaid(artifact.id, artifact.content, theme?.dark)
 			.then((svg) => {
 				if (!cancelled) {
@@ -175,9 +200,8 @@ export function MermaidBody({
 			})
 			.catch((err: MermaidRenderRejection) => {
 				if (!cancelled) {
-					setError(
-						err instanceof Error ? err.message : "Failed to render diagram"
-					);
+					setFailed(true);
+					setErrorDetail(err instanceof Error ? err.message : null);
 				}
 			});
 		return () => {
@@ -185,13 +209,18 @@ export function MermaidBody({
 		};
 	}, [artifact.id, artifact.kind, artifact.content, theme]);
 
-	if (error) {
-		return <ArtifactError message={error} />;
+	if (failed) {
+		return (
+			<ArtifactError
+				detail={errorDetail}
+				message={tl("This diagram could not be rendered.")}
+			/>
+		);
 	}
 	if (!mermaidDoc) {
 		return (
 			<div className="flex h-full animate-skeleton items-center justify-center text-muted-foreground text-xs">
-				Rendering diagram…
+				{tl("Rendering diagram…")}
 			</div>
 		);
 	}

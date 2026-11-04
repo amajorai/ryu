@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "{frameCount} Frames · wischbereite Komposition",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, one {Bei # Frame fehlen Text oder Bild-Prompt} other {Bei # Frames fehlen Text oder Bild-Prompt}}.",
   "{projectName} canvas": "Canvas von {projectName}",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, Frame {frameNumber} von {frameTotal}",
-  "← Gallery": "← Galerie"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, Frame {frameNumber} von {frameTotal}"
 }

@@ -16,6 +16,7 @@
   "Agent-assisted refinement isn't available here yet. Use Edit plan to update this case.": "एजेंट-सहायता प्राप्त परिष्करण अभी यहाँ उपलब्ध नहीं है। इस केस को अपडेट करने के लिए प्लान संपादित करें का उपयोग करें।",
   "All Tests": "सभी टेस्ट",
   "All projects": "सभी प्रोजेक्ट",
+  "All provider lanes": "सभी प्रोवाइडर लेन",
   "All statuses": "सभी स्थितियाँ",
   "Attach a text context file": "टेक्स्ट संदर्भ फ़ाइल संलग्न करें",
   "Attention": "ध्यान आवश्यक",
@@ -389,6 +390,5 @@
   "{type} tests": "{type} परीक्षण",
   "{uiTests} UI · {apiTests} API": "{uiTests} UI · {apiTests} API",
   "{url} · Last run {lastRun}": "{url} · पिछला रन {lastRun}",
-  "{url} · The target is checked after the project is saved": "{url} · प्रोजेक्ट सहेजने के बाद लक्ष्य की जाँच की जाती है",
-  "← All provider lanes": "← सभी प्रदाता लेन"
+  "{url} · The target is checked after the project is saved": "{url} · प्रोजेक्ट सहेजने के बाद लक्ष्य की जाँच की जाती है"
 }

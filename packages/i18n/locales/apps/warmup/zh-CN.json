@@ -20,6 +20,7 @@
   "Align": "对齐",
   "All": "全部",
   "All messages": "所有消息",
+  "All provider lanes": "所有提供商通道",
   "Allow": "允许",
   "Allowed": "已允许",
   "Alpha": "透明度",
@@ -740,6 +741,5 @@
   "{gaps}. The overnight gap is intentional — a middle-of-the-night ping opens a window that expires before you start work.": "{gaps}。夜间间隔是有意设置的 — 半夜 ping 会打开一个在你开始工作前就过期的窗口。",
   "{modelName} — cheapest": "{modelName} — 最便宜",
   "{providerName} lists no models yet, so its accounts cannot be pinged.": "{providerName} 尚未列出任何模型，因此无法 ping 其账户。",
-  "{windowLabel} · {usedPercent}% used": "{windowLabel} · 已用 {usedPercent}%",
-  "← All provider lanes": "← 所有提供商通道"
+  "{windowLabel} · {usedPercent} used": "{windowLabel} · 已用 {usedPercent}"
 }

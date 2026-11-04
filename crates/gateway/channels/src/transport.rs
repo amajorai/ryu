@@ -3,6 +3,9 @@
 
 use super::*;
 
+mod opening_request;
+use opening_request::opening_request_body;
+
 // ─── Thread packing ─────────────────────────────────────────────────────────
 //
 // Threaded platforms need two ids to answer (the room and the thread within it)
@@ -231,16 +234,8 @@ pub(super) async fn run_proactive_opening<C: Channel + 'static>(channel: Arc<C>)
     let idempotency_key = format!("ryu-opening:v1:{}:{}", channel.name(), target);
 
     loop {
-        let result = runtime
-            .http
-            .post(&url)
-            .json(&json!({
-                "conversation_id": target.clone(),
-                "agent_id": agent_id.clone(),
-                "idempotency_key": idempotency_key.clone(),
-            }))
-            .send()
-            .await;
+        let body = opening_request_body(runtime, &target, &agent_id, &idempotency_key).await;
+        let result = runtime.http.post(&url).json(&body).send().await;
 
         let response = match result {
             Ok(response) => response,

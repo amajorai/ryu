@@ -20,6 +20,7 @@
   "Align": "정렬",
   "All": "전체",
   "All messages": "모든 메시지",
+  "All provider lanes": "모든 공급자 레인",
   "Allow": "허용",
   "Allowed": "허용됨",
   "Alpha": "알파",
@@ -740,6 +741,5 @@
   "{gaps}. The overnight gap is intentional — a middle-of-the-night ping opens a window that expires before you start work.": "{gaps}. 야간 간격은 의도된 것입니다 — 한밤중에 핑을 보내면 업무를 시작하기 전에 만료되는 윈도가 열립니다.",
   "{modelName} — cheapest": "{modelName} — 최저가",
   "{providerName} lists no models yet, so its accounts cannot be pinged.": "{providerName}에 아직 모델이 없어 해당 계정에 핑을 보낼 수 없습니다.",
-  "{windowLabel} · {usedPercent}% used": "{windowLabel} · {usedPercent}% 사용됨",
-  "← All provider lanes": "← 모든 제공업체 레인"
+  "{windowLabel} · {usedPercent} used": "{windowLabel} · {usedPercent} 사용됨"
 }

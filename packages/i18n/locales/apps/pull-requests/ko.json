@@ -878,7 +878,5 @@
   "{count} layers": "레이어 {count}개",
   "{count} more": "{count}개 더",
   "{count} pull requests": "풀 리퀘스트 {count}개",
-  "{repository} #{number} · {age}": "{repository} #{number} · {age}",
-  "← Issues": "← 이슈",
-  "← Pull requests": "← 풀 리퀘스트"
+  "{repository} #{number} · {age}": "{repository} #{number} · {age}"
 }

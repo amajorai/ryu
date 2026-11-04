@@ -22,6 +22,7 @@
   "Align": "정렬",
   "All": "전체",
   "All messages": "모든 메시지",
+  "All provider lanes": "모든 공급자 레인",
   "Allow": "허용",
   "Allowed": "허용됨",
   "Alpha": "알파",
@@ -1041,6 +1042,5 @@
   "working": "작업 중",
   "your browser": "브라우저",
   "{age} ago": "{age} 전",
-  "{count} more": "{count}개 더",
-  "← All provider lanes": "← 모든 제공업체 레인"
+  "{count} more": "{count}개 더"
 }

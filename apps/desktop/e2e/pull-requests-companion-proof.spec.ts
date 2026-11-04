@@ -122,7 +122,10 @@ test("issue scopes, search, state filters, refresh retry, selection, and mobile 
 	);
 	expect(issueDetailCall.status).toBe(200);
 	await page.setViewportSize({ width: 390, height: 844 });
-	const mobileBack = companion.getByRole("button", { name: "← Issues" });
+	const mobileBack = companion.getByRole("button", {
+		name: "Issues",
+		exact: true,
+	});
 	await expect(mobileBack).toBeVisible();
 	await mobileBack.click();
 	await expect(mobileBack).toBeHidden();
@@ -377,7 +380,10 @@ test("pull request scopes, search, state filters, refresh retry, and mobile back
 		companion.getByRole("heading", { name: /Expose usage export/ })
 	).toBeVisible();
 	await page.setViewportSize({ width: 390, height: 844 });
-	const mobileBack = companion.getByRole("button", { name: "← Pull requests" });
+	const mobileBack = companion.getByRole("button", {
+		name: "Pull requests",
+		exact: true,
+	});
 	await expect(mobileBack).toBeVisible();
 	await mobileBack.click();
 	await expect(mobileBack).toBeHidden();

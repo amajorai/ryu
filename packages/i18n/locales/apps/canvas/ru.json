@@ -20,6 +20,7 @@
   "Align": "Выравнивание",
   "All": "Все",
   "All messages": "Все сообщения",
+  "All provider lanes": "Все каналы провайдеров",
   "Allow": "Разрешить",
   "Allowed": "Разрешено",
   "Alpha": "Альфа",
@@ -786,6 +787,5 @@
   "{age} ago": "{age} назад",
   "{count} more": "Ещё {count}",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {Выбранный узел перемещён вверх. Новая позиция, x: {x}, y: {y}} down {Выбранный узел перемещён вниз. Новая позиция, x: {x}, y: {y}} left {Выбранный узел перемещён влево. Новая позиция, x: {x}, y: {y}} right {Выбранный узел перемещён вправо. Новая позиция, x: {x}, y: {y}} other {Выбранный узел перемещён. Новая позиция, x: {x}, y: {y}}}",
-  "{label} note": "Заметка {label}",
-  "← All provider lanes": "← Все линии провайдеров"
+  "{label} note": "Заметка {label}"
 }

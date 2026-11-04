@@ -393,7 +393,6 @@
   "not installed": "non installé",
   "nothing to speak after removing tags": "rien à lire après la suppression des balises",
   "pause tags may add at most {maxTotalPauseS}s of silence in total": "les balises de pause peuvent ajouter au maximum {maxTotalPauseS} s de silence au total",
-  "required TTS engine '{engineId}' is missing from the registry": "le moteur TTS requis '{engineId}' est absent du registre",
   "synthesis failed in '{engine}': {error}": "échec de la synthèse dans '{engine}' : {error}",
   "unknown model '{modelName}' for engine '{engine}'": "modèle inconnu '{modelName}' pour le moteur '{engine}'",
   "{displayName} cannot be installed alongside {others}": "{displayName} ne peut pas être installé avec {others}",

@@ -12,7 +12,5 @@
   "Widget “{title}” recovered": "विजेट “{title}” फिर से काम कर रहा है",
   "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "वर्कफ़्लो विजेट अभी उपलब्ध नहीं हैं: कोई होस्ट क्षमता किसी ऐप को सहेजा गया वर्कफ़्लो चलाने नहीं देती। इसके बजाय http, composio या स्थिर स्रोत का उपयोग करें।",
   "dashboard not found": "डैशबोर्ड नहीं मिला",
-  "kind is required": "प्रकार आवश्यक है",
-  "name is required": "नाम आवश्यक है",
   "not found": "नहीं मिला"
 }

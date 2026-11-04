@@ -164,6 +164,7 @@ impl AgentRunner {
         self.conversations
             .ensure_conversation(&conversation_id, Some(&agent_id), Some(&title), tenancy)
             .await?;
+        let text = crate::agents::patrol::scheduled_prompt(&agent_id, text).await;
         self.run_worker_with_model(Some(agent_id), conversation_id, text, None, false, model)
             .await
     }

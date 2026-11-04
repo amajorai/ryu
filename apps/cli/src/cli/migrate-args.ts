@@ -1,5 +1,6 @@
 // Argument parsing for `ryu migrate`.
 
+import { tf } from "../i18n/translate.ts";
 import {
 	ITEM_KINDS,
 	type ItemKind,
@@ -97,7 +98,10 @@ function parseKinds(raw: string): ItemKind[] {
 		const parsed = itemKindSchema.safeParse(alias);
 		if (!parsed.success) {
 			throw new UsageError(
-				`Unknown kind "${part}". Use: ${ITEM_KINDS.join(", ")}.`
+				tf('Unknown kind "{part}". Use: {kinds}.', {
+					kinds: ITEM_KINDS.join(", "),
+					part,
+				})
 			);
 		}
 		kinds.push(parsed.data);

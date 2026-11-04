@@ -59,19 +59,24 @@ export function MermaidBlock({
 	const tl = useLiteralMessages();
 	const id = useId();
 	const [svg, setSvg] = useState<string | null>(null);
-	const [error, setError] = useState<string | null>(null);
+	// `failed` drives the translated lead; `errorDetail` is Mermaid's own
+	// (English, dynamic) parser message, shown only as a secondary line.
+	const [failed, setFailed] = useState(false);
+	const [errorDetail, setErrorDetail] = useState<string | null>(null);
 	const [lightboxOpen, setLightboxOpen] = useState(false);
 	const originRef = useRef<HTMLButtonElement | null>(null);
 
 	useEffect(() => {
 		if (isIncomplete || !code.trim()) {
 			setSvg(null);
-			setError(null);
+			setFailed(false);
+			setErrorDetail(null);
 			return;
 		}
 		let cancelled = false;
 		setSvg(null);
-		setError(null);
+		setFailed(false);
+		setErrorDetail(null);
 
 		const renderDiagram = async () => {
 			const mermaidModule = await import("mermaid");
@@ -98,18 +103,15 @@ export function MermaidBlock({
 
 		renderDiagram().catch((reason) => {
 			if (!cancelled) {
-				setError(
-					reason instanceof Error
-						? reason.message
-						: tl("Failed to render diagram")
-				);
+				setFailed(true);
+				setErrorDetail(reason instanceof Error ? reason.message : null);
 			}
 		});
 
 		return () => {
 			cancelled = true;
 		};
-	}, [code, id, isIncomplete, tl]);
+	}, [code, id, isIncomplete]);
 
 	// The lightbox only shows media URLs the shared policy admits, and that
 	// policy refuses `data:image/svg+xml`. Hand it a browser-created object URL
@@ -150,7 +152,7 @@ export function MermaidBlock({
 		wideBlocks && "-mx-4 w-[calc(100%+2rem)] max-w-[calc(100vw-2rem)]"
 	);
 
-	if (error) {
+	if (failed) {
 		return (
 			<div className={surfaceClassName} data-streamdown="mermaid-block">
 				<div className="flex items-center justify-between px-1 text-xs">
@@ -162,7 +164,18 @@ export function MermaidBlock({
 						options={DIAGRAM_COPY_OPTIONS}
 					/>
 				</div>
-				<p className="px-1 text-status-destructive text-xs">{error}</p>
+				<p className="px-1 text-status-destructive text-xs">
+					{tl("This diagram could not be rendered.")}
+				</p>
+				{errorDetail ? (
+					<p
+						className="whitespace-pre-wrap break-words px-1 font-mono text-muted-foreground text-xs"
+						data-ryu-i18n="off"
+						data-testid="mermaid-error-detail"
+					>
+						{errorDetail}
+					</p>
+				) : null}
 				<pre className="max-h-56 overflow-auto rounded-lg bg-background/70 p-3 text-xs">
 					<code>{code}</code>
 				</pre>

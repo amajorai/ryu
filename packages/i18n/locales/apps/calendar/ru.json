@@ -24,6 +24,7 @@
   "Align": "Выравнивание",
   "All": "Все",
   "All messages": "Все сообщения",
+  "All provider lanes": "Все каналы провайдеров",
   "All scheduled job status for {date}": "Статус всех запланированных заданий за {date}",
   "All scheduled jobs": "Все запланированные задания",
   "Allow": "Разрешить",
@@ -778,6 +779,5 @@
   "{jobCount} tracked": "Отслеживается: {jobCount}",
   "{jobName} run status for {date}": "Статус запуска {jobName} за {date}",
   "{runCount} runs": "Запусков: {runCount}",
-  "· Paused": "· Приостановлено",
-  "← All provider lanes": "← Все линии провайдеров"
+  "· Paused": "· Приостановлено"
 }

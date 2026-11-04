@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "{frameCount} images · composition prête à faire défiler",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, one {# cadre n’a pas de texte ou de prompt visuel} other {# cadres n’ont pas de texte ou de prompt visuel}}.",
   "{projectName} canvas": "Canevas de {projectName}",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, image {frameNumber} sur {frameTotal}",
-  "← Gallery": "← Galerie"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, image {frameNumber} sur {frameTotal}"
 }

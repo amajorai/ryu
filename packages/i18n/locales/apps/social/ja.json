@@ -47,6 +47,7 @@
   "All kinds": "すべての種類",
   "All messages": "すべてのメッセージ",
   "All platforms": "すべてのプラットフォーム",
+  "All provider lanes": "すべてのプロバイダーレーン",
   "All tabs": "すべてのタブ",
   "All {total}": "すべて ({total})",
   "Allow": "許可",
@@ -573,7 +574,6 @@
   "No templates": "テンプレートはありません",
   "No text — this post was scheduled without a draft body.": "テキストなし。この投稿は下書きの本文なしで予約されました。",
   "No workspaces": "ワークスペースはありません",
-  "No.": "No.",
   "None": "なし",
   "None of these accounts is connected yet — scheduled posts will queue but never publish.": "これらのアカウントはまだ接続されていません。予約投稿はキューに入りますが、公開されることはありません。",
   "Normal": "通常",
@@ -1328,6 +1328,5 @@
   "· already out": "· 公開済み",
   "“{name}” created": "「{name}」を作成しました",
   "“{name}” deleted": "「{name}」を削除しました",
-  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "「{text}」は完全に削除されます。これを元にすでに予約された投稿は独自のコンテンツのコピーを保持するため、影響を受けません。",
-  "← All provider lanes": "← すべてのプロバイダレーン"
+  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "「{text}」は完全に削除されます。これを元にすでに予約された投稿は独自のコンテンツのコピーを保持するため、影響を受けません。"
 }

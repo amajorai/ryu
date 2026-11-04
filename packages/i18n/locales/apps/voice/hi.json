@@ -393,7 +393,6 @@
   "not installed": "इंस्टॉल नहीं है",
   "nothing to speak after removing tags": "टैग हटाने के बाद बोलने के लिए कुछ नहीं बचा",
   "pause tags may add at most {maxTotalPauseS}s of silence in total": "pause टैग कुल मिलाकर अधिकतम {maxTotalPauseS} सेकंड का मौन जोड़ सकते हैं",
-  "required TTS engine '{engineId}' is missing from the registry": "आवश्यक TTS इंजन '{engineId}' रजिस्ट्री में नहीं है",
   "synthesis failed in '{engine}': {error}": "'{engine}' में संश्लेषण विफल रहा: {error}",
   "unknown model '{modelName}' for engine '{engine}'": "इंजन '{engine}' के लिए अज्ञात मॉडल '{modelName}'",
   "{displayName} cannot be installed alongside {others}": "{displayName} को {others} के साथ इंस्टॉल नहीं किया जा सकता",

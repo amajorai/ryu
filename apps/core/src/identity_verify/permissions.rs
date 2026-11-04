@@ -372,7 +372,7 @@ mod tests {
     }
 
     /// The quoted keys of a TypeScript `export const PERMISSIONS = [ ... ] as const;`.
-    fn ts_permission_keys(source: &str) -> Vec<String> {
+    pub(super) fn ts_permission_keys(source: &str) -> Vec<String> {
         let start = source
             .find("export const PERMISSIONS = [")
             .expect("PERMISSIONS array");
@@ -389,30 +389,14 @@ mod tests {
     /// The vocabulary is a byte-for-byte contract with the control plane and the
     /// Desktop roles editor. A key added on one side only would be dropped by the
     /// control plane's effective-permission filter or be ungrantable in the UI.
-    ///
-    /// The control-plane model is read at run time, not with `include_str!`:
-    /// `packages/db` is not part of the public mirror (`tools/mirror-public.sh`
-    /// refuses a tree with an unresolved include), so it is compared only where
-    /// the package exists.
+    /// The control-plane half is `control_plane_mirror_tests`.
     #[test]
-    fn vocabulary_matches_the_typescript_mirrors() {
+    fn vocabulary_matches_the_desktop_mirror() {
         let rust: Vec<String> = PERMISSIONS.iter().map(|p| (*p).to_owned()).collect();
         assert_eq!(
             ts_permission_keys(include_str!("../../../desktop/src/lib/api/org.ts")),
             rust,
             "apps/desktop lib/api/org.ts drifted"
-        );
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        if !repo.join("packages/db").is_dir() {
-            return;
-        }
-        let model =
-            std::fs::read_to_string(repo.join("packages/db/src/models/control-plane.model.ts"))
-                .expect("packages/db control-plane.model.ts");
-        assert_eq!(
-            ts_permission_keys(&model),
-            rust,
-            "packages/db control-plane.model.ts drifted"
         );
     }
 }

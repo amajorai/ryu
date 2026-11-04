@@ -2,6 +2,7 @@
 
 import {
 	ArrowDown01Icon,
+	ArrowLeft02Icon,
 	BotIcon,
 	SparklesIcon,
 } from "@hugeicons/core-free-icons";
@@ -24,6 +25,7 @@ import {
 	CommandItem,
 	CommandList,
 } from "@ryu/ui/components/command.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Popover,
 	PopoverContent,
@@ -427,7 +429,11 @@ export function ModelAgentPicker({
 											onSelect={() => setProviderFilter(null)}
 											value="all provider lanes"
 										>
-											← All provider lanes
+											<DirectionalIcon
+												aria-hidden="true"
+												icon={ArrowLeft02Icon}
+											/>
+											All provider lanes
 										</CommandItem>
 									) : null}
 									{providers.map((provider) => {

@@ -878,7 +878,5 @@
   "{count} layers": "Слоёв: {count}",
   "{count} more": "Ещё {count}",
   "{count} pull requests": "Пул-реквестов: {count}",
-  "{repository} #{number} · {age}": "{repository} #{number} · {age}",
-  "← Issues": "← Задачи",
-  "← Pull requests": "← Пул-реквесты"
+  "{repository} #{number} · {age}": "{repository} #{number} · {age}"
 }

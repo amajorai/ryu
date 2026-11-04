@@ -24,6 +24,7 @@
   "Align": "المحاذاة",
   "All": "الكل",
   "All messages": "كل الرسائل",
+  "All provider lanes": "كل مسارات المزوّدين",
   "All scheduled job status for {date}": "حالة جميع المهام المجدولة بتاريخ {date}",
   "All scheduled jobs": "جميع المهام المجدولة",
   "Allow": "سماح",
@@ -778,6 +779,5 @@
   "{jobCount} tracked": "{jobCount} قيد التتبع",
   "{jobName} run status for {date}": "حالة تشغيل {jobName} في {date}",
   "{runCount} runs": "{runCount} من عمليات التشغيل",
-  "· Paused": "· متوقف مؤقتًا",
-  "← All provider lanes": "← كل مسارات المزودين"
+  "· Paused": "· متوقف مؤقتًا"
 }

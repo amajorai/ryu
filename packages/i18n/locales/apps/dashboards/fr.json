@@ -12,7 +12,5 @@
   "Widget “{title}” recovered": "Le widget « {title} » est rétabli",
   "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "Les widgets de workflow ne sont pas encore disponibles : aucune capacité de l’hôte ne permet à une app d’exécuter un workflow enregistré. Utilisez plutôt une source http, composio ou statique.",
   "dashboard not found": "tableau de bord introuvable",
-  "kind is required": "le type est requis",
-  "name is required": "le nom est requis",
   "not found": "introuvable"
 }

@@ -24,6 +24,7 @@ import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useFormatLocale } from "../hooks/use-format-locale.ts";
 import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import drawingStyles from "./profile-charts.drawing.module.css";
+import { chartEntryTitle } from "./profile-charts-label.ts";
 
 /** A `YYYY-MM-DD` axis tick as the locale writes a month and day ("10/30", "30.10."). */
 function formatDayTick(day: string, locale: string): string {
@@ -101,6 +102,7 @@ export function TransportDonut({
 	formatCount?: (value: number) => string;
 	transport: TransportBreakdown;
 }) {
+	const tl = useLiteralMessages();
 	const data = TRANSPORT_ORDER.map(({ key, label }) => ({
 		name: label,
 		value: transport[key] ?? 0,
@@ -153,7 +155,9 @@ export function TransportDonut({
 								strokeDashoffset={offset}
 								strokeWidth={stroke}
 							>
-								<title>{`${entry.name}: ${formatSharedCount(entry.value)}`}</title>
+								<title>
+									{chartEntryTitle(tl, entry.name, entry.value, formatCount)}
+								</title>
 							</circle>
 						);
 					})}
@@ -188,6 +192,7 @@ export function FeatureMixBar({
 }: {
 	featureTotals: FeatureTotals;
 }) {
+	const tl = useLiteralMessages();
 	const data = [
 		{ name: "Agent", value: Math.round(featureTotals.agentSeconds / 3600) },
 		{ name: "Chat", value: featureTotals.chat },
@@ -225,7 +230,7 @@ export function FeatureMixBar({
 								drawingStyles.categoryBar
 							)}
 							style={categoryBarStyle}
-							title={`${entry.name}: ${formatSharedCount(entry.value)}`}
+							title={chartEntryTitle(tl, entry.name, entry.value)}
 						/>
 						<span className="text-muted-foreground text-xs">{entry.name}</span>
 					</div>

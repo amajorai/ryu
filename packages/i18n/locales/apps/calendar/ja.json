@@ -24,6 +24,7 @@
   "Align": "配置",
   "All": "すべて",
   "All messages": "すべてのメッセージ",
+  "All provider lanes": "すべてのプロバイダーレーン",
   "All scheduled job status for {date}": "{date} のすべてのスケジュール済みジョブのステータス",
   "All scheduled jobs": "すべてのスケジュール済みジョブ",
   "Allow": "許可",
@@ -778,6 +779,5 @@
   "{jobCount} tracked": "{jobCount} 件を追跡中",
   "{jobName} run status for {date}": "{date} の {jobName} の実行ステータス",
   "{runCount} runs": "{runCount} 回の実行",
-  "· Paused": "· 一時停止中",
-  "← All provider lanes": "← すべてのプロバイダレーン"
+  "· Paused": "· 一時停止中"
 }

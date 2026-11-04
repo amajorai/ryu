@@ -20,6 +20,7 @@
   "Align": "संरेखण",
   "All": "सभी",
   "All messages": "सभी संदेश",
+  "All provider lanes": "सभी प्रोवाइडर लेन",
   "Allow": "अनुमति दें",
   "Allowed": "अनुमत",
   "Alpha": "अल्फ़ा",
@@ -786,6 +787,5 @@
   "{age} ago": "{age} पहले",
   "{count} more": "{count} और",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {चुना गया नोड ऊपर ले जाया गया। नई स्थिति, x: {x}, y: {y}} down {चुना गया नोड नीचे ले जाया गया। नई स्थिति, x: {x}, y: {y}} left {चुना गया नोड बाईं ओर ले जाया गया। नई स्थिति, x: {x}, y: {y}} right {चुना गया नोड दाईं ओर ले जाया गया। नई स्थिति, x: {x}, y: {y}} other {चुना गया नोड ले जाया गया। नई स्थिति, x: {x}, y: {y}}}",
-  "{label} note": "{label} नोट",
-  "← All provider lanes": "← सभी प्रदाता लेन"
+  "{label} note": "{label} नोट"
 }

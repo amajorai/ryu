@@ -37,6 +37,7 @@
   "All messages": "Все сообщения",
   "All must ack": "Все должны подтвердить",
   "All passes (JSON)": "Все проходы (JSON)",
+  "All provider lanes": "Все каналы провайдеров",
   "Allow": "Разрешить",
   "Allowed": "Разрешено",
   "Alpha": "Альфа",
@@ -1086,6 +1087,5 @@
   "{count} selected people": "Выбрано людей: {count}",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {Выбранный узел перемещён вверх. Новая позиция, x: {x}, y: {y}} down {Выбранный узел перемещён вниз. Новая позиция, x: {x}, y: {y}} left {Выбранный узел перемещён влево. Новая позиция, x: {x}, y: {y}} right {Выбранный узел перемещён вправо. Новая позиция, x: {x}, y: {y}} other {Выбранный узел перемещён. Новая позиция, x: {x}, y: {y}}}",
   "{event} (not installed)": "{event} (не установлено)",
-  "{size} selected": "Выбрано: {size}",
-  "← All provider lanes": "← Все линии провайдеров"
+  "{size} selected": "Выбрано: {size}"
 }

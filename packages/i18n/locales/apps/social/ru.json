@@ -47,6 +47,7 @@
   "All kinds": "Все типы",
   "All messages": "Все сообщения",
   "All platforms": "Все платформы",
+  "All provider lanes": "Все каналы провайдеров",
   "All tabs": "Все вкладки",
   "All {total}": "Все ({total})",
   "Allow": "Разрешить",
@@ -573,7 +574,6 @@
   "No templates": "Нет шаблонов",
   "No text — this post was scheduled without a draft body.": "Нет текста — эта публикация запланирована без текста черновика.",
   "No workspaces": "Нет рабочих пространств",
-  "No.": "№",
   "None": "Нет",
   "None of these accounts is connected yet — scheduled posts will queue but never publish.": "Ни один из этих аккаунтов ещё не подключён — запланированные публикации попадут в очередь, но так и не будут опубликованы.",
   "Normal": "Обычный",
@@ -1328,6 +1328,5 @@
   "· already out": "· уже опубликовано",
   "“{name}” created": "«{name}» создано",
   "“{name}” deleted": "«{name}» удалено",
-  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "«{text}» будет удалено без возможности восстановления. Уже запланированные на его основе публикации сохраняют собственную копию содержимого и не затрагиваются.",
-  "← All provider lanes": "← Все линии провайдеров"
+  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "«{text}» будет удалено без возможности восстановления. Уже запланированные на его основе публикации сохраняют собственную копию содержимого и не затрагиваются."
 }

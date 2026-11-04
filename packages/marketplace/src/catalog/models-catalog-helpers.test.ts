@@ -297,6 +297,12 @@ describe("formatParams", () => {
 	test("a sub-million count renders raw", () => {
 		expect(formatParams(500_000)).toBe("500000");
 	});
+
+	test("the size uses the reader's decimal mark", () => {
+		expect(formatParams(8_000_000_000, "de")).toBe("8,0B");
+		expect(formatParams(500_000_000, "fr")).toBe("0,5B");
+		expect(formatParams(70_000_000_000, "de")).toBe("70B");
+	});
 });
 
 describe("deviceSummaryLines", () => {

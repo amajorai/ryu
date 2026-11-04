@@ -878,7 +878,5 @@
   "{count} layers": "{count} طبقات",
   "{count} more": "{count} أخرى",
   "{count} pull requests": "{count} طلب سحب",
-  "{repository} #{number} · {age}": "{repository} #{number} · {age}",
-  "← Issues": "← المشكلات",
-  "← Pull requests": "← طلبات السحب"
+  "{repository} #{number} · {age}": "{repository} #{number} · {age}"
 }

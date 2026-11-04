@@ -11,8 +11,10 @@ import type { ValueBag } from "@/src/lib/api/crm.ts";
 // the store authors them, no route accepts them — so they render differently from
 // the entries a person wrote, and carry no edit affordance.
 
+import { ArrowLeft02Icon } from "@hugeicons/core-free-icons";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -269,7 +271,12 @@ export function RecordDetail({
 			<header className="flex items-center justify-between gap-2 border-b px-4 py-3">
 				<div className="flex min-w-0 items-center gap-3">
 					<Button onClick={onBack} size="sm" variant="ghost">
-						← Back
+						<DirectionalIcon
+							aria-hidden="true"
+							data-icon="inline-start"
+							icon={ArrowLeft02Icon}
+						/>
+						Back
 					</Button>
 					<div className="min-w-0">
 						<h2

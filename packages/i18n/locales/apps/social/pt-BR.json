@@ -47,6 +47,7 @@
   "All kinds": "Todos os tipos",
   "All messages": "Todas as mensagens",
   "All platforms": "Todas as plataformas",
+  "All provider lanes": "Todas as faixas de provedores",
   "All tabs": "Todas as abas",
   "All {total}": "Todos ({total})",
   "Allow": "Permitir",
@@ -573,7 +574,6 @@
   "No templates": "Nenhum modelo",
   "No text — this post was scheduled without a draft body.": "Sem texto — esta publicação foi agendada sem corpo de rascunho.",
   "No workspaces": "Nenhum espaço de trabalho",
-  "No.": "Nº",
   "None": "Nenhum",
   "None of these accounts is connected yet — scheduled posts will queue but never publish.": "Nenhuma dessas contas está conectada ainda — as publicações agendadas entrarão na fila, mas nunca serão publicadas.",
   "Normal": "Normal",
@@ -1328,6 +1328,5 @@
   "· already out": "· já publicado",
   "“{name}” created": "“{name}” criado",
   "“{name}” deleted": "“{name}” excluído",
-  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "“{text}” será excluído permanentemente. Posts já agendados a partir dele mantêm sua própria cópia do conteúdo e não são afetados.",
-  "← All provider lanes": "← Todas as faixas de provedores"
+  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "“{text}” será excluído permanentemente. Posts já agendados a partir dele mantêm sua própria cópia do conteúdo e não são afetados."
 }

@@ -236,7 +236,9 @@ export function GeneralTabStartupIntro() {
 								startupRealmError ? (
 									<span className="text-status-destructive" role="alert">
 										{tl("{error} Your choice isn't saved yet.", {
-											error: startupRealmError,
+											// The save error is an English literal from
+											// product-mode.ts; translate it before splicing it in.
+											error: tl(startupRealmError),
 										})}
 									</span>
 								) : undefined

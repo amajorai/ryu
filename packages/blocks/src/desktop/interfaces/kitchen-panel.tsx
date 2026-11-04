@@ -21,12 +21,9 @@ import {
 	ticketLabel,
 	ticketTimer,
 } from "./kitchen-model.ts";
-import {
-	ChefLeading,
-	chefActStatus,
-	STATION_NAMES,
-} from "./kitchen-panel-chef.tsx";
+import { ChefLeading } from "./kitchen-panel-chef.tsx";
 import { NewOrderPane } from "./kitchen-panel-new-order.tsx";
+import { chefSheetSubtitle } from "./kitchen-panel-status.ts";
 import { ThreadPane } from "./kitchen-panel-thread.tsx";
 import { CookRing, STATE_TEXT, StateMark } from "./kitchen-parts.tsx";
 
@@ -138,14 +135,6 @@ function ChefPane({
 	const open = orders.filter((order) => order.state !== "served");
 	const served = orders.filter((order) => order.state === "served");
 	const progress = cookProgress(station.runStartedAt, station.typicalMs, now);
-	let status = "Idle";
-	if (act) {
-		status = chefActStatus(act).label;
-	} else if (station.working) {
-		status = "Cooking";
-	} else if (station.burnt) {
-		status = "Has a burnt order";
-	}
 	return (
 		<GameSheet
 			data-kitchen-panel=""
@@ -163,7 +152,7 @@ function ChefPane({
 			leading={<ChefLeading agentId={agent.id} />}
 			onClose={onClose}
 			sheetKey={`chef:${agent.id}`}
-			subtitle={`${STATION_NAMES[station.kind]} · ${status}`}
+			subtitle={chefSheetSubtitle(tl, station, act)}
 			title={agent.name}
 		>
 			<ScrollArea className="min-h-0 flex-1">

@@ -37,6 +37,7 @@
   "All messages": "Todos los mensajes",
   "All must ack": "Todos deben confirmar",
   "All passes (JSON)": "Todas las pasadas (JSON)",
+  "All provider lanes": "Todos los carriles de proveedores",
   "Allow": "Permitir",
   "Allowed": "Permitido",
   "Alpha": "Alfa",
@@ -1086,6 +1087,5 @@
   "{count} selected people": "{count} personas seleccionadas",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {Nodo seleccionado movido hacia arriba. Nueva posición, x: {x}, y: {y}} down {Nodo seleccionado movido hacia abajo. Nueva posición, x: {x}, y: {y}} left {Nodo seleccionado movido a la izquierda. Nueva posición, x: {x}, y: {y}} right {Nodo seleccionado movido a la derecha. Nueva posición, x: {x}, y: {y}} other {Nodo seleccionado movido. Nueva posición, x: {x}, y: {y}}}",
   "{event} (not installed)": "{event} (no instalado)",
-  "{size} selected": "{size} seleccionados",
-  "← All provider lanes": "← Todos los carriles de proveedores"
+  "{size} selected": "{size} seleccionados"
 }

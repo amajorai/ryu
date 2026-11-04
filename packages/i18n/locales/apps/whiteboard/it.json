@@ -22,6 +22,7 @@
   "Align": "Allineamento",
   "All": "Tutto",
   "All messages": "Tutti i messaggi",
+  "All provider lanes": "Tutte le corsie dei provider",
   "Allow": "Consenti",
   "Allowed": "Consentito",
   "Alpha": "Alfa",
@@ -1041,6 +1042,5 @@
   "working": "al lavoro",
   "your browser": "il browser",
   "{age} ago": "{age} fa",
-  "{count} more": "Altri {count}",
-  "← All provider lanes": "← Tutte le corsie dei provider"
+  "{count} more": "Altri {count}"
 }

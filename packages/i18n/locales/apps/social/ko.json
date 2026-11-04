@@ -47,6 +47,7 @@
   "All kinds": "모든 유형",
   "All messages": "모든 메시지",
   "All platforms": "모든 플랫폼",
+  "All provider lanes": "모든 공급자 레인",
   "All tabs": "모든 탭",
   "All {total}": "전체 {total}",
   "Allow": "허용",
@@ -573,7 +574,6 @@
   "No templates": "템플릿 없음",
   "No text — this post was scheduled without a draft body.": "텍스트 없음 — 이 게시물은 초안 본문 없이 예약되었습니다.",
   "No workspaces": "워크스페이스 없음",
-  "No.": "No.",
   "None": "없음",
   "None of these accounts is connected yet — scheduled posts will queue but never publish.": "아직 연결된 계정이 없습니다. 예약된 게시물은 대기열에 들어가지만 게시되지 않습니다.",
   "Normal": "보통",
@@ -1328,6 +1328,5 @@
   "· already out": "· 이미 게시됨",
   "“{name}” created": "“{name}” 생성됨",
   "“{name}” deleted": "“{name}” 삭제됨",
-  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "“{text}”이(가) 영구적으로 삭제됩니다. 이미 이를 기반으로 예약된 게시물은 자체 콘텐츠 사본을 유지하므로 영향을 받지 않습니다.",
-  "← All provider lanes": "← 모든 제공업체 레인"
+  "“{text}” will be permanently deleted. Posts already scheduled from it keep their own copy of the content and are unaffected.": "“{text}”이(가) 영구적으로 삭제됩니다. 이미 이를 기반으로 예약된 게시물은 자체 콘텐츠 사본을 유지하므로 영향을 받지 않습니다."
 }

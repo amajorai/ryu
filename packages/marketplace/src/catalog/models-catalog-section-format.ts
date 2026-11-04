@@ -1,5 +1,6 @@
 import {
 	activeLocale,
+	numberFormatter,
 	relativeTimeFormatter,
 	translate as tl,
 } from "@ryu/i18n/lite";
@@ -168,19 +169,30 @@ export function formatContext(tokens: number | null): string | null {
 }
 
 /** Friendly parameter-count string (999885952 → "1.0B", 8e9 → "8.0B"). `null`
- *  when unknown. Uses 1B = 1e9 (HF reports decimal parameter counts). */
-export function formatParams(n: number | null): string | null {
+ *  when unknown. Uses 1B = 1e9 (HF reports decimal parameter counts). The
+ *  number uses the reader's decimal mark ("8,0B" in German); "B" and "M" are
+ *  model-size unit suffixes, not words. */
+export function formatParams(
+	n: number | null,
+	locale: string = activeLocale()
+): string | null {
 	if (!n || n <= 0) {
 		return null;
 	}
+	const digits = (value: number, fractionDigits: number) =>
+		numberFormatter(locale, {
+			maximumFractionDigits: fractionDigits,
+			minimumFractionDigits: fractionDigits,
+			useGrouping: false,
+		}).format(value);
 	if (n >= 500_000_000) {
 		const b = n / 1_000_000_000;
-		return `${b >= 10 ? Math.round(b) : b.toFixed(1)}B`;
+		return `${b >= 10 ? digits(Math.round(b), 0) : digits(b, 1)}B`;
 	}
 	if (n >= 1_000_000) {
-		return `${Math.round(n / 1_000_000)}M`;
+		return `${digits(Math.round(n / 1_000_000), 0)}M`;
 	}
-	return String(n);
+	return digits(n, 0);
 }
 
 /** Multi-line hardware summary for the detail overview, in the UI language. */

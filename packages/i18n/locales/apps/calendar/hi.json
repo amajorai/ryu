@@ -24,6 +24,7 @@
   "Align": "संरेखण",
   "All": "सभी",
   "All messages": "सभी संदेश",
+  "All provider lanes": "सभी प्रोवाइडर लेन",
   "All scheduled job status for {date}": "{date} के लिए सभी शेड्यूल किए गए जॉब की स्थिति",
   "All scheduled jobs": "सभी शेड्यूल किए गए जॉब",
   "Allow": "अनुमति दें",
@@ -778,6 +779,5 @@
   "{jobCount} tracked": "{jobCount} ट्रैक किए गए",
   "{jobName} run status for {date}": "{date} के लिए {jobName} रन स्थिति",
   "{runCount} runs": "{runCount} रन",
-  "· Paused": "· रुका हुआ",
-  "← All provider lanes": "← सभी प्रदाता लेन"
+  "· Paused": "· रुका हुआ"
 }

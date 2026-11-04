@@ -449,7 +449,7 @@
   "Open frame {frameNumber}": "فتح الإطار {frameNumber}",
   "Open in Ryu": "فتح في Ryu",
   "Open navigation": "فتح التنقل",
-  "Open reader preview →": "فتح معاينة القارئ →",
+  "Open reader preview →": "فتح معاينة القارئ ←",
   "Open workspace navigation": "فتح التنقل في مساحة العمل",
   "Open {projectName}": "فتح {projectName}",
   "Opened": "تاريخ الفتح",
@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "{frameCount} من الإطارات · تركيبة جاهزة للتمرير",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, zero {لا توجد إطارات ناقصة} one {إطار واحد ينقصه نص أو موجّه مرئي} two {إطاران ينقصهما نص أو موجّه مرئي} few {# إطارات ينقصها نص أو موجّه مرئي} many {# إطارًا ينقصه نص أو موجّه مرئي} other {# إطار ينقصه نص أو موجّه مرئي}}.",
   "{projectName} canvas": "لوحة {projectName}",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}، الإطار {frameNumber} من {frameTotal}",
-  "← Gallery": "← المعرض"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}، الإطار {frameNumber} من {frameTotal}"
 }

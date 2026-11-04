@@ -16,6 +16,7 @@
   "Agent-assisted refinement isn't available here yet. Use Edit plan to update this case.": "此处暂不支持智能体辅助优化。请使用“编辑计划”更新此用例。",
   "All Tests": "所有测试",
   "All projects": "所有项目",
+  "All provider lanes": "所有提供商通道",
   "All statuses": "所有状态",
   "Attach a text context file": "附加文本上下文文件",
   "Attention": "需关注",
@@ -389,6 +390,5 @@
   "{type} tests": "{type} 测试",
   "{uiTests} UI · {apiTests} API": "{uiTests} UI · {apiTests} API",
   "{url} · Last run {lastRun}": "{url} · 上次运行 {lastRun}",
-  "{url} · The target is checked after the project is saved": "{url} · 保存项目后将检查目标",
-  "← All provider lanes": "← 所有提供商通道"
+  "{url} · The target is checked after the project is saved": "{url} · 保存项目后将检查目标"
 }

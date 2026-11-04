@@ -326,7 +326,10 @@ async function accessCommand(
 	const missing = keys.filter((key) => !view.accountAccess?.includes(key));
 	if (missing.length > 0) {
 		throw new Error(
-			`Not in '${view.name}''s account access: ${missing.join(", ")}. Nothing was saved.`
+			tf("Not in '{name}''s account access: {keys}. Nothing was saved.", {
+				keys: missing.join(", "),
+				name: view.name,
+			})
 		);
 	}
 	return saveAgentPatch(

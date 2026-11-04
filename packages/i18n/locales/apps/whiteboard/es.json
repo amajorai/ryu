@@ -22,6 +22,7 @@
   "Align": "Alinear",
   "All": "Todo",
   "All messages": "Todos los mensajes",
+  "All provider lanes": "Todos los carriles de proveedores",
   "Allow": "Permitir",
   "Allowed": "Permitido",
   "Alpha": "Alfa",
@@ -1041,6 +1042,5 @@
   "working": "trabajando",
   "your browser": "tu navegador",
   "{age} ago": "hace {age}",
-  "{count} more": "{count} más",
-  "← All provider lanes": "← Todos los carriles de proveedores"
+  "{count} more": "{count} más"
 }

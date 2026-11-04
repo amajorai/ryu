@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "{frameCount} फ़्रेम · स्वाइप के लिए तैयार कंपोज़िशन",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, one {# फ़्रेम में मुख्य टेक्स्ट या विज़ुअल प्रॉम्प्ट नहीं है} other {# फ़्रेम में मुख्य टेक्स्ट या विज़ुअल प्रॉम्प्ट नहीं है}}।",
   "{projectName} canvas": "{projectName} कैनवस",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, फ़्रेम {frameNumber} / {frameTotal}",
-  "← Gallery": "← गैलरी"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, फ़्रेम {frameNumber} / {frameTotal}"
 }

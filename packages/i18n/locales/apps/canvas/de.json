@@ -20,6 +20,7 @@
   "Align": "Ausrichtung",
   "All": "Alle",
   "All messages": "Alle Nachrichten",
+  "All provider lanes": "Alle Anbieter-Lanes",
   "Allow": "Zulassen",
   "Allowed": "Erlaubt",
   "Alpha": "Deckkraft",
@@ -786,6 +787,5 @@
   "{age} ago": "vor {age}",
   "{count} more": "{count} weitere",
   "{direction, select, up {Moved selected node up. New position, x: {x}, y: {y}} down {Moved selected node down. New position, x: {x}, y: {y}} left {Moved selected node left. New position, x: {x}, y: {y}} right {Moved selected node right. New position, x: {x}, y: {y}} other {Moved selected node. New position, x: {x}, y: {y}}}": "{direction, select, up {Ausgewählten Knoten nach oben verschoben. Neue Position, x: {x}, y: {y}} down {Ausgewählten Knoten nach unten verschoben. Neue Position, x: {x}, y: {y}} left {Ausgewählten Knoten nach links verschoben. Neue Position, x: {x}, y: {y}} right {Ausgewählten Knoten nach rechts verschoben. Neue Position, x: {x}, y: {y}} other {Ausgewählten Knoten verschoben. Neue Position, x: {x}, y: {y}}}",
-  "{label} note": "Notiz: {label}",
-  "← All provider lanes": "← Alle Anbieterkanäle"
+  "{label} note": "Notiz: {label}"
 }

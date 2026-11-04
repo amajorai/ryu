@@ -415,7 +415,7 @@ test("rail create denial retry deduplicates while pending and reads back accepte
 		{ body: { values: {} }, status: 403 },
 		{ body: { values: {} }, status: 201 },
 	]);
-	await page.getByRole("button", { name: "← Back" }).click();
+	await page.getByRole("button", { name: "Back", exact: true }).click();
 	await page.getByRole("button", { name: "Next", exact: true }).click();
 	await page
 		.getByRole("button", { name: "Untitled deal", exact: true })
@@ -518,7 +518,7 @@ test("detail editors validate, cancel, commit typed values and read back", async
 	await expect(
 		detail.getByRole("link", { name: "person@example.com" })
 	).toHaveAttribute("href", "mailto:person@example.com");
-	await page.getByRole("button", { name: "← Back" }).click();
+	await page.getByRole("button", { name: "Back", exact: true }).click();
 	await page
 		.getByRole("button", { name: "Deal 01", exact: true })
 		.first()

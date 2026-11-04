@@ -39,7 +39,10 @@ export function requireAgent(ctx: CliContext, usage: string): AgentTarget {
 	const agent = findAgent(id);
 	if (!agent) {
 		throw new UsageError(
-			`Unknown coding agent '${id}'. Supported: ${agentList()}.`
+			tf("Unknown coding agent '{id}'. Supported: {agents}.", {
+				agents: agentList(),
+				id,
+			})
 		);
 	}
 	return agent;

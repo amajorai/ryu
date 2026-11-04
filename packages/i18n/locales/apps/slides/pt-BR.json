@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "{frameCount} quadros · composição pronta para deslizar",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, one {# quadro está sem texto ou prompt visual} other {# quadros estão sem texto ou prompt visual}}.",
   "{projectName} canvas": "Tela de {projectName}",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, quadro {frameNumber} de {frameTotal}",
-  "← Gallery": "← Galeria"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}, quadro {frameNumber} de {frameTotal}"
 }

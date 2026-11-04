@@ -29,6 +29,7 @@ import {
 	GlanceAvatar,
 	GlanceMark,
 } from "./glance-parts.tsx";
+import { glanceTileLabel } from "./glance-tile-label.ts";
 import { agentById } from "./interface-renderer.ts";
 
 export {
@@ -192,7 +193,7 @@ function AgentsWidget({
 					{shown.map((tile) => (
 						<li className="min-w-0" key={tile.agent.id}>
 							<button
-								aria-label={`${tile.agent.name}, ${GLANCE_AGENT_STATE_LABELS[tile.state]}`}
+								aria-label={glanceTileLabel(tl, tile.agent.name, tile.state)}
 								className="corner-squircle flex w-full min-w-0 flex-col items-center gap-[1cqw] rounded-[2cqw] py-[1cqw] outline-none transition-colors hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring active:bg-foreground/[0.08]"
 								onClick={() =>
 									tile.thread

@@ -15,6 +15,10 @@ pub(in crate::server) struct ProactiveOpeningRequest {
     pub(in crate::server) agent_id: Option<String>,
     #[serde(default)]
     pub(in crate::server) idempotency_key: Option<String>,
+    /// The language to write the opening in. A Gateway channel sends its
+    /// owner's locale; when absent, Core uses the node's UI language.
+    #[serde(default)]
+    pub(in crate::server) locale: Option<String>,
 }
 
 pub(in crate::server) fn proactive_opening_retryable(error: &anyhow::Error) -> bool {
@@ -170,6 +174,7 @@ pub(in crate::server) async fn proactive_opening(
         }
     }
 
+    let locale = crate::sidecar::adapters::opening_locale(req.locale.as_deref()).await;
     let result = run_proactive_opening_text(
         conversation_id.clone(),
         Some(agent_id),
@@ -182,6 +187,7 @@ pub(in crate::server) async fn proactive_opening(
         Arc::clone(&state.mcp),
         state.skills.clone(),
         state.traces.clone(),
+        &locale,
     )
     .await;
 

@@ -22,6 +22,7 @@
   "Align": "Выравнивание",
   "All": "Все",
   "All messages": "Все сообщения",
+  "All provider lanes": "Все каналы провайдеров",
   "Allow": "Разрешить",
   "Allowed": "Разрешено",
   "Alpha": "Альфа",
@@ -1041,6 +1042,5 @@
   "working": "работают",
   "your browser": "браузере",
   "{age} ago": "{age} назад",
-  "{count} more": "Ещё {count}",
-  "← All provider lanes": "← Все линии провайдеров"
+  "{count} more": "Ещё {count}"
 }

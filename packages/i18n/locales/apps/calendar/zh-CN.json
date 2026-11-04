@@ -24,6 +24,7 @@
   "Align": "对齐",
   "All": "全部",
   "All messages": "所有消息",
+  "All provider lanes": "所有提供商通道",
   "All scheduled job status for {date}": "{date} 所有计划任务的状态",
   "All scheduled jobs": "所有计划任务",
   "Allow": "允许",
@@ -778,6 +779,5 @@
   "{jobCount} tracked": "已跟踪 {jobCount} 个",
   "{jobName} run status for {date}": "{jobName} 在 {date} 的运行状态",
   "{runCount} runs": "{runCount} 次运行",
-  "· Paused": "· 已暂停",
-  "← All provider lanes": "← 所有提供商通道"
+  "· Paused": "· 已暂停"
 }

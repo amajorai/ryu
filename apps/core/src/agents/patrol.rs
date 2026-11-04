@@ -31,6 +31,9 @@ use serde::{Deserialize, Serialize};
 use super::{AgentSafetyProfile, AgentScheduleTemplate, AgentStore};
 use crate::scheduler::store::{JobTarget, Schedule, ScheduledJob};
 
+mod language;
+pub use language::scheduled_prompt;
+
 /// Stable agent id. Persisted in conversations, the agents table and scheduler
 /// jobs, so it must never change.
 pub const AGENT_ID: &str = "patrol";

@@ -858,6 +858,5 @@
   "{frameCount} frames · swipe-ready composition": "{frameCount} 帧 · 可滑动的构图",
   "{incomplete, plural, one {# frame is missing a body or visual prompt} other {# frames are missing a body or visual prompt}}.": "{incomplete, plural, other {# 个画面缺少正文或视觉提示词}}。",
   "{projectName} canvas": "{projectName} 画布",
-  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}，第 {frameNumber} 帧，共 {frameTotal} 帧",
-  "← Gallery": "← 图库"
+  "{projectName}, frame {frameNumber} of {frameTotal}": "{projectName}，第 {frameNumber} 帧，共 {frameTotal} 帧"
 }

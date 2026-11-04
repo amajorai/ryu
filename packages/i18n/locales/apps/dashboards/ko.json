@@ -12,7 +12,5 @@
   "Widget “{title}” recovered": "위젯 '{title}'이(가) 복구되었습니다",
   "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "워크플로 위젯은 아직 사용할 수 없습니다. 앱이 저장된 워크플로를 실행할 수 있는 호스트 기능이 없습니다. 대신 http, composio 또는 정적 소스를 사용하세요.",
   "dashboard not found": "대시보드를 찾을 수 없습니다",
-  "kind is required": "종류는 필수입니다",
-  "name is required": "이름은 필수입니다",
   "not found": "찾을 수 없습니다"
 }

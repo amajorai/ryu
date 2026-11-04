@@ -12,7 +12,5 @@
   "Widget “{title}” recovered": "小组件“{title}”已恢复",
   "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "工作流小组件暂不可用:没有允许应用运行已保存工作流的主机能力。请改用 http、composio 或静态来源。",
   "dashboard not found": "未找到仪表板",
-  "kind is required": "类型为必填项",
-  "name is required": "名称为必填项",
   "not found": "未找到"
 }
