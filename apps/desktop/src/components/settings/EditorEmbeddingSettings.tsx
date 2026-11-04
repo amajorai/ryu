@@ -36,11 +36,17 @@ import { EmbeddingCard } from "./EditorEmbeddingSettings-embedding-card.tsx";
  */
 export function EditorEmbeddingSettings() {
 	const node = useActiveNode();
-	const target: ApiTarget = {
-		url: node.url,
-		token: node.token,
-		userJwt: node.userJwt ?? null,
-	};
+	// Keyed on the node's values, not its object: both cards reload their
+	// preferences when `target` changes, so a fresh object on every render would
+	// reload them on any re-render and drop an edit the user has not saved yet.
+	const target = useMemo<ApiTarget>(
+		() => ({
+			url: node.url,
+			token: node.token,
+			userJwt: node.userJwt ?? null,
+		}),
+		[node.url, node.token, node.userJwt]
+	);
 
 	return (
 		<div className="space-y-4">

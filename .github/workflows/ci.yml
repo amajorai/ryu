@@ -65,6 +65,18 @@ jobs:
           # Seed the workspace lock from Core's so tests run against the pinned
           # dependency versions instead of a fresh resolution.
           cp apps/core/Cargo.lock Cargo.lock
+      # The workspace test build needs more memory and disk than a hosted runner
+      # has free by default. Drop toolchains this job never uses and add swap.
+      - name: Free runner disk and add swap
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo swapoff -a
+          sudo fallocate -l 12G /swapfile.ci
+          sudo chmod 600 /swapfile.ci
+          sudo mkswap /swapfile.ci
+          sudo swapon /swapfile.ci
+          free -h
+          df -h /
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: clippy, rustfmt
@@ -97,6 +109,12 @@ jobs:
       - name: Reclaim clippy artifacts before tests
         run: cargo clean
       - name: Test every Rust workspace member
+        # Linking every member's test binaries four at a time exhausted the
+        # hosted runner's memory, which kills the runner itself ("received a
+        # shutdown signal", exit 143) rather than failing a test. Two parallel
+        # jobs plus the swap added above keeps the build inside the VM.
+        env:
+          CARGO_BUILD_JOBS: 2
         run: cargo test --workspace --no-fail-fast -- --test-threads=1
       - name: Install cargo-deny
         uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30

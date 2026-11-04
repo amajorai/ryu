@@ -362,3 +362,27 @@ test("a failed preference read shows a retry that recovers the stored value", as
 	expect(modelInput()?.value).toBe("gemma");
 	expect(editorSwitch().getAttribute("aria-checked")).toBe("true");
 });
+
+test("an unsaved edit survives a re-render that hands the same node back as a new object", async () => {
+	await mount();
+	expect(editorSwitch().getAttribute("aria-checked")).toBe("false");
+	await click(editorSwitch());
+	expect(editorSwitch().getAttribute("aria-checked")).toBe("true");
+	const preferenceReads = () =>
+		calls.filter(
+			(call) =>
+				call.method === "GET" &&
+				call.path === `/api/preferences/${EDITOR_AI_PREF_KEY}`
+		).length;
+	const readsBefore = preferenceReads();
+
+	// The node store hands back an equal node in a fresh object, as any store
+	// update does; the panel must not treat that as a different node.
+	await act(async () => {
+		useNodeStore.setState({ nodes: [{ ...node }] });
+	});
+	await settle();
+
+	expect(preferenceReads()).toBe(readsBefore);
+	expect(editorSwitch().getAttribute("aria-checked")).toBe("true");
+});
