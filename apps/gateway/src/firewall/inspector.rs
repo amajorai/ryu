@@ -49,6 +49,8 @@ use windows::{run_inspection, Judge};
 /// reads `InspectorConfig::max_windows`. Past the budget is unjudged, and the
 /// verdict says so.
 pub const MAX_INSPECT_WINDOWS: usize = crate::config::DEFAULT_INSPECTOR_WINDOWS;
+/// A rubric judge's timeout when the inspector config leaves it at zero.
+const RUBRIC_DEFAULT_TIMEOUT_MS: u64 = 1_500;
 /// Judge calls in flight at once for one turn.
 const WINDOW_CONCURRENCY: usize = 4;
 /// The category a fail-closed verdict carries.
@@ -276,24 +278,34 @@ impl InspectorClient {
         .await
     }
 
+    /// A rubric judge's verdict over all of `text`, under `cfg`'s model,
+    /// timeout (1,500 ms when unset) and window budget
+    /// ([`InspectorConfig::effective_max_windows`]): a budget an operator
+    /// raised to judge long turns covers rubric judges too, instead of leaving
+    /// them `Incomplete` past the default. `cfg.enabled` and `min_chars` gate
+    /// the Inspector stage only; an inline rubric binding always runs.
     pub async fn inspect_rubric(
         text: &str,
         rubric: &str,
-        model: &str,
-        timeout_ms: u64,
+        cfg: &InspectorConfig,
         inference: &dyn InferenceClient,
     ) -> Result<InspectorVerdict, GatewayError> {
         if text.trim().is_empty() || rubric.trim().is_empty() {
             return Ok(InspectorVerdict::allow());
         }
+        let timeout_ms = if cfg.timeout_ms == 0 {
+            RUBRIC_DEFAULT_TIMEOUT_MS
+        } else {
+            cfg.timeout_ms
+        };
         run_inspection(
             // `flagged` only when the rubric's bad condition clearly holds.
             &judge::rubric_system_prompt(rubric),
             text,
             Judge {
-                model,
+                model: &cfg.model,
                 timeout_ms,
-                max_windows: MAX_INSPECT_WINDOWS,
+                max_windows: cfg.effective_max_windows(),
                 restrict_categories: false,
                 injection_continues: false,
             },
@@ -354,6 +366,10 @@ mod window_tests;
 #[cfg(test)]
 #[path = "inspector_fail_mode_tests.rs"]
 mod fail_mode_tests;
+
+#[cfg(test)]
+#[path = "inspector_rubric_window_tests.rs"]
+mod rubric_window_tests;
 
 #[cfg(test)]
 #[path = "inspector_sanitize_test.rs"]

@@ -732,7 +732,7 @@
   "request": "요청",
   "research": "리서치",
   "routing": "라우팅",
-  "running": "실행 모델",
+  "running": "실행 중",
   "ryu": "ryu",
   "show": "보기",
   "shown": "개 표시됨",
@@ -758,6 +758,7 @@
   "with": "참여자:",
   "working": "작업 중",
   "your browser": "브라우저",
+  "{age} ago": "{age} 전",
   "{ariaLabel} expanded": "{ariaLabel} 펼침",
   "{count} more": "{count}개 더",
   "{label} tools": "{label} 도구"

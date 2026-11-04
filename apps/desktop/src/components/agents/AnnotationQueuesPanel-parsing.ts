@@ -2,6 +2,8 @@
 //
 // Input parsing helpers shared by the annotation queue panel pieces.
 
+import { activeLocale, parseLocaleNumber } from "@ryu/i18n";
+
 export function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -18,12 +20,18 @@ export function parseLabelList(raw: string): string[] {
 	return labels;
 }
 
-/** Parse a score field; `undefined` when blank, `null` when not a number. */
-export function parseScore(raw: string): number | null | undefined {
+/**
+ * Parse a score field written in `locale` ("3,5" in de); `undefined` when
+ * blank, `null` when not a number.
+ */
+export function parseScore(
+	raw: string,
+	locale: string | null | undefined = activeLocale()
+): number | null | undefined {
 	const trimmed = raw.trim();
 	if (trimmed === "") {
 		return;
 	}
-	const value = Number(trimmed);
+	const value = parseLocaleNumber(trimmed, locale);
 	return Number.isFinite(value) ? value : null;
 }

@@ -703,10 +703,10 @@
   "policy v{version} · {elapsed} ms": "ポリシー v{version} · {elapsed} ms",
   "project": "件のプロジェクト",
   "prompt": "プロンプト",
-  "ready": "件が準備完了",
+  "ready": "準備完了",
   "records": "件のレコード",
   "request": "リクエスト",
-  "running": "で実行中のモデル",
+  "running": "実行中",
   "ryu": "ryu",
   "show": "表示",
   "shown": "件を表示",
@@ -730,6 +730,7 @@
   "with": "参加者:",
   "working": "件が作業中",
   "your browser": "ブラウザ",
+  "{age} ago": "{age} 前",
   "{count} more": "ほか {count} 件",
   "{passed} passed, {failed} failed": "{passed} 件成功、{failed} 件失敗"
 }

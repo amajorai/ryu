@@ -1,6 +1,5 @@
 {
   "(authenticated)": "(аутентифицирован)",
-  "1 install": "1 установка",
   "24/7 on-device speech capture into your meeting memory.": "Круглосуточная запись речи на устройстве в память ваших встреч.",
   "A Twilio number receives forwarded calls. Purchasing one bills your Twilio account.": "Номер Twilio принимает переадресованные звонки. Покупка оплачивается с вашего аккаунта Twilio.",
   "A line can list at most {maxAllowedCallers} trusted callers.": "Для линии можно указать не более {maxAllowedCallers} доверенных абонентов.",
@@ -592,7 +591,6 @@
   "No documents yet. Tap New to create a page.": "Документов пока нет. Нажмите «Создать», чтобы добавить страницу.",
   "No groups yet": "Групп пока нет",
   "No groups yet. Create one from the desktop app.": "Групп пока нет. Создайте группу в настольном приложении.",
-  "No installs": "Нет установок",
   "No matches": "Нет совпадений",
   "No meetings recorded yet.": "Записанных встреч пока нет.",
   "No meetings yet": "Встреч пока нет",
@@ -1150,7 +1148,6 @@
   "{count, plural, one {# match found} other {# matches found}}": "{count, plural, one {Найдено # совпадение} few {Найдено # совпадения} many {Найдено # совпадений} other {Найдено # совпадения}}",
   "{count, plural, one {# member} other {# members}} · {coordination}": "{count, plural, one {# участник} few {# участника} many {# участников} other {# участника}} · {coordination}",
   "{count, plural, one {# runnable} other {# runnables}}": "{count, plural, one {# исполняемый элемент} few {# исполняемых элемента} many {# исполняемых элементов} other {# исполняемого элемента}}",
-  "{count} installs": "Установок: {count}",
   "{deviceLabel}. Add your Wi-Fi so the device can connect directly at home, or skip it to relay through this phone.": "{deviceLabel}. Добавьте свою сеть Wi-Fi, чтобы устройство подключалось дома напрямую, или пропустите этот шаг, чтобы передавать данные через этот телефон.",
   "{minutes} min": "{minutes} мин",
   "{modelName} · mobile tools limited": "{modelName} · мобильные инструменты ограничены",

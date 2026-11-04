@@ -2,6 +2,7 @@
 
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -71,6 +72,17 @@ export function DefaultCommissionSection({
 	savePending,
 	setRule,
 }: DefaultCommissionSectionProps) {
+	const tl = useLiteralMessages();
+	// The closed trigger reads its text from `items`; without them Base UI
+	// prints the raw value ("percent", "seller") in every locale.
+	const typeItems = [
+		{ value: "percent", label: tl("Percent") },
+		{ value: "flat", label: tl("Flat") },
+	];
+	const fundedByItems = [
+		{ value: "platform", label: tl("Platform") },
+		{ value: "seller", label: tl("Seller") },
+	];
 	return (
 		<SettingsSection
 			as="section"
@@ -111,6 +123,7 @@ export function DefaultCommissionSection({
 							label="Type"
 						>
 							<Select
+								items={typeItems}
 								onValueChange={(value) =>
 									setRule((prev) => ({
 										...prev,
@@ -123,8 +136,11 @@ export function DefaultCommissionSection({
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="percent">Percent</SelectItem>
-									<SelectItem value="flat">Flat</SelectItem>
+									{typeItems.map((item) => (
+										<SelectItem key={item.value} value={item.value}>
+											{item.label}
+										</SelectItem>
+									))}
 								</SelectContent>
 							</Select>
 						</CommissionFieldRow>
@@ -160,6 +176,7 @@ export function DefaultCommissionSection({
 							label="Funded by"
 						>
 							<Select
+								items={fundedByItems}
 								onValueChange={(value) =>
 									setRule((prev) => ({
 										...prev,
@@ -176,8 +193,11 @@ export function DefaultCommissionSection({
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="platform">Platform</SelectItem>
-									<SelectItem value="seller">Seller</SelectItem>
+									{fundedByItems.map((item) => (
+										<SelectItem key={item.value} value={item.value}>
+											{item.label}
+										</SelectItem>
+									))}
 								</SelectContent>
 							</Select>
 						</CommissionFieldRow>

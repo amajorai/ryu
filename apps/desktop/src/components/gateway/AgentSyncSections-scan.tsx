@@ -9,6 +9,7 @@ import {
 	SettingsGroup,
 	SettingsItem,
 } from "@/src/components/settings/shared/settings-items.tsx";
+import { agentSyncItemTitle } from "@/src/lib/agent-sync-scan-text.ts";
 import type {
 	AgentSyncScan,
 	AgentSyncScanItem,
@@ -100,6 +101,7 @@ export function ScanItems({
 	onToggle: (item: AgentSyncScanItem, checked: boolean) => void;
 	selected: Set<string>;
 }) {
+	const tl = useLiteralMessages();
 	if (items.length === 0) {
 		return <EmptyCard>No supported setup items found.</EmptyCard>;
 	}
@@ -107,6 +109,7 @@ export function ScanItems({
 		<ChecklistCard>
 			{items.map((item) => {
 				const key = `${item.kind}:${item.id}`;
+				const title = agentSyncItemTitle(item, tl);
 				return (
 					<label
 						className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-foreground/5"
@@ -117,8 +120,8 @@ export function ScanItems({
 							onCheckedChange={(checked) => onToggle(item, checked === true)}
 						/>
 						<span className="min-w-0 flex-1">
-							<span className="block truncate text-sm" title={item.title}>
-								{item.title}
+							<span className="block truncate text-sm" title={title}>
+								{title}
 							</span>
 							<span className="block truncate font-mono text-muted-foreground text-xs">
 								{item.kind} · {item.id}

@@ -677,7 +677,7 @@
   "ready": "جاهز",
   "records": "سجلات",
   "request": "الطلب",
-  "running": "يشغّل",
+  "running": "قيد التشغيل",
   "ryu": "ryu",
   "show": "إظهار",
   "shown": "معروضة",
@@ -701,6 +701,7 @@
   "with": "مع",
   "working": "قيد العمل",
   "your browser": "متصفحك",
+  "{age} ago": "منذ {age}",
   "{count} more": "{count} أخرى",
   "{status} in Ryu storage": "{status} في تخزين Ryu",
   "{status} in browser preview": "{status} في معاينة المتصفح"

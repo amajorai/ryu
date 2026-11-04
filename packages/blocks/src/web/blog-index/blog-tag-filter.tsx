@@ -25,7 +25,7 @@ export function BlogTagFilter({
 	}
 	return (
 		<nav aria-label="Filter posts by tag" className="min-w-0">
-			<ul className="flex min-w-0 gap-2 overflow-x-auto py-1 [scrollbar-width:none] max-md:-mx-6 max-md:px-6 md:flex-wrap max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)]">
+			<ul className="flex min-w-0 gap-2 overflow-x-auto py-1 [scrollbar-width:none] max-md:-mx-6 max-md:px-6 md:flex-wrap max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)] max-md:rtl:[mask-image:linear-gradient(to_left,black_85%,transparent)]">
 				{chips.map((chip) => {
 					const isActive =
 						(chip.value ?? undefined) === (activeTag || undefined);

@@ -3,6 +3,7 @@ import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionProvider } from "@ryu/ui/components/direction.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { type ComponentProps, useCallback, useMemo } from "react";
 import styles from "./color-picker.module.css";
@@ -57,28 +58,33 @@ function ColorPickerHueSlider(
 	);
 
 	return (
-		<SliderPrimitive.Root
-			data-slot="color-picker-hue-slider"
-			{...sliderProps}
-			disabled={context.disabled || context.readOnly}
-			max={360}
-			min={0}
-			onValueChange={onValueChange}
-			step={1}
-			value={[hsv?.h ?? 0]}
-		>
-			<SliderPrimitive.Control
-				className={cn(
-					"relative flex w-full touch-none select-none items-center",
-					className
-				)}
+		// The spectrum stays physical in RTL: force LTR on both the DOM (thumb
+		// inset) and Base UI's pointer/keyboard mapping so paint and value agree.
+		<DirectionProvider direction="ltr">
+			<SliderPrimitive.Root
+				data-slot="color-picker-hue-slider"
+				{...sliderProps}
+				dir="ltr"
+				disabled={context.disabled || context.readOnly}
+				max={360}
+				min={0}
+				onValueChange={onValueChange}
+				step={1}
+				value={[hsv?.h ?? 0]}
 			>
-				<SliderPrimitive.Track className="relative h-3 w-full grow overflow-hidden rounded-full bg-[linear-gradient(to_right,#ff0000_0%,#ffff00_16.66%,#00ff00_33.33%,#00ffff_50%,#0000ff_66.66%,#ff00ff_83.33%,#ff0000_100%)]">
-					<SliderPrimitive.Indicator className="absolute h-full" />
-				</SliderPrimitive.Track>
-				<SliderPrimitive.Thumb className="block size-4 rounded-full border border-primary/50 bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50" />
-			</SliderPrimitive.Control>
-		</SliderPrimitive.Root>
+				<SliderPrimitive.Control
+					className={cn(
+						"relative flex w-full touch-none select-none items-center",
+						className
+					)}
+				>
+					<SliderPrimitive.Track className="relative h-3 w-full grow overflow-hidden rounded-full bg-[linear-gradient(to_right,#ff0000_0%,#ffff00_16.66%,#00ff00_33.33%,#00ffff_50%,#0000ff_66.66%,#ff00ff_83.33%,#ff0000_100%)]">
+						<SliderPrimitive.Indicator className="absolute h-full" />
+					</SliderPrimitive.Track>
+					<SliderPrimitive.Thumb className="block size-4 rounded-full border border-primary/50 bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50" />
+				</SliderPrimitive.Control>
+			</SliderPrimitive.Root>
+		</DirectionProvider>
 	);
 }
 
@@ -111,37 +117,42 @@ function ColorPickerAlphaSlider(
 	};
 
 	return (
-		<SliderPrimitive.Root
-			data-slot="color-picker-alpha-slider"
-			{...sliderProps}
-			disabled={context.disabled || context.readOnly}
-			max={100}
-			min={0}
-			onValueChange={onValueChange}
-			step={1}
-			value={[Math.round((color?.a ?? 1) * 100)]}
-		>
-			<SliderPrimitive.Control
-				className={cn(
-					"relative flex w-full touch-none select-none items-center",
-					className
-				)}
+		// The spectrum stays physical in RTL: force LTR on both the DOM (thumb
+		// inset) and Base UI's pointer/keyboard mapping so paint and value agree.
+		<DirectionProvider direction="ltr">
+			<SliderPrimitive.Root
+				data-slot="color-picker-alpha-slider"
+				{...sliderProps}
+				dir="ltr"
+				disabled={context.disabled || context.readOnly}
+				max={100}
+				min={0}
+				onValueChange={onValueChange}
+				step={1}
+				value={[Math.round((color?.a ?? 1) * 100)]}
 			>
-				<SliderPrimitive.Track
+				<SliderPrimitive.Control
 					className={cn(
-						"relative h-3 w-full grow overflow-hidden rounded-full",
-						styles.alphaChecker
+						"relative flex w-full touch-none select-none items-center",
+						className
 					)}
 				>
-					<div
-						className={cn("absolute inset-0 rounded-full", styles.alphaColor)}
-						style={alphaStyle}
-					/>
-					<SliderPrimitive.Indicator className="absolute h-full" />
-				</SliderPrimitive.Track>
-				<SliderPrimitive.Thumb className="block size-4 rounded-full border border-primary/50 bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50" />
-			</SliderPrimitive.Control>
-		</SliderPrimitive.Root>
+					<SliderPrimitive.Track
+						className={cn(
+							"relative h-3 w-full grow overflow-hidden rounded-full",
+							styles.alphaChecker
+						)}
+					>
+						<div
+							className={cn("absolute inset-0 rounded-full", styles.alphaColor)}
+							style={alphaStyle}
+						/>
+						<SliderPrimitive.Indicator className="absolute h-full" />
+					</SliderPrimitive.Track>
+					<SliderPrimitive.Thumb className="block size-4 rounded-full border border-primary/50 bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50" />
+				</SliderPrimitive.Control>
+			</SliderPrimitive.Root>
+		</DirectionProvider>
 	);
 }
 

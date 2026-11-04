@@ -6,6 +6,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { X } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import { STAGE_TEXT } from "./tracking-list.tsx";
 import {
@@ -32,6 +33,7 @@ export function TrackingThreadPanel({
 	parcel: TrackingParcel | undefined;
 	threadView: ReactNode;
 }) {
+	const inlineSign = useInlineSign();
 	const reduceMotion = useReducedMotion();
 	const tl = useLiteralMessages();
 	const title = parcel
@@ -48,7 +50,7 @@ export function TrackingThreadPanel({
 					: "absolute inset-0 z-20"
 			)}
 			data-testid="tracking-thread-panel"
-			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 16 * inlineSign }}
 			transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
 		>
 			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b px-4">

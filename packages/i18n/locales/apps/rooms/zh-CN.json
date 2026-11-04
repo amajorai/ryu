@@ -83,7 +83,7 @@
   "Your rooms": "你的房间",
   "assistant output is too long": "助手输出过长",
   "e.g. Jiawei…": "例如：Jiawei…",
-  "ready": "项已就绪",
+  "ready": "就绪",
   "{modelId} · {count, plural, one {# participant} other {# participants}}": "{modelId} · {count, plural, other {# 位参与者}}",
   "{onlineCount} online · {count, plural, one {# participant} other {# participants}}": "{onlineCount} 人在线 · {count, plural, other {# 位参与者}}"
 }

@@ -119,7 +119,7 @@ export function CinemaBillboard({
 				className="absolute flex flex-col items-start"
 				style={{
 					bottom: bottomInset + (size === "compact" ? 24 : 48),
-					left: gutter,
+					insetInlineStart: gutter,
 					width: Math.max(280, infoWidth),
 				}}
 			>

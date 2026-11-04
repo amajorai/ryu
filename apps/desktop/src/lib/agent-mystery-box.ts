@@ -17,6 +17,10 @@
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type { AgentCatalogEntry } from "@/src/lib/api/agents.ts";
 import type { MarketplaceCard } from "@/src/lib/api/marketplace.ts";
+import { formatLocalNumber } from "@/src/lib/locale-format.ts";
+
+/** A rating average as "4.8" / "4,8", in the UI language's decimal mark. */
+const ONE_DECIMAL = { maximumFractionDigits: 1, minimumFractionDigits: 1 };
 
 /** The built-in agent: always installed, so never a prize. */
 export const MYSTERY_BOX_FLAGSHIP_ID = "ryu";
@@ -191,7 +195,7 @@ export function templateRarityReason(
 	}
 	if (card.ratingCount >= MIN_RATINGS_FOR_TIER) {
 		return tl("Rated {rating} by {ratingCount} people", {
-			rating: card.ratingAverage.toFixed(1),
+			rating: formatLocalNumber(card.ratingAverage, ONE_DECIMAL),
 			ratingCount: String(card.ratingCount),
 		});
 	}

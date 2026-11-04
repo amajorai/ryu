@@ -72,6 +72,11 @@ export function ShareConversationPeopleSection({
 			{availableMembers.length > 0 ? (
 				<Select
 					disabled={!canManage}
+					// The closed trigger shows the person's name, not their user id.
+					items={availableMembers.map((member) => ({
+						value: member.id,
+						label: member.name,
+					}))}
 					onValueChange={(value) =>
 						addPerson(isNativeText(value) ? value : null)
 					}

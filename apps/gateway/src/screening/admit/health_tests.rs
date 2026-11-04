@@ -139,13 +139,14 @@ async fn a_node_fails_closed_on_a_derailed_screener_unless_it_opts_out() {
     assert_eq!(report.degraded, Some("t2"));
 }
 
-/// An engine that answered with an error status or a 429 was reachable: on
-/// a node that fails closed the request is refused, never served degraded,
-/// so content that makes the engine reject it (a prompt over its context)
-/// or a flood that makes it busy cannot buy the degraded row.
+/// An engine that answered with an error status or a 429, or was reached
+/// and then reset the connection, was reachable: on a node that fails closed
+/// the request is refused, never served degraded, so content that makes the
+/// engine reject it (a prompt over its context), a flood that makes it busy
+/// or a body that makes it drop the request cannot buy the degraded row.
 #[tokio::test]
 async fn a_node_refuses_when_its_engine_answered_with_an_error() {
-    for reason in ["http_status", "busy"] {
+    for reason in ["http_status", "busy", "transport"] {
         let backend = Arc::new(
             TestBackend::new("decision_local").fail_always(BackendError::Unavailable(reason)),
         );

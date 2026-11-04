@@ -76,6 +76,45 @@ function Fail-Install {
   throw $Message
 }
 
+# Every release URL answers with a redirect to the asset host. Follow redirects
+# one hop at a time and refuse any hop that is not HTTPS: a downgrade redirect
+# would let anyone on the path swap the binary and its .sha256 together, which
+# the checksum alone cannot detect. Returns the body as text without -OutFile.
+function Invoke-HttpsDownload {
+  param([string]$Uri, [string]$OutFile)
+  # .NET resolves relative paths against the process directory, not the
+  # PowerShell location that Get-FileHash and Move-Item use below.
+  if ($OutFile) { $OutFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile) }
+  $current = [Uri]$Uri
+  for ($hop = 0; $hop -le 10; $hop++) {
+    if ($current.Scheme -ne 'https') { throw "refusing non-HTTPS download URL $current" }
+    $request = [System.Net.WebRequest]::Create($current)
+    $request.AllowAutoRedirect = $false
+    $request.UserAgent = 'ryu-install'
+    $response = $request.GetResponse()
+    try {
+      $status = [int]$response.StatusCode
+      if ($status -ge 300 -and $status -lt 400) {
+        $location = $response.Headers['Location']
+        if ([string]::IsNullOrEmpty($location)) { throw "redirect without a location from $current" }
+        $current = New-Object System.Uri -ArgumentList $current, $location
+        continue
+      }
+      $body = $response.GetResponseStream()
+      if ($OutFile) {
+        $file = [System.IO.File]::Create($OutFile)
+        try { $body.CopyTo($file) } finally { $file.Dispose() }
+        return
+      }
+      $reader = New-Object System.IO.StreamReader -ArgumentList $body
+      try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally {
+      $response.Dispose()
+    }
+  }
+  throw "too many redirects for $Uri"
+}
+
 # --- detect arch ------------------------------------------------------------
 $arch = $env:PROCESSOR_ARCHITECTURE
 if ($arch -ne 'AMD64') {
@@ -112,7 +151,7 @@ for ($index = 0; $index -lt $binaries.Count; $index++) {
   Emit-Progress 'binary' $bin 'started' $before
   $download = "$out.download"
   try {
-    Invoke-WebRequest -Uri $url -OutFile $download -UseBasicParsing
+    Invoke-HttpsDownload -Uri $url -OutFile $download
   } catch {
     Fail-Install $bin "download failed: $url — $_"
   }
@@ -125,11 +164,10 @@ for ($index = 0; $index -lt $binaries.Count; $index++) {
     Write-Host '  RYU_SKIP_CHECKSUM=1 — skipping checksum verification (not recommended)'
   } else {
     try {
-      $shaContent = (Invoke-WebRequest -Uri "$url.sha256" -UseBasicParsing).Content
+      $shaContent = Invoke-HttpsDownload -Uri "$url.sha256"
     } catch {
       Fail-Install $bin "could not download checksum $url.sha256 — refusing to install an unverified binary (set `$env:RYU_SKIP_CHECKSUM = '1' to bypass): $_"
     }
-    if ($shaContent -is [byte[]]) { $shaContent = [System.Text.Encoding]::ASCII.GetString($shaContent) }
     $want = ([string]$shaContent -split '\s+')[0].Trim()
     if ($want -notmatch '^[0-9a-fA-F]{64}$') {
       Fail-Install $bin "malformed checksum file at $url.sha256 — refusing to install (set `$env:RYU_SKIP_CHECKSUM = '1' to bypass)"

@@ -18,6 +18,7 @@ import {
 	fullDateTime,
 } from "./bank-model.ts";
 import { BoardStatusDot } from "./board-status.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
@@ -155,6 +156,7 @@ export function BankTransactionPanel({
 	onViewConversation: (threadId: string) => void;
 	transaction: InterfaceAccountTransaction;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const label = transaction.label.trim() || "Transaction";
@@ -167,7 +169,7 @@ export function BankTransactionPanel({
 				"sm:w-[26rem] sm:border-s sm:shadow-xl xl:w-[clamp(22rem,30vw,28rem)]"
 			)}
 			data-testid="bank-transaction-panel"
-			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 16 * inlineSign }}
 			transition={PANEL_TRANSITION}
 		>
 			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b px-4">
@@ -266,6 +268,7 @@ export function BankThreadPanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread
@@ -278,7 +281,7 @@ export function BankThreadPanel({
 			aria-label={tl("Thread: {title}", { title })}
 			className={cn(PANEL_CLASS, "xl:w-[clamp(26rem,38vw,40rem)]")}
 			data-testid="bank-thread-panel"
-			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 16 * inlineSign }}
 			transition={PANEL_TRANSITION}
 		>
 			<header className="flex h-14 shrink-0 items-center gap-2 border-border border-b px-4">

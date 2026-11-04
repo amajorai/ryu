@@ -424,6 +424,7 @@
   "No run selected. Start one from Configure, or pick one in History.": "Запуск не выбран. Начните новый в разделе «Настройка» или выберите в истории.",
   "No runs yet.": "Запусков пока нет.",
   "No trained adapters yet.": "Обученных адаптеров пока нет.",
+  "No.": "№",
   "None": "Нет",
   "Normal": "Обычный",
   "Note": "Заметка",
@@ -850,7 +851,7 @@
   "rendered dataset exceeds the {maxRenderedTotalChars} character limit": "сформированный набор данных превышает лимит в {maxRenderedTotalChars} символов",
   "request": "запрос",
   "requests": "запросов",
-  "running": "с моделью",
+  "running": "выполняется",
   "ryu": "ryu",
   "show": "показать",
   "shown": "показано",
@@ -875,5 +876,6 @@
   "with": "с участием",
   "working": "работают",
   "your browser": "браузере",
+  "{age} ago": "{age} назад",
   "{count} more": "Ещё {count}"
 }

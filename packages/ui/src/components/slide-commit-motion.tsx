@@ -8,6 +8,7 @@ import {
 } from "motion/react";
 import type { RefObject } from "react";
 import { useEffect, useLayoutEffect, useState } from "react";
+import { useDirection } from "./direction.tsx";
 import styles from "./slide-commit.module.css";
 import {
 	clamp,
@@ -16,6 +17,11 @@ import {
 	SQUASH_DIV,
 	SQUASH_MAX,
 } from "./slide-commit-config.ts";
+import {
+	gripOrigin,
+	inlineSign,
+	revealClip,
+} from "./slide-commit-direction.ts";
 
 const useIsoLayoutEffect =
 	typeof window === "undefined" ? useEffect : useLayoutEffect;
@@ -95,6 +101,10 @@ export function useSlideCommitMotion({
 	swellTarget: number;
 }) {
 	const measured = useMeasuredWidth(rootRef, fallbackWidth);
+	// The grip starts at the inline start, so under RTL the fill, the content
+	// offset and the scale origin all mirror.
+	const direction = useDirection();
+	const sign = inlineSign(direction);
 	const grip = height - PAD * 2;
 	const innerWidth = Math.max(grip + 1, measured - PAD * 2);
 	const travelOf = (w: number) => Math.max(1, w - grip);
@@ -127,21 +137,21 @@ export function useSlideCommitMotion({
 		[seen, anchor, inner],
 		([v = 0, a = 0, w = 0]: number[]) => v + grip + clamp(a - v, 0, travelOf(w))
 	);
-	const clip = useTransform(
-		[edge, inner],
-		([right = 0, w = 0]: number[]) =>
-			`inset(0 ${w - right}px 0 0 round ${gripRadius}px)`
+	const clip = useTransform([edge, inner], ([right = 0, w = 0]: number[]) =>
+		revealClip(right, w, gripRadius, direction)
 	);
 	const content = useTransform(
 		[seen, edge, inner],
 		([v = 0, right = 0, w = 0]: number[]) =>
-			`translateX(${(v + right) / 2 - w / 2}px)`
+			`translateX(${sign * ((v + right) / 2 - w / 2)}px)`
 	);
 	const shape = useTransform([x, swell], ([v = 0, s = 1]: number[]) => {
 		const q = 1 - Math.min(SQUASH_MAX, Math.max(0, -v) / SQUASH_DIV);
 		return `scale(${q * s}, ${s / q})`;
 	});
-	const origin = useTransform(seen, (v) => `${v}px 50%`);
+	const origin = useTransform([seen, inner], ([v = 0, w = 0]: number[]) =>
+		gripOrigin(v, w, direction)
+	);
 	const say = useTransform([seen, inner], ([v = 0, w = 0]: number[]) =>
 		clamp(1 - v / (travelOf(w) * 0.55), 0, 1)
 	);
@@ -162,6 +172,7 @@ export function useSlideCommitMotion({
 		arrow,
 		clip,
 		content,
+		direction,
 		inner: innerWidth,
 		measured,
 		origin,

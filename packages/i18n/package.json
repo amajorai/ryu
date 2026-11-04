@@ -20,6 +20,7 @@
     "./official-catalog/extension": "./src/official-catalog-extension.ts",
     "./official-catalog/native": "./src/official-catalog-native.ts",
     "./official-catalog/web": "./src/official-catalog-web.ts",
+    "./parse-number": "./src/parse-number.ts",
     "./react": "./src/react.tsx",
     "./react-lite": "./src/react-lite.tsx",
     "./sentence-label": "./src/sentence-label.ts"

@@ -211,7 +211,15 @@ export function NodeOrganizationBindingCard({
 					<FieldLabel htmlFor="node-binding-organization">
 						Organization
 					</FieldLabel>
-					<Select onValueChange={setOrganizationId} value={organizationId}>
+					<Select
+						// The closed trigger shows the organization's name, not its id.
+						items={organizations.map((organization) => ({
+							value: organization.id,
+							label: organization.name,
+						}))}
+						onValueChange={setOrganizationId}
+						value={organizationId}
+					>
 						<SelectTrigger
 							aria-label="Organization"
 							className="min-w-0 max-w-full"

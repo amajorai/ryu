@@ -24,6 +24,7 @@ import {
 	type ChannelSearchHit,
 	ChannelsMessageList,
 } from "./channels-messages.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import {
 	agentById,
 	type InterfaceRendererProps,
@@ -97,6 +98,7 @@ export function ChannelPane({
 	threads: InterfaceThread[];
 	threadView: InterfaceRendererProps<ChannelsParams>["threadView"];
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const isDm = channel.kind === "agent";
 	const dmAgent = isDm ? agentById(snapshot, selectedAgentId) : undefined;
@@ -249,7 +251,7 @@ export function ChannelPane({
 					// Side by side down to 720px (the rail and sidebar give way
 					// first), then the thread takes the whole pane.
 					className="@max-[720px]:absolute @max-[720px]:inset-0 @max-[720px]:z-30 flex @max-[1100px]:w-[min(420px,50%)] @max-[720px]:w-full w-[420px] shrink-0 flex-col border-border border-s @max-[720px]:border-s-0 bg-background"
-					initial={reduceMotion ? false : { opacity: 0, x: 12 }}
+					initial={reduceMotion ? false : { opacity: 0, x: 12 * inlineSign }}
 					transition={{ duration: 0.18, ease: "easeOut" }}
 				>
 					{/* Two rows, like the channel header beside it, so the rule

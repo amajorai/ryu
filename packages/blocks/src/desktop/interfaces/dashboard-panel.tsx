@@ -11,6 +11,7 @@ import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
 import { BoardStatusLabel } from "./board-status.tsx";
 import { threadTitle } from "./dashboard-model.ts";
+import { useInlineSign } from "./inline-direction.ts";
 import { agentById, relativeAge } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
@@ -53,6 +54,7 @@ export function DashboardThreadPanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread ? threadTitle(thread) : tl("New thread");
@@ -66,8 +68,8 @@ export function DashboardThreadPanel({
 			aria-label={tl("Thread: {title}", { title })}
 			className="absolute inset-y-0 end-0 z-30 flex @min-[760px]/dash:w-[min(720px,56%)] w-full flex-col border-border @min-[760px]/dash:border-s bg-background shadow-2xl shadow-foreground/10"
 			data-testid="dashboard-thread-panel"
-			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 40 }}
-			initial={reduceMotion ? false : { opacity: 0, x: 40 }}
+			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 40 * inlineSign }}
+			initial={reduceMotion ? false : { opacity: 0, x: 40 * inlineSign }}
 			transition={{ duration: 0.2, ease: EASE }}
 		>
 			<header className="flex h-12 shrink-0 items-center gap-3 border-border border-b ps-4 pe-2">

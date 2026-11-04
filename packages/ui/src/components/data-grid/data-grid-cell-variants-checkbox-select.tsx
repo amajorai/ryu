@@ -226,6 +226,11 @@ export function SelectCell<TData>({
 		>
 			{isEditing ? (
 				<Select
+					// The closed trigger shows the option label, not its stored value.
+					items={options.map((option) => ({
+						value: option.value,
+						label: option.label,
+					}))}
 					onOpenChange={onOpenChange}
 					onValueChange={onValueChange}
 					open={isEditing}

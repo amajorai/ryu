@@ -165,6 +165,8 @@ pub async fn route_team_chat_stream(
         .unwrap_or_else(|| team.members[0].clone());
     let member_plugin_flags = req.plugin_flags.clone();
     let persist_combined = req.persist;
+    // Core's own placeholders and labels in this turn use the owner's language.
+    let locale = crate::i18n::locale::node_locale().await;
 
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(ui_start());
@@ -176,11 +178,8 @@ pub async fn route_team_chat_stream(
             // Every member answers the same prompt independently.
             Coordination::Broadcast => {
                 for (idx, (mid, mname)) in members.iter().enumerate() {
-                    let text = match run_member_text_with_flags(mid, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
-                        Ok(t) if !t.trim().is_empty() => t,
-                        Ok(_) => "_(no response)_".to_owned(),
-                        Err(e) => format!("_(error: {e})_"),
-                    };
+                    let reply = run_member_text_with_flags(mid, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
+                    let text = team_member_reply_text(locale, mid, reply);
                     let mut block = Vec::new();
                     push_member_block(&mut block, &mut combined, &format!("m{idx}"), mname, &text);
                     for f in &block { yield Ok(f.clone()); }
@@ -199,11 +198,8 @@ pub async fn route_team_chat_stream(
                         );
                         messages_with_preamble(&original_messages, &preamble)
                     };
-                    let text = match run_member_text_with_flags(mid, msgs, conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
-                        Ok(t) if !t.trim().is_empty() => t,
-                        Ok(_) => "_(no response)_".to_owned(),
-                        Err(e) => format!("_(error: {e})_"),
-                    };
+                    let reply = run_member_text_with_flags(mid, msgs, conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
+                    let text = team_member_reply_text(locale, mid, reply);
                     transcript.push_str(&format!("{mname}: {text}\n\n"));
                     let mut block = Vec::new();
                     push_member_block(&mut block, &mut combined, &format!("m{idx}"), mname, &text);
@@ -215,11 +211,8 @@ pub async fn route_team_chat_stream(
             Coordination::DebateSynthesis => {
                 let mut round1 = String::new();
                 for (idx, (mid, mname)) in members.iter().enumerate() {
-                    let text = match run_member_text_with_flags(mid, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
-                        Ok(t) if !t.trim().is_empty() => t,
-                        Ok(_) => "_(no response)_".to_owned(),
-                        Err(e) => format!("_(error: {e})_"),
-                    };
+                    let reply = run_member_text_with_flags(mid, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
+                    let text = team_member_reply_text(locale, mid, reply);
                     round1.push_str(&format!("{mname}: {text}\n\n"));
                     let mut block = Vec::new();
                     push_member_block(&mut block, &mut combined, &format!("m{idx}"), mname, &text);
@@ -236,13 +229,10 @@ pub async fn route_team_chat_stream(
                     "You are the lead of a team. Your teammates gave these answers to the user's request:\n\n{round1}\nSynthesize them into one definitive, non-repetitive answer for the user."
                 );
                 let msgs = messages_with_preamble(&original_messages, &preamble);
-                let synth = match run_member_text_with_flags(&lead_id, msgs, conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
-                    Ok(t) if !t.trim().is_empty() => t,
-                    Ok(_) => "_(no synthesis)_".to_owned(),
-                    Err(e) => format!("_(synthesis error: {e})_"),
-                };
+                let reply = run_member_text_with_flags(&lead_id, msgs, conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
+                let synth = team_synthesis_text(locale, &lead_id, reply);
                 let mut block = Vec::new();
-                push_member_block(&mut block, &mut combined, "synth", &format!("{lead_name} (synthesis)"), &synth);
+                push_member_block(&mut block, &mut combined, "synth", &team_synthesis_label(locale, &lead_name), &synth);
                 for f in &block { yield Ok(f.clone()); }
                 frames.extend(block);
             }
@@ -271,13 +261,10 @@ pub async fn route_team_chat_stream(
                     .find(|(id, _)| pick.contains(id.as_str()))
                     .cloned()
                     .unwrap_or_else(|| members[0].clone());
-                let text = match run_member_text_with_flags(&chosen.0, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
-                    Ok(t) if !t.trim().is_empty() => t,
-                    Ok(_) => "_(no response)_".to_owned(),
-                    Err(e) => format!("_(error: {e})_"),
-                };
+                let reply = run_member_text_with_flags(&chosen.0, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
+                let text = team_member_reply_text(locale, &chosen.0, reply);
                 let mut block = Vec::new();
-                push_member_block(&mut block, &mut combined, "m0", &format!("{} (routed)", chosen.1), &text);
+                push_member_block(&mut block, &mut combined, "m0", &team_routed_label(locale, &chosen.1), &text);
                 for f in &block { yield Ok(f.clone()); }
                 frames.extend(block);
             }

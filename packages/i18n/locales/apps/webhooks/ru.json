@@ -663,7 +663,7 @@
   "ready": "готово",
   "records": "записей",
   "request": "запрос",
-  "running": "с моделью",
+  "running": "выполняется",
   "ryu": "ryu",
   "show": "показать",
   "shown": "показано",
@@ -688,6 +688,7 @@
   "with": "с участием",
   "working": "работают",
   "your browser": "браузере",
+  "{age} ago": "{age} назад",
   "{count, plural, one {{countText} subscription} other {{countText} subscriptions}}": "{count, plural, one {{countText} подписка} few {{countText} подписки} many {{countText} подписок} other {{countText} подписки}}",
   "{count} more": "Ещё {count}"
 }

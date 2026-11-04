@@ -11,6 +11,7 @@
 // byte-size, per-period and week-start helpers at the end of this file.
 
 import { activeLocale, translate as tl } from "./active-locale.ts";
+import { relativeTimeFormatOrFallback } from "./intl-relative-fallback.ts";
 import { DEFAULT_LOCALE } from "./pack.ts";
 
 /** Most formatters one cache keeps before it starts over. */
@@ -125,7 +126,7 @@ export function relativeTimeFormatter(
 		cacheKey(locale ?? "", { numeric, style }),
 		() =>
 			withFallback(locale, (resolved) => {
-				return new Intl.RelativeTimeFormat(resolved, { numeric, style });
+				return relativeTimeFormatOrFallback(resolved, numeric, style);
 			})
 	);
 }

@@ -1,8 +1,14 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { useFormatLocale } from "@ryu/ui/hooks/use-format-locale.ts";
 import { type ReactNode, useState } from "react";
 import { useCatalogHost } from "./host.tsx";
+import {
+	llmfitFitLabel,
+	llmfitMemoryLine,
+	llmfitRateLabel,
+} from "./llmfit-labels.ts";
 import type { LlmFitEstimate, ModelCard } from "./types.ts";
 
 /**
@@ -21,6 +27,7 @@ export function LlmfitEstimateBlock({
 }) {
 	const host = useCatalogHost();
 	const tl = useLiteralMessages();
+	const formatLocale = useFormatLocale();
 	const node = host.useActiveNode();
 	const [busy, setBusy] = useState<"idle" | "loading" | "installing">("idle");
 	const [result, setResult] = useState<LlmFitEstimate | null>(null);
@@ -110,20 +117,22 @@ export function LlmfitEstimateBlock({
 			<div className="flex flex-wrap items-center gap-2">
 				{result.tps != null && (
 					<Badge variant="secondary">
-						{tl("≈{rate} tokens/sec", {
-							rate: String(Math.round(result.tps)),
-						})}
+						{llmfitRateLabel(tl, formatLocale, result.tps)}
 					</Badge>
 				)}
 				{result.fit_level && (
-					<Badge variant="outline">{result.fit_level}</Badge>
+					<Badge variant="outline">
+						{llmfitFitLabel(tl, result.fit_level)}
+					</Badge>
 				)}
 				{result.min_vram_gb != null && (
 					<span className="text-muted-foreground text-xs">
-						{tl("needs {memory} GB graphics memory{path}", {
-							memory: result.min_vram_gb.toFixed(1),
-							path: result.path ? ` · ${result.path.replace("_", " ")}` : "",
-						})}
+						{llmfitMemoryLine(
+							tl,
+							formatLocale,
+							result.min_vram_gb,
+							result.path
+						)}
 					</span>
 				)}
 				<Button onClick={onRun} size="sm" variant="ghost">

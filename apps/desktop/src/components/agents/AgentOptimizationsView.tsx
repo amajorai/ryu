@@ -31,6 +31,11 @@ import {
 	optimizationRecoveryRequired,
 } from "@/src/lib/api/optimizer.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
+import {
+	analysisNote,
+	recommendationSummary,
+	recommendationTitle,
+} from "./optimizer-copy.ts";
 
 export interface AgentOptimizationsViewProps {
 	agentId: string;
@@ -137,7 +142,7 @@ function RecommendationCard({
 		<SettingsCard className="flex flex-col gap-3">
 			<div className="flex flex-wrap items-start justify-between gap-2">
 				<div className="flex flex-col gap-1">
-					<p className="font-medium text-sm">{rec.title}</p>
+					<p className="font-medium text-sm">{recommendationTitle(rec, tl)}</p>
 					<ChangeLine rec={rec} />
 				</div>
 				<div className="flex flex-wrap items-center gap-1">
@@ -156,7 +161,7 @@ function RecommendationCard({
 					)}
 				</div>
 			</div>
-			<p className="text-sm">{rec.summary}</p>
+			<p className="text-sm">{recommendationSummary(rec, tl)}</p>
 			{rec.kind === "model" ? <ModelEvidence rec={rec} /> : null}
 			<p className="text-muted-foreground text-xs">
 				{tl("Based on {sessions} sessions · {createdAt}", {
@@ -389,7 +394,7 @@ export function AgentOptimizationsView({
 						{analysis && analysis.notes.length > 0 ? (
 							<ul className="list-disc ps-4 text-muted-foreground text-xs">
 								{analysis.notes.map((note) => (
-									<li key={note}>{note}</li>
+									<li key={note}>{analysisNote(note, tl)}</li>
 								))}
 							</ul>
 						) : null}
@@ -408,7 +413,9 @@ export function AgentOptimizationsView({
 							className="flex flex-col gap-3"
 							key={`recovery:${rec.id}`}
 						>
-							<p className="font-medium text-sm">{rec.title}</p>
+							<p className="font-medium text-sm">
+								{recommendationTitle(rec, tl)}
+							</p>
 							<p className="text-sm">
 								The agent was updated. Finish recording this suggestion;
 								retrying will not apply the change again.

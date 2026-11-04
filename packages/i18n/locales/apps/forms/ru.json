@@ -126,6 +126,7 @@
   "This form changed. Reload it and try again.": "Эта форма изменилась. Перезагрузите ее и повторите попытку.",
   "This form changed. Reload it before saving.": "Эта форма изменилась. Перезагрузите ее перед сохранением.",
   "This form is no longer accepting responses.": "Эта форма больше не принимает ответы.",
+  "This form is no longer available.": "Эта форма больше недоступна.",
   "This form link is already in use.": "Эта ссылка на форму уже используется.",
   "This form link is reserved. Choose another link name.": "Эта ссылка на форму зарезервирована. Выберите другое имя ссылки.",
   "This permanently deletes the form and every response stored with it on this Ryu node.": "Форма и все связанные с ней ответы на этом узле Ryu будут удалены безвозвратно.",

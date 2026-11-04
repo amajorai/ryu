@@ -797,7 +797,7 @@
   "records": "записей",
   "request": "запрос",
   "research": "исследование",
-  "running": "с моделью",
+  "running": "выполняется",
   "ryu": "ryu",
   "show": "показать",
   "shown": "показано",
@@ -824,5 +824,6 @@
   "with:": "на:",
   "working": "работают",
   "your browser": "браузере",
+  "{age} ago": "{age} назад",
   "{count} more": "Ещё {count}"
 }

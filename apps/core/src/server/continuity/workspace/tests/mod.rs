@@ -1,5 +1,5 @@
 use super::errors::{coded_error, handoff_response};
-use super::prepare::{same_remote, slug};
+use super::prepare::{canonical, same_remote, slug};
 use super::routes::capabilities;
 use super::storage::{read_blob, store_blob, write_sealed_blob, Roots, StoredBlob};
 use super::validation::{guard_remote_url, validate_manifest};
@@ -301,5 +301,18 @@ fn error_responses_carry_a_status_and_a_stable_code() {
     assert_eq!(
         handoff_response(HandoffError::TooLarge("bundle".to_owned())).status(),
         StatusCode::PAYLOAD_TOO_LARGE
+    );
+}
+
+#[test]
+fn canonical_paths_drop_only_the_windows_verbatim_prefix() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = canonical(temp.path()).unwrap();
+    assert!(path.is_absolute());
+    assert!(path.is_dir());
+    assert!(!path.to_string_lossy().starts_with(r"\\?\"));
+    assert_eq!(
+        std::fs::canonicalize(&path).unwrap(),
+        std::fs::canonicalize(temp.path()).unwrap()
     );
 }

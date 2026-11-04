@@ -23,6 +23,7 @@ import {
 	MODEL_ROUTER_TYPE_LABELS,
 	type routeStrategyCopy,
 } from "@/src/lib/api/gateway.ts";
+import { formatFixedDecimals } from "@/src/lib/fixed-decimal-format.ts";
 import { ClassifyTierNote } from "./classify-tier.tsx";
 
 /**
@@ -188,7 +189,7 @@ export function SmartRouterAlgorithmFields({
 					<div className="flex flex-col gap-1.5">
 						<FluidSlider
 							disabled={isDisabled}
-							format={(v) => v.toFixed(2)}
+							format={(v) => formatFixedDecimals(v, 2)}
 							label="Similarity threshold"
 							max={1}
 							min={0}
@@ -280,7 +281,7 @@ export function SmartRouterAlgorithmFields({
 					</div>
 					<FluidSlider
 						disabled={isDisabled}
-						format={(value) => value.toFixed(2)}
+						format={(value) => formatFixedDecimals(value, 2)}
 						label="Signal confidence threshold"
 						max={1}
 						min={0}

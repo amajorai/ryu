@@ -50,9 +50,10 @@ function sameSelection(
 /** The Island is a separate Electron renderer, so it needs its own provider
  * and a main-process catalog read rather than inheriting Desktop's context.
  * The main process also serves the saved UI language (Core's `ui-language`
- * preference, written today only by the Island picker), so both Island
- * windows follow one choice. Without a fixed choice the provider follows the
- * OS's preferred languages (`languagechange`). The on-screen
+ * preference, shared with Desktop: the Island picker and Desktop both write
+ * it and Desktop adopts an Island choice, so the last writer wins), so both
+ * Island windows follow one choice. Without a fixed choice the provider
+ * follows the OS's preferred languages (`languagechange`). The on-screen
  * generative UI window passes its own `languagePacks` bridge. */
 export function IslandI18nProvider({
 	children,

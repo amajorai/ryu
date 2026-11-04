@@ -15,6 +15,7 @@ import {
 	ContextMenuItem,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -426,7 +427,10 @@ export function AgentThreadRow({
 											onOpenQuickReply?.(thread.id);
 										}}
 									>
-										<HugeiconsIcon className="size-4" icon={MailReply01Icon} />
+										<DirectionalIcon
+											className="size-4"
+											icon={MailReply01Icon}
+										/>
 										Quick reply
 									</DropdownMenuItem>
 									<DropdownMenuItem
@@ -450,7 +454,7 @@ export function AgentThreadRow({
 				{hasActions ? (
 					<ContextMenuContent>
 						<ContextMenuItem onClick={() => onOpenQuickReply?.(thread.id)}>
-							<HugeiconsIcon className="size-4" icon={MailReply01Icon} />
+							<DirectionalIcon className="size-4" icon={MailReply01Icon} />
 							Quick reply
 						</ContextMenuItem>
 						<ContextMenuItem

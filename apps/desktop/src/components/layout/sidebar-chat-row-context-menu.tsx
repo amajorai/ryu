@@ -32,6 +32,7 @@ import {
 	ContextMenuSubContent,
 	ContextMenuSubTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Icon } from "@ryu/ui/components/icon.tsx";
 import { copyChatTranscriptAsMarkdown } from "@/src/lib/copy-chat-transcript.ts";
 import { OpenInNewWindowContextMenuItem } from "./OpenInNewWindowMenuItem.tsx";
@@ -142,7 +143,7 @@ export function ChatRowContextMenuContent({
 				{isArchived ? tl("Unarchive chat") : tl("Archive chat")}
 			</ContextMenuItem>
 			<ContextMenuItem onClick={() => onOpenQuickReply(conv.id)}>
-				<HugeiconsIcon className="size-4" icon={MailReply01Icon} />
+				<DirectionalIcon className="size-4" icon={MailReply01Icon} />
 				Quick reply
 			</ContextMenuItem>
 			<ContextMenuSeparator />

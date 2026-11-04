@@ -264,18 +264,45 @@ pub fn new_span_id() -> String {
     id
 }
 
-/// SHA-256 hex of a JSON value's canonical representation.
+/// SHA-256 hex of a JSON value's canonical representation: object keys sorted
+/// at every depth, array order kept, compact separators.
+///
+/// The serialized bytes of a `Value` are not canonical on their own. A Core
+/// build links `agent-client-protocol`, which turns on `serde_json/preserve_order`
+/// for every crate, so an object serializes in insertion order: the same tool
+/// arguments parsed from `{"a":1,"b":2}` and from `{"b":2,"a":1}` would hash
+/// differently, and an idempotent retry or a cross-surface correlation would
+/// see two different inputs.
 pub fn hash_args(value: &serde_json::Value) -> String {
     use std::fmt::Write;
-    // Canonical form: serialize the value (serde_json is deterministic for
-    // the same in-memory Value; sufficient for a privacy-safe fingerprint).
-    let bytes = serde_json::to_vec(value).unwrap_or_default();
+    let bytes = serde_json::to_vec(&sorted_keys(value)).unwrap_or_default();
     let digest = sha2_digest(&bytes);
     let mut out = String::with_capacity(64);
     for b in digest {
         let _ = write!(out, "{b:02x}");
     }
     out
+}
+
+/// `value` with every object's keys in sorted order. Building each object from
+/// sorted entries gives sorted output under both `serde_json` map backends:
+/// the default `BTreeMap` and `preserve_order`'s insertion-ordered map.
+fn sorted_keys(value: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::Object(object) => {
+            let mut entries: Vec<_> = object.iter().collect();
+            entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+            Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key.clone(), sorted_keys(value)))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sorted_keys).collect()),
+        scalar => scalar.clone(),
+    }
 }
 
 /// Minimal SHA-256 implementation using the `sha2` crate (already in the
@@ -286,4 +313,34 @@ fn sha2_digest(data: &[u8]) -> [u8; 32] {
     let mut h = sha2::Sha256::new();
     h.update(data);
     h.finalize().into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hash_args;
+    use serde_json::json;
+
+    #[test]
+    fn hash_args_is_the_digest_of_the_key_sorted_compact_form() {
+        use sha2::Digest;
+        let value = json!({ "b": [3, { "z": true, "a": null }], "a": "x" });
+        let canonical = r#"{"a":"x","b":[3,{"a":null,"z":true}]}"#;
+        let expected = format!("{:x}", sha2::Sha256::digest(canonical.as_bytes()));
+        assert_eq!(hash_args(&value), expected);
+    }
+
+    #[test]
+    fn hash_args_ignores_key_order_but_not_array_order() {
+        let mut first = serde_json::Map::new();
+        first.insert("path".into(), json!("/tmp/a"));
+        first.insert("limit".into(), json!(5));
+        let mut second = serde_json::Map::new();
+        second.insert("limit".into(), json!(5));
+        second.insert("path".into(), json!("/tmp/a"));
+        assert_eq!(
+            hash_args(&serde_json::Value::Object(first)),
+            hash_args(&serde_json::Value::Object(second))
+        );
+        assert_ne!(hash_args(&json!([1, 2])), hash_args(&json!([2, 1])));
+    }
 }

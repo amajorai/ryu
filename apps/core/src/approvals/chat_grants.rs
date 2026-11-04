@@ -107,8 +107,10 @@ pub fn requires_per_call_consent(tool_id: &str) -> bool {
 }
 
 fn fingerprint(arguments: &Value) -> String {
-    // serde_json maps are ordered, so equal argument objects serialize equally.
-    arguments.to_string()
+    // Core links `serde_json/preserve_order`, so `to_string` keeps each object's
+    // key order and the same arguments sent in another order would miss the
+    // grant. Digest the key-sorted form instead.
+    ryu_safe_actions::sha256_canonical(arguments).unwrap_or_else(|_| arguments.to_string())
 }
 
 /// Record the user's in-chat "Allow once" for exactly this call.
@@ -209,6 +211,28 @@ mod tests {
         assert!(
             !take("conv-once", LAUNCH, &args),
             "a once grant is consumed"
+        );
+    }
+
+    #[test]
+    fn a_once_grant_matches_the_same_arguments_in_any_key_order() {
+        grant_once(
+            "conv-order",
+            LAUNCH,
+            &json!({ "id": "llama", "body": { "ctx_size": 8192, "threads": 4 } }),
+        );
+        assert!(take(
+            "conv-order",
+            LAUNCH,
+            &json!({ "body": { "threads": 4, "ctx_size": 8192 }, "id": "llama" })
+        ));
+        assert!(
+            !take(
+                "conv-order",
+                LAUNCH,
+                &json!({ "id": "llama", "body": { "ctx_size": 8192, "threads": 4 } })
+            ),
+            "the reordered call consumed the grant"
         );
     }
 

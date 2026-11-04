@@ -126,6 +126,7 @@
   "This form changed. Reload it and try again.": "تغيّر هذا النموذج. أعد تحميله وحاول مرة أخرى.",
   "This form changed. Reload it before saving.": "تغيّر هذا النموذج. أعد تحميله قبل الحفظ.",
   "This form is no longer accepting responses.": "لم يعد هذا النموذج يقبل الردود.",
+  "This form is no longer available.": "هذا النموذج لم يعد متاحًا.",
   "This form link is already in use.": "رابط النموذج هذا مستخدم بالفعل.",
   "This form link is reserved. Choose another link name.": "رابط النموذج هذا محجوز. اختر اسم رابط آخر.",
   "This permanently deletes the form and every response stored with it on this Ryu node.": "سيؤدي هذا إلى حذف النموذج وكل الردود المخزّنة معه على عقدة Ryu هذه نهائيًا.",

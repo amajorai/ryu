@@ -1,6 +1,5 @@
 {
   "(authenticated)": "(인증됨)",
-  "1 install": "설치 1회",
   "24/7 on-device speech capture into your meeting memory.": "기기에서 24시간 음성을 캡처하여 회의 메모리에 저장합니다.",
   "A Twilio number receives forwarded calls. Purchasing one bills your Twilio account.": "Twilio 번호는 착신 전환된 전화를 받습니다. 구매 시 Twilio 계정에 요금이 청구됩니다.",
   "A line can list at most {maxAllowedCallers} trusted callers.": "회선 하나에 신뢰할 수 있는 발신자를 최대 {maxAllowedCallers}명까지 등록할 수 있습니다.",
@@ -592,7 +591,6 @@
   "No documents yet. Tap New to create a page.": "아직 문서가 없습니다. 새로 만들기를 탭하여 페이지를 만드세요.",
   "No groups yet": "아직 그룹이 없습니다",
   "No groups yet. Create one from the desktop app.": "아직 그룹이 없습니다. 데스크톱 앱에서 만드세요.",
-  "No installs": "설치 없음",
   "No matches": "일치 항목 없음",
   "No meetings recorded yet.": "아직 녹음된 회의가 없습니다.",
   "No meetings yet": "아직 회의가 없습니다",
@@ -1150,7 +1148,6 @@
   "{count, plural, one {# match found} other {# matches found}}": "{count, plural, other {일치 항목 #개 찾음}}",
   "{count, plural, one {# member} other {# members}} · {coordination}": "{count, plural, other {멤버 #명}} · {coordination}",
   "{count, plural, one {# runnable} other {# runnables}}": "{count, plural, other {실행 가능 항목 #개}}",
-  "{count} installs": "설치 {count}회",
   "{deviceLabel}. Add your Wi-Fi so the device can connect directly at home, or skip it to relay through this phone.": "{deviceLabel}. 집에서 기기가 직접 연결되도록 Wi-Fi를 추가하거나, 건너뛰고 이 휴대폰을 통해 중계하세요.",
   "{minutes} min": "{minutes}분",
   "{modelName} · mobile tools limited": "{modelName} · 모바일 도구 제한됨",

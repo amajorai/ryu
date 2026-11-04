@@ -348,8 +348,7 @@ pub async fn run_connect_target(
     }
     let payload_hash =
         ryu_crypto::hmac_sha256_hex(b"ryu-connect-payload-v1", payload_json.as_bytes());
-    let workflow_hash =
-        ryu_crypto::hmac_sha256_hex(b"ryu-connect-workflow-v1", &serde_json::to_vec(&workflow)?);
+    let workflow_hash = workflow_digest::workflow_hash(&workflow)?;
     match store::load_run(&run_id) {
         Ok(existing) => {
             if existing.workflow_id != workflow.id
@@ -384,7 +383,8 @@ pub async fn run_connect_target(
                 }
                 RunStatus::Running => {}
             }
-            if existing.input.get("__ryu_connect_workflow_hash") != Some(&workflow_hash) {
+            let recorded = existing.input.get("__ryu_connect_workflow_hash");
+            if !workflow_digest::checkpoint_matches(recorded, &workflow)? {
                 return Err(anyhow!(
                     "Connect workflow changed since its checkpoint; review the run"
                 ));
@@ -497,3 +497,4 @@ pub fn install() {
 mod connect_suggestion_tests;
 #[cfg(test)]
 mod trigger_delivery_tests;
+mod workflow_digest;

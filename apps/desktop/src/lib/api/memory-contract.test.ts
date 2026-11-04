@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { rustModuleSource } from "./rust-module-source.ts";
 
 const REPO_ROOT = join(import.meta.dir, "../../../../..");
 
@@ -10,7 +11,7 @@ function source(relativePath: string): string {
 
 describe("memory graph and consent route contract", () => {
 	test("keeps the Core routes and the Memory client aligned", () => {
-		const server = source("apps/core/src/server/mod.rs");
+		const server = rustModuleSource("apps/core/src/server");
 		const client = source("apps/desktop/src/lib/api/memory.ts");
 		expect(server).toContain('"/api/memory/settings"');
 		expect(server).toContain('"/api/memory/graph"');

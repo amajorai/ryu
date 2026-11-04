@@ -663,7 +663,7 @@
   "ready": "bereit",
   "records": "Datensätze",
   "request": "Anfrage",
-  "running": "mit",
+  "running": "läuft",
   "ryu": "ryu",
   "show": "anzeigen",
   "shown": "angezeigt",
@@ -688,6 +688,7 @@
   "with": "mit",
   "working": "arbeiten",
   "your browser": "dem Browser",
+  "{age} ago": "vor {age}",
   "{count, plural, one {{countText} subscription} other {{countText} subscriptions}}": "{count, plural, one {{countText} Abonnement} other {{countText} Abonnements}}",
   "{count} more": "{count} weitere"
 }

@@ -1,4 +1,5 @@
 import { PatchDiff } from "@pierre/diffs/react";
+import { usePierreShadowLocalizer } from "@ryu/blocks/desktop/agent-elements/use-pierre-shadow-localizer.ts";
 import {
 	Select,
 	SelectContent,
@@ -34,6 +35,7 @@ import {
 
 export function AppearanceDiffPage({ state }: { state: AppearanceTabState }) {
 	const { diffPrefs } = state;
+	const localizePreviewCopy = usePierreShadowLocalizer();
 	return (
 		<SettingsSection caption="How diffs render in the workspace Changes tab.">
 			<SettingsCard
@@ -43,7 +45,10 @@ export function AppearanceDiffPage({ state }: { state: AppearanceTabState }) {
 				<div className="border-border border-b px-3 py-1.5 text-muted-foreground text-xs">
 					Live preview
 				</div>
-				<div className="max-h-64 overflow-auto text-xs">
+				<div
+					className="max-h-64 overflow-auto text-xs"
+					ref={localizePreviewCopy}
+				>
 					<PatchDiff
 						disableWorkerPool
 						options={diffViewPrefsToOptions(diffPrefs)}

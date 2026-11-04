@@ -488,6 +488,7 @@
   "Read the docs": "दस्तावेज़ पढ़ें",
   "Reason": "कारण",
   "Receive signed event notifications for received, sent, delivery, bounce, complaint, rejection, and open events.": "प्राप्त, भेजे गए, डिलीवरी, बाउंस, शिकायत, अस्वीकृति और खोलने की घटनाओं के लिए साइन की गई सूचनाएँ पाएँ।",
+  "Received": "प्राप्त",
   "Recent": "हाल के",
   "Red": "लाल",
   "Reference": "संदर्भ",
@@ -764,7 +765,7 @@
   "request": "अनुरोध",
   "research": "रिसर्च",
   "routing": "रूटिंग",
-  "running": "पर चल रहा मॉडल",
+  "running": "चल रहा है",
   "ryu": "ryu",
   "show": "दिखाएँ",
   "shown": "दिखाए गए",
@@ -792,6 +793,9 @@
   "with": "इनके साथ:",
   "working": "काम कर रहे हैं",
   "your browser": "आपके ब्राउज़र",
+  "{age} ago": "{age} पहले",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, one {# अटैचमेंट तैयार} other {# अटैचमेंट तैयार}}",
-  "{count} more": "{count} और"
+  "{count} more": "{count} और",
+  "{recipients} · {status}": "{recipients} · {status}",
+  "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {ड्राफ़्ट} sending {भेजा जा रहा है} sent {भेजा गया} failed {विफल} inbound {प्राप्त} outbound {आउटगोइंग} other {{value}}}"
 }

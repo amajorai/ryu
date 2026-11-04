@@ -797,7 +797,7 @@
   "records": "रिकॉर्ड",
   "request": "अनुरोध",
   "research": "रिसर्च",
-  "running": "पर चल रहा मॉडल",
+  "running": "चल रहा है",
   "ryu": "ryu",
   "show": "दिखाएँ",
   "shown": "दिखाए गए",
@@ -824,5 +824,6 @@
   "with:": "इससे:",
   "working": "काम कर रहे हैं",
   "your browser": "आपके ब्राउज़र",
+  "{age} ago": "{age} पहले",
   "{count} more": "{count} और"
 }

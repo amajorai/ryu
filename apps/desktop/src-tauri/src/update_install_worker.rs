@@ -1,6 +1,9 @@
 //! Cached, signature-verified installation in a process owned by the guard.
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedInstall {
@@ -11,6 +14,34 @@ pub struct CachedInstall {
     pub target_executable: PathBuf,
     pub nonce: String,
     pub format: String,
+}
+
+/// The folder a verified MSI is handed to Windows Installer from:
+/// `<data dir>/tmp/msi-handoff`, built through the data-dir layout. Never the
+/// shared `%TEMP%`, where any process the user runs can plant or swap files
+/// beside what Ryu asks `msiexec` to install. Windows Installer cannot open
+/// `\\?\` verbatim paths, so a verbatim data dir is given back in plain form.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn msi_handoff_dir(data_dir: &Path) -> PathBuf {
+    without_verbatim_prefix(&ryu_sidecar_runtime::layout::tmp_dir_for(
+        data_dir,
+        "msi-handoff",
+    ))
+}
+
+/// `\\?\C:\x` -> `C:\x` and `\\?\UNC\host\share` -> `\\host\share`; any other
+/// path (and one that is not valid Unicode) is returned unchanged.
+fn without_verbatim_prefix(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => path.to_path_buf(),
+    }
 }
 
 pub fn run(path: PathBuf) -> anyhow::Result<()> {
@@ -64,9 +95,14 @@ pub fn run(path: PathBuf) -> anyhow::Result<()> {
         use std::os::windows::process::CommandExt;
         // Windows Installer needs a normal, short source path accessible to its
         // service. Canonical cache paths can be verbatim/redirected MSIX paths
-        // that it cannot open. The bytes are already signature-verified above.
+        // that it cannot open, so the MSI goes to the Ryu-owned, non-verbatim
+        // handoff folder. The bytes are already signature-verified above.
         let temporary = if record.format == "msi" {
-            tempfile::Builder::new().prefix("ryu-msi-").tempdir()?
+            let handoff = msi_handoff_dir(&crate::profile::ryu_home_dir());
+            fs::create_dir_all(&handoff)?;
+            tempfile::Builder::new()
+                .prefix("ryu-msi-")
+                .tempdir_in(&handoff)?
         } else {
             tempfile::Builder::new()
                 .prefix("installer-")
@@ -199,5 +235,69 @@ pub fn run(path: PathBuf) -> anyhow::Result<()> {
         });
         app.run(|_, _| {});
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_msi_handoff_folder_is_under_the_data_dir_not_the_system_temp() {
+        let data_dir = Path::new("/home/someone/.ryu");
+        let handoff = msi_handoff_dir(data_dir);
+        assert_eq!(handoff, data_dir.join("tmp").join("msi-handoff"));
+        assert!(!handoff.starts_with(std::env::temp_dir()));
+    }
+
+    #[test]
+    fn a_verbatim_data_dir_yields_a_plain_handoff_path() {
+        let handoff = msi_handoff_dir(Path::new(r"\\?\C:\Users\someone\.ryu"));
+        let text = handoff.to_str().expect("utf-8 path");
+        assert!(text.starts_with(r"C:\Users\someone\.ryu"), "{text}");
+        assert!(text.ends_with("msi-handoff"), "{text}");
+    }
+
+    #[test]
+    fn the_msi_is_written_to_the_handoff_folder_not_the_system_temp() {
+        // The msiexec branch only compiles on Windows; guard its source here.
+        let source = include_str!("update_install_worker.rs");
+        let code = source
+            .split(concat!("#[cfg(", "test)]"))
+            .next()
+            .expect("worker source");
+        let msi_branch = code
+            .split(r#"if record.format == "msi" {"#)
+            .nth(1)
+            .and_then(|rest| rest.split("} else {").next())
+            .expect("msi handoff branch");
+        assert!(
+            msi_branch.contains("msi_handoff_dir(&crate::profile::ryu_home_dir())")
+                && msi_branch.contains(".tempdir_in(&handoff)"),
+            "{msi_branch}"
+        );
+        assert!(!code.contains(concat!(".tempdir", "()")));
+    }
+
+    #[test]
+    fn verbatim_prefixes_are_removed_and_other_paths_are_kept() {
+        assert_eq!(
+            without_verbatim_prefix(Path::new(r"\\?\D:\Ryu Data")),
+            PathBuf::from(r"D:\Ryu Data")
+        );
+        assert_eq!(
+            without_verbatim_prefix(Path::new(r"\\?\UNC\server\share\ryu")),
+            PathBuf::from(r"\\server\share\ryu")
+        );
+        for plain in [
+            r"C:\Users\someone\.ryu",
+            "/home/someone/.ryu",
+            r"\\server\share",
+        ] {
+            assert_eq!(
+                without_verbatim_prefix(Path::new(plain)),
+                PathBuf::from(plain)
+            );
+        }
     }
 }

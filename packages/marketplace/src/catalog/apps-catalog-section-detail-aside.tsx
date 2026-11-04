@@ -9,6 +9,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { formatRatingAverage } from "../rating-format.ts";
 import { StarRating } from "../star-rating.tsx";
 import {
 	AppInformationSection,
@@ -20,8 +21,8 @@ import {
 	type ListingStat,
 } from "./detail/listing-detail-shell.tsx";
 import { ScorecardBadge } from "./detail/scorecard-panel.tsx";
+import { ratingCountLabel, surfaceListLabel } from "./listing-stat-labels.ts";
 import type { Scorecard } from "./scorecard.ts";
-import { surfaceLabel } from "./surface-labels.ts";
 import type { CatalogEntry, PluginCatalogDetail } from "./types.ts";
 
 /** The stat strip's cells for an app/plugin listing. Built as data rather than
@@ -61,7 +62,7 @@ export function appStatItems({
 	const cells: (ListingStat | null)[] = [
 		showRating && ratingCount > 0
 			? {
-					label: `${formatCount(ratingCount)} Ratings`,
+					label: ratingCountLabel(ratingCount),
 					// Apple's shape exactly: the number is the headline, the stars are
 					// the caption. Clicking the cell opens the tab that loads them.
 					onClick: onOpenReviews,
@@ -72,7 +73,7 @@ export function appStatItems({
 							value={entry.rating_average ?? 0}
 						/>
 					),
-					value: (entry.rating_average ?? 0).toFixed(1),
+					value: formatRatingAverage(entry.rating_average),
 				}
 			: null,
 		// Gated with the Health TAB it jumps to, not independently: leaving the cell
@@ -97,7 +98,7 @@ export function appStatItems({
 		surfaces.length > 0
 			? {
 					label: "Runs on",
-					value: surfaces.map((s) => surfaceLabel(s)).join(", "),
+					value: surfaceListLabel(surfaces),
 				}
 			: null,
 	];

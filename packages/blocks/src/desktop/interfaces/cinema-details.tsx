@@ -166,7 +166,7 @@ export function CinemaDetails({
 					/>
 					<div
 						aria-hidden="true"
-						className="absolute inset-y-0 left-0 w-3/5 bg-linear-to-r from-card/60 to-transparent"
+						className="absolute inset-y-0 start-0 w-3/5 bg-linear-to-r from-card/60 to-transparent rtl:bg-linear-to-l"
 					/>
 					<div
 						className={cn(

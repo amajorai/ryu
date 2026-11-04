@@ -176,7 +176,55 @@ pub fn local_engine_url(name: &str) -> Option<String> {
 }
 
 fn active_engine_path() -> PathBuf {
+    #[cfg(test)]
+    if let Some(path) = test_state::pinned_state_path("active-engine.json") {
+        return path;
+    }
     crate::paths::state_path("active-engine.json")
+}
+
+/// Test-only redirect of the persisted engine selection (`active-engine.json`
+/// here, `versions.json` in the version store) to a test-scoped data dir.
+///
+/// Core resolves its data dir once per process, so a reused `RYU_DIR` whose
+/// selection names llama.cpp leaks into every test that starts the managed
+/// Gateway: it waits for a llama.cpp sidecar that no test runs. A pinned test
+/// reads and writes only its own directory. The pin is per thread, so tests
+/// running beside it keep their own view; it covers code the pinned test runs
+/// on its own thread, which is every future of a current-thread runtime.
+#[cfg(test)]
+pub(crate) mod test_state {
+    use std::cell::RefCell;
+    use std::path::{Path, PathBuf};
+
+    thread_local! {
+        static DATA_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    }
+
+    /// Restores the previous pin (usually none) when dropped.
+    #[must_use = "the pin ends when the guard is dropped"]
+    pub(crate) struct EngineStatePin(Option<PathBuf>);
+
+    impl Drop for EngineStatePin {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            DATA_DIR.with(|dir| *dir.borrow_mut() = previous);
+        }
+    }
+
+    /// Point this thread's engine selection and version store at `data_dir`.
+    pub(crate) fn pin(data_dir: &Path) -> EngineStatePin {
+        EngineStatePin(DATA_DIR.with(|dir| dir.replace(Some(data_dir.to_path_buf()))))
+    }
+
+    /// `<pinned data dir>/state/<name>`, or `None` when this thread is unpinned.
+    pub(crate) fn pinned_state_path(name: &str) -> Option<PathBuf> {
+        DATA_DIR.with(|dir| {
+            dir.borrow()
+                .as_deref()
+                .map(|root| ryu_sidecar_runtime::layout::state_path(root, name))
+        })
+    }
 }
 
 /// Durable record of the currently selected local engine, persisted to
@@ -249,6 +297,38 @@ mod tests {
         let apple_silicon = cfg!(target_os = "macos") && cfg!(target_arch = "aarch64");
         assert_eq!(can_reside_on_node("mlx"), apple_silicon);
         assert_eq!(can_reside_on_node("omlx"), apple_silicon);
+    }
+
+    #[test]
+    fn a_pinned_thread_reads_and_writes_only_its_own_selection() {
+        let first = tempfile::tempdir().unwrap();
+        {
+            let _pin = test_state::pin(first.path());
+            assert_eq!(ActiveEngineStore::load().active, None);
+            ActiveEngineStore::save_active(Some("llamacpp")).unwrap();
+            assert_eq!(
+                ActiveEngineStore::load().active.as_deref(),
+                Some("llamacpp")
+            );
+            let second = tempfile::tempdir().unwrap();
+            {
+                let _inner = test_state::pin(second.path());
+                assert_eq!(ActiveEngineStore::load().active, None);
+            }
+            assert_eq!(
+                ActiveEngineStore::load().active.as_deref(),
+                Some("llamacpp")
+            );
+        }
+        assert!(
+            ryu_sidecar_runtime::layout::state_path(first.path(), "active-engine.json").is_file()
+        );
+        // Unpinned again: back on the process data dir. (Its content is not
+        // compared: another test may change it while this one runs.)
+        assert_eq!(
+            active_engine_path(),
+            crate::paths::state_path("active-engine.json")
+        );
     }
 
     #[test]

@@ -69,6 +69,9 @@ log = "0.4"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 base64 = "0.22"
 minisign-verify = "0.2"
+# Verifies the publisher-signed SHA256SUMS that pins the managed runtime binaries
+# (`core/install/release_digests/signed_sums.rs`); the same crate Core verifies it with.
+ed25519-dalek = "2"
 semver = "1"
 tempfile = "3"
 getrandom = "0.3"

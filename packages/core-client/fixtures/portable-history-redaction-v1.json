@@ -118,5 +118,59 @@
     "expected": "\u043f\u043e\u0447\u0442\u0430 \u0430\u0441\u0435 and nothing else",
     "pii": 0,
     "secrets": 0
+  },
+  {
+    "input": "Email \u0430\u0441\u0435@\u0435\u0445\u0430\u0441\u0435.\u0441\u043e",
+    "expected": "Email [REDACTED:EMAIL]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "\u0410\u0420\u0406_\u041a\u0415\u03a5 = hunt\u0065r2",
+    "expected": "[REDACTED:CREDENTIAL]",
+    "pii": 0,
+    "secrets": 1
+  },
+  {
+    "input": "\u03a4\u039f\u039a\u0395\u039d= hunt\u0065r2",
+    "expected": "[REDACTED:CREDENTIAL]",
+    "pii": 0,
+    "secrets": 1
+  },
+  {
+    "input": "\u043f\u0438\u0448\u0438\u0442\u0435 @\u0438\u0432\u0430\u043d",
+    "expected": "\u043f\u0438\u0448\u0438\u0442\u0435 @\u0438\u0432\u0430\u043d",
+    "pii": 0,
+    "secrets": 0
+  },
+  {
+    "input": "\u0412\u043e\u0442 \u043f\u0440\u0438\u043c\u0435\u0440: \u043a\u0442\u043e-\u0442\u043e \u0441\u043a\u0430\u0437\u0430\u043b \u00ab\u0443\u0440\u0430\u00bb.",
+    "expected": "\u0412\u043e\u0442 \u043f\u0440\u0438\u043c\u0435\u0440: \u043a\u0442\u043e-\u0442\u043e \u0441\u043a\u0430\u0437\u0430\u043b \u00ab\u0443\u0440\u0430\u00bb.",
+    "pii": 0,
+    "secrets": 0
+  },
+  {
+    "input": "ΤΟΚΕΝ = hunter2",
+    "expected": "[REDACTED:CREDENTIAL]",
+    "pii": 0,
+    "secrets": 1
+  },
+  {
+    "input": "АРІКЕΥ: hunter2",
+    "expected": "[REDACTED:CREDENTIAL]",
+    "pii": 0,
+    "secrets": 1
+  },
+  {
+    "input": "-----BEGIN ЕС PRIVATE ΚΕΥ-----\nsynthetic-body\n-----END ЕС PRIVATE ΚΕΥ-----",
+    "expected": "[REDACTED:PRIVATE_KEY]",
+    "pii": 0,
+    "secrets": 1
+  },
+  {
+    "input": "В ЕС так: сосед сказал.",
+    "expected": "В ЕС так: сосед сказал.",
+    "pii": 0,
+    "secrets": 0
   }
 ]

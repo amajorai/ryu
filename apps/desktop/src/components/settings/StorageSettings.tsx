@@ -32,6 +32,11 @@ import {
 	type ParseCapability,
 } from "@/src/lib/api/documents.ts";
 import { formatBytes, NODE_UPLOAD_MAX_BYTES } from "@/src/lib/api/spaces.ts";
+import {
+	DataPathRefusal,
+	dataPathActionErrorText,
+	dataPathValidationText,
+} from "@/src/lib/data-path-error.ts";
 import { fsCommandErrorText } from "@/src/lib/fs-command-error.ts";
 import { listenWhenReady } from "@/src/lib/tauri-ready.ts";
 import { NodeBackupSettings } from "./BackupSettings.tsx";
@@ -214,8 +219,14 @@ export function StorageSettings() {
 		if (targetRef.current !== target) {
 			return;
 		}
-		setPicked({ path: selected, validation });
-	}, [target]);
+		// Core's reason is English; show the coded sentence in the UI language.
+		setPicked({
+			path: selected,
+			validation: validation.ok
+				? validation
+				: { ...validation, error: dataPathValidationText(validation, tl) },
+		});
+	}, [target, tl]);
 
 	const doMigrate = useCallback(async () => {
 		if (!picked) {
@@ -257,28 +268,34 @@ export function StorageSettings() {
 		try {
 			const res = await switchDataPath(target, picked.path);
 			if (!res.ok) {
-				throw new Error(res.error ?? "switch failed");
+				throw new DataPathRefusal(res);
 			}
 			await relaunch();
 		} catch (e) {
 			setBusy(false);
-			sileo.error({ title: "Could not switch folder", description: String(e) });
+			sileo.error({
+				title: "Could not switch folder",
+				description: dataPathActionErrorText("switch", e, tl),
+			});
 		}
-	}, [target, picked]);
+	}, [target, picked, tl]);
 
 	const doReset = useCallback(async () => {
 		setBusy(true);
 		try {
 			const res = await resetDataPath(target);
 			if (!res.ok) {
-				throw new Error(res.error ?? "reset failed");
+				throw new DataPathRefusal(res);
 			}
 			await relaunch();
 		} catch (e) {
 			setBusy(false);
-			sileo.error({ title: "Could not reset folder", description: String(e) });
+			sileo.error({
+				title: "Could not reset folder",
+				description: dataPathActionErrorText("reset", e, tl),
+			});
 		}
-	}, [target]);
+	}, [target, tl]);
 
 	const doProfileCopy = useCallback(
 		async (toProfile: string) => {
@@ -356,7 +373,7 @@ export function StorageSettings() {
 		try {
 			const res = await exportDataPath(target, dest, passphrase);
 			if (!res.ok) {
-				throw new Error(res.error ?? "export failed");
+				throw new DataPathRefusal(res);
 			}
 			sileo.success({
 				title: "Backup created",
@@ -366,7 +383,10 @@ export function StorageSettings() {
 				}),
 			});
 		} catch (e) {
-			sileo.error({ title: "Backup failed", description: String(e) });
+			sileo.error({
+				title: "Backup failed",
+				description: dataPathActionErrorText("export", e, tl),
+			});
 		} finally {
 			setBusy(false);
 		}

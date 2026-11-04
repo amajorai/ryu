@@ -27,6 +27,7 @@ import {
 	type SpaceSummary,
 	searchRetrieval,
 } from "@/src/lib/api/retrieval.ts";
+import { formatFixedDecimals } from "@/src/lib/fixed-decimal-format.ts";
 import { useMemoryOwner } from "./MemoryTab-owner.ts";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
@@ -175,7 +176,9 @@ export function MemorySearchSection({ target }: { target: ApiTarget }) {
 										{sourceLabel(chunk, spaces, tl)}
 									</Badge>
 									<span className="font-mono text-muted-foreground text-xs">
-										{tl("score {score}", { score: chunk.score.toFixed(3) })}
+										{tl("score {score}", {
+											score: formatFixedDecimals(chunk.score, 3),
+										})}
 									</span>
 								</div>
 								<p className="whitespace-pre-wrap text-foreground">

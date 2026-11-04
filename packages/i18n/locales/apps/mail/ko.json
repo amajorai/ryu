@@ -488,6 +488,7 @@
   "Read the docs": "문서 읽기",
   "Reason": "사유",
   "Receive signed event notifications for received, sent, delivery, bounce, complaint, rejection, and open events.": "수신, 발신, 배달, 반송, 신고, 거부, 열람 이벤트에 대한 서명된 알림을 받습니다.",
+  "Received": "수신",
   "Recent": "최근",
   "Red": "빨강",
   "Reference": "참조",
@@ -764,7 +765,7 @@
   "request": "요청",
   "research": "리서치",
   "routing": "라우팅",
-  "running": "실행 모델",
+  "running": "실행 중",
   "ryu": "ryu",
   "show": "보기",
   "shown": "개 표시됨",
@@ -792,6 +793,9 @@
   "with": "참여자:",
   "working": "작업 중",
   "your browser": "브라우저",
+  "{age} ago": "{age} 전",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, other {첨부 파일 #개 준비됨}}",
-  "{count} more": "{count}개 더"
+  "{count} more": "{count}개 더",
+  "{recipients} · {status}": "{recipients} · {status}",
+  "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {임시 보관} sending {보내는 중} sent {보냄} failed {실패} inbound {받음} outbound {발신} other {{value}}}"
 }

@@ -3,6 +3,7 @@ import {
 	ArrowTurnBackwardIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { useState } from "react";
 import {
@@ -88,7 +89,7 @@ export function InheritRow({ onClear }: { onClear: () => void }) {
 				onClick={onClear}
 				type="button"
 			>
-				<HugeiconsIcon icon={ArrowTurnBackwardIcon} size={14} />
+				<DirectionalIcon icon={ArrowTurnBackwardIcon} size={14} />
 				<span>Use the default</span>
 			</button>
 		</div>

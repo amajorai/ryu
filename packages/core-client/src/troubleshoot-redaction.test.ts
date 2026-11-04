@@ -29,6 +29,21 @@ describe("redactDiagnosticText on disguised values", () => {
 		expect(out).toContain("[REDACTED EMAIL]");
 	});
 
+	test("redacts an email written wholly in look-alike letters", () => {
+		const out = redactDiagnosticText(
+			"user \u0430\u0441\u0435@\u0435\u0445\u0430\u0441\u0435.\u0441\u043e rejected"
+		);
+		expect(out).toBe("user [REDACTED EMAIL] rejected");
+	});
+
+	test("redacts a credential whose name is spelled wholly in look-alikes", () => {
+		const out = redactDiagnosticText(
+			"\u03a4\u039f\u039a\u0395\u039d = hunter2value; \u0412\u0430\u0455\u0456\u0441 dXNlcjpodW50ZXIy"
+		);
+		expect(out).not.toContain("hunter2value");
+		expect(out).not.toContain("dXNlcjpodW50ZXIy");
+	});
+
 	test("redacts tokens and keys split or widened to dodge the patterns", () => {
 		for (const [input, secret] of [
 			["auth ghp_abc​defghijklmnopqrstuvwxyz0123", "defghijklmnop"],
@@ -65,7 +80,7 @@ describe("redactDiagnosticText on disguised values", () => {
 
 	test("keeps as-written matches redacted when the folded view is returned", () => {
 		const out = redactDiagnosticText(
-			"RYU_CORE_TOKEN=abcd1234efgh5678 mail ｊａｎｅ＠example.com peer 8.8.4.4",
+			"RYU_CORE_TOKEN=abcd1234efgh5678 mail ｊａｎｅ＠example.com peer 8.8.4.4", // Test vector, not a credential. gitleaks:allow skipcq
 			{ homeDir: "/srv/people/jane" }
 		);
 		for (const secret of ["abcd1234efgh5678", "jane", "8.8.4.4"]) {

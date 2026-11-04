@@ -101,10 +101,45 @@ case "$os" in
 esac
 
 # --- pick a downloader ------------------------------------------------------
+# Every release URL answers with a redirect to the asset host. Refuse any hop
+# that is not HTTPS: a downgrade redirect would let anyone on the path swap the
+# binary and its .sha256 together, which the checksum alone cannot detect.
 if command -v curl >/dev/null 2>&1; then
-  dl() { curl -fsSL "$1" -o "$2"; }
+  dl() { curl -fsSL --proto '=https' --proto-redir '=https' "$1" -o "$2"; }
 elif command -v wget >/dev/null 2>&1; then
-  dl() { wget -qO "$2" "$1"; }
+  # GNU wget's --https-only governs recursive link following, not redirects, so
+  # follow redirects one hop at a time and check each Location before fetching.
+  wget --help 2>&1 | grep -q -- '--max-redirect' \
+    || err "this wget cannot refuse non-HTTPS redirects (no --max-redirect); install curl or GNU wget"
+  dl() { # <url> <out>
+    dl_url="$1"
+    dl_hops=0
+    while :; do
+      case "$dl_url" in
+        https://*) ;;
+        *) printf 'error: refusing non-HTTPS download URL %s\n' "$dl_url" >&2; return 1 ;;
+      esac
+      if dl_headers="$(wget -q -S --https-only --max-redirect=0 -O "$2" "$dl_url" 2>&1)"; then
+        return 0
+      fi
+      dl_status="$(printf '%s\n' "$dl_headers" | awk '$1 ~ /^HTTP\// { code = $2 } END { print code }')"
+      case "$dl_status" in
+        301|302|303|307|308) ;;
+        *) return 1 ;;
+      esac
+      dl_location="$(printf '%s\n' "$dl_headers" | tr -d '\r' | awk 'tolower($1) == "location:" { value = $2 } END { print value }')"
+      case "$dl_location" in
+        https://*) dl_url="$dl_location" ;;
+        /*) dl_rest="${dl_url#https://}"; dl_url="https://${dl_rest%%/*}$dl_location" ;;
+        *) printf 'error: refusing redirect to %s\n' "${dl_location:-an empty location}" >&2; return 1 ;;
+      esac
+      dl_hops=$((dl_hops + 1))
+      if [ "$dl_hops" -gt 10 ]; then
+        printf 'error: too many redirects for %s\n' "$1" >&2
+        return 1
+      fi
+    done
+  }
 else
   err "need curl or wget on PATH"
 fi

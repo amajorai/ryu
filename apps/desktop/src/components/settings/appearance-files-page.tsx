@@ -1,3 +1,4 @@
+import { usePierreShadowLocalizer } from "@ryu/blocks/desktop/agent-elements/use-pierre-shadow-localizer.ts";
 import {
 	Select,
 	SelectContent,
@@ -32,6 +33,7 @@ import {
 
 export function AppearanceFilesPage({ state }: { state: AppearanceTabState }) {
 	const { fileTreePrefs, treePreviewStyle, treePreviewClasses } = state;
+	const localizePreviewCopy = usePierreShadowLocalizer();
 	return (
 		<SettingsSection caption="How the workspace Files tab renders your project.">
 			<SettingsCard
@@ -41,7 +43,7 @@ export function AppearanceFilesPage({ state }: { state: AppearanceTabState }) {
 				<div className="border-border border-b px-3 py-1.5 text-muted-foreground text-xs">
 					Live preview
 				</div>
-				<div className="h-52 overflow-hidden text-xs">
+				<div className="h-52 overflow-hidden text-xs" ref={localizePreviewCopy}>
 					{/* Keyed on the constructor-time options only — theme rides in as
 						    host CSS variables and must not force a remount. */}
 					<FileTreePreview

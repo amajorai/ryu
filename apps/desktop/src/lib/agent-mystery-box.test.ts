@@ -8,6 +8,12 @@ import { describe, expect, it } from "bun:test";
 import { formatMessage } from "@ryu/i18n";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type { AgentCatalogEntry } from "@/src/lib/api/agents.ts";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	type ActiveI18nRuntime,
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../../packages/i18n/src/active-locale.ts";
 import {
 	buildMysteryPool,
 	drawMysteryAgent,
@@ -154,5 +160,31 @@ describe("rarity", () => {
 		expect(
 			templateRarityReason(signals({ ratingAverage: 4.75, ratingCount: 8 }), tl)
 		).toBe("Rated 4.8 by 8 people");
+	});
+
+	it("writes the rating in the reader's decimal mark", () => {
+		const german: ActiveI18nRuntime = {
+			direction: "ltr",
+			locale: "de",
+			translate: (_id, values, fallback) =>
+				formatMessage(fallback ?? "", values ?? {}, "de"),
+		};
+		const germanTl: LiteralMessage = (_source, values) =>
+			formatMessage(
+				"Von {ratingCount} Personen mit {rating} bewertet",
+				values ?? {},
+				"de"
+			);
+		registerActiveI18nRuntime(german);
+		try {
+			expect(
+				templateRarityReason(
+					signals({ ratingAverage: 4.75, ratingCount: 8 }),
+					germanTl
+				)
+			).toBe("Von 8 Personen mit 4,8 bewertet");
+		} finally {
+			unregisterActiveI18nRuntime(german);
+		}
 	});
 });

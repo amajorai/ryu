@@ -1,18 +1,26 @@
 "use client";
 
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { nextTabIndex, type TabOrientation } from "./tab-keys.ts";
 
 /**
  * Selection and roving focus for a tab list: only the selected tab is in the
- * tab order, arrow keys select and focus the neighbouring tab.
+ * tab order, arrow keys select and focus the neighbouring tab in reading order.
  */
 export function useRovingTabs(count: number, orientation: TabOrientation) {
 	const [selected, setSelected] = useState(0);
 	const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+	const direction = useDirection();
 
 	const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-		const next = nextTabIndex(selected, event.key, count, orientation);
+		const next = nextTabIndex(
+			selected,
+			event.key,
+			count,
+			orientation,
+			direction
+		);
 		if (next === null) {
 			return;
 		}

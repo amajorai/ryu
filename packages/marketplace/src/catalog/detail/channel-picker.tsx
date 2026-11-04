@@ -237,10 +237,18 @@ export function ChannelPicker({
 	const selectedVersion = installable.find(
 		(c) => c.channel === selected
 	)?.version;
+	// The closed trigger renders the selected item's label from `items`; without
+	// it Base UI prints the raw channel token ("beta") in every language.
+	// An author's own train name is not catalog copy: keep it out of ICU parsing.
+	const items = installable.map((c) => {
+		const label = channelLabel(c.channel);
+		return { label: /[{}]/.test(label) ? label : tl(label), value: c.channel };
+	});
 
 	return (
 		<div className="flex items-center gap-2">
 			<Select
+				items={items}
 				onValueChange={(next) =>
 					onChange(next === STABLE_CHANNEL ? null : next)
 				}

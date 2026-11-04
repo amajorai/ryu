@@ -1,4 +1,5 @@
 import { findClosingBrace, parseOptions, splitTopLevel } from "./icu-syntax.ts";
+import { type PluralSelector, pluralRules } from "./intl-guards.ts";
 import { DEFAULT_LOCALE, MAX_MESSAGE_LENGTH } from "./pack.ts";
 
 // Structural ICU argument names; kept on this path for existing callers.
@@ -123,9 +124,9 @@ function formatValue(value: MessageValue): string {
 }
 
 interface MessageFormatters {
-	cardinal?: Intl.PluralRules;
+	cardinal?: PluralSelector;
 	number?: Intl.NumberFormat;
-	ordinal?: Intl.PluralRules;
+	ordinal?: PluralSelector;
 }
 
 // These objects depend only on locale and fixed formatting options. Keep user
@@ -198,7 +199,7 @@ function formatMessageValue(
 			const exact = options.get(`=${count}`);
 			const type = kind === "selectordinal" ? "ordinal" : "cardinal";
 			const formatters = messageFormatters(locale);
-			formatters[type] ??= new Intl.PluralRules(locale, { type });
+			formatters[type] ??= pluralRules(locale, type);
 			const category = formatters[type].select(count);
 			const selected = exact ?? options.get(category) ?? options.get("other");
 			output +=

@@ -54,20 +54,8 @@ export function formatDate(iso: string | null | undefined): string {
 	return formatDateInZone(parsed);
 }
 
-/** Accepts `12`, `12.5`, `$12.50`. Returns integer cents, or null when the text
- *  is not a money amount — parsed digit-wise so a typed amount never round-trips
- *  through a float. */
-const DOLLARS_RE = /^\s*\$?\s*(\d+)(?:\.(\d{1,2}))?\s*$/;
-
-export function dollarsToCents(input: string): number | null {
-	const match = DOLLARS_RE.exec(input);
-	if (!match) {
-		return null;
-	}
-	const whole = Number.parseInt(match[1], 10);
-	const fraction = (match[2] ?? "").padEnd(2, "0");
-	return whole * 100 + Number.parseInt(fraction, 10);
-}
+// Locale-aware typed USD amounts live in a sibling; re-exported for callers.
+export { dollarsToCents } from "./ugc-dollars.ts";
 
 /** A counter is a whole number of people, not money, so it never goes through
  *  `dollarsToCents`. Digit-only on purpose: `1e4`, `12.5` and `1,200` all parse

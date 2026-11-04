@@ -677,7 +677,7 @@
   "research": "리서치",
   "reward {reward}": "보상 {reward}",
   "routing": "라우팅",
-  "running": "실행 모델",
+  "running": "실행 중",
   "ryu": "ryu",
   "show": "보기",
   "shown": "개 표시됨",
@@ -704,6 +704,7 @@
   "with": "참여자:",
   "working": "작업 중",
   "your browser": "브라우저",
+  "{age} ago": "{age} 전",
   "{attemptCount, plural, one {{attemptCountText} attempt} other {{attemptCountText} attempts}}": "{attemptCount, plural, other {{attemptCountText}회 시도}}",
   "{attemptCount, plural, one {{attemptCountText} attempt} other {{attemptCountText} attempts}} · {lastAttempt}": "{attemptCount, plural, other {{attemptCountText}회 시도}} · {lastAttempt}",
   "{count} more": "{count}개 더"

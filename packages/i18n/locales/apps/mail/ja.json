@@ -488,6 +488,7 @@
   "Read the docs": "ドキュメントを読む",
   "Reason": "理由",
   "Receive signed event notifications for received, sent, delivery, bounce, complaint, rejection, and open events.": "受信、送信、配信、バウンス、苦情、拒否、開封の各イベントについて署名付きの通知を受け取ります。",
+  "Received": "受信",
   "Recent": "最近",
   "Red": "レッド",
   "Reference": "参照",
@@ -759,12 +760,12 @@
   "play": "プレイ",
   "project": "件のプロジェクト",
   "prompt": "プロンプト",
-  "ready": "件が準備完了",
+  "ready": "準備完了",
   "records": "件のレコード",
   "request": "リクエスト",
   "research": "リサーチ",
   "routing": "のルーティング",
-  "running": "で実行中のモデル",
+  "running": "実行中",
   "ryu": "ryu",
   "show": "表示",
   "shown": "件を表示",
@@ -792,6 +793,9 @@
   "with": "参加者:",
   "working": "件が作業中",
   "your browser": "ブラウザ",
+  "{age} ago": "{age} 前",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, other {添付ファイル # 件の準備完了}}",
-  "{count} more": "ほか {count} 件"
+  "{count} more": "ほか {count} 件",
+  "{recipients} · {status}": "{recipients} · {status}",
+  "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {下書き} sending {送信中} sent {送信済み} failed {失敗} inbound {受信} outbound {発信} other {{value}}}"
 }

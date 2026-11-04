@@ -677,7 +677,7 @@
   "research": "исследование",
   "reward {reward}": "награда {reward}",
   "routing": "маршрутизация",
-  "running": "с моделью",
+  "running": "выполняется",
   "ryu": "ryu",
   "show": "показать",
   "shown": "показано",
@@ -704,6 +704,7 @@
   "with": "с участием",
   "working": "работают",
   "your browser": "браузере",
+  "{age} ago": "{age} назад",
   "{attemptCount, plural, one {{attemptCountText} attempt} other {{attemptCountText} attempts}}": "{attemptCount, plural, one {{attemptCountText} попытка} few {{attemptCountText} попытки} many {{attemptCountText} попыток} other {{attemptCountText} попытки}}",
   "{attemptCount, plural, one {{attemptCountText} attempt} other {{attemptCountText} attempts}} · {lastAttempt}": "{attemptCount, plural, one {{attemptCountText} попытка} few {{attemptCountText} попытки} many {{attemptCountText} попыток} other {{attemptCountText} попытки}} · {lastAttempt}",
   "{count} more": "Ещё {count}"

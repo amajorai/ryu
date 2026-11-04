@@ -4216,6 +4216,22 @@
     ],
     "reason": "\"Gain\" is the French audio term"
   },
+  "Gateway": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu Gateway product name, kept in English per the glossary."
+  },
   "Gateway API": {
     "locales": [
       "ar",
@@ -4986,6 +5002,20 @@
       "pt-BR"
     ],
     "reason": "'Hardware' is the established term in these locales (glossary Hardware)"
+  },
+  "Harness": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "\"Harness\" (evaluation harness) is the technical term these locales use for this benchmark category."
   },
   "Hash": {
     "locales": [
@@ -13679,6 +13709,15 @@
     ],
     "reason": "French word is 'source'"
   },
+  "spam": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "\"spam\" is the word these languages use."
+  },
   "status": {
     "locales": [
       "pt-BR"
@@ -14276,6 +14315,12 @@
       "ru"
     ],
     "reason": "placeholder-only ICU; catalog value already drops the English plural suffix"
+  },
+  "{count, plural, one {<b>#</b> test} other {<b>#</b> tests}}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "\"test\"/\"tests\" is spelled the same in French."
   },
   "{count, plural, one {Agent} other {Agents}}": {
     "locales": [
@@ -15123,6 +15168,20 @@
     ],
     "reason": "'participant(s)' is the French word"
   },
+  "{model} · {category}: {percent}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Only placeholders and separators."
+  },
   "{monitor}: {title}": {
     "locales": [
       "ar",
@@ -15475,6 +15534,22 @@
     ],
     "reason": "placeholders and punctuation only; nothing to translate"
   },
+  "{recipients} · {status}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a separator."
+  },
   "{repository} #{number} · {age}": {
     "locales": [
       "ar",
@@ -15548,6 +15623,22 @@
       "fr"
     ],
     "reason": "'session/sessions' is the French word"
+  },
+  "{severity} · {summary}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a separator."
   },
   "{size} GB": {
     "locales": [

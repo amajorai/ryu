@@ -226,6 +226,15 @@ pub const IMPORT_CODE_NOT_CONVERTED_WARNING_MESSAGE: Template = |arg| {
     )
 };
 
+// ---- scan warnings: Agent Sync -----------------------------------------------------
+
+/// Agent Sync's scan of a Cursor home (`crate::server::agent_sync`): Cursor's
+/// native history has no import path. Agent Sync sends this sentence as plain
+/// text, so the desktop looks it up by its exact English source.
+pub const IMPORT_AGENT_SYNC_CURSOR_HISTORY_WARNING_MESSAGE: Template = |_| {
+    format!("Cursor native conversation history is not a documented import format; use the portable bundle.")
+};
+
 pub(super) const ALL: &[Template] = &[
     IMPORT_INSTRUCTIONS_TITLE_MESSAGE,
     IMPORT_MCP_SERVER_TITLE_MESSAGE,
@@ -273,4 +282,9 @@ pub(super) const ALL: &[Template] = &[
     IMPORT_RUNTIME_AGENT_ONE_WARNING_MESSAGE,
     IMPORT_RUNTIME_AGENTS_WARNING_MESSAGE,
     IMPORT_CODE_NOT_CONVERTED_WARNING_MESSAGE,
+    IMPORT_AGENT_SYNC_CURSOR_HISTORY_WARNING_MESSAGE,
 ];
+
+#[cfg(test)]
+#[path = "import_agent_sync_test.rs"]
+mod agent_sync_test;

@@ -472,6 +472,37 @@ describe("GlanceInterface", () => {
 	);
 
 	test(
+		"under dir=rtl ArrowLeft pages forward, on the page and on the dots",
+		async () => {
+			// happy-dom does not map dir="rtl" to the computed direction.
+			const rtl = { direction: "rtl" } as const;
+			const view = await mount(
+				<div dir="rtl" style={rtl}>
+					{glance()}
+				</div>
+			);
+			const face = () => root(view.container).getAttribute("data-face");
+			await press("ArrowLeft");
+			expect(face()).toBe("agents");
+			await press("ArrowRight");
+			expect(face()).toBe("clock");
+			const dot = tab(view.container, "Clock");
+			await act(async () => {
+				dot?.dispatchEvent(
+					new KeyboardEvent("keydown", {
+						bubbles: true,
+						cancelable: true,
+						key: "ArrowLeft",
+					})
+				);
+			});
+			expect(face()).toBe("agents");
+			await view.dispose();
+		},
+		MOUNT_TIMEOUT_MS
+	);
+
+	test(
 		"distance switches Near detail on and the Home Screen opens threads",
 		async () => {
 			const { calls, port } = recordingPort();

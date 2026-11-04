@@ -683,7 +683,7 @@
   "records": "записей",
   "request": "запрос",
   "routing": "маршрутизация",
-  "running": "с моделью",
+  "running": "выполняется",
   "ryu": "ryu",
   "shop": "магазин",
   "show": "показать",
@@ -708,6 +708,7 @@
   "with": "с участием",
   "working": "работают",
   "your browser": "браузере",
+  "{age} ago": "{age} назад",
   "{count} more": "Ещё {count}",
   "{currency} invoice totals": "Суммы счетов в {currency}"
 }

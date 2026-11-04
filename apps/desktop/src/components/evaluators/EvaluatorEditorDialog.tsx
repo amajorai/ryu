@@ -40,6 +40,10 @@ import type {
 	EvaluatorTarget,
 } from "@/src/lib/api/gateway.ts";
 import { saveCustomEvaluator } from "@/src/lib/api/gateway.ts";
+import {
+	defaultThresholdInput,
+	parseThresholdInput,
+} from "./evaluator-threshold.ts";
 
 /** Which editor to show. */
 export type EvaluatorEditorMode = "judge" | "code";
@@ -114,7 +118,7 @@ export function EvaluatorEditorDialog({
 	const [name, setName] = useState("");
 	const [category, setCategory] = useState<EvaluatorCategory>("custom");
 	const [evalTarget, setEvalTarget] = useState<EvaluatorTarget>("output");
-	const [threshold, setThreshold] = useState("0.7");
+	const [threshold, setThreshold] = useState(defaultThresholdInput);
 	const [judgeModel, setJudgeModel] = useState("");
 	const [rubric, setRubric] = useState("");
 	const [lang, setLang] = useState<EvaluatorCodeLang>("js");
@@ -128,7 +132,7 @@ export function EvaluatorEditorDialog({
 
 	const id = useMemo(() => slugify(name), [name]);
 	const idCollision = id.length > 0 && existingIds.includes(id);
-	const thresholdNum = Number.parseFloat(threshold);
+	const thresholdNum = parseThresholdInput(threshold);
 	const thresholdValid =
 		!Number.isNaN(thresholdNum) && thresholdNum >= 0 && thresholdNum <= 1;
 
@@ -143,7 +147,7 @@ export function EvaluatorEditorDialog({
 		setName("");
 		setCategory("custom");
 		setEvalTarget("output");
-		setThreshold("0.7");
+		setThreshold(defaultThresholdInput());
 		setJudgeModel("");
 		setRubric("");
 		setLang("js");

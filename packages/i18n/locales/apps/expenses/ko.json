@@ -655,7 +655,7 @@
   "ready": "준비됨",
   "records": "개 레코드",
   "request": "요청",
-  "running": "실행 모델",
+  "running": "실행 중",
   "ryu": "ryu",
   "show": "보기",
   "shown": "개 표시됨",
@@ -679,6 +679,7 @@
   "with": "참여자:",
   "working": "작업 중",
   "your browser": "브라우저",
+  "{age} ago": "{age} 전",
   "{count, plural, one {{length} visible record} other {{length} visible records}}": "{count, plural, other {표시된 레코드 {length}개}}",
   "{count} more": "{count}개 더",
   "{primaryCurrency} ledger total": "{primaryCurrency} 장부 합계"

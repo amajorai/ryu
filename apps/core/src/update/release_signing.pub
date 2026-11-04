@@ -1,0 +1,3 @@
+# Ed25519 public key that verifies each release SHA256SUMS.sig, as PEM
+# (SubjectPublicKeyInfo). Lines starting with # are ignored. With no key below
+# the publisher-signature check is off. See docs/releasing/14-update-signing.md.

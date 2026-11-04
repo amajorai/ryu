@@ -10,6 +10,7 @@ import { MessageSquareDashed, X } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import {
 	agentById,
 	relativeAge,
@@ -75,6 +76,7 @@ export function MissionThreadPanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread ? missionThreadTitle(thread) : "New thread";
@@ -90,8 +92,8 @@ export function MissionThreadPanel({
 			aria-label={tl("Thread: {title}", { title })}
 			className="absolute inset-y-0 end-0 z-30 flex @min-[720px]:w-[min(760px,58%)] w-full flex-col border-border @min-[720px]:border-s bg-background"
 			data-testid="mission-thread-panel"
-			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 48 }}
-			initial={reduceMotion ? false : { opacity: 0, x: 48 }}
+			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 48 * inlineSign }}
+			initial={reduceMotion ? false : { opacity: 0, x: 48 * inlineSign }}
 			transition={{ duration: 0.22, ease: EASE }}
 		>
 			<header className="flex min-h-14 shrink-0 items-center gap-3 border-border border-b px-3 py-2">

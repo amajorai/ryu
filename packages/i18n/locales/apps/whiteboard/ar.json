@@ -1005,7 +1005,7 @@
   "research": "البحث",
   "ripe": "ناضج",
   "routing": "توجيه",
-  "running": "يشغّل",
+  "running": "قيد التشغيل",
   "ryu": "ryu",
   "seeded": "مزروع",
   "shop": "متجر",
@@ -1040,6 +1040,7 @@
   "with:": "بـ:",
   "working": "قيد العمل",
   "your browser": "متصفحك",
+  "{age} ago": "منذ {age}",
   "{count} more": "{count} أخرى",
   "← All provider lanes": "← كل مسارات المزودين"
 }

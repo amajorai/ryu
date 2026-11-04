@@ -14,6 +14,7 @@ import {
 	ContextMenuSeparator,
 	ContextMenuTrigger,
 } from "@ryu/ui/components/context-menu.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Tooltip,
 	TooltipContent,
@@ -306,7 +307,7 @@ export function RegularTab({
 				<MoveTabToRegionMenu tabId={tab.id} />
 				<OpenInSidePanelItem tab={tab} />
 				<ContextMenuItem disabled={!hasClosedTabs} onClick={restoreTab}>
-					<HugeiconsIcon className="size-4" icon={ArrowTurnBackwardIcon} />
+					<DirectionalIcon className="size-4" icon={ArrowTurnBackwardIcon} />
 					Restore closed tab
 				</ContextMenuItem>
 				{tabOverrideEnabled && (

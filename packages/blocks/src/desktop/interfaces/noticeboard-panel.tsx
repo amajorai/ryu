@@ -4,6 +4,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { X } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, RefObject } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
 import { type NoticeboardNote, noteByline } from "./noticeboard-model.ts";
 import { PinDot } from "./noticeboard-paper.tsx";
@@ -32,6 +33,7 @@ export function NoticeboardPanel({
 	threadView: ReactNode;
 	width: number;
 }) {
+	const inlineSign = useInlineSign();
 	const age = note ? compactAge(note.thread.updatedAt, now) : "";
 	return (
 		<motion.aside
@@ -42,7 +44,7 @@ export function NoticeboardPanel({
 				overlay ? "absolute inset-0 z-30" : "relative shrink-0 border-s"
 			)}
 			data-testid="noticeboard-panel"
-			initial={reduceMotion ? false : { opacity: 0, x: 12 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 12 * inlineSign }}
 			style={overlay ? undefined : { width }}
 			transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
 		>

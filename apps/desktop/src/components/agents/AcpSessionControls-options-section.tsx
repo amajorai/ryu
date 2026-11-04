@@ -44,7 +44,11 @@ const noopModelChange = () => {
  * that ramp resolve; without it the fill silently disappears. Everything else is
  * an unordered set and gets a select.
  */
-function AcpOptionRow({ section }: { section: ComposerSettingsSection }) {
+export function AcpOptionRow({
+	section,
+}: {
+	section: ComposerSettingsSection;
+}) {
 	const selectionGuard = useFullAccessSelectionGuard();
 	const activeIndex = Math.max(
 		0,
@@ -112,6 +116,11 @@ function AcpOptionRow({ section }: { section: ComposerSettingsSection }) {
 				) : null}
 			</div>
 			<Select
+				// The closed trigger shows the advertised name, not the option id.
+				items={section.items.map((item) => ({
+					value: item.id,
+					label: item.name,
+				}))}
 				onValueChange={(next) => {
 					if (next) {
 						const item = section.items.find(

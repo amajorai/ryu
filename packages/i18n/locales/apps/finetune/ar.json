@@ -424,6 +424,7 @@
   "No run selected. Start one from Configure, or pick one in History.": "لم يتم تحديد أي تشغيل. ابدأ تشغيلًا من «الإعداد» أو اختر واحدًا من السجل.",
   "No runs yet.": "لا توجد عمليات تشغيل بعد.",
   "No trained adapters yet.": "لا توجد محوّلات مدرّبة بعد.",
+  "No.": "رقم",
   "None": "لا شيء",
   "Normal": "عادية",
   "Note": "ملاحظة",
@@ -850,7 +851,7 @@
   "rendered dataset exceeds the {maxRenderedTotalChars} character limit": "تتجاوز مجموعة البيانات المعروضة حد {maxRenderedTotalChars} حرفًا",
   "request": "الطلب",
   "requests": "طلبات",
-  "running": "يشغّل",
+  "running": "قيد التشغيل",
   "ryu": "ryu",
   "show": "إظهار",
   "shown": "معروضة",
@@ -875,5 +876,6 @@
   "with": "مع",
   "working": "قيد العمل",
   "your browser": "متصفحك",
+  "{age} ago": "منذ {age}",
   "{count} more": "{count} أخرى"
 }

@@ -36,6 +36,7 @@ import {
 	setParseBackend,
 } from "./documents.ts";
 import type { GatewayJsonValue } from "./gateway-json-contracts.ts";
+import { rustModuleSource } from "./rust-module-source.ts";
 
 // src/lib/api → src/lib → src → apps/desktop → apps → repo root.
 const REPO_ROOT = join(import.meta.dir, "../../../../..");
@@ -53,8 +54,8 @@ function repoSource(relative: string): string {
 	}
 }
 
-const SERVER_MOD_RS = repoSource("apps/core/src/server/mod.rs");
-const DOCUMENT_PARSE_RS = repoSource("apps/core/src/document_parse.rs");
+const SERVER_MOD_RS = rustModuleSource("apps/core/src/server");
+const DOCUMENT_PARSE_RS = rustModuleSource("apps/core/src/document_parse");
 const DOCUMENTS_TS = repoSource("apps/desktop/src/lib/api/documents.ts");
 
 /**

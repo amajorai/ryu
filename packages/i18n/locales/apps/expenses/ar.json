@@ -655,7 +655,7 @@
   "ready": "جاهز",
   "records": "سجلات",
   "request": "الطلب",
-  "running": "يشغّل",
+  "running": "قيد التشغيل",
   "ryu": "ryu",
   "show": "إظهار",
   "shown": "معروضة",
@@ -679,6 +679,7 @@
   "with": "مع",
   "working": "قيد العمل",
   "your browser": "متصفحك",
+  "{age} ago": "منذ {age}",
   "{count, plural, one {{length} visible record} other {{length} visible records}}": "{count, plural, zero {{length} سجل مرئي} one {{length} سجل مرئي} two {{length} سجل مرئي} few {{length} سجلات مرئية} many {{length} سجلًا مرئيًا} other {{length} سجل مرئي}}",
   "{count} more": "{count} أخرى",
   "{primaryCurrency} ledger total": "إجمالي الدفتر بعملة {primaryCurrency}"

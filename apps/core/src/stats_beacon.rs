@@ -25,6 +25,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+mod definitions;
+pub use definitions::{record_definition_run, witness_runtime_definition};
+
 /// How often to snapshot + report (5 min). Matches the sync loop cadence.
 const BEACON_INTERVAL: Duration = Duration::from_secs(300);
 /// Per-request timeout for both the gateway read and the control-plane POST.
@@ -232,52 +235,6 @@ pub fn associate_marketplace_runtime(kind: &str, marketplace: &str, runtime: &st
             }
         }
     }
-}
-
-fn definition_fingerprint(definition: &impl Serialize) -> Option<String> {
-    use sha2::{Digest, Sha256};
-    Some(format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(definition).ok()?)
-    ))
-}
-
-pub fn witness_runtime_definition(
-    kind: &str,
-    listing: &str,
-    runtime: &str,
-    definition: &impl Serialize,
-) {
-    let Some(fingerprint) = definition_fingerprint(definition) else {
-        return;
-    };
-    associate_marketplace_runtime(kind, listing, runtime);
-    if let Ok(mut items) = public_items_store().lock() {
-        if items.listing_ids.contains(&format!("{kind}:{listing}")) {
-            items
-                .definitions
-                .insert(format!("{kind}:{runtime}"), fingerprint);
-            if let Err(error) = save_public_items(&items) {
-                tracing::warn!(%error, "public definition witness could not be saved");
-            }
-        }
-    }
-}
-
-pub fn record_definition_run(kind: &str, runtime: &str, definition: &impl Serialize) {
-    let Some(fingerprint) = definition_fingerprint(definition) else {
-        return;
-    };
-    let verified = public_items_store().lock().ok().is_some_and(|items| {
-        items.definitions.get(&format!("{kind}:{runtime}")) == Some(&fingerprint)
-    });
-    if !verified {
-        return;
-    }
-    let Some((kind, id)) = marketplace_runtime_identity(kind, runtime) else {
-        return;
-    };
-    record_identity(kind, id, false);
 }
 
 /// Record one local, content-free Marketplace event. Counters stay in Core until
@@ -511,101 +468,4 @@ pub fn spawn_stats_beacon(prefs: crate::server::preferences::PreferencesStore) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn marketplace_identity_is_normalized_and_path_safe() {
-        assert_eq!(
-            marketplace_id("AGENT", "ryu/design-director"),
-            Some(("agent".to_owned(), "ryu/design-director".to_owned()))
-        );
-        assert!(marketplace_id("agent", "../secret").is_none());
-        assert!(marketplace_id("unknown", "demo").is_none());
-    }
-
-    #[test]
-    fn private_discovered_skills_never_enter_the_per_listing_snapshot() {
-        let private_id = "private-local-skill-0320a115a6c8819188e4edb47a4756ea";
-        for kind in ["skill", "SKILL", " skill "] {
-            assert!(marketplace_runtime_identity(kind, private_id).is_none());
-            record_marketplace_event(kind, private_id, false);
-            record_marketplace_event(kind, private_id, true);
-        }
-        let record = ryu_skills::parse_skill_md(
-            private_id,
-            "---\nname: Private review\n---\nPrivate instructions",
-        )
-        .expect("private record");
-        record_skill_load(&record);
-        let payload = serde_json::to_value(marketplace_stats_snapshot()).expect("snapshot");
-        assert!(!payload.to_string().contains(private_id));
-        assert!(!payload.to_string().contains("Private instructions"));
-    }
-
-    #[test]
-    fn private_agent_workflow_plugin_and_usage_ids_need_public_source_witnesses() {
-        let mut items = PublicItemWitnesses {
-            version: 1,
-            authority: "https://api.ryuhq.com".into(),
-            ..Default::default()
-        };
-        items
-            .listing_ids
-            .insert("agent:publisher/public-agent".into());
-        items.runtime_ids.insert(
-            "agent:installed-runtime".into(),
-            ("agent".into(), "publisher/public-agent".into()),
-        );
-        assert_eq!(
-            resolve_public_identity(&items, "agent".into(), "installed-runtime".into()),
-            Some(("agent".into(), "publisher/public-agent".into()))
-        );
-        items.runtime_ids.insert(
-            "agent:private-runtime".into(),
-            ("agent".into(), "private/company-secret".into()),
-        );
-        assert!(
-            resolve_public_identity(&items, "agent".into(), "private-runtime".into()).is_none()
-        );
-        for kind in ["agent", "workflow", "plugin", "app", "model", "bundle"] {
-            assert!(
-                resolve_public_identity(&items, kind.into(), "private-company-name".into())
-                    .is_none()
-            );
-            assert!(marketplace_runtime_identity(kind, "private-company-0320-unknown").is_none());
-        }
-    }
-
-    #[test]
-    fn marketplace_snapshot_uses_content_free_camel_case_fields() {
-        let payload = IngestPayload {
-            instance_id: "instance".to_owned(),
-            session_id: "session".to_owned(),
-            requests: 0,
-            api_calls_protected: 0,
-            malicious_calls_blocked: 0,
-            input_tokens: 0,
-            output_tokens: 0,
-            tokens_saved: 0,
-            cache_hit_rate: 0.0,
-            os: "test".to_owned(),
-            arch: "test".to_owned(),
-            version: "test".to_owned(),
-            engine: "test".to_owned(),
-            marketplace_stats: vec![MarketplaceStatsSnapshot {
-                id: "ryu/design-director".to_owned(),
-                kind: "agent".to_owned(),
-                downloads: 1,
-                runs: 2,
-            }],
-        };
-        let value = serde_json::to_value(payload).expect("payload should serialize");
-        assert_eq!(value["marketplaceStats"][0]["downloads"], 1);
-        assert_eq!(value["marketplaceStats"][0]["runs"], 2);
-        assert_eq!(value["apiCallsProtected"], 0);
-        assert_eq!(value["maliciousCallsBlocked"], 0);
-        assert!(value.get("userId").is_none());
-        assert!(value.get("hostname").is_none());
-    }
-}
+mod tests;

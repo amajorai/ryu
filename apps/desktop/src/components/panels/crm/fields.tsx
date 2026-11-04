@@ -22,7 +22,10 @@ import {
 // Money is integer cents on the wire and divides once, at `formatValue`. No
 // currency arithmetic happens in floats anywhere above this file.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { formatList } from "@ryu/i18n";
+import { activeLocale, translate } from "@ryu/i18n/core";
+import { formatNumberValue } from "@ryu/i18n/format-intl";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -45,10 +48,13 @@ import {
 	formatDate as formatDateInZone,
 	formatDateTime as formatDateTimeInZone,
 } from "@/src/lib/timezone.ts";
+import { currencyInputValue, parseCurrencyCents } from "./currency-input.ts";
 
 /** Shown wherever a value is absent. One constant so an empty cell, an empty
  *  detail row and an empty card line are visibly the same kind of nothing. */
 export const EMPTY = "—";
+
+const PERCENT = { maximumFractionDigits: 4, style: "percent" } as const;
 
 /** Integer cents → a localized amount, dividing exactly once.
  *
@@ -91,9 +97,14 @@ function optionFor<TValue>(
 
 /**
  * The display string for one value. Pure — no JSX, so it is also what search,
- * export, and a card's subtitle use.
+ * export, and a card's subtitle use. A rendering component passes its `tl` so
+ * the Yes/No words follow a live locale change.
  */
-export function formatValue<TValue>(field: Field, value: TValue): string {
+export function formatValue<TValue>(
+	field: Field,
+	value: TValue,
+	tl: LiteralMessage = translate
+): string {
 	if (value === null || value === undefined || value === "") {
 		return EMPTY;
 	}
@@ -103,9 +114,11 @@ export function formatValue<TValue>(field: Field, value: TValue): string {
 				? formatCents(value, field.config?.currency_code ?? "USD")
 				: String(value);
 		case "percent":
-			return isNativeNumber(value) ? `${value}%` : String(value);
+			return isNativeNumber(value)
+				? formatNumberValue(activeLocale(), value / 100, PERCENT)
+				: String(value);
 		case "checkbox":
-			return value ? "Yes" : "No";
+			return value ? tl("Yes") : tl("No");
 		case "date":
 			return formatDate(String(value));
 		case "datetime":
@@ -115,7 +128,7 @@ export function formatValue<TValue>(field: Field, value: TValue): string {
 			return optionFor(field, value)?.label ?? String(value);
 		case "multi_select":
 			return Array.isArray(value)
-				? value.map((v) => optionFor(field, v)?.label ?? String(v)).join(", ")
+				? formatList(value.map((v) => optionFor(field, v)?.label ?? String(v)))
 				: String(value);
 		case "rating": {
 			const max = field.config?.max_rating ?? 5;
@@ -339,10 +352,8 @@ export function FieldEditor({
 				<Input
 					aria-label={`${field.name} (${field.config?.currency_code ?? "USD"})`}
 					autoFocus={autoFocus}
-					// Shown as a decimal amount, committed as integer cents. Rounding
-					// happens once, here, so a value typed as 42.005 cannot drift into
-					// the database as a float.
-					defaultValue={isNativeNumber(value) ? String(value / 100) : ""}
+					// Shown as a locale decimal amount, committed as integer cents.
+					defaultValue={isNativeNumber(value) ? currencyInputValue(value) : ""}
 					inputMode="decimal"
 					onBlur={(event) => {
 						const raw = event.target.value.trim();
@@ -350,14 +361,8 @@ export function FieldEditor({
 							commit(null);
 							return;
 						}
-						const parsed = Number(raw);
-						if (
-							!(
-								/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw) &&
-								Number.isFinite(parsed) &&
-								Number.isSafeInteger(Math.round(parsed * 100))
-							)
-						) {
+						const cents = parseCurrencyCents(raw);
+						if (cents === null) {
 							event.target.setCustomValidity(
 								tl("Enter a valid currency amount.")
 							);
@@ -365,7 +370,7 @@ export function FieldEditor({
 							return;
 						}
 						event.target.setCustomValidity("");
-						commit(Math.round(parsed * 100));
+						commit(cents);
 					}}
 					onChange={(event) => event.target.setCustomValidity("")}
 					onKeyDown={stopOnEscape}

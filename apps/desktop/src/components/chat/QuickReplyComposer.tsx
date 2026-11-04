@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { useEffect, useState } from "react";
 import type { QuickReplyRequest } from "@/src/store/useQuickReplyStore.ts";
 
@@ -57,7 +58,7 @@ export function QuickReplyComposer({
 					composerHeader={
 						<div className="flex min-w-0 items-center justify-between gap-3 border-border border-b px-3 py-2">
 							<div className="flex min-w-0 items-center gap-2 text-xs">
-								<HugeiconsIcon
+								<DirectionalIcon
 									className="size-3.5 shrink-0 text-primary"
 									icon={MailReply01Icon}
 								/>

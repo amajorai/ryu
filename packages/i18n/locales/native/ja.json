@@ -1,6 +1,5 @@
 {
   "(authenticated)": "（認証済み）",
-  "1 install": "1 件のインストール",
   "24/7 on-device speech capture into your meeting memory.": "デバイス上で24時間365日音声をキャプチャし、ミーティングメモリに保存します。",
   "A Twilio number receives forwarded calls. Purchasing one bills your Twilio account.": "Twilio 番号で転送された通話を受信します。購入すると Twilio アカウントに請求されます。",
   "A line can list at most {maxAllowedCallers} trusted callers.": "1 回線に登録できる信頼済み発信者は最大 {maxAllowedCallers} 件です。",
@@ -592,7 +591,6 @@
   "No documents yet. Tap New to create a page.": "ドキュメントはまだありません。「新規」をタップしてページを作成してください。",
   "No groups yet": "グループはまだありません",
   "No groups yet. Create one from the desktop app.": "グループはまだありません。デスクトップアプリから作成してください。",
-  "No installs": "インストールなし",
   "No matches": "一致なし",
   "No meetings recorded yet.": "録音されたミーティングはまだありません。",
   "No meetings yet": "ミーティングはまだありません",
@@ -1150,7 +1148,6 @@
   "{count, plural, one {# match found} other {# matches found}}": "{count, plural, other {# 件一致}}",
   "{count, plural, one {# member} other {# members}} · {coordination}": "{count, plural, other {# 人のメンバー}} · {coordination}",
   "{count, plural, one {# runnable} other {# runnables}}": "{count, plural, other {# 個の実行可能項目}}",
-  "{count} installs": "{count} 件のインストール",
   "{deviceLabel}. Add your Wi-Fi so the device can connect directly at home, or skip it to relay through this phone.": "{deviceLabel}。自宅でデバイスが直接接続できるよう Wi-Fi を追加するか、スキップしてこのスマートフォン経由で中継します。",
   "{minutes} min": "{minutes} 分",
   "{modelName} · mobile tools limited": "{modelName} · モバイルツール制限あり",

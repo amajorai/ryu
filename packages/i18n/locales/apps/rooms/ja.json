@@ -83,7 +83,7 @@
   "Your rooms": "あなたのルーム",
   "assistant output is too long": "アシスタントの出力が長すぎます",
   "e.g. Jiawei…": "例: Jiawei…",
-  "ready": "件が準備完了",
+  "ready": "準備完了",
   "{modelId} · {count, plural, one {# participant} other {# participants}}": "{modelId} · {count, plural, other {参加者 # 人}}",
   "{onlineCount} online · {count, plural, one {# participant} other {# participants}}": "{onlineCount} 人オンライン · {count, plural, other {参加者 # 人}}"
 }

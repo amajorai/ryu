@@ -8,11 +8,20 @@
 //! asset was uploaded, read from the release metadata over HTTPS with no
 //! redirects. A missing digest, an unpublished asset, or a mismatch refuses the
 //! whole stack; there is no fallback to an unchecked binary.
+//!
+//! When a publisher key is compiled in ([`signed_sums`]), the release's signed
+//! `SHA256SUMS` becomes the anchor: every binary must be listed and match, and
+//! GitHub's digests must still agree whenever the API answers. Only then is an
+//! unreachable, rate-limited or failing `api.github.com` tolerated instead of
+//! fatal; an answer that does not describe the release (`404`) still refuses.
 
 use std::path::Path;
 
 use super::binaries::{CLI, CORE, GATEWAY};
 use super::stack::stack_digests;
+use signed_sums::{fetch_signed_sums, release_signing_key, SignedSums};
+
+mod signed_sums;
 
 /// The repository whose releases publish the official runtime binaries.
 pub(super) const OFFICIAL_RELEASE_REPOSITORY: &str = "amajorai/ryu";
@@ -122,6 +131,34 @@ pub(super) fn metadata_status(status: reqwest::StatusCode) -> Result<(), String>
     }
 }
 
+/// Statuses that mean GitHub gave no verdict on the release: rate limiting
+/// (`403`/`429`) or a server-side failure. Any other non-`200` answer (a
+/// redirect, `404` for a release that does not exist or was pulled) is a verdict.
+pub(super) fn metadata_unreachable(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::FORBIDDEN
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+}
+
+/// Why the release metadata could not be used.
+#[derive(Debug)]
+pub(super) enum MetadataError {
+    /// GitHub could not be reached, cut the response off, rate-limited the
+    /// request or failed server-side: it said nothing about the release.
+    Unreachable(String),
+    /// GitHub answered without usable metadata (no such release, a redirect,
+    /// an oversized or invalid body), or the request could not be made at all.
+    Refused(String),
+}
+
+impl std::fmt::Display for MetadataError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unreachable(error) | Self::Refused(error) => formatter.write_str(error),
+        }
+    }
+}
+
 /// The client that reads release metadata: HTTPS only, and no redirects, so a
 /// response can never hand the request to plain HTTP.
 pub(super) fn metadata_client() -> Result<reqwest::Client, String> {
@@ -135,31 +172,74 @@ pub(super) fn metadata_client() -> Result<reqwest::Client, String> {
         .map_err(|error| format!("create release metadata client: {error}"))
 }
 
-async fn fetch_release_metadata(repository: &str, tag: &str) -> Result<serde_json::Value, String> {
+async fn fetch_release_metadata(
+    repository: &str,
+    tag: &str,
+) -> Result<serde_json::Value, MetadataError> {
     let url = format!("https://api.github.com/repos/{repository}/releases/tags/{tag}");
-    let mut response = metadata_client()?
+    let mut response = metadata_client()
+        .map_err(MetadataError::Refused)?
         .get(&url)
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
         .send()
         .await
-        .map_err(|error| format!("read release metadata for {tag}: {error}"))?;
-    metadata_status(response.status())?;
+        .map_err(|error| {
+            MetadataError::Unreachable(format!("read release metadata for {tag}: {error}"))
+        })?;
+    let status = response.status();
+    metadata_status(status).map_err(|error| {
+        if metadata_unreachable(status) {
+            MetadataError::Unreachable(error)
+        } else {
+            MetadataError::Refused(error)
+        }
+    })?;
     let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| format!("read release metadata for {tag}: {error}"))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        MetadataError::Unreachable(format!("read release metadata for {tag}: {error}"))
+    })? {
         if body.len() + chunk.len() > RELEASE_METADATA_LIMIT {
-            return Err("release metadata exceeds its size limit".to_owned());
+            return Err(MetadataError::Refused(
+                "release metadata exceeds its size limit".to_owned(),
+            ));
         }
         body.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&body).map_err(|error| format!("invalid release metadata: {error}"))
+    serde_json::from_slice(&body)
+        .map_err(|error| MetadataError::Refused(format!("invalid release metadata: {error}")))
+}
+
+/// Decide whether the staged `actual` digests may run. Without a signed
+/// manifest this is exactly the GitHub digest check. With one, the signed hashes
+/// must match, and GitHub's digests must too unless its API gave no verdict
+/// (unreachable, rate-limited or failing). A release GitHub answers for but does
+/// not describe (`404` for a pulled release, a redirect, an invalid body) is
+/// refused even though the manifest is signed.
+fn verify_runtime(
+    signed: Option<&SignedSums>,
+    release: Result<&serde_json::Value, &MetadataError>,
+    tag: &str,
+    actual: &[(String, String)],
+) -> Result<(), String> {
+    let Some(signed) = signed else {
+        return verify_against_release(release.map_err(ToString::to_string)?, tag, actual);
+    };
+    signed.check(tag, actual)?;
+    match release {
+        Ok(release) => verify_against_release(release, tag, actual),
+        Err(MetadataError::Unreachable(error)) => {
+            tracing::warn!(%error, %tag, "release metadata unavailable; runtime pinned by the signed SHA256SUMS alone");
+            Ok(())
+        }
+        Err(MetadataError::Refused(error)) => Err(format!(
+            "GitHub does not vouch for {tag} ({error}); refusing the runtime despite its signed SHA256SUMS"
+        )),
+    }
 }
 
 /// Refuse a staged Core/Gateway/CLI set unless every binary matches the digest
-/// its release published. Runs before any staged binary is executed.
+/// its release published (and, once a publisher key is compiled in, its signed
+/// `SHA256SUMS`). Runs before any staged binary is executed.
 pub(super) async fn verify_staged_runtime(
     directory: &Path,
     release_base: &str,
@@ -172,178 +252,13 @@ pub(super) async fn verify_staged_runtime(
         .zip(digests)
         .map(|(spec, digest)| (platform_asset_name(spec.bin_name), digest))
         .collect();
-    let release = fetch_release_metadata(&repository, tag).await?;
-    verify_against_release(&release, tag, &actual)
+    let signed = match release_signing_key()? {
+        Some(key) => Some(fetch_signed_sums(&key, release_base, tag).await?),
+        None => None,
+    };
+    let release = fetch_release_metadata(&repository, tag).await;
+    verify_runtime(signed.as_ref(), release.as_ref(), tag, &actual)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const CORE_DIGEST: &str = "aa00000000000000000000000000000000000000000000000000000000000001";
-    const GATEWAY_DIGEST: &str = "bb00000000000000000000000000000000000000000000000000000000000002";
-
-    fn release(assets: serde_json::Value) -> serde_json::Value {
-        serde_json::json!({ "tag_name": "v0.5.1", "assets": assets })
-    }
-
-    fn published() -> serde_json::Value {
-        release(serde_json::json!([
-            { "name": "ryu-core-linux-x86_64", "digest": format!("sha256:{}", CORE_DIGEST.to_ascii_uppercase()) },
-            { "name": "ryu-core-linux-x86_64.sha256", "digest": format!("sha256:{GATEWAY_DIGEST}") },
-            { "name": "ryu-gateway-linux-x86_64", "digest": format!("sha256:{GATEWAY_DIGEST}") },
-            { "name": "ryu-cli-linux-x86_64", "digest": null },
-        ]))
-    }
-
-    fn pair(name: &str, digest: &str) -> (String, String) {
-        (name.to_owned(), digest.to_owned())
-    }
-
-    #[test]
-    fn binaries_matching_their_published_digests_pass() {
-        verify_against_release(
-            &published(),
-            "v0.5.1",
-            &[
-                pair("ryu-core-linux-x86_64", CORE_DIGEST),
-                pair("ryu-gateway-linux-x86_64", GATEWAY_DIGEST),
-            ],
-        )
-        .expect("matching digests verify");
-    }
-
-    #[test]
-    fn a_binary_that_differs_from_its_published_digest_is_refused() {
-        // The same-origin `.sha256` side file carries the gateway hash; only the
-        // digest GitHub recorded for the binary asset itself counts.
-        let error = verify_against_release(
-            &published(),
-            "v0.5.1",
-            &[pair("ryu-core-linux-x86_64", GATEWAY_DIGEST)],
-        )
-        .unwrap_err();
-        assert!(error.contains("does not match"), "{error}");
-    }
-
-    #[test]
-    fn a_missing_digest_or_asset_is_refused_rather_than_skipped() {
-        let no_digest = verify_against_release(
-            &published(),
-            "v0.5.1",
-            &[pair("ryu-cli-linux-x86_64", CORE_DIGEST)],
-        )
-        .unwrap_err();
-        assert!(no_digest.contains("no SHA-256 digest"), "{no_digest}");
-        let unpublished = verify_against_release(
-            &published(),
-            "v0.5.1",
-            &[pair("ryu-core-windows-x86_64.exe", CORE_DIGEST)],
-        )
-        .unwrap_err();
-        assert!(unpublished.contains("publishes no"), "{unpublished}");
-        let malformed = release(serde_json::json!([
-            { "name": "ryu-core-linux-x86_64", "digest": "sha256:abc" },
-        ]));
-        assert!(verify_against_release(
-            &malformed,
-            "v0.5.1",
-            &[pair("ryu-core-linux-x86_64", "abc")]
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn metadata_for_another_release_is_refused() {
-        let error = verify_against_release(
-            &published(),
-            "v0.5.2",
-            &[pair("ryu-core-linux-x86_64", CORE_DIGEST)],
-        )
-        .unwrap_err();
-        assert!(error.contains("does not describe v0.5.2"), "{error}");
-    }
-
-    #[test]
-    fn digests_come_from_the_release_base_repository_or_the_official_one() {
-        assert_eq!(
-            digest_repository("https://github.com/amajorai/ryu/releases").unwrap(),
-            "amajorai/ryu"
-        );
-        assert_eq!(
-            digest_repository("https://github.com/acme/ryu-fork/releases/").unwrap(),
-            "acme/ryu-fork"
-        );
-        assert_eq!(
-            digest_repository("https://releases.example.com/ryu").unwrap(),
-            OFFICIAL_RELEASE_REPOSITORY
-        );
-        assert!(digest_repository("http://github.com/amajorai/ryu/releases").is_err());
-        assert!(digest_repository("http://releases.example.com/ryu").is_err());
-        assert!(digest_repository("https://github.com/amajorai/ryu").is_err());
-        assert!(digest_repository("https://github.com/../ryu/releases").is_err());
-    }
-
-    #[test]
-    fn asset_names_follow_the_installer_platform_suffix() {
-        let name = platform_asset_name("ryu-core");
-        assert!(name.starts_with("ryu-core-"), "{name}");
-        if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            assert_eq!(name, "ryu-core-linux-x86_64");
-        }
-        if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-            assert_eq!(name, "ryu-core-windows-x86_64.exe");
-        }
-        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-            assert_eq!(name, "ryu-core-macos-aarch64");
-        }
-    }
-
-    #[test]
-    fn only_a_direct_ok_response_carries_metadata() {
-        assert!(metadata_status(reqwest::StatusCode::OK).is_ok());
-        for status in [
-            reqwest::StatusCode::MOVED_PERMANENTLY,
-            reqwest::StatusCode::FOUND,
-            reqwest::StatusCode::TEMPORARY_REDIRECT,
-            reqwest::StatusCode::FORBIDDEN,
-            reqwest::StatusCode::NOT_FOUND,
-        ] {
-            assert!(metadata_status(status).is_err(), "{status} must be refused");
-        }
-    }
-
-    #[tokio::test]
-    async fn the_metadata_client_never_sends_a_plain_http_request() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let url = format!(
-            "http://{}/repos/amajorai/ryu/releases/tags/v0.5.1",
-            listener.local_addr().unwrap()
-        );
-        listener.set_nonblocking(true).unwrap();
-        let error = metadata_client()
-            .unwrap()
-            .get(&url)
-            .send()
-            .await
-            .expect_err("an http:// URL is refused");
-        assert!(error.is_builder(), "{error}");
-        assert!(
-            listener.accept().is_err(),
-            "the client must not connect to an http:// URL"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_staged_stack_from_a_plain_http_base_is_refused_before_any_request() {
-        let directory = tempfile::tempdir().unwrap();
-        let error = verify_staged_runtime(
-            directory.path(),
-            "http://releases.example.com/ryu",
-            "v0.5.1",
-        )
-        .await
-        .unwrap_err();
-        assert!(error.contains("HTTPS"), "{error}");
-    }
-}
+mod tests;

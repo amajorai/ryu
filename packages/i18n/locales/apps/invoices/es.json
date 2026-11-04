@@ -679,11 +679,11 @@
   "play": "jugar",
   "project": "proyecto",
   "prompt": "prompt",
-  "ready": "listos",
+  "ready": "listo",
   "records": "registros",
   "request": "solicitud",
   "routing": "enrutamiento",
-  "running": "ejecutando",
+  "running": "en ejecución",
   "ryu": "ryu",
   "shop": "tienda",
   "show": "mostrar",
@@ -708,6 +708,7 @@
   "with": "con",
   "working": "trabajando",
   "your browser": "tu navegador",
+  "{age} ago": "hace {age}",
   "{count} more": "{count} más",
   "{currency} invoice totals": "Totales de facturas en {currency}"
 }

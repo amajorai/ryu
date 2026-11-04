@@ -65,7 +65,7 @@ function foldDigit(digit: string): string {
 }
 
 /** Cyrillic and Greek letters drawn like an ASCII letter. Folded only inside a
- * token that already holds an ASCII letter or digit, so a mixed-script address
+ * PII-shaped token (`isPiiShapedToken`), so a mixed-script or all-look-alike address
  * (`ava@\u0435xample.com`) reads as ASCII while Russian or Greek prose is left
  * alone. Same table as Core's `redaction_fold::CONFUSABLES`. */
 const CONFUSABLES: ReadonlyMap<number, string> = new Map([
@@ -133,11 +133,94 @@ const IDEOGRAPHIC_FULL_STOP = 0x30_02;
 const TOKEN_SEPARATORS = new Set([
 	0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0x20_28, 0x20_29,
 ]);
-const ASCII_ALPHANUMERIC = /[A-Za-z0-9]/;
+/** The credential names and PEM labels the redaction patterns key on,
+ * lowercased, one word between punctuation: every spelling of a name, with
+ * each optional `[_-]` separator written as `-` or left out, has a listed
+ * word. Same list as Core's `redaction_fold::LOOK_ALIKE_KEYWORDS` and the one
+ * beside `foldShareText`; `fixtures/look-alike-keywords-v1.json` in core-client pins
+ * the parity. Exported for that test. */
+export const LOOK_ALIKE_KEYWORDS: ReadonlySet<string> = new Set([
+	"accesskey",
+	"accesstoken",
+	"apikey",
+	"authorization",
+	"authtoken",
+	"awssecretaccesskey",
+	"basic",
+	"bearer",
+	"begin",
+	"clientsecret",
+	"connection",
+	"connectionstring",
+	"database",
+	"databaseurl",
+	"ec",
+	"end",
+	"key",
+	"openssh",
+	"passwd",
+	"password",
+	"private",
+	"privatekey",
+	"refreshtoken",
+	"rsa",
+	"secret",
+	"secretaccesskey",
+	"token",
+]);
+/** A token holding an ASCII letter or digit, an `@` (an address written wholly
+ * in look-alike letters), or an `_` or `=` (a credential key such as `API_KEY`
+ * or `TOKEN=` written wholly in look-alike letters). */
+const PII_MARKER = /[A-Za-z0-9@_=]/;
+
+function isAsciiPunctuation(codePoint: number): boolean {
+	return (
+		(codePoint >= 0x21 && codePoint <= 0x2f) ||
+		(codePoint >= 0x3a && codePoint <= 0x40) ||
+		(codePoint >= 0x5b && codePoint <= 0x60) ||
+		(codePoint >= 0x7b && codePoint <= 0x7e)
+	);
+}
+
+/** Whether a token is spelled wholly in look-alike letters (`CONFUSABLES`) and
+ * ASCII punctuation, and one of its punctuation-delimited words reads as a
+ * `LOOK_ALIKE_KEYWORDS` entry: `TOKEN = value`, `"API-KEY": value` or a PEM
+ * `KEY-----` armor line with every letter a look-alike, where no `@`, `_` or
+ * `=` sits in the token. Its fold looks the same as the token, so a Russian or
+ * Greek word that happens to match loses nothing visible. Same rule as Core's
+ * `redaction_fold::is_look_alike_keyword`. */
+function isLookAlikeKeyword(token: string): boolean {
+	let found = false;
+	let word = "";
+	for (const character of `${token} `) {
+		const codePoint = character.codePointAt(0) ?? 0;
+		if (character === " " || isAsciiPunctuation(codePoint)) {
+			found ||= LOOK_ALIKE_KEYWORDS.has(word);
+			word = "";
+			continue;
+		}
+		const ascii = CONFUSABLES.get(codePoint);
+		if (ascii === undefined) {
+			return false;
+		}
+		word += ascii.toLowerCase();
+	}
+	return found;
+}
+
+/** A token shaped like PII or a credential rather than prose: it holds a
+ * `PII_MARKER` character or is a look-alike spelling of a credential name or
+ * PEM label (`isLookAlikeKeyword`). Prose colons, hyphens and punctuation do
+ * not qualify on their own, so ordinary Russian or Greek text keeps its script.
+ * Same rule as Core's `redaction_fold::folds_look_alikes` and `foldShareText`. */
+function isPiiShapedToken(token: string): boolean {
+	return PII_MARKER.test(token) || isLookAlikeKeyword(token);
+}
+
 const COMBINING_MARK = /^[\p{Mn}\p{Me}]$/u;
 
 function foldToken(token: string): string {
-	if (!ASCII_ALPHANUMERIC.test(token)) {
+	if (!isPiiShapedToken(token)) {
 		return token;
 	}
 	let folded = "";
@@ -151,8 +234,8 @@ function foldToken(token: string): string {
 	return folded;
 }
 
-/** Fold look-alike letters and the ideographic full stop in every token that
- * mixes them with ASCII letters or digits. */
+/** Fold look-alike letters and the ideographic full stop in every PII-shaped
+ * token (`isPiiShapedToken`). */
 function foldMixedScriptTokens(text: string): string {
 	let folded = "";
 	let token = "";
@@ -195,7 +278,7 @@ function nfkcPerCodePoint(text: string): string {
 
 /** NFKC per code point, drop invisible characters, fold space, dash and digit
  * variants to ASCII, fold look-alike letters and the ideographic full stop in
- * mixed-script tokens, then drop combining marks sitting on ASCII. Idempotent;
+ * PII-shaped tokens, then drop combining marks sitting on ASCII. Idempotent;
  * plain ASCII text is returned unchanged. */
 export function foldRedactionText(input: string): string {
 	const spaced = dropIgnorable(nfkcPerCodePoint(input))

@@ -706,7 +706,7 @@
   "ready": "bereit",
   "records": "Datensätze",
   "request": "Anfrage",
-  "running": "mit",
+  "running": "läuft",
   "ryu": "ryu",
   "show": "anzeigen",
   "shown": "angezeigt",
@@ -730,6 +730,7 @@
   "with": "mit",
   "working": "arbeiten",
   "your browser": "dem Browser",
+  "{age} ago": "vor {age}",
   "{count} more": "{count} weitere",
   "{passed} passed, {failed} failed": "{passed} bestanden, {failed} fehlgeschlagen"
 }

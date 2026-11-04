@@ -20,6 +20,7 @@ import {
 } from "@ryu/ui/components/select.tsx";
 import { formatCurrency } from "@ryu/ui/lib/number-format.ts";
 import { Cloud, Cpu, Server } from "lucide-react";
+import { usePriceTickerAffixes } from "./price-ticker-parts.ts";
 import { usePricingCtaVariant } from "./pricing-appearance.tsx";
 import { noop } from "./pricing-plan-prices.ts";
 import { SubscriptionAgreement } from "./subscription-agreement.tsx";
@@ -101,6 +102,7 @@ export function PricingInstancePicker({
 }) {
 	const tl = useLiteralMessages();
 	const tlRich = useRichLiteralMessages();
+	const currencyAffixes = usePriceTickerAffixes();
 	const ctaVariant = usePricingCtaVariant();
 	if (instances.length === 0) {
 		return null;
@@ -202,7 +204,8 @@ export function PricingInstancePicker({
 											{
 												amount: () => (
 													<NumberTicker
-														prefix="$"
+														prefix={currencyAffixes.prefix}
+														suffix={currencyAffixes.suffix}
 														value={instance.monthlyUsd}
 														variant="plan-price"
 													/>

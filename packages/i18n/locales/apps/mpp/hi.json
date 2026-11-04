@@ -30,6 +30,7 @@
   "Cross-origin payment redirects are blocked.": "क्रॉस-ऑरिजिन भुगतान रीडायरेक्ट ब्लॉक किए जाते हैं।",
   "Daily spend cap": "दैनिक खर्च सीमा",
   "Endpoint returned HTTP {status}; no payment was required.": "एंडपॉइंट ने HTTP {status} लौटाया; किसी भुगतान की ज़रूरत नहीं थी।",
+  "Enter an amount, such as {example}.": "कोई राशि दर्ज करें, जैसे {example}।",
   "Every limit is enforced again immediately before signing.": "साइन करने से ठीक पहले हर सीमा फिर से लागू की जाती है।",
   "Expires": "समाप्ति",
   "Explicit approval is required.": "स्पष्ट स्वीकृति आवश्यक है।",

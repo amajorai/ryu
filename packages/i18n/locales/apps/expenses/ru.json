@@ -655,7 +655,7 @@
   "ready": "готово",
   "records": "записей",
   "request": "запрос",
-  "running": "с моделью",
+  "running": "выполняется",
   "ryu": "ryu",
   "show": "показать",
   "shown": "показано",
@@ -679,6 +679,7 @@
   "with": "с участием",
   "working": "работают",
   "your browser": "браузере",
+  "{age} ago": "{age} назад",
   "{count, plural, one {{length} visible record} other {{length} visible records}}": "{count, plural, one {{length} видимая запись} few {{length} видимые записи} many {{length} видимых записей} other {{length} видимой записи}}",
   "{count} more": "Ещё {count}",
   "{primaryCurrency} ledger total": "Итог по книге учёта в {primaryCurrency}"

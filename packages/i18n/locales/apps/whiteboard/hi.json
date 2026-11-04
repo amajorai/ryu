@@ -1005,7 +1005,7 @@
   "research": "रिसर्च",
   "ripe": "पका हुआ",
   "routing": "रूटिंग",
-  "running": "पर चल रहा मॉडल",
+  "running": "चल रहा है",
   "ryu": "ryu",
   "seeded": "बोया गया",
   "shop": "दुकान",
@@ -1040,6 +1040,7 @@
   "with:": "इससे:",
   "working": "काम कर रहे हैं",
   "your browser": "आपके ब्राउज़र",
+  "{age} ago": "{age} पहले",
   "{count} more": "{count} और",
   "← All provider lanes": "← सभी प्रदाता लेन"
 }

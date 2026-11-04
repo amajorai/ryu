@@ -424,6 +424,7 @@
   "No run selected. Start one from Configure, or pick one in History.": "선택된 실행이 없습니다. 구성에서 새로 시작하거나 기록에서 선택하세요.",
   "No runs yet.": "아직 실행이 없습니다.",
   "No trained adapters yet.": "아직 학습된 어댑터가 없습니다.",
+  "No.": "No.",
   "None": "없음",
   "Normal": "보통",
   "Note": "메모",
@@ -850,7 +851,7 @@
   "rendered dataset exceeds the {maxRenderedTotalChars} character limit": "렌더링된 데이터셋이 {maxRenderedTotalChars}자 제한을 초과합니다",
   "request": "요청",
   "requests": "개의 요청",
-  "running": "실행 모델",
+  "running": "실행 중",
   "ryu": "ryu",
   "show": "보기",
   "shown": "개 표시됨",
@@ -875,5 +876,6 @@
   "with": "참여자:",
   "working": "작업 중",
   "your browser": "브라우저",
+  "{age} ago": "{age} 전",
   "{count} more": "{count}개 더"
 }

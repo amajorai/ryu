@@ -1,6 +1,5 @@
 {
   "(authenticated)": "(प्रमाणित)",
-  "1 install": "1 इंस्टॉल",
   "24/7 on-device speech capture into your meeting memory.": "आपकी मीटिंग मेमोरी में 24/7 ऑन-डिवाइस वाणी कैप्चर।",
   "A Twilio number receives forwarded calls. Purchasing one bills your Twilio account.": "Twilio नंबर फ़ॉरवर्ड की गई कॉल प्राप्त करता है। इसे ख़रीदने का शुल्क आपके Twilio खाते से लिया जाता है।",
   "A line can list at most {maxAllowedCallers} trusted callers.": "एक लाइन में अधिकतम {maxAllowedCallers} भरोसेमंद कॉलर हो सकते हैं।",
@@ -592,7 +591,6 @@
   "No documents yet. Tap New to create a page.": "अभी तक कोई दस्तावेज़ नहीं। पेज बनाने के लिए नया पर टैप करें।",
   "No groups yet": "अभी कोई ग्रुप नहीं है",
   "No groups yet. Create one from the desktop app.": "अभी कोई ग्रुप नहीं है। डेस्कटॉप ऐप से एक बनाएँ।",
-  "No installs": "कोई इंस्टॉल नहीं",
   "No matches": "कोई मिलान नहीं",
   "No meetings recorded yet.": "अभी तक कोई मीटिंग रिकॉर्ड नहीं हुई।",
   "No meetings yet": "अभी कोई मीटिंग नहीं है",
@@ -1150,7 +1148,6 @@
   "{count, plural, one {# match found} other {# matches found}}": "{count, plural, one {# मिलान मिला} other {# मिलान मिले}}",
   "{count, plural, one {# member} other {# members}} · {coordination}": "{count, plural, one {# सदस्य} other {# सदस्य}} · {coordination}",
   "{count, plural, one {# runnable} other {# runnables}}": "{count, plural, one {# चलाने योग्य आइटम} other {# चलाने योग्य आइटम}}",
-  "{count} installs": "{count} इंस्टॉल",
   "{deviceLabel}. Add your Wi-Fi so the device can connect directly at home, or skip it to relay through this phone.": "{deviceLabel}. अपना Wi-Fi जोड़ें ताकि डिवाइस घर पर सीधे कनेक्ट हो सके, या इसे छोड़कर इस फ़ोन के ज़रिए रिले करें।",
   "{minutes} min": "{minutes} मिनट",
   "{modelName} · mobile tools limited": "{modelName} · मोबाइल टूल सीमित",

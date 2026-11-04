@@ -52,8 +52,9 @@ impl Snapshot {
     /// Whether every source of every code in `codes` was out for an engine
     /// outage: its breaker open before the request, or unreachable on it.
     /// A source that was healthy and still gave no verdict (a reply outside
-    /// its grammar, a refusal, a timeout, an item too large to send) is not
-    /// an outage: the content may have caused it.
+    /// its grammar, a refusal, a timeout, a connection reset mid-request, an
+    /// item too large to send) is not an outage: the content may have caused
+    /// it.
     pub(crate) fn outage_only(
         &self,
         active: &ActiveChain,

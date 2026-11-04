@@ -20,6 +20,7 @@ import {
 	AlertDialogTitle,
 } from "@ryu/ui/components/alert-dialog";
 import { Button } from "@ryu/ui/components/button";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileTypeIcon } from "./file-type-icon.tsx";
@@ -199,7 +200,11 @@ function FileEditActions({
 						variant="ghost"
 					>
 						{undoComplete ? "Undone" : "Undo"}
-						<HugeiconsIcon aria-hidden className="size-3.5" icon={Undo02Icon} />
+						<DirectionalIcon
+							aria-hidden
+							className="size-3.5"
+							icon={Undo02Icon}
+						/>
 					</Button>
 				</span>
 			) : null}

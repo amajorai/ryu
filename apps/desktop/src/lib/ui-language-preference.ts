@@ -11,6 +11,8 @@ import { getPreference, setPreference } from "./api/preferences.ts";
 // Desktop also records the `locale` it actually shows, so Core's own messages
 // (toasts, node email, pushes) follow the UI rather than re-probing the OS
 // (`locale_from_preference` in `apps/core/src/i18n/locale.rs`).
+// The key is two-way: a fixed choice made in the Island picker is adopted by
+// Desktop (`ui-language-adopt.ts`), so the last writer wins on every surface.
 
 /** Core preference key shared with the Island (`UI_LANGUAGE_PREF_KEY`). */
 export const UI_LANGUAGE_PREF_KEY = "ui-language";
@@ -59,7 +61,7 @@ export function serializeUiLanguagePreference(
 }
 
 /** Mode and pack only: what the person chose, without the resolved locale. */
-function choiceOf(value: string): string {
+export function choiceOf(value: string): string {
 	try {
 		const parsed = JSON.parse(value) as { mode?: unknown; packId?: unknown };
 		return `${String(parsed.mode)}:${String(parsed.packId ?? "")}`;
@@ -89,6 +91,9 @@ function refreshable(existing: string | null, value: string): boolean {
  */
 const lastSynced = new Map<string, string>();
 
+/** Each node's in-flight syncs, so a read of the key waits for Desktop's writes. */
+const inflight = new Map<string, Promise<void>>();
+
 function targetIdentity(target: ApiTarget): string {
 	return target.url;
 }
@@ -104,12 +109,75 @@ function targetIdentity(target: ApiTarget): string {
  * (StrictMode, several bridges) act once. Failures are swallowed and restore
  * the previous claim, so a later sync retries.
  */
-export async function syncUiLanguagePreference(
+export function syncUiLanguagePreference(
 	target: ApiTarget,
 	preference: UiLanguagePreference
 ): Promise<boolean> {
 	const identity = targetIdentity(target);
+	const task = syncOnce(identity, target, preference);
+	const settled = Promise.all([inflight.get(identity), task]).then(
+		() => undefined,
+		() => undefined
+	);
+	inflight.set(identity, settled);
+	void settled.then(() => {
+		if (inflight.get(identity) === settled) {
+			inflight.delete(identity);
+		}
+	});
+	return task;
+}
+
+/** Resolve once no sync for the node is in flight. */
+export async function settledUiLanguageSync(target: ApiTarget): Promise<void> {
+	const identity = targetIdentity(target);
+	for (let task = inflight.get(identity); task; task = inflight.get(identity)) {
+		await task;
+	}
+}
+
+/** Whether a sync for the node is in flight. */
+export function uiLanguageSyncInFlight(target: ApiTarget): boolean {
+	return inflight.has(targetIdentity(target));
+}
+
+/** Desktop's value as last synced (or adopted) for the node. */
+export function lastSyncedUiLanguage(target: ApiTarget): string | undefined {
+	return lastSynced.get(targetIdentity(target));
+}
+
+/**
+ * Each node's choice being adopted from the shared key (a choice made in the
+ * Island). Until Desktop renders it, syncs are held, so a render that still
+ * shows the previous choice never writes it back over the adopted one.
+ */
+const adopting = new Map<string, string>();
+
+/** Start adopting `preference`; it counts as synced once Desktop shows it. */
+export function beginUiLanguageAdoption(
+	target: ApiTarget,
+	preference: UiLanguagePreference
+): void {
+	adopting.set(
+		targetIdentity(target),
+		serializeUiLanguagePreference(preference)
+	);
+}
+
+async function syncOnce(
+	identity: string,
+	target: ApiTarget,
+	preference: UiLanguagePreference
+): Promise<boolean> {
 	const value = serializeUiLanguagePreference(preference);
+	const adopted = adopting.get(identity);
+	if (adopted !== undefined) {
+		if (choiceOf(adopted) === choiceOf(value)) {
+			adopting.delete(identity);
+			lastSynced.set(identity, adopted);
+		}
+		return false;
+	}
 	const previous = lastSynced.get(identity);
 	if (previous === value) {
 		return false;
@@ -141,4 +209,6 @@ export async function syncUiLanguagePreference(
 /** Test seam: forget each node's synced choice. */
 export function resetUiLanguagePreferenceSync(): void {
 	lastSynced.clear();
+	inflight.clear();
+	adopting.clear();
 }

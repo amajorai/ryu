@@ -7,6 +7,7 @@ import type { InterfaceThread } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import { SEVERITY_TEXT } from "./status-incidents.tsx";
 import type { StatusIncident } from "./status-model.ts";
@@ -31,6 +32,7 @@ export function StatusThreadPanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread
@@ -44,7 +46,7 @@ export function StatusThreadPanel({
 			aria-label={tl("Thread: {threadTitle}", { threadTitle: title })}
 			className="absolute inset-0 z-20 flex min-h-0 flex-col bg-background md:static md:w-[clamp(22rem,40vw,38rem)] md:shrink-0 md:border-border md:border-s"
 			data-testid="status-thread-panel"
-			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 16 * inlineSign }}
 			transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
 		>
 			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b px-4">

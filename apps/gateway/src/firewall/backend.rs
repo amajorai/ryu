@@ -1,7 +1,9 @@
 //! The swappable firewall backend trait and its live-swap registry.
 
+use std::sync::Arc;
+
 use super::{FirewallMatch, FirewallScanner};
-use crate::config::{FirewallConfig, FirewallPolicy};
+use crate::config::{CustomPatternKind, FirewallConfig, FirewallPolicy};
 
 // ─── Swappable firewall/DLP backend (W6c decomposition) ──────────────────────
 
@@ -32,11 +34,53 @@ pub trait FirewallBackend: Send + Sync {
     /// Redact a violation excerpt for storage, ignoring `redact_pii` /
     /// `redact_secrets`; an empty result means the excerpt must be dropped.
     /// `AppState::record_violation` stores only what this returns. The
-    /// default keeps a backend without its own redactor on the
-    /// sanitize-then-scrub path.
+    /// default ([`redact_excerpt_fail_closed`]) gives a backend without its
+    /// own redactor a safe path: sanitize, then the outbound scrub, then a
+    /// fold-aware survivor check that drops the excerpt if anything survives.
     fn redact_excerpt(&self, text: &str) -> String {
-        let sanitized = self.sanitize(text);
-        self.redact_outbound(&sanitized).0
+        redact_excerpt_fail_closed(self, text)
+    }
+}
+
+/// The built-in pattern sets with the default config, compiled once: the
+/// survivor check every plugin excerpt passes, whatever the plugin's own
+/// detection misses. Its PII and secret scans read the `normalize_for_scan`
+/// view, so zero-width, fullwidth, look-alike and TAG obfuscation is seen.
+fn builtin_excerpt_scanner() -> &'static FirewallScanner {
+    static SCANNER: std::sync::OnceLock<FirewallScanner> = std::sync::OnceLock::new();
+    SCANNER.get_or_init(|| FirewallScanner::new_scoped(FirewallConfig::default()))
+}
+
+/// Whether PII or a secret survives in `text`: by `backend`'s own `pii` /
+/// `secrets` scan, or by the built-in's normalized scan.
+fn excerpt_survives<B: FirewallBackend + ?Sized>(backend: &B, text: &str) -> bool {
+    let guardrails = ["pii".to_owned(), "secrets".to_owned()];
+    if backend.scan_locked_guardrails(text, &guardrails).is_some() {
+        return true;
+    }
+    let (pii, secret) = builtin_excerpt_scanner().companion_survivors(text);
+    pii || secret
+}
+
+/// The default [`FirewallBackend::redact_excerpt`]: `backend`'s sanitize,
+/// then its outbound scrub. A plugin's sanitize rewrites the raw text while
+/// obfuscated PII hides from raw patterns, so when anything survives the text
+/// is folded with `fold_for_redaction` and scrubbed again; if anything still
+/// survives, the excerpt is dropped (empty) rather than stored.
+pub(super) fn redact_excerpt_fail_closed<B: FirewallBackend + ?Sized>(
+    backend: &B,
+    text: &str,
+) -> String {
+    let scrub = |text: &str| backend.redact_outbound(&backend.sanitize(text)).0;
+    let clean = scrub(text);
+    if !excerpt_survives(backend, &clean) {
+        return clean;
+    }
+    let refolded = scrub(&ryu_gw_firewall::fold_for_redaction(&clean));
+    if excerpt_survives(backend, &refolded) {
+        String::new()
+    } else {
+        refolded
     }
 }
 
@@ -70,6 +114,88 @@ impl FirewallBackend for FirewallScanner {
     }
 }
 
+/// The operator's survivor set: the curated PII and secret patterns plus the
+/// node config's `custom_patterns` of kind PII or secret. Built from the
+/// config the registry is given at startup and on every `PUT /v1/config`.
+fn operator_excerpt_scanner(config: &FirewallConfig) -> Arc<FirewallScanner> {
+    let custom_patterns = config
+        .custom_patterns
+        .iter()
+        .filter(|pattern| {
+            matches!(
+                pattern.kind,
+                CustomPatternKind::Pii | CustomPatternKind::Secret
+            )
+        })
+        .cloned()
+        .collect();
+    Arc::new(FirewallScanner::new_scoped(FirewallConfig {
+        custom_patterns,
+        ..FirewallConfig::default()
+    }))
+}
+
+/// The active backend as [`FirewallRegistry::with_active`] hands it out.
+/// Every call is the backend's own; its excerpt is then checked against the
+/// operator's survivor set (curated plus custom PII and secret patterns, on
+/// the normalized view) and dropped if anything survives. The curated-only
+/// fallback in [`redact_excerpt_fail_closed`] cannot see a pattern only the
+/// operator configured. The built-in's own excerpt redaction already applies
+/// the same patterns, so for it the check never drops anything it kept.
+struct OperatorExcerptGuard {
+    inner: Arc<dyn FirewallBackend>,
+    survivor: Arc<FirewallScanner>,
+}
+
+impl FirewallBackend for OperatorExcerptGuard {
+    fn config(&self) -> &FirewallConfig {
+        self.inner.config()
+    }
+    fn policy(&self) -> &FirewallPolicy {
+        self.inner.policy()
+    }
+    fn outbound_enabled(&self) -> bool {
+        self.inner.outbound_enabled()
+    }
+    fn scan_inbound(&self, text: &str) -> Option<FirewallMatch> {
+        self.inner.scan_inbound(text)
+    }
+    fn scan_outbound(&self, text: &str) -> Option<FirewallMatch> {
+        self.inner.scan_outbound(text)
+    }
+    fn scan_locked_guardrails(&self, text: &str, guardrails: &[String]) -> Option<FirewallMatch> {
+        self.inner.scan_locked_guardrails(text, guardrails)
+    }
+    fn sanitize(&self, text: &str) -> String {
+        self.inner.sanitize(text)
+    }
+    fn redact_outbound(&self, text: &str) -> (String, Vec<&'static str>) {
+        self.inner.redact_outbound(text)
+    }
+    fn redact_excerpt(&self, text: &str) -> String {
+        let clean = self.inner.redact_excerpt(text);
+        let (pii, secret) = self.survivor.companion_survivors(&clean);
+        if pii || secret {
+            String::new()
+        } else {
+            clean
+        }
+    }
+}
+
+/// The live handle for a backend: always behind an [`OperatorExcerptGuard`],
+/// keyed on nothing about the backend, so a plugin registered under
+/// [`FirewallRegistry::BUILTIN`] cannot pass for the built-in and skip it.
+fn live_handle(
+    backend: &Arc<dyn FirewallBackend>,
+    survivor: &Arc<FirewallScanner>,
+) -> Arc<dyn FirewallBackend> {
+    Arc::new(OperatorExcerptGuard {
+        inner: Arc::clone(backend),
+        survivor: Arc::clone(survivor),
+    })
+}
+
 /// Id-keyed registry over [`FirewallBackend`] implementations with a live-swap
 /// discipline, identical in shape to [`crate::budget::BudgetRegistry`]: the
 /// built-in [`FirewallScanner`] is registered under [`FirewallRegistry::BUILTIN`]
@@ -86,7 +212,10 @@ struct FirewallRegistryInner {
     backends: std::collections::HashMap<String, std::sync::Arc<dyn FirewallBackend>>,
     order: Vec<String>,
     active_id: String,
+    /// The live handle: the active backend, wrapped by [`live_handle`].
     active: std::sync::Arc<dyn FirewallBackend>,
+    /// The operator's excerpt survivor set, rebuilt with the config.
+    survivor: Arc<FirewallScanner>,
 }
 
 impl FirewallRegistry {
@@ -96,6 +225,7 @@ impl FirewallRegistry {
     /// Build the registry from config, registering a fresh built-in
     /// [`FirewallScanner`] as the default active backend.
     pub fn new(config: FirewallConfig) -> Self {
+        let survivor = operator_excerpt_scanner(&config);
         let builtin: std::sync::Arc<dyn FirewallBackend> =
             std::sync::Arc::new(FirewallScanner::new(config));
         let mut backends = std::collections::HashMap::new();
@@ -105,7 +235,8 @@ impl FirewallRegistry {
                 backends,
                 order: vec![Self::BUILTIN.to_string()],
                 active_id: Self::BUILTIN.to_string(),
-                active: builtin,
+                active: live_handle(&builtin, &survivor),
+                survivor,
             }),
         }
     }
@@ -125,19 +256,24 @@ impl FirewallRegistry {
     }
 
     /// Hot-swap the active built-in scanner with one built from a new config.
-    /// Only rebuilds the built-in; a non-built-in active backend is left in place.
+    /// Only rebuilds the built-in; a non-built-in active backend is left in
+    /// place, but its excerpt survivor check is rebuilt with the new
+    /// `custom_patterns`.
     pub fn update_config(&self, config: FirewallConfig) {
         let mut guard = match self.inner.write() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
+        let survivor = operator_excerpt_scanner(&config);
         let builtin: std::sync::Arc<dyn FirewallBackend> =
             std::sync::Arc::new(FirewallScanner::new(config));
         guard
             .backends
             .insert(Self::BUILTIN.to_string(), std::sync::Arc::clone(&builtin));
-        if guard.active_id == Self::BUILTIN {
-            guard.active = builtin;
+        guard.survivor = survivor;
+        let inner = &mut *guard;
+        if let Some(active) = inner.backends.get(&inner.active_id) {
+            inner.active = live_handle(active, &inner.survivor);
         }
     }
 
@@ -153,11 +289,10 @@ impl FirewallRegistry {
         if !guard.backends.contains_key(&id) {
             guard.order.push(id.clone());
         }
-        let is_active = id == guard.active_id;
-        guard.backends.insert(id, std::sync::Arc::clone(&backend));
-        if is_active {
-            guard.active = backend;
+        if id == guard.active_id {
+            guard.active = live_handle(&backend, &guard.survivor);
         }
+        guard.backends.insert(id, backend);
     }
 
     /// Select the active backend by id. `false` (unchanged) if `id` is unknown.
@@ -168,7 +303,7 @@ impl FirewallRegistry {
         };
         match guard.backends.get(id).map(std::sync::Arc::clone) {
             Some(backend) => {
-                guard.active = backend;
+                guard.active = live_handle(&backend, &guard.survivor);
                 guard.active_id = id.to_string();
                 true
             }

@@ -706,7 +706,7 @@
   "ready": "준비됨",
   "records": "개 레코드",
   "request": "요청",
-  "running": "실행 모델",
+  "running": "실행 중",
   "ryu": "ryu",
   "show": "보기",
   "shown": "개 표시됨",
@@ -730,6 +730,7 @@
   "with": "참여자:",
   "working": "작업 중",
   "your browser": "브라우저",
+  "{age} ago": "{age} 전",
   "{count} more": "{count}개 더",
   "{passed} passed, {failed} failed": "{passed}개 통과, {failed}개 실패"
 }

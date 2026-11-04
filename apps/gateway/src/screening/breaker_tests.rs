@@ -59,8 +59,9 @@ fn failures_are_classified_by_what_they_say_about_the_engine() {
     assert!(is_engine_outage(&BackendError::Unavailable("breaker_open")));
     assert!(is_engine_outage(&BackendError::Unavailable("connect")));
     assert!(!is_engine_outage(&BackendError::Timeout));
-    // An engine that answered was not out, whatever it answered.
-    for reason in ["busy", "redirect", "http_status"] {
+    // An engine that answered was not out, whatever it answered; nor was
+    // one that was reached and reset the request (a body can cause that).
+    for reason in ["busy", "redirect", "http_status", "transport"] {
         assert!(
             !is_engine_outage(&BackendError::Unavailable(reason)),
             "{reason}"
@@ -205,4 +206,61 @@ fn the_subject_is_the_tenant_else_the_credential() {
     first.org_id = Some("org-a".into());
     second.org_id = Some("org-a".into());
     assert_eq!(super::subject_tag(&first), super::subject_tag(&second));
+}
+
+/// A 429 (the caller's own flood) and a reset transport (a body the engine
+/// aborts reading, or one that crashes a worker) are health failures a caller
+/// can produce on a healthy engine: one subject adds one failure to the
+/// window however often it causes them, while many subjects still open the
+/// breaker. A refused connection still opens it from one subject.
+#[tokio::test]
+async fn one_subject_cannot_open_the_breaker_with_busy_or_reset_transport() {
+    for reason in ["busy", "transport"] {
+        assert!(counts_per_subject(&BackendError::Unavailable(reason)));
+        let flood = || {
+            breakered(TestBackend::new("guard").fail_on("FLOOD", BackendError::Unavailable(reason)))
+        };
+        let backend = flood();
+        backend.breaker.record_probe(BackendHealth::Ready);
+        let attacker = subject_ctx("org-attacker");
+        for request in 0..10 {
+            super::for_subject(
+                &attacker,
+                screen_once(&backend, &format!("req-{request}"), "FLOOD payload"),
+            )
+            .await;
+        }
+        assert_eq!(backend.breaker.state(), BreakerState::Closed, "{reason}");
+
+        let backend = flood();
+        backend.breaker.record_probe(BackendHealth::Ready);
+        for request in 0..10 {
+            let tenant = subject_ctx(&format!("org-{request}"));
+            super::for_subject(
+                &tenant,
+                screen_once(&backend, &format!("req-{request}"), "FLOOD payload"),
+            )
+            .await;
+        }
+        assert_eq!(backend.breaker.state(), BreakerState::Open, "{reason}");
+    }
+
+    for reason in ["connect", "down", "unreachable", "redirect"] {
+        assert!(
+            !counts_per_subject(&BackendError::Unavailable(reason)),
+            "{reason}"
+        );
+    }
+    let refused =
+        breakered(TestBackend::new("guard").fail_always(BackendError::Unavailable("connect")));
+    refused.breaker.record_probe(BackendHealth::Ready);
+    let attacker = subject_ctx("org-attacker");
+    for request in 0..10 {
+        super::for_subject(
+            &attacker,
+            screen_once(&refused, &format!("req-{request}"), "anything"),
+        )
+        .await;
+    }
+    assert_eq!(refused.breaker.state(), BreakerState::Open);
 }

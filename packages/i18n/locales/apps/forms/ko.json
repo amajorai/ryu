@@ -126,6 +126,7 @@
   "This form changed. Reload it and try again.": "이 양식이 변경되었습니다. 다시 불러온 후 다시 시도하세요.",
   "This form changed. Reload it before saving.": "이 양식이 변경되었습니다. 저장하기 전에 다시 불러오세요.",
   "This form is no longer accepting responses.": "이 양식은 더 이상 응답을 받지 않습니다.",
+  "This form is no longer available.": "이 양식은 더 이상 사용할 수 없습니다.",
   "This form link is already in use.": "이 양식 링크는 이미 사용 중입니다.",
   "This form link is reserved. Choose another link name.": "이 양식 링크는 예약되어 있습니다. 다른 링크 이름을 선택하세요.",
   "This permanently deletes the form and every response stored with it on this Ryu node.": "이 Ryu 노드에 저장된 양식과 모든 응답이 영구적으로 삭제됩니다.",

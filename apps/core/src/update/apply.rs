@@ -8,22 +8,39 @@
 //! once, with the signing secrets configured, before this path has real assets
 //! to install). Treat the swap as proven only after a real release exists.
 //!
+//! Trust: the bytes must match GitHub's published per-asset digest; once a
+//! publisher key is compiled in, they must also match the release's signed
+//! `SHA256SUMS` (see `apply_trust.rs`), and the staged file is re-hashed right
+//! before any swap.
+//!
 //! Platform note: on Windows a running `.exe` cannot be overwritten in place, so
 //! the self-replace renames the live binary aside (`*.old`) and moves the new
 //! one into its slot — the classic rename-then-replace. The `.old` file is
 //! cleaned up on the next launch.
 
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::ReleaseAsset;
 use crate::downloads::{DownloadCenter, DownloadKind, DownloadRole, DownloadSpec};
 pub use outcome::ApplyOutcome;
+use release::release_tag;
+pub use swap::cleanup_stale_backup;
+use swap::{replace_current_exe, replace_exe_at, running_inside_app_bundle};
+use trust::{ensure_staged_digest, ReleaseTrust};
 
 #[path = "apply_outcome.rs"]
 mod outcome;
+#[path = "apply_release.rs"]
+mod release;
+#[path = "apply_signature.rs"]
+mod signature;
+#[path = "apply_swap.rs"]
+mod swap;
+#[path = "apply_trust.rs"]
+mod trust;
 
 /// Where downloaded update artifacts are staged before install.
 fn staging_dir() -> PathBuf {
@@ -54,129 +71,6 @@ pub struct ApplyResult {
     pub gateway_left_behind: bool,
 }
 
-/// The caller selects an official asset; it cannot select a filesystem path or
-/// a download origin. Resolve its digest independently from the release API.
-fn release_tag(asset: &ReleaseAsset) -> Result<String> {
-    ensure!(
-        !asset.name.is_empty()
-            && asset.name != "."
-            && asset.name != ".."
-            && asset
-                .name
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')),
-        "invalid update asset filename"
-    );
-    ensure!(
-        super::asset_kind(&asset.name) == asset.kind && asset.kind != "unknown",
-        "invalid update asset kind"
-    );
-    let prefix = format!("https://github.com/{}/releases/download/", super::RYU_REPO);
-    let suffix = asset
-        .url
-        .strip_prefix(&prefix)
-        .context("update must come from the official release repository")?;
-    let (tag, name) = suffix
-        .split_once('/')
-        .context("invalid release asset URL")?;
-    ensure!(
-        !tag.is_empty()
-            && tag
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')),
-        "invalid release tag"
-    );
-    ensure!(
-        name == asset.name,
-        "update asset URL and filename do not match"
-    );
-    Ok(tag.to_owned())
-}
-
-fn release_digest(asset: &ReleaseAsset, tag: &str, release: &serde_json::Value) -> Result<String> {
-    ensure!(
-        release.get("draft").and_then(serde_json::Value::as_bool) == Some(false),
-        "update release is not published"
-    );
-    ensure!(
-        release.get("tag_name").and_then(serde_json::Value::as_str) == Some(tag),
-        "update release tag mismatch"
-    );
-    let entry = release
-        .get("assets")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|assets| {
-            assets.iter().find(|entry| {
-                entry.get("name").and_then(serde_json::Value::as_str) == Some(asset.name.as_str())
-                    && entry
-                        .get("browser_download_url")
-                        .and_then(serde_json::Value::as_str)
-                        == Some(asset.url.as_str())
-            })
-        })
-        .context("update asset is not in the published release")?;
-    ensure!(
-        entry.get("size").and_then(serde_json::Value::as_u64) == Some(asset.size) && asset.size > 0,
-        "update asset size mismatch"
-    );
-    let digest = entry
-        .get("digest")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|value| value.strip_prefix("sha256:"))
-        .filter(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
-        .context("published update has no valid SHA-256 digest")?;
-    Ok(digest.to_ascii_lowercase())
-}
-
-async fn verified_digest(asset: &ReleaseAsset) -> Result<String> {
-    let tag = release_tag(asset)?;
-    let release = fetch_release_metadata(&tag).await?;
-    release_digest(asset, &tag, &release)
-}
-
-/// The published release `tag`, from the releases API (bounded, https only, no
-/// redirects).
-async fn fetch_release_metadata(tag: &str) -> Result<serde_json::Value> {
-    let client = reqwest::Client::builder()
-        .https_only(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(30))
-        .user_agent("ryu-update-verifier")
-        .build()?;
-    let mut response = client
-        .get(format!(
-            "https://api.github.com/repos/{}/releases/tags/{tag}",
-            super::RYU_REPO
-        ))
-        .send()
-        .await?
-        .error_for_status()?;
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await? {
-        ensure!(
-            body.len() + chunk.len() <= 2 * 1024 * 1024,
-            "release metadata exceeds size limit"
-        );
-        body.extend_from_slice(&chunk);
-    }
-    Ok(serde_json::from_slice(&body)?)
-}
-
-/// The release asset named `name` in `release`, in [`ReleaseAsset`] form.
-fn release_asset_named(release: &serde_json::Value, name: &str) -> Option<ReleaseAsset> {
-    let entry = release
-        .get("assets")?
-        .as_array()?
-        .iter()
-        .find(|entry| entry.get("name").and_then(serde_json::Value::as_str) == Some(name))?;
-    Some(ReleaseAsset {
-        name: name.to_owned(),
-        url: entry.get("browser_download_url")?.as_str()?.to_owned(),
-        kind: "exe".to_owned(),
-        size: entry.get("size")?.as_u64()?,
-    })
-}
-
 /// The Gateway binary the running Core launches: `RYU_GATEWAY_BIN`, else
 /// `ryu-gateway` on `PATH` — the same resolution `sidecar::gateway` spawns with.
 fn managed_gateway_path() -> Option<PathBuf> {
@@ -196,28 +90,24 @@ fn managed_gateway_path() -> Option<PathBuf> {
 /// Core and the Gateway ship on ONE release train and Core refuses a Gateway
 /// whose version disagrees, so swapping Core alone left a remote node with a
 /// stale Gateway after every update. The Gateway asset comes from the SAME
-/// release as the Core asset just installed and is verified the same way.
+/// release as the Core asset just installed and is verified the same way
+/// (the same [`ReleaseTrust`], so the same signed manifest when a key exists).
 /// Best-effort: the Core swap already succeeded, so a Gateway failure is
 /// reported in the message rather than undoing it.
 async fn update_gateway_alongside(
     downloads: &DownloadCenter,
-    core_asset: &ReleaseAsset,
+    trust: &ReleaseTrust,
 ) -> std::result::Result<Option<PathBuf>, String> {
     let Some(gateway) = managed_gateway_path() else {
         return Ok(None);
     };
-    let tag = release_tag(core_asset).map_err(|e| e.to_string())?;
-    let release = fetch_release_metadata(&tag)
-        .await
-        .map_err(|e| format!("reading release {tag}: {e}"))?;
     let name = format!(
         "ryu-gateway-{}{}",
         super::platform_tag(),
         std::env::consts::EXE_SUFFIX
     );
-    let asset = release_asset_named(&release, &name)
-        .ok_or_else(|| format!("release {tag} publishes no {name}"))?;
-    let digest = release_digest(&asset, &tag, &release).map_err(|e| e.to_string())?;
+    let asset = trust.asset_named(&name).map_err(|e| format!("{e:#}"))?;
+    let digest = trust.digest_for(&asset).map_err(|e| format!("{e:#}"))?;
     let staged = downloads
         .download_blocking(DownloadSpec {
             kind: DownloadKind::Other,
@@ -225,11 +115,12 @@ async fn update_gateway_alongside(
             label: format!("Ryu update ({name})"),
             url: asset.url.clone(),
             dest: staging_dir().join(&name),
-            sha256: Some(digest),
+            sha256: Some(digest.clone()),
             version_record: None,
         })
         .await
         .map_err(|e| format!("downloading {name}: {e:#}"))?;
+    ensure_staged_digest(&staged, &digest).map_err(|e| format!("{e:#}"))?;
     replace_exe_at(&gateway, &staged).map_err(|e| format!("{e:#}"))?;
     let _ = std::fs::remove_file(&staged);
     Ok(Some(gateway))
@@ -244,8 +135,11 @@ async fn update_gateway_alongside(
 /// minutes. The center streams it to `<dest>.part`, publishes byte progress to the
 /// Downloads page and tray, and makes it pausable/resumable/cancelable like every
 /// other artifact.
-async fn download_asset(downloads: &DownloadCenter, asset: &ReleaseAsset) -> Result<PathBuf> {
-    let digest = verified_digest(asset).await?;
+async fn download_asset(
+    downloads: &DownloadCenter,
+    asset: &ReleaseAsset,
+    digest: &str,
+) -> Result<PathBuf> {
     let dir = staging_dir();
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("creating staging dir {}", dir.display()))?;
@@ -258,89 +152,11 @@ async fn download_asset(downloads: &DownloadCenter, asset: &ReleaseAsset) -> Res
             url: asset.url.clone(),
             dest: dir.join(&asset.name),
             // DownloadCenter verifies bytes against independently fetched metadata.
-            sha256: Some(digest),
+            sha256: Some(digest.to_owned()),
             version_record: None,
         })
         .await
         .context("downloading update asset")
-}
-
-/// In-place replace of the currently running executable.
-///
-/// The new binary is first copied NEXT TO the live one (`<exe>.new`), so the
-/// final step is a same-directory rename even when the staging dir is on another
-/// volume. The live binary is then renamed aside to `<exe>.old` (allowed while
-/// running, on Windows too) and `<exe>.new` moved into its slot. If that last
-/// move fails, the backup is renamed back: a failed update must never leave the
-/// node with no Core binary at its own path. The caller must restart the process
-/// for the new binary to take effect.
-fn replace_current_exe(new_binary: &Path) -> Result<()> {
-    let current = std::env::current_exe().context("resolving current exe")?;
-    replace_exe_at(&current, new_binary)
-}
-
-/// Swap `new_binary` into `current`, never leaving `current` missing.
-///
-/// The new binary is first copied next to the live one (`<exe>.new`, same
-/// volume, so the final step is a rename), and only then is the live binary
-/// moved aside. If copying fails (disk full, AV lock) the live exe is untouched;
-/// if the final rename fails the original is moved back.
-fn replace_exe_at(current: &Path, new_binary: &Path) -> Result<()> {
-    let backup = current.with_extension("old");
-    let incoming = current.with_extension("new");
-    let _ = std::fs::remove_file(&incoming);
-    // Copy rather than rename so it works across volumes (the staging dir may be
-    // on a different drive).
-    std::fs::copy(new_binary, &incoming)
-        .with_context(|| format!("staging new exe at {}", incoming.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&incoming, std::fs::Permissions::from_mode(0o755))
-            .with_context(|| format!("marking {} executable", incoming.display()))?;
-    }
-    // Opened for writing: on Windows `FlushFileBuffers` refuses a read-only handle.
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(&incoming)
-        .and_then(|file| file.sync_all())
-        .with_context(|| format!("flushing {}", incoming.display()))?;
-
-    // Best-effort: remove a stale backup from a prior update.
-    let _ = std::fs::remove_file(&backup);
-    if let Err(error) = std::fs::rename(current, &backup) {
-        let _ = std::fs::remove_file(&incoming);
-        return Err(error)
-            .with_context(|| format!("renaming live exe aside to {}", backup.display()));
-    }
-    if let Err(error) = std::fs::rename(&incoming, current) {
-        // Put the original back so the node still has a binary to start.
-        let _ = std::fs::rename(&backup, current);
-        let _ = std::fs::remove_file(&incoming);
-        return Err(error).with_context(|| format!("installing new exe at {}", current.display()));
-    }
-    let _ = std::fs::remove_file(new_binary);
-    Ok(())
-}
-
-/// Whether the running Core lives inside a macOS `.app` bundle (the desktop's
-/// bundled sidecar). Swapping a file inside a signed bundle breaks its code
-/// signature, and the bundle is the native updater's to replace.
-fn running_inside_app_bundle() -> bool {
-    std::env::current_exe()
-        .map(|exe| exe.to_string_lossy().contains(".app/Contents/"))
-        .unwrap_or(false)
-}
-
-/// Clean up the `<exe>.old` backup left by a previous self-update. Called once
-/// on Core startup so the staging crumbs don't accumulate.
-pub fn cleanup_stale_backup() {
-    if let Ok(current) = std::env::current_exe() {
-        let backup = current.with_extension("old");
-        if backup.exists() {
-            let _ = std::fs::remove_file(backup);
-        }
-    }
 }
 
 /// Apply an update from a resolved [`ReleaseAsset`].
@@ -351,7 +167,12 @@ pub fn cleanup_stale_backup() {
 ///   the path back; the client runs the platform installer (Core does not launch
 ///   GUI installers itself).
 pub async fn apply_update(downloads: &DownloadCenter, asset: &ReleaseAsset) -> Result<ApplyResult> {
-    let staged = download_asset(downloads, asset).await?;
+    let trust = ReleaseTrust::load(&release_tag(asset)?).await?;
+    let digest = trust.digest_for(asset)?;
+    let staged = download_asset(downloads, asset, &digest).await?;
+    // Re-hash what is on disk now: the swap (or installer hand-off) below must
+    // only ever see bytes that match the verified digest.
+    ensure_staged_digest(&staged, &digest)?;
     let staged_str = staged.display().to_string();
 
     match asset.kind.as_str() {
@@ -361,7 +182,7 @@ pub async fn apply_update(downloads: &DownloadCenter, asset: &ReleaseAsset) -> R
         // replace this process with a different program.
         "exe" if asset.name == super::core_asset_name() && !running_inside_app_bundle() => {
             replace_current_exe(&staged)?;
-            let gateway = update_gateway_alongside(downloads, asset).await;
+            let gateway = update_gateway_alongside(downloads, &trust).await;
             let gateway_left_behind = gateway.is_err();
             let outcome = match gateway {
                 Ok(Some(_)) => ApplyOutcome::InstalledWithGateway,

@@ -793,11 +793,11 @@
   "play": "gioca",
   "project": "progetto",
   "prompt": "prompt",
-  "ready": "pronti",
+  "ready": "pronto",
   "records": "record",
   "request": "richiesta",
   "research": "ricerca",
-  "running": "che esegue",
+  "running": "in esecuzione",
   "ryu": "ryu",
   "show": "mostra",
   "shown": "visualizzati",
@@ -824,5 +824,6 @@
   "with:": "con:",
   "working": "al lavoro",
   "your browser": "il browser",
+  "{age} ago": "{age} fa",
   "{count} more": "Altri {count}"
 }

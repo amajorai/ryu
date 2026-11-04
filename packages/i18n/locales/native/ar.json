@@ -1,6 +1,5 @@
 {
   "(authenticated)": "(تمت المصادقة)",
-  "1 install": "تثبيت واحد",
   "24/7 on-device speech capture into your meeting memory.": "التقاط الكلام على الجهاز على مدار الساعة إلى ذاكرة اجتماعاتك.",
   "A Twilio number receives forwarded calls. Purchasing one bills your Twilio account.": "يستقبل رقم Twilio المكالمات المحوّلة. يتم احتساب تكلفة شرائه على حساب Twilio الخاص بك.",
   "A line can list at most {maxAllowedCallers} trusted callers.": "يمكن أن يتضمن الخط {maxAllowedCallers} متصلين موثوقين كحد أقصى.",
@@ -592,7 +591,6 @@
   "No documents yet. Tap New to create a page.": "لا توجد مستندات بعد. اضغط على \"جديد\" لإنشاء صفحة.",
   "No groups yet": "لا توجد مجموعات بعد",
   "No groups yet. Create one from the desktop app.": "لا توجد مجموعات بعد. أنشئ واحدة من تطبيق سطح المكتب.",
-  "No installs": "لا توجد عمليات تثبيت",
   "No matches": "لا توجد نتائج مطابقة",
   "No meetings recorded yet.": "لا توجد اجتماعات مسجلة بعد.",
   "No meetings yet": "لا توجد اجتماعات بعد",
@@ -1150,7 +1148,6 @@
   "{count, plural, one {# match found} other {# matches found}}": "{count, plural, zero {لم يُعثر على تطابقات} one {عُثر على تطابق واحد} two {عُثر على تطابقين} few {عُثر على # تطابقات} many {عُثر على # تطابقًا} other {عُثر على # تطابق}}",
   "{count, plural, one {# member} other {# members}} · {coordination}": "{count, plural, zero {لا أعضاء} one {عضو واحد} two {عضوان} few {# أعضاء} many {# عضوًا} other {# عضو}} · {coordination}",
   "{count, plural, one {# runnable} other {# runnables}}": "{count, plural, zero {لا عناصر قابلة للتشغيل} one {عنصر واحد قابل للتشغيل} two {عنصران قابلان للتشغيل} few {# عناصر قابلة للتشغيل} many {# عنصرًا قابلًا للتشغيل} other {# عنصر قابل للتشغيل}}",
-  "{count} installs": "{count} عمليات تثبيت",
   "{deviceLabel}. Add your Wi-Fi so the device can connect directly at home, or skip it to relay through this phone.": "{deviceLabel}. أضف شبكة Wi-Fi الخاصة بك ليتصل الجهاز مباشرةً في المنزل، أو تخطَّ ذلك للترحيل عبر هذا الهاتف.",
   "{minutes} min": "{minutes} د",
   "{modelName} · mobile tools limited": "{modelName} · أدوات الجوال محدودة",

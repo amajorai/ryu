@@ -13,11 +13,15 @@
 //! the breaker and send every tenant's traffic to the degraded row. A broken
 //! engine is still caught by the 10 s readiness probe, whose canary failure
 //! force-opens the breaker. One request adds at most one failure to the
-//! window, so a request with hundreds of items cannot open it alone. A
-//! timeout is a health failure a payload can be sized to cause, so timeouts
-//! count at most once per subject (a tenant, else a credential) in the
-//! window ([`for_subject`]): one caller cannot open the breaker for every
-//! tenant with them. A slow engine still fails its readiness probe.
+//! window, so a request with hundreds of items cannot open it alone. Some
+//! health failures are ones a caller can produce on a healthy engine
+//! ([`counts_per_subject`]): a timeout (a payload sized to stall it), a 429
+//! (the caller's own flood) and a reset transport (a body the engine aborts
+//! reading, or one that crashes a worker mid-request). They count at most once
+//! per subject (a tenant, else a credential) in the window ([`for_subject`]):
+//! one caller cannot open the breaker for every tenant with them. An
+//! unreachable engine (refused connections, marked down) still opens it from
+//! one subject, and a slow or broken engine still fails its readiness probe.
 
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
@@ -40,11 +44,12 @@ pub const FAILURE_SHARE: f64 = 0.2;
 pub const MIN_SAMPLES: usize = 5;
 
 /// `Unavailable` reasons that say the engine could not be reached at all:
-/// refused or reset connections, an engine marked down, a closed gate. These
-/// say nothing about the request's content, so they are an outage.
+/// refused connections, an engine marked down, a closed gate. These say
+/// nothing about the request's content, so they are an outage. A connection
+/// reset mid-request (`transport`) is not one: the engine was reached, and the
+/// body it was sent can be what reset it ([`SUBJECT_DRIVEN_REASONS`]).
 const UNREACHABLE_REASONS: &[&str] = &[
     "connect",
-    "transport",
     "gate_closed",
     "down",
     "unreachable",
@@ -52,10 +57,17 @@ const UNREACHABLE_REASONS: &[&str] = &[
 ];
 
 /// `Unavailable` reasons from an engine that answered but is overloaded or
-/// misrouted (a 429, a redirect). They move the breaker, so a sustained
-/// overload sheds load, but one of them on a request is not an outage: the
-/// engine was there.
+/// misrouted (a 429, a redirect). They move the breaker, so an overload
+/// across subjects sheds load (a 429 counts once per subject), but one of
+/// them on a request is not an outage: the engine was there.
 const LOADED_REASONS: &[&str] = &["busy", "redirect"];
+
+/// Health reasons a caller can produce on a healthy engine: `busy` (a 429 its
+/// own flood causes) and `transport` (a reset connection: a body the engine
+/// aborts reading, or one that crashes a worker mid-request). With timeouts
+/// they count once per subject ([`counts_per_subject`]); the connect errors
+/// that follow a real crash are unreachable and count for every request.
+const SUBJECT_DRIVEN_REASONS: &[&str] = &["busy", "transport"];
 
 /// How one failed call bears on the engine's health.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,7 +93,9 @@ pub fn failure_kind(error: &BackendError) -> FailureKind {
     match error {
         BackendError::Timeout => FailureKind::Health,
         BackendError::Unavailable(reason)
-            if UNREACHABLE_REASONS.contains(reason) || LOADED_REASONS.contains(reason) =>
+            if UNREACHABLE_REASONS.contains(reason)
+                || LOADED_REASONS.contains(reason)
+                || SUBJECT_DRIVEN_REASONS.contains(reason) =>
         {
             FailureKind::Health
         }
@@ -90,10 +104,24 @@ pub fn failure_kind(error: &BackendError) -> FailureKind {
     }
 }
 
+/// Whether `error` is a health failure a caller can produce on a healthy
+/// engine, so it counts toward the breaker at most once per subject in the
+/// window ([`for_subject`]): a timeout, a 429 or a reset transport. An
+/// unreachable engine is not one: it says nothing about the request.
+pub fn counts_per_subject(error: &BackendError) -> bool {
+    match error {
+        BackendError::Timeout => true,
+        BackendError::Unavailable(reason) => SUBJECT_DRIVEN_REASONS.contains(reason),
+        _ => false,
+    }
+}
+
 /// Whether `error` says the engine was out (unreachable, or its breaker
 /// open), so it could not have answered whatever the content was. An engine
-/// that answered (an error status, a 429, a redirect) was not out: a node
-/// that fails closed refuses that request rather than serve it degraded.
+/// that answered (an error status, a 429, a redirect) or was reached and then
+/// reset the connection was not out: a body can be built to make it drop the
+/// request, so a node that fails closed refuses that request rather than
+/// serve it degraded.
 pub fn is_engine_outage(error: &BackendError) -> bool {
     matches!(error, BackendError::Unavailable(reason)
         if *reason == "breaker_open" || UNREACHABLE_REASONS.contains(reason))
@@ -124,8 +152,9 @@ pub fn subject_tag(ctx: &crate::pipeline::RequestContext) -> u64 {
     hasher.finish()
 }
 
-/// Run `screen` with `ctx`'s subject in scope: its backend timeouts count
-/// toward a breaker at most once per window for that subject.
+/// Run `screen` with `ctx`'s subject in scope: its subject-driven backend
+/// failures ([`counts_per_subject`]) count toward a breaker at most once per
+/// window for that subject.
 pub async fn for_subject<F: std::future::Future>(
     ctx: &crate::pipeline::RequestContext,
     screen: F,
@@ -133,9 +162,9 @@ pub async fn for_subject<F: std::future::Future>(
     SUBJECT.scope(subject_tag(ctx), screen).await
 }
 
-/// The tag a timeout is deduplicated by: the subject in scope, else the
-/// request.
-fn timeout_tag(correlation_id: &str) -> Option<u64> {
+/// The tag a subject-driven failure is deduplicated by: the subject in
+/// scope, else the request.
+fn subject_failure_tag(correlation_id: &str) -> Option<u64> {
     SUBJECT
         .try_with(|subject| *subject)
         .ok()
@@ -217,11 +246,12 @@ impl Breaker {
         self.record_tagged(false, request_tag(correlation_id));
     }
 
-    /// Record a timed-out call. While the breaker is closed the subject's
-    /// second and later timeouts in the window (see [`for_subject`]; the
-    /// request's when no subject is in scope) are not counted again.
-    pub fn record_timeout_for(&self, correlation_id: &str) {
-        self.record_tagged(false, timeout_tag(correlation_id));
+    /// Record a subject-driven failure ([`counts_per_subject`]). While the
+    /// breaker is closed the subject's second and later such failures in the
+    /// window (see [`for_subject`]; the request's when no subject is in
+    /// scope) are not counted again.
+    pub fn record_subject_failure_for(&self, correlation_id: &str) {
+        self.record_tagged(false, subject_failure_tag(correlation_id));
     }
 
     fn record_tagged(&self, ok: bool, tag: Option<u64>) {
@@ -350,8 +380,8 @@ impl ScreenerBackend for Breakered {
         match &result {
             Ok(_) => self.breaker.record(true),
             Err(error) => match failure_kind(error) {
-                FailureKind::Health if matches!(error, BackendError::Timeout) => {
-                    self.breaker.record_timeout_for(req.correlation_id)
+                FailureKind::Health if counts_per_subject(error) => {
+                    self.breaker.record_subject_failure_for(req.correlation_id)
                 }
                 FailureKind::Health => self.breaker.record_failure_for(req.correlation_id),
                 // Content-driven: the request that caused it is refused by the

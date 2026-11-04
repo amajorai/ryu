@@ -87,3 +87,21 @@ fn version_store_load_defaults_on_bad_json() {
     assert!(parsed.is_none());
     assert!(VersionStore::default().versions.is_empty());
 }
+
+/// A pinned thread records and reads installs in its own data dir, so a reused
+/// `RYU_DIR` that lists llama.cpp cannot leak into the pinned test.
+#[test]
+fn a_pinned_thread_keeps_its_own_versions_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let _pin = crate::sidecar::active_engine::test_state::pin(dir.path());
+    assert!(VersionStore::load().versions.is_empty());
+    VersionStore::record_persisted("llamacpp", "b8373", "aaa").unwrap();
+    assert!(ryu_sidecar_runtime::layout::state_path(dir.path(), "versions.json").is_file());
+    assert_eq!(
+        VersionStore::load()
+            .versions
+            .get("llamacpp")
+            .map(String::as_str),
+        Some("b8373")
+    );
+}

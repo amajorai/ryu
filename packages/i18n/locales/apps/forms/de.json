@@ -126,6 +126,7 @@
   "This form changed. Reload it and try again.": "Dieses Formular wurde geändert. Laden Sie es neu und versuchen Sie es erneut.",
   "This form changed. Reload it before saving.": "Dieses Formular wurde geändert. Laden Sie es vor dem Speichern neu.",
   "This form is no longer accepting responses.": "Dieses Formular nimmt keine Antworten mehr an.",
+  "This form is no longer available.": "Dieses Formular ist nicht mehr verfügbar.",
   "This form link is already in use.": "Dieser Formularlink wird bereits verwendet.",
   "This form link is reserved. Choose another link name.": "Dieser Formularlink ist reserviert. Wählen Sie einen anderen Linknamen.",
   "This permanently deletes the form and every response stored with it on this Ryu node.": "Dadurch werden das Formular und alle damit auf diesem Ryu-Knoten gespeicherten Antworten dauerhaft gelöscht.",

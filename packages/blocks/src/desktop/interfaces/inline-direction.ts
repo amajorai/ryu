@@ -5,12 +5,23 @@
  * the start and negative toward the end.
  */
 
+import { useDirection } from "@ryu/ui/components/direction.tsx";
+
 /** `-1` when the element lays out right-to-left, otherwise `1`. */
 export function inlineSign(element: Element | null | undefined): 1 | -1 {
 	if (!element || typeof getComputedStyle === "undefined") {
 		return 1;
 	}
 	return getComputedStyle(element).direction === "rtl" ? -1 : 1;
+}
+
+/**
+ * `-1` while the surrounding UI reads right-to-left, otherwise `1`. Multiply a
+ * physical motion `x` offset by it so a panel docked at the inline end slides
+ * in from (and out toward) that end in either direction.
+ */
+export function useInlineSign(): 1 | -1 {
+	return useDirection() === "rtl" ? -1 : 1;
 }
 
 /** How far a horizontal scroller has moved from its inline start, in px. */

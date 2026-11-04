@@ -424,6 +424,7 @@
   "No run selected. Start one from Configure, or pick one in History.": "कोई रन चयनित नहीं है। कॉन्फ़िगर से एक शुरू करें या इतिहास में से एक चुनें।",
   "No runs yet.": "अभी तक कोई रन नहीं।",
   "No trained adapters yet.": "अभी तक कोई प्रशिक्षित एडेप्टर नहीं।",
+  "No.": "क्र.",
   "None": "कोई नहीं",
   "Normal": "सामान्य",
   "Note": "नोट",
@@ -850,7 +851,7 @@
   "rendered dataset exceeds the {maxRenderedTotalChars} character limit": "रेंडर किया गया डेटासेट {maxRenderedTotalChars} वर्णों की सीमा से अधिक है",
   "request": "अनुरोध",
   "requests": "अनुरोध",
-  "running": "पर चल रहा मॉडल",
+  "running": "चल रहा है",
   "ryu": "ryu",
   "show": "दिखाएँ",
   "shown": "दिखाए गए",
@@ -875,5 +876,6 @@
   "with": "इनके साथ:",
   "working": "काम कर रहे हैं",
   "your browser": "आपके ब्राउज़र",
+  "{age} ago": "{age} पहले",
   "{count} more": "{count} और"
 }

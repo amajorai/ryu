@@ -488,6 +488,7 @@
   "Read the docs": "阅读文档",
   "Reason": "原因",
   "Receive signed event notifications for received, sent, delivery, bounce, complaint, rejection, and open events.": "接收已签名的事件通知，涵盖接收、发送、投递、退信、投诉、拒收和打开事件。",
+  "Received": "接收于",
   "Recent": "最近",
   "Red": "红色",
   "Reference": "参考",
@@ -759,12 +760,12 @@
   "play": "出牌",
   "project": "个项目",
   "prompt": "提示词",
-  "ready": "项已就绪",
+  "ready": "就绪",
   "records": "条记录",
   "request": "请求",
   "research": "研究",
   "routing": "路由",
-  "running": "运行",
+  "running": "运行中",
   "ryu": "ryu",
   "show": "显示",
   "shown": "条已显示",
@@ -792,6 +793,9 @@
   "with": "，参与者：",
   "working": "个工作中",
   "your browser": "浏览器",
+  "{age} ago": "{age}前",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, other {# 个附件已就绪}}",
-  "{count} more": "还有 {count} 个"
+  "{count} more": "还有 {count} 个",
+  "{recipients} · {status}": "{recipients} · {status}",
+  "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {草稿} sending {正在发送} sent {已发送} failed {失败} inbound {已接收} outbound {外发} other {{value}}}"
 }

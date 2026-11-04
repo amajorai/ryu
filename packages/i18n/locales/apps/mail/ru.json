@@ -488,6 +488,7 @@
   "Read the docs": "Читать документацию",
   "Reason": "Причина",
   "Receive signed event notifications for received, sent, delivery, bounce, complaint, rejection, and open events.": "Получайте подписанные уведомления о событиях получения, отправки, доставки, возврата, жалоб, отклонения и открытия.",
+  "Received": "Получено",
   "Recent": "Недавние",
   "Red": "Красный",
   "Reference": "Ссылка",
@@ -764,7 +765,7 @@
   "request": "запрос",
   "research": "исследование",
   "routing": "маршрутизация",
-  "running": "с моделью",
+  "running": "выполняется",
   "ryu": "ryu",
   "show": "показать",
   "shown": "показано",
@@ -792,6 +793,9 @@
   "with": "с участием",
   "working": "работают",
   "your browser": "браузере",
+  "{age} ago": "{age} назад",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, one {# вложение готово} few {# вложения готовы} many {# вложений готово} other {# вложения готово}}",
-  "{count} more": "Ещё {count}"
+  "{count} more": "Ещё {count}",
+  "{recipients} · {status}": "{recipients} · {status}",
+  "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {Черновик} sending {Отправка} sent {Отправлено} failed {Ошибка} inbound {Получено} outbound {Исходящее} other {{value}}}"
 }

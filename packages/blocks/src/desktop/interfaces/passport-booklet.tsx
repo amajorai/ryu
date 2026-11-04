@@ -63,7 +63,9 @@ function IndexTabs({ tabs }: { tabs: BookTab[] }) {
 					aria-label={tab.label}
 					className={cn(
 						"flex h-10 w-[30px] cursor-pointer items-center justify-center rounded-e-[5px] font-mono font-semibold text-[9.5px] tracking-[0.06em] outline-none transition-transform duration-150 [writing-mode:vertical-rl] focus-visible:ring-2 focus-visible:ring-ring",
-						tab.active ? "translate-x-0" : "-translate-x-1 hover:translate-x-0"
+						tab.active
+							? "translate-x-0"
+							: "-translate-x-1 hover:translate-x-0 rtl:translate-x-1 rtl:hover:translate-x-0"
 					)}
 					key={tab.code}
 					onClick={tab.onSelect}

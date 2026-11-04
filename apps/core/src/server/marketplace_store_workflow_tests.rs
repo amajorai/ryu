@@ -3,144 +3,15 @@
 use super::*;
 use crate::workflow::store::{NodeStatus, RunStatus};
 use axum::{
-    extract::{OriginalUri, Query, State},
-    http::{HeaderMap, StatusCode},
-    response::IntoResponse,
     routing::{get, post},
-    Json, Router,
+    Router,
 };
 use std::collections::HashMap;
 use std::io::{Cursor, Write};
-use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Default)]
-struct GatewayFixture {
-    requests: Arc<Mutex<Vec<serde_json::Value>>>,
-    mode: Arc<Mutex<String>>,
-    core_bearer: String,
-    admin: String,
-    relay: String,
-    address: Option<std::net::SocketAddr>,
-    control_requests: Arc<Mutex<Vec<String>>>,
-}
-
-async fn gateway_control(
-    State(fixture): State<GatewayFixture>,
-    OriginalUri(uri): OriginalUri,
-    Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> axum::response::Response {
-    let bearer = headers
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-    fixture
-        .control_requests
-        .lock()
-        .unwrap()
-        .push(uri.path().to_string());
-    match uri.path() {
-        "/health" => Json(serde_json::json!({"status":"ok"})).into_response(),
-        "/v1/auth/readiness" => {
-            assert!(bearer.is_empty(), "readiness must not expose a bearer");
-            let nonce = query.get("nonce").expect("readiness nonce");
-            let signature = headers
-                .get("x-ryu-readiness-proof")
-                .unwrap()
-                .to_str()
-                .unwrap();
-            ryu_gw_credentials::verify_readiness_request(nonce, signature, &fixture.admin).unwrap();
-            let proof = ryu_gw_credentials::ReadinessProof::sign(
-                ryu_gw_credentials::Readiness {
-                    protocol: "ryu-gateway-readiness-v1".into(),
-                    version: env!("CARGO_PKG_VERSION").into(),
-                    nonce: nonce.clone(),
-                    listener: fixture.address.unwrap(),
-                    require_auth: true,
-                    inference_keys: vec![ryu_gw_credentials::fingerprint(&fixture.relay)],
-                    core_keys: vec![ryu_gw_credentials::fingerprint(
-                        fixture.core_bearer.strip_prefix("Bearer ").unwrap(),
-                    )],
-                },
-                &fixture.admin,
-            )
-            .unwrap();
-            Json(proof).into_response()
-        }
-        "/v1/config" if bearer == format!("Bearer {}", fixture.admin) => {
-            Json(serde_json::json!({"auth":{"require_auth":true}})).into_response()
-        }
-        "/v1/auth/status" if bearer == format!("Bearer {}", fixture.relay) => {
-            Json(serde_json::json!({"admin":false,"trustedForwarder":false})).into_response()
-        }
-        "/v1/auth/status" if bearer == fixture.core_bearer => {
-            Json(serde_json::json!({"admin":false,"trustedForwarder":true})).into_response()
-        }
-        _ => StatusCode::UNAUTHORIZED.into_response(),
-    }
-}
-
-async fn completion(
-    State(fixture): State<GatewayFixture>,
-    headers: HeaderMap,
-    Json(payload): Json<serde_json::Value>,
-) -> axum::response::Response {
-    let relay_bearer = format!("Bearer {}", fixture.relay);
-    let expected_bearer = if payload["messages"].as_array().unwrap().len() == 2 {
-        fixture.core_bearer.as_str()
-    } else {
-        // Workflow prompt/skill nodes must use inference-only authority.
-        // Clean-context delegation uses the distinct Core relay above.
-        assert_ne!(fixture.core_bearer, relay_bearer);
-        relay_bearer.as_str()
-    };
-    assert_eq!(
-        headers.get("authorization").unwrap().to_str().unwrap(),
-        expected_bearer
-    );
-    fixture.requests.lock().unwrap().push(payload.clone());
-    let mode = fixture.mode.lock().unwrap().clone();
-    if mode == "forbidden" {
-        return (StatusCode::FORBIDDEN, "fixture policy denied").into_response();
-    }
-    if mode == "malformed" {
-        return (StatusCode::OK, "invalid JSON").into_response();
-    }
-    let prompt = payload["messages"].as_array().unwrap().last().unwrap()["content"]
-        .as_str()
-        .unwrap();
-    assert!(
-        !prompt.contains("{{"),
-        "unresolved template sent to Gateway: {prompt}"
-    );
-    let text = if prompt.starts_with("Classify this request") {
-        if mode == "alternate" {
-            "general"
-        } else {
-            "billing"
-        }
-    } else if prompt.starts_with("Classify this into") {
-        if mode == "alternate" {
-            "research"
-        } else {
-            "code"
-        }
-    } else if prompt.starts_with("Here are independent verifier") {
-        if mode == "alternate" {
-            "FAIL"
-        } else {
-            "PASS"
-        }
-    } else if prompt.starts_with("Create exactly one autoresearch") {
-        "CONTINUE:{\"campaign_id\":\"local-fixture\",\"goal\":\"fixture goal\"}"
-    } else if prompt.starts_with("You are running at most ONE attempt") {
-        "DONE:{\"campaign_id\":\"local-fixture\",\"goal\":\"fixture goal\"}"
-    } else {
-        "fixture-result"
-    };
-    Json(serde_json::json!({"choices":[{"message":{"content":text}}], "usage":{"total_tokens":1}}))
-        .into_response()
-}
+#[path = "marketplace_store_workflow_gateway_tests.rs"]
+mod gateway_fixture;
+use gateway_fixture::{completion, gateway_control, GatewayEnvironment, GatewayFixture};
 
 fn shipped_archive(dir: &Path) -> Vec<u8> {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
@@ -151,27 +22,6 @@ fn shipped_archive(dir: &Path) -> Vec<u8> {
             .unwrap();
     }
     zip.finish().unwrap().into_inner()
-}
-
-struct GatewayEnvironment(Vec<(&'static str, Option<String>)>);
-impl GatewayEnvironment {
-    fn capture(keys: &[&'static str]) -> Self {
-        Self(
-            keys.iter()
-                .map(|key| (*key, std::env::var(key).ok()))
-                .collect(),
-        )
-    }
-}
-impl Drop for GatewayEnvironment {
-    fn drop(&mut self) {
-        for (key, value) in &self.0 {
-            match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-        }
-    }
 }
 
 #[tokio::test]
@@ -188,6 +38,30 @@ async fn marketplace_store_workflow_all_shipped_zip_lifecycles_execute_and_read_
         "RYU_ALLOW_GATEWAY_FALLBACK",
     ]);
     let _quarantine = crate::sidecar::gateway::quarantine_for_test(true);
+    // Regression: a reused data dir whose engine selection names llama.cpp made
+    // Core wait for a llama.cpp sidecar instead of adopting the fixture Gateway.
+    // That reused dir is written first. It is stood in for by an outer pin, not
+    // the process data dir, so no test running beside this one (and no later
+    // run, if this one is killed before cleanup) sees the llama.cpp selection.
+    // The test then pins its own dir and reads only that.
+    let reused = tempfile::tempdir().unwrap();
+    let _reused_pin = crate::sidecar::active_engine::test_state::pin(reused.path());
+    let reused_selection =
+        ryu_sidecar_runtime::layout::state_path(reused.path(), "active-engine.json");
+    std::fs::create_dir_all(reused_selection.parent().unwrap()).unwrap();
+    std::fs::write(&reused_selection, r#"{"active":"llamacpp"}"#).unwrap();
+    assert_eq!(
+        crate::sidecar::active_engine::ActiveEngineStore::load()
+            .active
+            .as_deref(),
+        Some("llamacpp")
+    );
+    let engine_state = tempfile::tempdir().unwrap();
+    let _engine_pin = crate::sidecar::active_engine::test_state::pin(engine_state.path());
+    assert_eq!(
+        crate::sidecar::active_engine::ActiveEngineStore::load().active,
+        None
+    );
     std::env::set_var("RYU_GATEWAY_MANAGED", "1");
     std::env::set_var("RYU_GATEWAY_REMOTE", "0");
     std::env::set_var("RYU_MANAGED_NODE", "0");
@@ -452,6 +326,46 @@ async fn marketplace_store_workflow_all_shipped_zip_lifecycles_execute_and_read_
     server.abort();
 }
 
+/// Removes the compatibility fixture's package, the runtime definitions it
+/// still owns, and the workflows the test persisted, even when an assertion
+/// fails, so a rerun on the same data dir starts clean.
+struct CompatibilityFixture {
+    package_id: &'static str,
+    workflows: Vec<String>,
+}
+
+impl CompatibilityFixture {
+    fn clean(&self) {
+        if let Ok(Some(package)) = crate::portable_packages::get("workflow", self.package_id) {
+            for runtime_id in &package.runtime_ids {
+                let _ = crate::workflow::store::delete_workflow(runtime_id);
+            }
+            let _ = crate::portable_packages::uninstall("workflow", self.package_id);
+        }
+        for id in &self.workflows {
+            let _ = crate::workflow::store::delete_workflow(id);
+        }
+    }
+}
+
+impl Drop for CompatibilityFixture {
+    fn drop(&mut self) {
+        self.clean();
+    }
+}
+
+/// Ids of the stored workflows named `name`. The invalid templates name every
+/// definition they carry with a per-run marker, so the atomicity check sees only
+/// what this fixture could have written, never a workflow a test running beside
+/// it persisted.
+fn workflows_named(name: &str) -> std::collections::BTreeSet<String> {
+    crate::workflow::store::list_workflows()
+        .into_iter()
+        .filter(|workflow| workflow.name == name)
+        .map(|workflow| workflow.id)
+        .collect()
+}
+
 #[tokio::test]
 async fn marketplace_store_workflow_raw_compatibility_and_invalid_templates_are_atomic() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -464,6 +378,13 @@ async fn marketplace_store_workflow_raw_compatibility_and_invalid_templates_are_
     let original_bytes = serde_json::to_value(&original).unwrap();
     let fixture = tempfile::tempdir().unwrap();
     let id = "fixture/marketplace-workflow-compatibility";
+    let mut cleanup = CompatibilityFixture {
+        package_id: id,
+        workflows: Vec::new(),
+    };
+    // A run killed before this guard existed may have left the package behind.
+    cleanup.clean();
+    cleanup.workflows.push(original.id.clone());
     std::fs::write(
         fixture.path().join("ryu.package.json"),
         serde_json::to_vec(
@@ -502,13 +423,15 @@ async fn marketplace_store_workflow_raw_compatibility_and_invalid_templates_are_
     crate::portable_packages::uninstall("workflow", id).unwrap();
     assert!(crate::workflow::store::load_workflow(&original.id).is_ok());
 
+    let marker = format!("marketplace-atomicity-{}", uuid::Uuid::new_v4());
+    let mut body = original.clone();
+    body.name.clone_from(&marker);
     let mut duplicate = template.clone();
-    duplicate.bodies = vec![
-        ("body".into(), original.clone()),
-        ("body".into(), original.clone()),
-    ];
+    duplicate.primary.name.clone_from(&marker);
+    duplicate.bodies = vec![("body".into(), body.clone()), ("body".into(), body.clone())];
     let mut invalid_graph = template.clone();
-    invalid_graph.bodies = vec![("body".into(), original.clone())];
+    invalid_graph.primary.name.clone_from(&marker);
+    invalid_graph.bodies = vec![("body".into(), body)];
     invalid_graph
         .primary
         .nodes
@@ -524,10 +447,7 @@ async fn marketplace_store_workflow_raw_compatibility_and_invalid_templates_are_
             "duplicate node id",
         ),
     ] {
-        let baseline: std::collections::BTreeSet<_> = crate::workflow::store::list_workflows()
-            .into_iter()
-            .map(|workflow| workflow.id)
-            .collect();
+        assert!(workflows_named(&marker).is_empty());
         std::fs::write(fixture.path().join("workflow.json"), artifact).unwrap();
         let package = crate::portable_packages::install(
             "workflow",
@@ -549,15 +469,12 @@ async fn marketplace_store_workflow_raw_compatibility_and_invalid_templates_are_
             .unwrap();
         assert!(!package.enabled);
         assert!(package.runtime_ids.is_empty());
-        let after: std::collections::BTreeSet<_> = crate::workflow::store::list_workflows()
-            .into_iter()
-            .map(|workflow| workflow.id)
-            .collect();
-        assert_eq!(
-            after, baseline,
+        assert!(
+            workflows_named(&marker).is_empty(),
             "invalid template must not leave partial body definitions"
         );
         crate::portable_packages::uninstall("workflow", id).unwrap();
     }
     crate::workflow::store::delete_workflow(&original.id).unwrap();
+    drop(cleanup);
 }

@@ -331,3 +331,37 @@ async fn another_member_cannot_cancel_or_read_a_private_run() {
     })
     .await;
 }
+
+/// Core links `serde_json/preserve_order`, so an object keeps the order its
+/// keys arrived in. A tool call's input digest must not depend on that order:
+/// the same arguments from two surfaces (or an idempotent retry) are one input.
+#[test]
+fn tool_input_hashes_ignore_object_key_order() {
+    let input_hash = |frame: serde_json::Value| {
+        let mut names = std::collections::HashMap::new();
+        match harness_event_from_ui_frame(&frame, &mut String::new(), &mut names) {
+            Some(RunEvent::ToolCallStarted { input_hash, .. }) => input_hash,
+            _ => panic!("expected a tool start event"),
+        }
+    };
+    let ordered = serde_json::json!({
+        "type": "tool-input-available",
+        "toolCallId": "call-1",
+        "toolName": "read_file",
+        "input": { "path": "/tmp/a", "options": { "limit": 5, "encoding": "utf8" } },
+    });
+    let reordered = serde_json::json!({
+        "type": "tool-input-available",
+        "toolCallId": "call-1",
+        "toolName": "read_file",
+        "input": { "options": { "encoding": "utf8", "limit": 5 }, "path": "/tmp/a" },
+    });
+    assert_eq!(input_hash(ordered.clone()), input_hash(reordered));
+    let other = serde_json::json!({
+        "type": "tool-input-available",
+        "toolCallId": "call-1",
+        "toolName": "read_file",
+        "input": { "path": "/tmp/b", "options": { "limit": 5, "encoding": "utf8" } },
+    });
+    assert_ne!(input_hash(ordered), input_hash(other));
+}

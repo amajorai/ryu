@@ -793,11 +793,11 @@
   "play": "プレイ",
   "project": "件のプロジェクト",
   "prompt": "プロンプト",
-  "ready": "件が準備完了",
+  "ready": "準備完了",
   "records": "件のレコード",
   "request": "リクエスト",
   "research": "リサーチ",
-  "running": "で実行中のモデル",
+  "running": "実行中",
   "ryu": "ryu",
   "show": "表示",
   "shown": "件を表示",
@@ -824,5 +824,6 @@
   "with:": "置換後:",
   "working": "件が作業中",
   "your browser": "ブラウザ",
+  "{age} ago": "{age} 前",
   "{count} more": "ほか {count} 件"
 }

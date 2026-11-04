@@ -361,8 +361,7 @@ fn rubric_judges_see_the_tail_of_a_long_response() {
     let v = block_on(InspectorClient::inspect_rubric(
         &text,
         "flag overrides",
-        "judge",
-        1_500,
+        &cfg(FirewallPolicy::Block),
         &judge,
     ));
     assert!(v.flagged);
@@ -371,8 +370,7 @@ fn rubric_judges_see_the_tail_of_a_long_response() {
     let v = block_on(InspectorClient::inspect_rubric(
         &text,
         "flag overrides",
-        "judge",
-        1_500,
+        &cfg(FirewallPolicy::Block),
         &silent,
     ));
     assert!(
@@ -394,8 +392,7 @@ fn a_rubric_verdict_over_a_partial_view_is_not_available() {
     let v = block_on(InspectorClient::inspect_rubric(
         &text,
         "flag slurs",
-        "judge",
-        1_500,
+        &cfg(FirewallPolicy::Block),
         &judge,
     ));
     assert!(!v.flagged && !v.available);

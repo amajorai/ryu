@@ -26,9 +26,21 @@ pub struct VersionStore {
 /// Serialize the whole cycle so multiple engines can be installed side by side.
 static VERSIONS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// `versions.json`, or the test-scoped copy when this thread is pinned (see
+/// [`crate::sidecar::active_engine::test_state`]).
+fn store_path() -> std::path::PathBuf {
+    #[cfg(test)]
+    if let Some(path) =
+        crate::sidecar::active_engine::test_state::pinned_state_path("versions.json")
+    {
+        return path;
+    }
+    versions_path()
+}
+
 impl VersionStore {
     pub fn load() -> Self {
-        let path = versions_path();
+        let path = store_path();
         std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -36,7 +48,7 @@ impl VersionStore {
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = versions_path();
+        let path = store_path();
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }

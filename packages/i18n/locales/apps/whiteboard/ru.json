@@ -1005,7 +1005,7 @@
   "research": "исследование",
   "ripe": "созрело",
   "routing": "маршрутизация",
-  "running": "с моделью",
+  "running": "выполняется",
   "ryu": "ryu",
   "seeded": "засеяно",
   "shop": "магазин",
@@ -1040,6 +1040,7 @@
   "with:": "на:",
   "working": "работают",
   "your browser": "браузере",
+  "{age} ago": "{age} назад",
   "{count} more": "Ещё {count}",
   "← All provider lanes": "← Все линии провайдеров"
 }

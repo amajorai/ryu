@@ -488,6 +488,7 @@
   "Read the docs": "قراءة الوثائق",
   "Reason": "السبب",
   "Receive signed event notifications for received, sent, delivery, bounce, complaint, rejection, and open events.": "تلقَّ إشعارات موقّعة لأحداث الاستلام والإرسال والتسليم والارتداد والشكوى والرفض والفتح.",
+  "Received": "تاريخ الاستلام",
   "Recent": "الأخيرة",
   "Red": "أحمر",
   "Reference": "المرجع",
@@ -764,7 +765,7 @@
   "request": "الطلب",
   "research": "البحث",
   "routing": "توجيه",
-  "running": "يشغّل",
+  "running": "قيد التشغيل",
   "ryu": "ryu",
   "show": "إظهار",
   "shown": "معروضة",
@@ -792,6 +793,9 @@
   "with": "مع",
   "working": "قيد العمل",
   "your browser": "متصفحك",
+  "{age} ago": "منذ {age}",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, zero {لا توجد مرفقات جاهزة} one {مرفق واحد جاهز} two {مرفقان جاهزان} few {# مرفقات جاهزة} many {# مرفقًا جاهزًا} other {# مرفق جاهز}}",
-  "{count} more": "{count} أخرى"
+  "{count} more": "{count} أخرى",
+  "{recipients} · {status}": "{recipients} · {status}",
+  "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {مسودة} sending {جارٍ الإرسال} sent {تم الإرسال} failed {فشل} inbound {مستلَمة} outbound {صادرة} other {{value}}}"
 }

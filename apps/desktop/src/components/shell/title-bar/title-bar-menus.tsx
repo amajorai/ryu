@@ -89,7 +89,7 @@ export function TabStripContextMenuContent({
 				New tab
 			</ContextMenuItem>
 			<ContextMenuItem disabled={!hasClosedTabs} onClick={restoreTab}>
-				<HugeiconsIcon className="size-4" icon={ArrowTurnBackwardIcon} />
+				<DirectionalIcon className="size-4" icon={ArrowTurnBackwardIcon} />
 				Restore closed tab
 			</ContextMenuItem>
 			<ContextMenuSeparator />

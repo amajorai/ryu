@@ -1,5 +1,6 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { Plane, X } from "lucide-react";
@@ -16,6 +17,7 @@ import {
 	flightTimeline,
 	type TimelineStep,
 } from "./departures-model.ts";
+import { useInlineSign } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 /** How many of a gate's flights the booking panel lists. */
@@ -89,7 +91,7 @@ function TimelineRow({ last, step }: { last: boolean; step: TimelineStep }) {
 			{last ? null : (
 				<span
 					aria-hidden="true"
-					className="absolute top-3 bottom-0 left-[3.5px] w-px bg-border"
+					className="absolute start-[3.5px] top-3 bottom-0 w-px bg-border"
 				/>
 			)}
 			<span
@@ -150,6 +152,7 @@ function FlightCard({
 }) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	const agent = flight.gateAgentId
 		? snapshot.agents.find((candidate) => candidate.id === flight.gateAgentId)
 		: undefined;
@@ -169,18 +172,23 @@ function FlightCard({
 				<div aria-hidden="true" className="relative mt-5 h-7 min-w-12 flex-1">
 					<span className="absolute inset-x-0 top-1/2 border-border border-t border-dashed" />
 					<span
-						className="absolute top-1/2 left-0 h-px bg-foreground/60"
+						className="absolute start-0 top-1/2 h-px bg-foreground/60"
 						style={{ width: `${position * 100}%` }}
 					/>
 					<motion.span
-						animate={{ left: `${position * 100}%` }}
+						animate={{
+							left: `${(inlineSign === 1 ? position : 1 - position) * 100}%`,
+						}}
 						className="absolute top-1/2 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-background"
 						initial={false}
 						transition={reduceMotion ? { duration: 0 } : { duration: 0.4 }}
 					>
 						<Plane
 							className={cn(
-								"size-4 rotate-45 text-foreground",
+								// The glyph's nose points up-right; turn it toward the
+								// destination, which is the inline end in either direction.
+								"size-4 rotate-45 text-foreground rtl:-rotate-45",
+								DIRECTIONAL_ICON_CLASS,
 								flight.status === "delayed" && "text-status-destructive"
 							)}
 							strokeWidth={1.75}
@@ -318,6 +326,7 @@ export function DeparturesPanel({
 }) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	const fieldRef = useRef<HTMLTextAreaElement>(null);
 	useEffect(() => {
 		if (booking) {
@@ -345,7 +354,7 @@ export function DeparturesPanel({
 				PANEL_LAMPS
 			)}
 			data-testid="departures-panel"
-			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 16 * inlineSign }}
 			transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
 		>
 			{/*

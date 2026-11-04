@@ -40,3 +40,15 @@ test("keeps every payment family on the shared receipt surface", () => {
 		expect(html).toContain("paid");
 	}
 });
+
+test("an unknown currency code still prints the amount in the reader's locale", async () => {
+	const { I18nProvider } = await import("@ryu/i18n/react");
+	const html = renderToStaticMarkup(
+		<I18nProvider initialLocale="de" initialPackId={null}>
+			<PaymentSuccessReceipt amount={1234.5} currency="x1" kind="payment" />
+		</I18nProvider>
+	);
+
+	expect(html).toContain("X1 1.234,50");
+	expect(html).not.toContain("1234.50");
+});

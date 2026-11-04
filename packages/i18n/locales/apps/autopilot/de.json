@@ -797,7 +797,7 @@
   "records": "Datensätze",
   "request": "Anfrage",
   "research": "Recherche",
-  "running": "mit",
+  "running": "läuft",
   "ryu": "ryu",
   "show": "anzeigen",
   "shown": "angezeigt",
@@ -824,5 +824,6 @@
   "with:": "durch:",
   "working": "arbeiten",
   "your browser": "dem Browser",
+  "{age} ago": "vor {age}",
   "{count} more": "{count} weitere"
 }

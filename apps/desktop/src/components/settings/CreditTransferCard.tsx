@@ -30,7 +30,6 @@ import {
 	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
-import { MICRO_USD_PER_DOLLAR } from "@/src/lib/api/credits.ts";
 import {
 	fetchTransferable,
 	getOrgSessionToken,
@@ -44,6 +43,10 @@ import {
 	subscribeTransferAuthority,
 	TRANSFERABLE_KEY,
 } from "./CreditTransferCard-helpers.ts";
+import {
+	formatMoneyPlaceholder,
+	readTopupInput,
+} from "./credit-transfer-topup.ts";
 
 /**
  * Move credits from one workspace to another.
@@ -170,9 +173,8 @@ function ScopedCreditTransferCard({
 
 	const grants = data?.source?.grants ?? [];
 	const topupAvailable = data?.source?.topupMicroUsd ?? 0;
-	const topupMicroUsd = Math.round(
-		Math.max(0, Number.parseFloat(topupDollars) || 0) * MICRO_USD_PER_DOLLAR
-	);
+	const { invalid: topupInvalid, microUsd: topupMicroUsd } =
+		readTopupInput(topupDollars);
 	const selectedMicroUsd = grants
 		.filter((grant) => selectedGrants.has(grant.id))
 		.reduce((sum, grant) => sum + grant.remainingMicroUsd, 0);
@@ -426,15 +428,17 @@ function ScopedCreditTransferCard({
 									id="transfer-topup"
 									inputMode="decimal"
 									onChange={(event) => setTopupDollars(event.target.value)}
-									placeholder="0.00"
+									placeholder={formatMoneyPlaceholder()}
 									value={topupDollars}
 								/>
 							</div>
 						}
 						description={
-							overdrawn ? (
+							topupInvalid || overdrawn ? (
 								<span className="text-status-destructive">
-									That is more than this workspace holds.
+									{topupInvalid
+										? tl("Enter a valid amount.")
+										: tl("That is more than this workspace holds.")}
 								</span>
 							) : undefined
 						}
@@ -454,6 +458,7 @@ function ScopedCreditTransferCard({
 								disabled={
 									checkingAuthority ||
 									nothingChosen ||
+									topupInvalid ||
 									overdrawn ||
 									!(destOrgId && resolvedSource)
 								}

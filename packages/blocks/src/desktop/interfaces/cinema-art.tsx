@@ -1,3 +1,4 @@
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { type CSSProperties, memo } from "react";
 import type { CinemaArtSpec } from "./cinema-model.ts";
@@ -33,7 +34,8 @@ export function cinemaWallLines(text: string): string[] {
 }
 
 /**
- * The billboard's art: the title set as a wall of heavy type, flush right
+ * The billboard's art: the title set as a wall of heavy type, flush against
+ * the inline end (the right, or the left under RTL, opposite the shaded info)
  * and cropped, alternating solid and outlined lines like a one-sheet.
  */
 function TypeWall({ spec, text }: { spec: CinemaArtSpec; text: string }) {
@@ -43,7 +45,7 @@ function TypeWall({ spec, text }: { spec: CinemaArtSpec; text: string }) {
 	return (
 		<span
 			className="absolute flex flex-col items-end font-black uppercase leading-[0.86] tracking-[-0.02em]"
-			style={{ fontSize, right: "-1cqw", top: "6cqh" }}
+			style={{ fontSize, insetInlineEnd: "-1cqw", top: "6cqh" }}
 		>
 			{lines.map((line, index) => (
 				<span
@@ -75,14 +77,15 @@ function TypeWall({ spec, text }: { spec: CinemaArtSpec; text: string }) {
  */
 const MONOGRAM: Record<CinemaFrame, CSSProperties> = {
 	card: { fontSize: "150cqh", right: "-6cqw", top: "-22cqh" },
-	hero: { bottom: "-30cqh", fontSize: "118cqh", right: "5cqw" },
+	// The hero's follows the inline end, clear of the start-shaded title.
+	hero: { bottom: "-30cqh", fontSize: "118cqh", insetInlineEnd: "5cqw" },
 	poster: { bottom: "-22cqh", fontSize: "125cqw", right: "-14cqw" },
 };
 
-/** Which edge each frame shades for its title. */
-const SHADE: Record<CinemaFrame, "bottom" | "left" | "top"> = {
+/** Which edge each frame shades for its title (the hero's follows the title to the inline start). */
+const SHADE: Record<CinemaFrame, "bottom" | "start" | "top"> = {
 	card: "bottom",
-	hero: "left",
+	hero: "start",
 	poster: "top",
 };
 
@@ -105,6 +108,7 @@ export const CinemaArt = memo(function CinemaArt({
 	/** The billboard sets this text (the title) as its type wall. */
 	text?: string;
 }) {
+	const reading = useDirection();
 	const wall = frame === "hero" && text ? text : null;
 	// Cards set their title over the art, so their monogram stays in the back.
 	const quiet = frame !== "hero";
@@ -144,7 +148,7 @@ export const CinemaArt = memo(function CinemaArt({
 			</span>
 			<span
 				className="absolute inset-0"
-				style={{ background: cinemaShade(SHADE[frame]) }}
+				style={{ background: cinemaShade(SHADE[frame], reading) }}
 			/>
 		</span>
 	);

@@ -3,6 +3,24 @@ use super::super::export::{export_inner, inspect_inner};
 use super::super::resume::{resume_inner, set_continued_inner};
 use super::*;
 
+/// The temp directory, canonical (so macOS's `/private/tmp` link is resolved)
+/// but, through the same [`canonical`] the resume path uses, without the `\\?\`
+/// verbatim prefix `canonicalize` adds on Windows. A thread folder is stored the
+/// way the desktop's folder picker reports it; `set_run_metadata` collapses a
+/// leading `\\` like any doubled separator, so a verbatim folder came back as
+/// `\?\C:\…` and the thread had no folder to hand off.
+fn canonical_base(temp: &tempfile::TempDir) -> PathBuf {
+    canonical(temp.path()).unwrap()
+}
+
+/// A file the resumed worktree checked out, with line endings as committed.
+/// The destination clone is Core's own and inherits the host's Git config, so a
+/// host `core.autocrlf=true` (Git for Windows' system default) checks the `\n`
+/// files out as `\r\n`; the handoff carried the right content either way.
+fn checked_out(path: &FsPath) -> String {
+    std::fs::read_to_string(path).unwrap().replace("\r\n", "\n")
+}
+
 /// A source repository with no network remote, one local commit, a tracked
 /// change and an untracked file.
 fn source_repo(base: &FsPath) -> PathBuf {
@@ -68,7 +86,7 @@ async fn relay(
 async fn handoff_round_trip_is_idempotent_and_stamps_the_destination() {
     crate::crypto_host::install();
     let temp = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(temp.path()).unwrap();
+    let base = canonical_base(&temp);
     let source_state = crate::server::isolated_plugin_hook_test_state(&base.join("s"));
     let destination_state = crate::server::isolated_plugin_hook_test_state(&base.join("d"));
     let source_roots = roots(&base.join("source"));
@@ -190,14 +208,8 @@ async fn handoff_round_trip_is_idempotent_and_stamps_the_destination() {
     assert_eq!(first.warnings, vec!["workspace-untrusted".to_owned()]);
     assert!(first.branch.starts_with("handoff/"));
     let worktree = PathBuf::from(&first.worktree_path);
-    assert_eq!(
-        std::fs::read_to_string(worktree.join("README.md")).unwrap(),
-        "one\ntwo\n"
-    );
-    assert_eq!(
-        std::fs::read_to_string(worktree.join("notes.txt")).unwrap(),
-        "carry me\n"
-    );
+    assert_eq!(checked_out(&worktree.join("README.md")), "one\ntwo\n");
+    assert_eq!(checked_out(&worktree.join("notes.txt")), "carry me\n");
     assert!(!worktree.join(".env").exists());
     assert!(handoff::is_handoff_worktree(&worktree));
 
@@ -245,7 +257,7 @@ async fn handoff_round_trip_is_idempotent_and_stamps_the_destination() {
 async fn access_is_enforced_and_running_turns_are_refused() {
     crate::crypto_host::install();
     let temp = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(temp.path()).unwrap();
+    let base = canonical_base(&temp);
     let state = crate::server::isolated_plugin_hook_test_state(&base.join("s"));
     let roots = roots(&base);
     let source = source_repo(&base);
@@ -364,7 +376,7 @@ async fn body_bytes(response: Response) -> Vec<u8> {
 async fn staged_blobs_are_served_by_digest_only_to_their_exporter() {
     crate::crypto_host::install();
     let temp = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(temp.path()).unwrap();
+    let base = canonical_base(&temp);
     let state = crate::server::isolated_plugin_hook_test_state(&base.join("s"));
     let roots = roots(&base);
     let source = source_repo(&base);

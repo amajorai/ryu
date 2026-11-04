@@ -109,12 +109,19 @@ export function cinemaMonogramLine(spec: CinemaArtSpec, quiet = false): string {
 	return toneAlpha(spec, 0.85, 0.12, quiet ? 0.12 : 0.22);
 }
 
-/** Shade that keeps the title legible where it sits on the art. */
-export function cinemaShade(direction: "bottom" | "left" | "top"): string {
+/**
+ * Shade that keeps the title legible where it sits on the art. `start` darkens
+ * the inline start: the left edge, or the right edge when `reading` is `rtl`.
+ */
+export function cinemaShade(
+	direction: "bottom" | "start" | "top",
+	reading: "ltr" | "rtl" = "ltr"
+): string {
 	const deep = "oklch(0.12 0.003 286 / 0.88)";
 	const clear = "oklch(0.12 0.003 286 / 0)";
-	if (direction === "left") {
-		return `linear-gradient(90deg, ${deep} 0%, oklch(0.12 0.003 286 / 0.55) 40%, ${clear} 72%)`;
+	if (direction === "start") {
+		const angle = reading === "rtl" ? "270deg" : "90deg";
+		return `linear-gradient(${angle}, ${deep} 0%, oklch(0.12 0.003 286 / 0.55) 40%, ${clear} 72%)`;
 	}
 	if (direction === "top") {
 		return `linear-gradient(180deg, ${deep} 0%, ${clear} 55%)`;

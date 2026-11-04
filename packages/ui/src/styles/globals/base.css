@@ -39,6 +39,15 @@
 	text-transform: none;
 }
 
+/* Sileo's bundled description rule pins text-align: left, so a right-to-left
+   toast body sat flush to the wrong edge under its right-aligned title. Align
+   to the start edge of the reading direction instead. Sileo injects its rule
+   at runtime (later in the cascade, specificity 0,1,0), so this override needs
+   the extra toaster-slot attribute to win. */
+[data-slot="toaster"] [data-sileo-description] {
+	text-align: start;
+}
+
 /* The shared toaster sits above z-50 overlays so a dialog's backdrop does not
    dim the error it just raised. While a modal or popup is open, though, a toast
    must not take taps meant for that surface (a bottom-drawer footer, a

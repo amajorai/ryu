@@ -7,10 +7,7 @@ import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEffect, useState } from "react";
-import {
-	formatValue,
-	recordTitle,
-} from "@/src/components/panels/crm/fields.tsx";
+import { recordTitle } from "@/src/components/panels/crm/fields.tsx";
 import type {
 	Activity,
 	CrmClient,
@@ -18,6 +15,7 @@ import type {
 	Field,
 } from "@/src/lib/api/crm.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
+import { fieldChangeLine } from "./field-change-line.ts";
 
 /** One timeline row. Audit entries render as a compact sentence with no controls;
  *  authored entries get their body and, for tasks, a completion checkbox. */
@@ -46,13 +44,7 @@ export function TimelineEntry({
 			<li className="flex items-baseline gap-2 text-muted-foreground text-xs">
 				<span className="shrink-0 tabular-nums opacity-70">{stamp}</span>
 				<span>
-					{tl("{field} changed", { field: field?.name ?? tl("A field") })}
-					{activity.from_value !== undefined && field
-						? ` ${tl("from {value}", { value: formatValue(field, activity.from_value) })}`
-						: ""}
-					{activity.to_value !== undefined && field
-						? ` ${tl("to {value}", { value: formatValue(field, activity.to_value) })}`
-						: ""}
+					{fieldChangeLine(tl, activity, field)}
 					{activity.author ? ` · ${activity.author}` : ""}
 				</span>
 			</li>

@@ -117,6 +117,8 @@ pub async fn route_workflow_chat_stream(
     let workflow_name = workflow.name.clone();
     let conversation_id = req.conversation_id.clone();
     let persist = req.persist;
+    // Core's own sentences in this turn are written once, in the owner's language.
+    let locale = crate::i18n::locale::node_locale().await;
 
     let stream = async_stream::stream! {
         yield Ok::<_, std::convert::Infallible>(ui_start());
@@ -171,12 +173,11 @@ pub async fn route_workflow_chat_stream(
 
                 match run.status {
                     RunStatus::Completed => {
-                        reply_text = workflow_output_text(&run);
+                        reply_text = workflow_output_text(&run, locale);
                         terminal = true;
                     }
                     RunStatus::Failed => {
-                        let detail = run.error.clone().unwrap_or_else(|| "unknown error".into());
-                        reply_text = format!("_Workflow failed: {detail}_");
+                        reply_text = workflow_failed_text(locale, &run_id, run.error.as_deref());
                         terminal = true;
                     }
                     RunStatus::AwaitingInput => {
@@ -184,20 +185,11 @@ pub async fn route_workflow_chat_stream(
                             .awaiting_node
                             .as_deref()
                             .and_then(|id| workflow_awaiting_prompt(&workflow, id));
-                        reply_text = match prompt {
-                            Some(p) if !p.trim().is_empty() => {
-                                format!("**Workflow paused — waiting for input.**\n\n{p}")
-                            }
-                            _ => "**Workflow paused — waiting for input.**".to_string(),
-                        };
+                        reply_text = workflow_paused_input_text(locale, prompt.as_deref());
                         terminal = true;
                     }
                     RunStatus::Waiting => {
-                        let resume_at = run.resume_at.as_deref().unwrap_or("soon");
-                        reply_text = format!(
-                            "**Workflow paused — a provider limit was reached.** \
-                             It resumes on its own at {resume_at}."
-                        );
+                        reply_text = workflow_paused_limit_text(locale, run.resume_at.as_deref());
                         terminal = true;
                     }
                     RunStatus::Running => {}
@@ -209,7 +201,7 @@ pub async fn route_workflow_chat_stream(
                 // oneshot reports the latter; otherwise keep polling.
                 match outcome_rx.try_recv() {
                     Ok(Err(e)) => {
-                        reply_text = format!("_Workflow failed to start: {e}_");
+                        reply_text = workflow_start_failed_text(locale, &workflow_id, &e);
                         terminal = true;
                     }
                     Ok(Ok(_)) => {
@@ -221,7 +213,7 @@ pub async fn route_workflow_chat_stream(
                     Err(tokio::sync::oneshot::error::TryRecvError::Closed)
                         if !outcome_received =>
                     {
-                        reply_text = "_Workflow failed to start — the executor task terminated unexpectedly._".to_string();
+                        reply_text = workflow_executor_terminated_text(locale);
                         terminal = true;
                     }
                     Err(_) => {}
@@ -322,9 +314,9 @@ fn workflow_awaiting_prompt(
 /// The run's output rendered as the assistant reply: the single output value
 /// verbatim, a JSON block for a multi-key output map, or a quiet note when the
 /// workflow produced no output at all.
-fn workflow_output_text(run: &crate::workflow::store::WorkflowRun) -> String {
+fn workflow_output_text(run: &crate::workflow::store::WorkflowRun, locale: &str) -> String {
     if run.output.is_empty() {
-        return "_(Workflow completed with no output.)_".to_string();
+        return workflow_no_output_text(locale);
     }
     if run.output.len() == 1 {
         return run.output.values().next().cloned().unwrap_or_default();

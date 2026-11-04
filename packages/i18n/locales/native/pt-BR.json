@@ -1,6 +1,5 @@
 {
   "(authenticated)": "(autenticado)",
-  "1 install": "1 instalação",
   "24/7 on-device speech capture into your meeting memory.": "Captura de voz no dispositivo 24/7 para a sua memória de reuniões.",
   "A Twilio number receives forwarded calls. Purchasing one bills your Twilio account.": "Um número Twilio recebe chamadas encaminhadas. A compra é cobrada na sua conta Twilio.",
   "A line can list at most {maxAllowedCallers} trusted callers.": "Uma linha pode listar no máximo {maxAllowedCallers} chamadores confiáveis.",
@@ -592,7 +591,6 @@
   "No documents yet. Tap New to create a page.": "Nenhum documento ainda. Toque em Novo para criar uma página.",
   "No groups yet": "Nenhum grupo ainda",
   "No groups yet. Create one from the desktop app.": "Nenhum grupo ainda. Crie um pelo app para desktop.",
-  "No installs": "Nenhuma instalação",
   "No matches": "Nenhuma correspondência",
   "No meetings recorded yet.": "Nenhuma reunião gravada ainda.",
   "No meetings yet": "Nenhuma reunião ainda",
@@ -1150,7 +1148,6 @@
   "{count, plural, one {# match found} other {# matches found}}": "{count, plural, one {# correspondência encontrada} other {# correspondências encontradas}}",
   "{count, plural, one {# member} other {# members}} · {coordination}": "{count, plural, one {# membro} other {# membros}} · {coordination}",
   "{count, plural, one {# runnable} other {# runnables}}": "{count, plural, one {# executável} other {# executáveis}}",
-  "{count} installs": "{count} instalações",
   "{deviceLabel}. Add your Wi-Fi so the device can connect directly at home, or skip it to relay through this phone.": "{deviceLabel}. Adicione seu Wi-Fi para que o dispositivo se conecte diretamente em casa, ou pule esta etapa para retransmitir por este celular.",
   "{minutes} min": "{minutes} min",
   "{modelName} · mobile tools limited": "{modelName} · ferramentas móveis limitadas",

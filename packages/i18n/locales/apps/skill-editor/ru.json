@@ -732,7 +732,7 @@
   "request": "запрос",
   "research": "исследование",
   "routing": "маршрутизация",
-  "running": "с моделью",
+  "running": "выполняется",
   "ryu": "ryu",
   "show": "показать",
   "shown": "показано",
@@ -758,6 +758,7 @@
   "with": "с участием",
   "working": "работают",
   "your browser": "браузере",
+  "{age} ago": "{age} назад",
   "{ariaLabel} expanded": "{ariaLabel} развернуто",
   "{count} more": "Ещё {count}",
   "{label} tools": "Инструменты {label}"

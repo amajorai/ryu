@@ -424,6 +424,7 @@
   "No run selected. Start one from Configure, or pick one in History.": "Kein Lauf ausgewählt. Unter „Konfigurieren“ einen starten oder im Verlauf einen auswählen.",
   "No runs yet.": "Noch keine Läufe.",
   "No trained adapters yet.": "Noch keine trainierten Adapter.",
+  "No.": "Nr.",
   "None": "Keine",
   "Normal": "Normal",
   "Note": "Notiz",
@@ -850,7 +851,7 @@
   "rendered dataset exceeds the {maxRenderedTotalChars} character limit": "gerenderter Datensatz überschreitet das Limit von {maxRenderedTotalChars} Zeichen",
   "request": "Anfrage",
   "requests": "Anfragen",
-  "running": "mit",
+  "running": "läuft",
   "ryu": "ryu",
   "show": "anzeigen",
   "shown": "angezeigt",
@@ -875,5 +876,6 @@
   "with": "mit",
   "working": "arbeiten",
   "your browser": "dem Browser",
+  "{age} ago": "vor {age}",
   "{count} more": "{count} weitere"
 }

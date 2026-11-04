@@ -83,7 +83,7 @@
   "Your rooms": "Vos salons",
   "assistant output is too long": "la réponse de l’assistant est trop longue",
   "e.g. Jiawei…": "p. ex. Jiawei…",
-  "ready": "prêts",
+  "ready": "prêt",
   "{modelId} · {count, plural, one {# participant} other {# participants}}": "{modelId} · {count, plural, one {# participant} other {# participants}}",
   "{onlineCount} online · {count, plural, one {# participant} other {# participants}}": "{onlineCount} en ligne · {count, plural, one {# participant} other {# participants}}"
 }

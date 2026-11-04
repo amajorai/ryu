@@ -41,6 +41,61 @@ async fn operation_idempotency_is_scoped_and_conflicts_fail_closed() {
     assert!(recovered.error.unwrap().contains("interrupted"));
 }
 
+#[tokio::test]
+async fn an_app_backup_retry_finds_its_operation_across_key_order_and_the_upgrade() {
+    let directory = tempfile::tempdir().unwrap();
+    let service = BackupService::open(directory.path().to_owned()).unwrap();
+    let app = BackupScope::App {
+        app_id: "@ryu/example".into(),
+        namespace: "default".into(),
+        tenant: "alice".into(),
+    };
+    let original: Value = serde_json::from_str(r#"{"title":"a","body":"b"}"#).unwrap();
+    let reordered: Value = serde_json::from_str(r#"{"body":"b","title":"a"}"#).unwrap();
+    let changed: Value = serde_json::from_str(r#"{"title":"a","body":"c"}"#).unwrap();
+    let digest = |data: &Value| RequestDigest::for_backup(&app, Some(data)).unwrap();
+    let (first, created) = service
+        .begin("dest", &app, "backup", "app-key", digest(&original))
+        .await
+        .unwrap();
+    assert!(created);
+    let (retry, created) = service
+        .begin("dest", &app, "backup", "app-key", digest(&reordered))
+        .await
+        .unwrap();
+    assert!(!created);
+    assert_eq!(retry.id, first.id);
+    assert!(service
+        .begin("dest", &app, "backup", "app-key", digest(&changed))
+        .await
+        .is_err());
+
+    // An operation queued before the canonical digest recorded the digest of
+    // the insertion-order bytes; the same request still finds it.
+    let legacy = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(serde_json::to_vec(&app).unwrap());
+        hasher.update(serde_json::to_vec(&original).unwrap());
+        hex::encode(hasher.finalize())
+    };
+    let (recorded, created) = service
+        .begin("dest", &app, "backup", "old-key", legacy.into())
+        .await
+        .unwrap();
+    assert!(created);
+    let (retry, created) = service
+        .begin("dest", &app, "backup", "old-key", digest(&original))
+        .await
+        .unwrap();
+    assert!(!created);
+    assert_eq!(retry.id, recorded.id);
+    assert!(service
+        .begin("dest", &app, "backup", "old-key", digest(&changed))
+        .await
+        .is_err());
+}
+
 #[test]
 fn malformed_state_is_never_overwritten_with_empty_defaults() {
     let directory = tempfile::tempdir().unwrap();
@@ -64,7 +119,7 @@ fn backup_boundaries_exclude_identity_and_staging_but_preserve_source_history_an
         "secrets/memory.key",
         "state/fleet-identity.json",
     ] {
-        assert!(node_excluded(Path::new(value)), "{value}");
+        assert!(archive::node_excluded(Path::new(value)), "{value}");
     }
     for value in [
         "db/conversations.db",
@@ -76,7 +131,7 @@ fn backup_boundaries_exclude_identity_and_staging_but_preserve_source_history_an
         "state",
         "secrets",
     ] {
-        assert!(!node_excluded(Path::new(value)), "{value}");
+        assert!(!archive::node_excluded(Path::new(value)), "{value}");
     }
 }
 
@@ -92,7 +147,7 @@ fn retention_never_prunes_another_node_or_an_unknown_source() {
         sha256: "hash".into(),
         object_key: "key".into(),
     };
-    let candidates = retained_candidates(
+    let candidates = schedule::retained_candidates(
         vec![
             record("alice-node", "a"),
             record("bob-node", "b"),
@@ -102,7 +157,7 @@ fn retention_never_prunes_another_node_or_an_unknown_source() {
     );
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].id, "a");
-    assert!(retained_candidates(vec![record("", "legacy")], "").is_empty());
+    assert!(schedule::retained_candidates(vec![record("", "legacy")], "").is_empty());
 }
 
 #[test]
@@ -233,7 +288,7 @@ async fn queue_capacity_is_bounded_and_recent_operations_are_listed_first() {
                 &BackupScope::Node,
                 "backup",
                 &format!("pending-{index}"),
-                format!("hash-{index}"),
+                format!("hash-{index}").into(),
             )
             .await
             .unwrap();
@@ -256,21 +311,21 @@ async fn queue_capacity_is_bounded_and_recent_operations_are_listed_first() {
 fn staging_lives_in_the_data_dir_is_private_and_stale_jobs_are_swept() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
-    let stage = super::stage_dir(root, "ryu-backup-").unwrap();
-    assert!(stage.path().starts_with(super::staging_root(root)));
-    assert!(super::staging_root(root).starts_with(root.join("tmp")));
+    let stage = staging::stage_dir(root, "ryu-backup-").unwrap();
+    assert!(stage.path().starts_with(staging::staging_root(root)));
+    assert!(staging::staging_root(root).starts_with(root.join("tmp")));
     // Node snapshots skip the whole staging tree.
-    assert!(node_excluded(Path::new("tmp")));
+    assert!(archive::node_excluded(Path::new("tmp")));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        for dir in [super::staging_root(root), stage.path().to_path_buf()] {
+        for dir in [staging::staging_root(root), stage.path().to_path_buf()] {
             let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o700, "{}", dir.display());
         }
     }
     // The plaintext archive is anonymous: nothing can open it by name.
-    let mut scratch = super::plaintext_scratch(stage.path()).unwrap();
+    let mut scratch = staging::plaintext_scratch(stage.path()).unwrap();
     std::io::Write::write_all(&mut scratch, b"sk-plaintext-archive-bytes").unwrap();
     // Unix unlinks it, so writing it adds no named file.
     #[cfg(unix)]
@@ -298,7 +353,7 @@ fn staging_lives_in_the_data_dir_is_private_and_stale_jobs_are_swept() {
     std::mem::forget(stage);
     BackupService::open(root.to_path_buf()).unwrap();
     assert_eq!(
-        std::fs::read_dir(super::staging_root(root))
+        std::fs::read_dir(staging::staging_root(root))
             .unwrap()
             .count(),
         0
@@ -342,7 +397,7 @@ fn node_restore_installs_the_retired_keys_so_data_still_on_them_opens() {
         .seal("old row")
         .unwrap();
 
-    install_recovered_keys(root, &recovery, &recovery_key).unwrap();
+    restore::install_recovered_keys(root, &recovery, &recovery_key).unwrap();
 
     let read_key = |path: std::path::PathBuf| {
         ryu_crypto::custody::decode_key_file(&std::fs::read_to_string(path).unwrap()).unwrap()
@@ -388,7 +443,7 @@ fn node_restore_still_reads_recovery_files_with_only_the_master_key() {
             .unwrap(),
     });
     let dir = tempfile::tempdir().unwrap();
-    install_recovered_keys(dir.path(), &recovery, &recovery_key).unwrap();
+    restore::install_recovered_keys(dir.path(), &recovery, &recovery_key).unwrap();
     let text = std::fs::read_to_string(ryu_sidecar_runtime::layout::secret_path(
         dir.path(),
         "master.key",
@@ -398,5 +453,5 @@ fn node_restore_still_reads_recovery_files_with_only_the_master_key() {
         ryu_crypto::custody::decode_key_file(&text).unwrap(),
         current
     );
-    assert!(install_recovered_keys(dir.path(), &json!({}), &recovery_key).is_err());
+    assert!(restore::install_recovered_keys(dir.path(), &json!({}), &recovery_key).is_err());
 }

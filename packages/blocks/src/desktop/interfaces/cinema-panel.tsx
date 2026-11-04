@@ -10,6 +10,7 @@ import {
 	cinemaNames,
 	cinemaStatusText,
 } from "./cinema-model.ts";
+import { useInlineSign } from "./inline-direction.ts";
 
 export interface CinemaPanelProps {
 	headingRef: RefObject<HTMLHeadingElement | null>;
@@ -37,6 +38,7 @@ export function CinemaPanel({
 	title,
 	width,
 }: CinemaPanelProps) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const heading = title?.thread.title ?? "New thread";
 	const names = title ? cinemaNames(title.agents) : "";
@@ -51,7 +53,7 @@ export function CinemaPanel({
 					: "relative shrink-0 border-border border-s"
 			)}
 			data-testid="cinema-thread-panel"
-			initial={reduceMotion ? false : { opacity: 0, x: 24 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 24 * inlineSign }}
 			style={overlay ? undefined : { width }}
 			transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
 		>

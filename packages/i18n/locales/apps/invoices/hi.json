@@ -683,7 +683,7 @@
   "records": "रिकॉर्ड",
   "request": "अनुरोध",
   "routing": "रूटिंग",
-  "running": "पर चल रहा मॉडल",
+  "running": "चल रहा है",
   "ryu": "ryu",
   "shop": "दुकान",
   "show": "दिखाएँ",
@@ -708,6 +708,7 @@
   "with": "इनके साथ:",
   "working": "काम कर रहे हैं",
   "your browser": "आपके ब्राउज़र",
+  "{age} ago": "{age} पहले",
   "{count} more": "{count} और",
   "{currency} invoice totals": "{currency} इनवॉइस कुल"
 }

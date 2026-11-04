@@ -65,6 +65,43 @@ nsis:
   # Distinct from the portable exe (both are `.exe`) so they never collide in the
   # release. This is the interactive installer for users who install island standalone.
   artifactName: ryu-island-${os}-${arch}-setup.${ext}
+  # The wizard and uninstaller follow the Windows display language. Without this
+  # list electron-builder uses its bundled set, which has no Hindi, so a Hindi
+  # user got English while the desktop installer was in Hindi. This is that set
+  # plus hi_IN (stock NSIS ships the Hindi MUI file). Entries need the
+  # language_REGION form: a bare `hi` resolves to `hi_HI`, which has no LCID.
+  # electron-builder's own 26 messages (messages.yml, assistedMessages.yml)
+  # mostly fall back to English for hi_IN: upstream keys its one Hindi string
+  # as `hi` (-> hi_HI), and it has no assisted-page strings for hi, ar or it.
+  # electron-builder-languages.test.ts pins every official locale.
+  installerLanguages:
+    - en_US
+    - ar_SA
+    - de_DE
+    - es_ES
+    - fr_FR
+    - hi_IN
+    - it_IT
+    - ja_JP
+    - ko_KR
+    - pt_BR
+    - ru_RU
+    - zh_CN
+    - zh_TW
+    - nl_NL
+    - da_DK
+    - sv_SE
+    - nb_NO
+    - fi_FI
+    - pt_PT
+    - pl_PL
+    - uk_UA
+    - cs_CZ
+    - sk_SK
+    - hu_HU
+    - tr_TR
+    - th_TH
+    - vi_VN
 # macOS: the island is a menu-bar companion, so `LSUIElement: true` makes it an
 # accessory app (menu-bar tray + global hotkey, no Dock icon, no app menu).
 # NSMicrophoneUsageDescription is required for the renderer's getUserMedia voice

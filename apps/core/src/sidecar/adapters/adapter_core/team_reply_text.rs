@@ -138,24 +138,26 @@ pub async fn run_team_reply_text(
     // Resolve one member's reply, normalising empties/errors like the streaming
     // path. A nested item (not a closure) so it can be `await`ed in a loop.
     async fn member_reply(
+        locale: &str,
         mid: &str,
         msgs: Vec<UiMessage>,
         conv: Option<String>,
         deps: &TeamRunDeps,
     ) -> String {
-        match run_member_text(mid, msgs, conv, deps).await {
-            Ok(t) if !t.trim().is_empty() => t,
-            Ok(_) => "_(no response)_".to_owned(),
-            Err(e) => format!("_(error: {e})_"),
-        }
+        team_member_reply_text(locale, mid, run_member_text(mid, msgs, conv, deps).await)
     }
+
+    // Core's own placeholders and labels use the owner's language: the same
+    // locale the Gateway falls back to for a sender with no platform locale.
+    let locale = crate::i18n::locale::node_locale().await;
 
     let mut combined = String::new();
     match team.coordination {
         // Every member answers the same prompt independently.
         Coordination::Broadcast => {
             for (mid, mname) in &members {
-                let t = member_reply(mid, original_messages.clone(), conv.clone(), &deps).await;
+                let t =
+                    member_reply(locale, mid, original_messages.clone(), conv.clone(), &deps).await;
                 combined.push_str(&format!("**{mname}**\n\n{t}\n\n"));
             }
         }
@@ -171,7 +173,7 @@ pub async fn run_team_reply_text(
                     );
                     messages_with_preamble(&original_messages, &preamble)
                 };
-                let t = member_reply(mid, msgs, conv.clone(), &deps).await;
+                let t = member_reply(locale, mid, msgs, conv.clone(), &deps).await;
                 transcript.push_str(&format!("{mname}: {t}\n\n"));
                 combined.push_str(&format!("**{mname}**\n\n{t}\n\n"));
             }
@@ -180,7 +182,8 @@ pub async fn run_team_reply_text(
         Coordination::DebateSynthesis => {
             let mut round1 = String::new();
             for (mid, mname) in &members {
-                let t = member_reply(mid, original_messages.clone(), conv.clone(), &deps).await;
+                let t =
+                    member_reply(locale, mid, original_messages.clone(), conv.clone(), &deps).await;
                 round1.push_str(&format!("{mname}: {t}\n\n"));
                 combined.push_str(&format!("**{mname}**\n\n{t}\n\n"));
             }
@@ -193,12 +196,10 @@ pub async fn run_team_reply_text(
                 "You are the lead of a team. Your teammates gave these answers to the user's request:\n\n{round1}\nSynthesize them into one definitive, non-repetitive answer for the user."
             );
             let msgs = messages_with_preamble(&original_messages, &preamble);
-            let synth = match run_member_text(&lead_id, msgs, conv.clone(), &deps).await {
-                Ok(t) if !t.trim().is_empty() => t,
-                Ok(_) => "_(no synthesis)_".to_owned(),
-                Err(e) => format!("_(synthesis error: {e})_"),
-            };
-            combined.push_str(&format!("**{lead_name} (synthesis)**\n\n{synth}\n\n"));
+            let reply = run_member_text(&lead_id, msgs, conv.clone(), &deps).await;
+            let synth = team_synthesis_text(locale, &lead_id, reply);
+            let label = team_synthesis_label(locale, &lead_name);
+            combined.push_str(&format!("**{label}**\n\n{synth}\n\n"));
         }
         // A router picks the single best-suited member, then only it answers.
         Coordination::Router => {
@@ -225,8 +226,16 @@ pub async fn run_team_reply_text(
                 .find(|(id, _)| pick.contains(id.as_str()))
                 .cloned()
                 .unwrap_or_else(|| members[0].clone());
-            let t = member_reply(&chosen.0, original_messages.clone(), conv.clone(), &deps).await;
-            combined.push_str(&format!("**{} (routed)**\n\n{t}\n\n", chosen.1));
+            let t = member_reply(
+                locale,
+                &chosen.0,
+                original_messages.clone(),
+                conv.clone(),
+                &deps,
+            )
+            .await;
+            let label = team_routed_label(locale, &chosen.1);
+            combined.push_str(&format!("**{label}**\n\n{t}\n\n"));
         }
     }
 

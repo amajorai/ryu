@@ -1,5 +1,6 @@
 import { afterAll, afterEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { DirectionProvider } from "@ryu/ui/components/direction.tsx";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { nextTabIndex, tabIds } from "./tab-keys.ts";
@@ -58,6 +59,28 @@ test("tab keys wrap, jump to the ends and ignore cross-axis arrows", () => {
 		tab: "box-code-ts-tab",
 		panel: "box-code-ts-panel",
 	});
+});
+
+test("horizontal tab keys follow the reading direction under RTL", () => {
+	expect(nextTabIndex(0, "ArrowLeft", 3, "horizontal", "rtl")).toBe(1);
+	expect(nextTabIndex(0, "ArrowRight", 3, "horizontal", "rtl")).toBe(2);
+	expect(nextTabIndex(0, "ArrowLeft", 3, "both", "rtl")).toBe(1);
+	expect(nextTabIndex(0, "ArrowDown", 3, "both", "rtl")).toBe(1);
+	expect(nextTabIndex(0, "ArrowUp", 3, "vertical", "rtl")).toBe(2);
+	expect(nextTabIndex(0, "ArrowLeft", 3, "vertical", "rtl")).toBeNull();
+});
+
+test("code tabs move to the next tab with ArrowLeft under RTL", () => {
+	const view = mount(
+		<DirectionProvider direction="rtl">
+			<CodeTabs groupId="r" samples={SAMPLES} />
+		</DirectionProvider>
+	);
+	const tabA = view.querySelector("#r-a-tab") as HTMLElement;
+	const tabB = view.querySelector("#r-b-tab") as HTMLElement;
+	press(tabA, "ArrowLeft");
+	expect(tabB.getAttribute("aria-selected")).toBe("true");
+	expect(document.activeElement).toBe(tabB);
 });
 
 test("roving tabs: only the selected tab is focusable", () => {

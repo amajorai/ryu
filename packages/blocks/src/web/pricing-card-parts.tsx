@@ -18,6 +18,8 @@ import {
 import { cn } from "@ryu/ui/lib/utils";
 import { ArrowLeft, Coins } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef } from "react";
+import { pricingFormat } from "./data/standalone-pricing-locale.ts";
+import { currencyAffixes } from "./price-ticker-parts.ts";
 import styles from "./pricing.module.css";
 import {
 	useHelperTextSize,
@@ -72,12 +74,23 @@ export function PriceBlock({
 	const helperText = useHelperTextSize();
 	const seatTotal = perMonth * seats;
 	const seatAnnualTotal = annualTotal * seats;
+	const locale = useOptionalI18n()?.locale;
+	const { prefix, suffix: currencySuffix } = currencyAffixes(locale);
 	const priceAmount = (value: number, headline = false) =>
 		headline ? (
-			<NumberTicker prefix="$" value={Math.round(value)} variant="plan-price" />
+			<NumberTicker
+				prefix={prefix}
+				suffix={currencySuffix}
+				value={Math.round(value)}
+				variant="plan-price"
+			/>
 		) : (
 			<span className="font-heading tabular-nums">
-				<NumberTicker prefix="$" value={Math.round(value)} />
+				<NumberTicker
+					prefix={prefix}
+					suffix={currencySuffix}
+					value={Math.round(value)}
+				/>
 			</span>
 		);
 	// Each line is one whole message; its <amount> tag renders the animated
@@ -86,7 +99,7 @@ export function PriceBlock({
 		amount: () => priceAmount(value, headline),
 	});
 	const price = (value: number) => ({
-		price: `$${Math.round(value)}`,
+		price: pricingFormat(locale).price(Math.round(value)),
 		seats,
 	});
 	const suffix = (content: ReactNode) => (

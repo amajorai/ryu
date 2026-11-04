@@ -5,6 +5,8 @@ use serde_json::json;
 
 use super::node_org_id;
 
+mod reason;
+
 #[derive(serde::Deserialize)]
 pub(super) struct DataPathTarget {
     path: String,
@@ -57,7 +59,7 @@ pub(super) async fn validate_data_path(Json(req): Json<DataPathTarget>) -> impl 
     })
     .await;
     match res {
-        Ok(v) => Json(v).into_response(),
+        Ok(v) => Json(reason::validate_body(&v)).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "ok": false, "error": e.to_string() })),
@@ -84,7 +86,7 @@ pub(super) async fn switch_data_path(Json(req): Json<DataPathTarget>) -> impl In
     if !v.ok {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "ok": false, "error": v.error })),
+            Json(reason::switch_refusal_body(&v)),
         )
             .into_response();
     }
@@ -147,7 +149,8 @@ pub(super) async fn export_data_path(
             StatusCode::FORBIDDEN,
             Json(json!({
                 "ok": false,
-                "error": "forbidden: the data-folder export dumps every user's data and is disabled on a shared (org-bound) node"
+                "error": "forbidden: the data-folder export dumps every user's data and is disabled on a shared (org-bound) node",
+                "code": reason::EXPORT_SHARED_NODE_CODE
             })),
         )
             .into_response();
@@ -162,14 +165,12 @@ pub(super) async fn export_data_path(
         Ok(Ok(bytes)) => {
             Json(json!({ "ok": true, "bytes": bytes, "encrypted": true })).into_response()
         }
-        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidInput => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "ok": false, "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidInput => {
+            (StatusCode::BAD_REQUEST, Json(reason::export_error_body(&e))).into_response()
+        }
         Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "ok": false, "error": e.to_string() })),
+            Json(reason::export_error_body(&e)),
         )
             .into_response(),
         Err(e) => (

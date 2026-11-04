@@ -29,6 +29,7 @@ import type {
 	MarketplaceCardData,
 	MarketplaceVerification,
 } from "./marketplace-types.ts";
+import { formatRatingAverage } from "./rating-average.ts";
 
 const noop = () => {
 	// Default no-op handler for the presentational layer.
@@ -136,9 +137,9 @@ export function MarketplaceCardRating({
 				icon={StarIcon}
 			/>
 			<span className="font-medium text-foreground tabular-nums">
-				{(Math.round((average ?? 0) * 10) / 10).toFixed(1)}
+				{formatRatingAverage(average)}
 			</span>
-			<span className="tabular-nums">({count})</span>
+			<span className="tabular-nums">({formatCount(count) ?? "—"})</span>
 		</span>
 	);
 }

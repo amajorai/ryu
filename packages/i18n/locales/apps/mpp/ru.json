@@ -30,6 +30,7 @@
   "Cross-origin payment redirects are blocked.": "Перенаправления платежей между источниками заблокированы.",
   "Daily spend cap": "Дневной лимит расходов",
   "Endpoint returned HTTP {status}; no payment was required.": "Эндпоинт вернул HTTP {status}; оплата не потребовалась.",
+  "Enter an amount, such as {example}.": "Введите сумму, например {example}.",
   "Every limit is enforced again immediately before signing.": "Каждый лимит повторно применяется непосредственно перед подписанием.",
   "Expires": "Истекает",
   "Explicit approval is required.": "Требуется явное подтверждение.",

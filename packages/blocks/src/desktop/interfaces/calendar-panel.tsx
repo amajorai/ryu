@@ -17,6 +17,7 @@ import {
 	threadGroupName,
 	threadTitle,
 } from "./calendar-parts.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
@@ -54,6 +55,7 @@ export function CalendarThreadPanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread ? threadTitle(thread) : "New thread";
@@ -77,8 +79,8 @@ export function CalendarThreadPanel({
 			)}
 			data-calendar-panel=""
 			data-testid="calendar-thread-panel"
-			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 24 }}
-			initial={reduceMotion ? false : { opacity: 0, x: 24 }}
+			exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 24 * inlineSign }}
+			initial={reduceMotion ? false : { opacity: 0, x: 24 * inlineSign }}
 			transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
 		>
 			<header className="flex h-14 shrink-0 items-center gap-1 border-border border-b ps-4 pe-3">

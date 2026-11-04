@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import type { Tab } from "@/src/contexts/TabsContext.tsx";
 import type { ArtifactView } from "@/src/lib/live-artifacts.ts";
 import {
@@ -44,7 +45,9 @@ export async function moveTabToWindow(
 	});
 	if (moved && JSON.stringify(snapshotTab(tab)) !== snapshot) {
 		throw new TabTransferBlockedError(
-			"This tab changed while its new window was opening. Your latest edits are still in the original window."
+			tl(
+				"This tab changed while its new window was opening. Your latest edits are still in the original window."
+			)
 		);
 	}
 	return moved;

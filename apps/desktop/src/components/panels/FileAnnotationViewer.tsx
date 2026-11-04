@@ -7,6 +7,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { LineAnnotation, SelectedLineRange } from "@pierre/diffs";
 import { File } from "@pierre/diffs/react";
+import { usePierreShadowLocalizer } from "@ryu/blocks/desktop/agent-elements/use-pierre-shadow-localizer.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
@@ -29,13 +30,17 @@ import {
 	desktopCommandRejectionText,
 } from "@/src/lib/desktop-command-error-messages.ts";
 import {
+	fileAnnotationLineLabel,
+	fileAnnotationNoteTitle,
+	fileAnnotationRemoveLabel,
+} from "@/src/lib/file-annotation-labels.ts";
+import {
 	countLines,
 	decodeViewerText,
 	excerptLines,
 	type FileAnnotationNote,
 	type FileLineRange,
 	formatFileAnnotationsForChat,
-	formatLineLabel,
 	normalizeLineRange,
 	requestChatComposerInsert,
 } from "@/src/lib/file-annotations.ts";
@@ -77,6 +82,7 @@ export function FileAnnotationViewer({
 	path: string;
 }) {
 	const tl = useLiteralMessages();
+	const localizeFileCopy = usePierreShadowLocalizer();
 	const [load, setLoad] = useState<LoadState>({ status: "loading" });
 	const [selection, setSelection] = useState<SelectedLineRange | null>(null);
 	const [draft, setDraft] = useState("");
@@ -307,7 +313,7 @@ export function FileAnnotationViewer({
 	}
 
 	return (
-		<div className="flex h-full min-h-0 flex-col">
+		<div className="flex h-full min-h-0 flex-col" ref={localizeFileCopy}>
 			<div className="flex h-10 shrink-0 items-center gap-1 border-border border-b px-2">
 				<Button
 					aria-label="Back to files"
@@ -382,17 +388,15 @@ function DraftNoteCard({
 		textareaRef.current?.focus();
 	}, []);
 	const tl = useLiteralMessages();
-	const label = formatLineLabel(range);
+	const label = fileAnnotationNoteTitle(tl, range);
 	return (
 		<div className="my-1 flex max-w-[42rem] flex-col gap-1.5 rounded-lg border border-primary/30 bg-primary/5 p-2 font-sans text-xs">
 			<div className="flex items-center gap-1.5 text-muted-foreground">
 				<HugeiconsIcon className="size-3.5" icon={Message01Icon} />
-				<span className="font-medium text-foreground">
-					{tl("Note on {label}", { label })}
-				</span>
+				<span className="font-medium text-foreground">{label}</span>
 			</div>
 			<Textarea
-				aria-label={tl("Note on {label}", { label })}
+				aria-label={label}
 				onChange={(event) => onDraftChange(event.target.value)}
 				onKeyDown={(event) => {
 					if (event.key === "Escape") {
@@ -451,11 +455,11 @@ function SavedNoteCard({
 			<div className="flex items-center gap-1.5 text-status-warning">
 				<HugeiconsIcon className="size-3.5" icon={Message01Icon} />
 				<span className="font-medium">Note</span>
-				<span className="text-muted-foreground">{formatLineLabel(note)}</span>
+				<span className="text-muted-foreground">
+					{fileAnnotationLineLabel(tl, note)}
+				</span>
 				<button
-					aria-label={tl("Remove note on {lineLabel}", {
-						lineLabel: formatLineLabel(note),
-					})}
+					aria-label={fileAnnotationRemoveLabel(tl, note)}
 					className="ms-auto rounded-lg px-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					onClick={onRemove}
 					type="button"

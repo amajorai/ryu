@@ -96,8 +96,8 @@
 
 .capsule {
 	position: absolute;
+	inset-inline-start: var(--sc-pad);
 	top: var(--sc-pad);
-	left: var(--sc-pad);
 	width: calc(100% - var(--sc-pad) * 2);
 	height: calc(100% - var(--sc-pad) * 2);
 	color: var(--sc-on-ink);

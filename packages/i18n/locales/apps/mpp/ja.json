@@ -30,6 +30,7 @@
   "Cross-origin payment redirects are blocked.": "クロスオリジンの支払いリダイレクトはブロックされます。",
   "Daily spend cap": "1日の支出上限",
   "Endpoint returned HTTP {status}; no payment was required.": "エンドポイントが HTTP {status} を返しました。支払いは不要でした。",
+  "Enter an amount, such as {example}.": "金額を入力してください（例: {example}）。",
   "Every limit is enforced again immediately before signing.": "すべての上限は署名の直前に再度適用されます。",
   "Expires": "有効期限",
   "Explicit approval is required.": "明示的な承認が必要です。",

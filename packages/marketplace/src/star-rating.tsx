@@ -23,6 +23,7 @@ import {
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useRef, useState } from "react";
+import { formatRatingAverage } from "./rating-format.ts";
 
 const STAR_VALUES = [1, 2, 3, 4, 5] as const;
 const MAX_RATING = 5;
@@ -109,7 +110,7 @@ export function StarRating({
 		>
 			{showValue ? (
 				<span className="font-medium text-xs tabular-nums">
-					{rounded.toFixed(1)}
+					{formatRatingAverage(rounded)}
 				</span>
 			) : null}
 			<span aria-hidden="true" className="inline-flex items-center gap-0.5">

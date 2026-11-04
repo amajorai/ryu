@@ -703,10 +703,10 @@
   "policy v{version} · {elapsed} ms": "策略 v{version} · {elapsed} 毫秒",
   "project": "个项目",
   "prompt": "提示词",
-  "ready": "项已就绪",
+  "ready": "就绪",
   "records": "条记录",
   "request": "请求",
-  "running": "运行",
+  "running": "运行中",
   "ryu": "ryu",
   "show": "显示",
   "shown": "条已显示",
@@ -730,6 +730,7 @@
   "with": "，参与者：",
   "working": "个工作中",
   "your browser": "浏览器",
+  "{age} ago": "{age}前",
   "{count} more": "还有 {count} 个",
   "{passed} passed, {failed} failed": "{passed} 个通过，{failed} 个失败"
 }

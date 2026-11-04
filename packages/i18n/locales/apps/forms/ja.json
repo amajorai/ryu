@@ -126,6 +126,7 @@
   "This form changed. Reload it and try again.": "このフォームは変更されました。再読み込みしてもう一度お試しください。",
   "This form changed. Reload it before saving.": "このフォームは変更されました。保存する前に再読み込みしてください。",
   "This form is no longer accepting responses.": "このフォームは回答の受け付けを終了しました。",
+  "This form is no longer available.": "このフォームは利用できなくなりました。",
   "This form link is already in use.": "このフォームリンクはすでに使用されています。",
   "This form link is reserved. Choose another link name.": "このフォームリンクは予約されています。別のリンク名を選択してください。",
   "This permanently deletes the form and every response stored with it on this Ryu node.": "この Ryu ノードに保存されているフォームとそのすべての回答が完全に削除されます。",

@@ -12,6 +12,7 @@ import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { motion } from "motion/react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import { SheetStatusPill } from "./sheet-cells.tsx";
 import type { SheetRow } from "./sheet-model.ts";
 
@@ -91,6 +92,7 @@ export function SheetThreadPanel({
 	threadView: ReactNode;
 	total: number;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const title = row?.title ?? tr("New thread");
 	const lead = row?.agents[0];
@@ -133,8 +135,8 @@ export function SheetThreadPanel({
 					: "relative w-[clamp(340px,40%,680px)] shrink-0 border-border border-s"
 			)}
 			data-testid="sheet-thread-panel"
-			exit={{ opacity: 0, x: 24 }}
-			initial={{ opacity: 0, x: 24 }}
+			exit={{ opacity: 0, x: 24 * inlineSign }}
+			initial={{ opacity: 0, x: 24 * inlineSign }}
 			transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
 		>
 			{/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: the header only forwards Alt+Arrow from its own buttons to step records. */}

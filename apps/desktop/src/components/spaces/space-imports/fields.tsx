@@ -127,13 +127,19 @@ export function ArgumentField({
 		return (
 			<div className="flex flex-col gap-1.5">
 				<Label htmlFor={`composio-${name}`}>{label}</Label>
-				<Select onValueChange={onChange} value={value}>
+				<Select
+					// The closed trigger shows "True"/"False" in the UI language, not
+					// the raw "true"/"false" value.
+					items={{ true: tl("True"), false: tl("False") }}
+					onValueChange={onChange}
+					value={value}
+				>
 					<SelectTrigger id={`composio-${name}`}>
 						<SelectValue placeholder={tl("Choose {label}", { label })} />
 					</SelectTrigger>
 					<SelectContent>
-						<SelectItem value="true">True</SelectItem>
-						<SelectItem value="false">False</SelectItem>
+						<SelectItem value="true">{tl("True")}</SelectItem>
+						<SelectItem value="false">{tl("False")}</SelectItem>
 					</SelectContent>
 				</Select>
 				{property.description ? (

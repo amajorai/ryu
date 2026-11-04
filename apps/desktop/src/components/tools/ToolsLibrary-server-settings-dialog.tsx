@@ -50,6 +50,7 @@ import {
 	type McpKeyValueRow,
 	McpKeyValueRows,
 } from "./ToolsLibrary-key-value-rows.tsx";
+import { mcpTransportItems } from "./ToolsLibrary-transport-items.ts";
 
 export function McpServerSettingsDialog({
 	deleteServer,
@@ -64,6 +65,7 @@ export function McpServerSettingsDialog({
 	server: McpServer;
 }) {
 	const tl = useLiteralMessages();
+	const transportItems = mcpTransportItems(tl);
 	const [open, setOpen] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [command, setCommand] = useState("");
@@ -235,6 +237,7 @@ export function McpServerSettingsDialog({
 					<div className="flex flex-col gap-1.5">
 						<Label htmlFor="mcp-settings-transport">Transport</Label>
 						<Select<McpTransport>
+							items={transportItems}
 							onValueChange={(value) => {
 								if (value) {
 									setTransport(value);
@@ -246,9 +249,11 @@ export function McpServerSettingsDialog({
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="stdio">Local process (stdio)</SelectItem>
-								<SelectItem value="streamable-http">Streamable HTTP</SelectItem>
-								<SelectItem value="sse">Legacy HTTP + SSE</SelectItem>
+								<SelectItem value="stdio">{transportItems.stdio}</SelectItem>
+								<SelectItem value="streamable-http">
+									{transportItems["streamable-http"]}
+								</SelectItem>
+								<SelectItem value="sse">{transportItems.sse}</SelectItem>
 							</SelectContent>
 						</Select>
 					</div>

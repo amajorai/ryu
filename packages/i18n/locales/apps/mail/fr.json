@@ -488,6 +488,7 @@
   "Read the docs": "Lire la documentation",
   "Reason": "Motif",
   "Receive signed event notifications for received, sent, delivery, bounce, complaint, rejection, and open events.": "Recevez des notifications signées pour les événements de réception, d’envoi, de remise, de rebond, de plainte, de rejet et d’ouverture.",
+  "Received": "Reçu le",
   "Recent": "Récents",
   "Red": "Rouge",
   "Reference": "Référence",
@@ -759,12 +760,12 @@
   "play": "jouer",
   "project": "projet",
   "prompt": "prompt",
-  "ready": "prêts",
+  "ready": "prêt",
   "records": "enregistrements",
   "request": "requête",
   "research": "recherche",
   "routing": "routage",
-  "running": "exécutant",
+  "running": "en cours",
   "ryu": "ryu",
   "show": "afficher",
   "shown": "affichés",
@@ -792,6 +793,9 @@
   "with": "avec",
   "working": "au travail",
   "your browser": "votre navigateur",
+  "{age} ago": "il y a {age}",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, one {# pièce jointe prête} other {# pièces jointes prêtes}}",
-  "{count} more": "{count} de plus"
+  "{count} more": "{count} de plus",
+  "{recipients} · {status}": "{recipients} · {status}",
+  "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {Brouillon} sending {Envoi en cours} sent {Envoyé} failed {Échec} inbound {Reçu} outbound {Sortant} other {{value}}}"
 }

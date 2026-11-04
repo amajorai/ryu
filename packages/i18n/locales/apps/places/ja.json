@@ -58,6 +58,7 @@
   "Drag to rotate map, click to reset north": "ドラッグして地図を回転、クリックで北向きにリセット",
   "Drop a pin": "ピンを立てる",
   "Enter a positive amount.": "正の金額を入力してください。",
+  "Enter a positive budget, or leave it empty.": "正の予算を入力するか、空欄のままにしてください。",
   "Every day": "毎日",
   "Everyone": "全員",
   "Everyone in your organization shares this map and its trips.": "組織の全員がこの地図とその旅行を共有しています。",

@@ -47,6 +47,7 @@ import {
 	MESSAGE_TIME_OPTIONS,
 	MESSAGE_TOOLTIP_OPTIONS,
 } from "./user-message-time-options.ts";
+import { callEndedText } from "./utils/call-ended-text.ts";
 import type { NativeSdkValue } from "./utils/native-sdk-observation.ts";
 
 export { GoalMessageAnnotation } from "./user-message-goal-annotation.tsx";
@@ -104,10 +105,9 @@ export const UserMessage = memo(function UserMessage({
 	// peel it back off so it renders as a styled QuoteBlock, not raw `> …` text.
 	const { quote, body } = splitLeadingQuote(text);
 	const attachments = getMessageAttachments(message);
-	const isCallEnded =
-		!quote &&
-		attachments.length === 0 &&
-		/^Call ended · \d{2,}:[0-5]\d$/.test(body);
+	const callEnded =
+		!quote && attachments.length === 0 ? callEndedText(body) : null;
+	const isCallEnded = callEnded !== null;
 	const imageAttachments = attachments.filter(
 		(attachment) => attachment.isImage && attachment.url
 	);
@@ -288,7 +288,7 @@ export const UserMessage = memo(function UserMessage({
 									)}
 									<Markdown
 										className={cn(isCallEnded && "[&_p]:whitespace-nowrap")}
-										content={body}
+										content={callEnded ?? body}
 										mentionItems={mentionItems}
 										onOpenFile={onOpenFile}
 										onOpenLink={onOpenLink}

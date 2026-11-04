@@ -11,6 +11,10 @@ import { type ReactNode, useEffect, useState } from "react";
 import { SettingsItem } from "@/src/components/settings/shared/settings-items.tsx";
 import type { RoutingCondition } from "@/src/lib/api/routing.ts";
 import { type ScopeOption, scopeValue, WINDOW_OPTIONS } from "./shared.tsx";
+import {
+	formatThresholdDraft,
+	parseThresholdDraft,
+} from "./threshold-draft.ts";
 
 /** Keep number editing local until commit so an autosave can't interrupt typing. */
 function ThresholdInput({
@@ -31,16 +35,16 @@ function ThresholdInput({
 	value: number;
 }) {
 	const tl = useLiteralMessages();
-	const [draft, setDraft] = useState(String(value));
+	const [draft, setDraft] = useState(formatThresholdDraft(value));
 	const [error, setError] = useState<string | null>(null);
 	useEffect(() => {
-		setDraft(String(value));
+		setDraft(formatThresholdDraft(value));
 		setError(null);
 	}, [value]);
 
 	const commit = () => {
 		const trimmed = draft.trim();
-		const parsed = Number(trimmed);
+		const parsed = parseThresholdDraft(trimmed);
 		if (
 			trimmed.length === 0 ||
 			!Number.isFinite(parsed) ||
@@ -49,7 +53,7 @@ function ThresholdInput({
 		) {
 			setError(
 				max === undefined
-					? "Enter a non-negative USD amount."
+					? tl("Enter a non-negative USD amount.")
 					: tl("Enter a percent from 0 to {max}.", { max })
 			);
 			return;

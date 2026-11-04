@@ -167,12 +167,12 @@ async fn shipped_firewall_policy_drives_loopback_gateway_patch_and_recovers_from
         |path| Err(format!("unexpected Firewall code file: {path}")),
     )
     .expect("Core parses and validates the shipped Firewall manifest");
-    let policies = super::super::manifest_policies(&typed_manifest);
+    let policies = crate::server::manifest_policies(&typed_manifest);
     assert_eq!(policies.len(), 1);
     assert_eq!(policies[0].policy_type, "firewall");
     assert_eq!(policies[0].definition["service"], "gateway");
     assert_eq!(typed_manifest.permission_grants, Vec::<String>::new());
-    let bundle = super::super::FirewallPolicyBundle::from_definition(&policies[0].definition);
+    let bundle = crate::server::FirewallPolicyBundle::from_definition(&policies[0].definition);
 
     let client = reqwest::Client::new();
     let live_before_enable = crate::sidecar::gateway::fetch_config(&client)
@@ -180,7 +180,7 @@ async fn shipped_firewall_policy_drives_loopback_gateway_patch_and_recovers_from
         .expect("read the live Gateway config before enabling Firewall");
     assert_eq!(live_before_enable, initial_config);
     let enabled_firewall =
-        super::super::build_firewall_patch(live_before_enable["firewall"].clone(), true, &bundle);
+        crate::server::build_firewall_patch(live_before_enable["firewall"].clone(), true, &bundle);
     let mut expected_enabled_firewall = initial_config["firewall"].clone();
     expected_enabled_firewall["enabled"] = json!(true);
     assert_eq!(enabled_firewall, expected_enabled_firewall);
@@ -202,7 +202,7 @@ async fn shipped_firewall_policy_drives_loopback_gateway_patch_and_recovers_from
     );
 
     let disabled_firewall =
-        super::super::build_firewall_patch(enabled_readback["firewall"].clone(), false, &bundle);
+        crate::server::build_firewall_patch(enabled_readback["firewall"].clone(), false, &bundle);
     let mut expected_disabled_firewall = initial_config["firewall"].clone();
     expected_disabled_firewall["enabled"] = json!(false);
     assert_eq!(disabled_firewall, expected_disabled_firewall);
@@ -245,7 +245,7 @@ async fn shipped_firewall_policy_drives_loopback_gateway_patch_and_recovers_from
         .await
         .expect("Gateway config read recovers after one fixture failure");
     let retry_firewall =
-        super::super::build_firewall_patch(live_before_retry["firewall"].clone(), true, &bundle);
+        crate::server::build_firewall_patch(live_before_retry["firewall"].clone(), true, &bundle);
     {
         let mut fixture = state.0.lock().await;
         fixture.fail_next_put = true;
@@ -268,7 +268,7 @@ async fn shipped_firewall_policy_drives_loopback_gateway_patch_and_recovers_from
     );
 
     let retry_firewall =
-        super::super::build_firewall_patch(expected_disabled_firewall.clone(), true, &bundle);
+        crate::server::build_firewall_patch(expected_disabled_firewall.clone(), true, &bundle);
     let (retry_status, _) =
         crate::sidecar::gateway::push_config(&client, &json!({ "firewall": retry_firewall }))
             .await

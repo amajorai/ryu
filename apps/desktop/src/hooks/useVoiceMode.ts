@@ -12,6 +12,7 @@
 import { VoiceSessionConnection } from "@ryuhq/core-client/voice-session.ts";
 import type { RvpCallEnded, VoiceState } from "@ryuhq/protocol/voice";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { voiceErrorCopy } from "@/src/components/voice/voice-error-copy.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	playSound,
@@ -259,8 +260,8 @@ export function useVoiceMode(
 					// The assistant turn is done — the next delta opens a new line.
 					assistantIdRef.current = null;
 				},
-				onError: (_code, message) => {
-					setError(message);
+				onError: (code, message) => {
+					setError(voiceErrorCopy(code, message));
 					if (connRef.current === conn) {
 						cueConnectFailure();
 					}

@@ -35,6 +35,7 @@ import {
 	SWELL,
 	velocityOf,
 } from "./slide-commit-config.ts";
+import { arrowDelta, progressFromPointer } from "./slide-commit-direction.ts";
 import { Spinner, useSlideCommitMotion } from "./slide-commit-motion.tsx";
 
 export type { SlideCommitProps } from "./slide-commit-config.ts";
@@ -104,6 +105,7 @@ export function SlideCommit({
 		arrow,
 		clip,
 		content,
+		direction,
 		inner: INNER,
 		measured,
 		origin,
@@ -162,13 +164,8 @@ export function SlideCommit({
 		[]
 	);
 
-	const local = (clientX: number) => {
-		const rect = trackRef.current?.getBoundingClientRect();
-		if (!rect?.width) {
-			return 0;
-		}
-		return (clientX - rect.left) * (measured / rect.width);
-	};
+	const local = (clientX: number) =>
+		progressFromPointer(clientX, trackRef.current, measured, direction);
 
 	const goHome = (velocity: number) => {
 		if (reduce) {
@@ -356,14 +353,14 @@ export function SlideCommit({
 		if (event.key === "End") {
 			event.preventDefault();
 			commit(true);
-		} else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+		} else if (arrowDelta(event.key, direction) > 0) {
 			event.preventDefault();
 			const next = Math.min(TRAVEL, x.get() + step);
 			x.set(next);
 			if (next >= TRAVEL - 0.5) {
 				commit(true);
 			}
-		} else if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+		} else if (arrowDelta(event.key, direction) < 0) {
 			event.preventDefault();
 			x.set(Math.max(0, x.get() - step));
 		} else if (event.key === "Home" || event.key === "Escape") {
@@ -412,6 +409,7 @@ export function SlideCommit({
 			data-held={held ? "" : undefined}
 			data-phase={phase}
 			data-slot="slide-commit"
+			dir={direction}
 			ref={rootRef}
 			style={{ width, height, ...(vars as React.CSSProperties) }}
 		>

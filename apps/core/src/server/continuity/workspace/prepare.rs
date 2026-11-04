@@ -10,8 +10,25 @@ pub(super) fn record_path(roots: &Roots, workspace_id: &str) -> PathBuf {
 }
 
 pub(super) fn inside(root: &FsPath, path: &FsPath) -> bool {
-    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let root = canonical(root).unwrap_or_else(|_| root.to_path_buf());
     path.starts_with(root)
+}
+
+/// `canonicalize`, without the `\\?\` verbatim prefix it adds on Windows. The
+/// handoff worktree is created under this path, and Git cannot create one
+/// below a verbatim path (`could not create leading directories of
+/// '//?/C:/…'`), so a resume on Windows failed with `git-failed`. A `\\?\UNC\`
+/// share keeps its prefix: dropping it would name a different path.
+pub(super) fn canonical(path: &FsPath) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(path).map(|canonical| {
+        match canonical
+            .to_str()
+            .and_then(|text| text.strip_prefix(r"\\?\"))
+        {
+            Some(plain) if !plain.starts_with(r"UNC\") => PathBuf::from(plain),
+            _ => canonical,
+        }
+    })
 }
 
 pub(super) fn slug(value: &str, max: usize) -> String {
@@ -72,7 +89,7 @@ pub(super) async fn prepare_repository(
                     "an existing checkout needs the source's remote URL".to_owned(),
                 ));
             };
-            let path = std::fs::canonicalize(checkout_path).map_err(|_| {
+            let path = canonical(FsPath::new(checkout_path)).map_err(|_| {
                 refused(
                     "folder-invalid",
                     "the checkout folder does not exist".to_owned(),
@@ -90,6 +107,8 @@ pub(super) async fn prepare_repository(
                 move || handoff::inspect_workspace(&path).map(|inspection| inspection.repo_root)
             })
             .await?;
+            // The worktree is created under this root; see `canonical`.
+            let root = canonical(&root).unwrap_or(root);
             let origin = handoff::origin_url(&root);
             if !origin
                 .as_deref()
@@ -123,7 +142,7 @@ pub(super) async fn prepare_repository(
             crate::server::git::validate_folder_name(&base_name)
                 .map_err(|error| refused("folder-invalid", error))?;
             std::fs::create_dir_all(&roots.handoffs).map_err(stamp_error)?;
-            let parent = std::fs::canonicalize(&roots.handoffs).map_err(stamp_error)?;
+            let parent = canonical(&roots.handoffs).map_err(stamp_error)?;
             if !inside(&roots.home, &parent) {
                 return Err(coded_error(
                     StatusCode::FORBIDDEN,

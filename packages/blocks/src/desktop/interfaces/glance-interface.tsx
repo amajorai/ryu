@@ -44,6 +44,7 @@ import {
 	GlanceThreadSheet,
 	useGlanceClock,
 } from "./glance-parts.tsx";
+import { inlineSign, useInlineSign } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
@@ -105,10 +106,9 @@ function PageDots({
 }) {
 	const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
 		let next: GlanceFace | null = null;
-		if (event.key === "ArrowRight") {
-			next = stepGlanceFace(face, 1);
-		} else if (event.key === "ArrowLeft") {
-			next = stepGlanceFace(face, -1);
+		const arrow = glanceKeyAction(event, inlineSign(event.currentTarget));
+		if (arrow === "next" || arrow === "previous") {
+			next = stepGlanceFace(face, arrow === "next" ? 1 : -1);
 		} else if (event.key === "Home") {
 			next = GLANCE_FACES[0] ?? null;
 		} else if (event.key === "End") {
@@ -253,7 +253,7 @@ export function GlanceInterface({
 			if (event.defaultPrevented || event.isComposing) {
 				return;
 			}
-			const action = glanceKeyAction(event);
+			const action = glanceKeyAction(event, inlineSign(rootRef.current));
 			if (!action || isGlanceTypingTarget(event.target)) {
 				return;
 			}
@@ -294,7 +294,7 @@ export function GlanceInterface({
 		const dy = event.clientY - start.y;
 		if (Math.abs(dx) >= SWIPE_PX && Math.abs(dx) > Math.abs(dy) * 1.5) {
 			swipedRef.current = true;
-			step(dx < 0 ? 1 : -1);
+			step(dx * inlineSign(event.currentTarget) < 0 ? 1 : -1);
 		}
 	};
 
@@ -330,17 +330,16 @@ export function GlanceInterface({
 	const stageKey = `${contentKey}:${distance}`;
 	// Compare with the last committed stage to pick this change's entrance.
 	const committedRef = useRef({ contentKey, distance, view });
-	const committed = committedRef.current;
 	let change: StageChange = "face";
-	if (committed.view !== view) {
+	if (committedRef.current.view !== view) {
 		change = "view";
-	} else if (committed.distance !== distance) {
+	} else if (committedRef.current.distance !== distance) {
 		change = "distance";
 	}
 	useEffect(() => {
 		committedRef.current = { contentKey, distance, view };
 	}, [contentKey, distance, view]);
-	const offset = reduceMotion || change !== "face" ? 0 : 40;
+	const offset = useInlineSign() * (reduceMotion || change !== "face" ? 0 : 40);
 	const settle = reduceMotion || change === "face" ? 1 : 0.985;
 	const stageLabel =
 		view === "home" ? tr("Home Screen") : GLANCE_STAGE_LABELS[face]();

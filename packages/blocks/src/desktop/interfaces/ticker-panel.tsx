@@ -12,6 +12,7 @@ import { type InterfaceThread, threadStatus } from "@ryuhq/protocol/interfaces";
 import { X } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import type { TickerQuote } from "./ticker-model.ts";
@@ -39,6 +40,7 @@ export function TickerThreadPanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const title = thread
@@ -51,7 +53,7 @@ export function TickerThreadPanel({
 			aria-label={tl("Thread: {title}", { title })}
 			className="absolute inset-0 z-20 flex min-h-0 flex-col border-border bg-background xl:static xl:w-[clamp(26rem,38vw,40rem)] xl:shrink-0 xl:border-s"
 			data-testid="ticker-thread-panel"
-			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 16 * inlineSign }}
 			transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
 		>
 			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b px-4">

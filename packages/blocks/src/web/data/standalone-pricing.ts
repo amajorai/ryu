@@ -81,6 +81,27 @@ export const PRICING_COPY = {
 const englishLiteral: LiteralMessage = (source, values) =>
 	formatMessage(source, values);
 
+type StandaloneStatus = StandaloneProductPricing["status"];
+
+// Rows keep the English status as an id the cards compare; the badge a visitor
+// reads is catalog copy. Each status is its own message so the catalog
+// extractor sees it, and the DOM localizer translates the rendered badge.
+const STATUS_LABELS: Record<StandaloneStatus, (tl: LiteralMessage) => string> =
+	{
+		Available: (tl) => tl("Available"),
+		Metered: (tl) => tl("Metered"),
+		Included: (tl) => tl("Included"),
+		"Early access": (tl) => tl("Early access"),
+	};
+
+/** A status badge's display name through `tl` (English by default). */
+export function standaloneStatusLabel(
+	status: StandaloneStatus,
+	tl: LiteralMessage = englishLiteral
+): string {
+	return STATUS_LABELS[status](tl);
+}
+
 /**
  * Current customer-facing price and access status for standalone products,
  * with every price and detail sentence passed through `tl` as one message.

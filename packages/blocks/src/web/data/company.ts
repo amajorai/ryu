@@ -109,13 +109,28 @@ export interface CompanyFact {
 	readonly value: string;
 }
 
-/** The company's registration facts, with the founding date in `locale`. */
+/** The company's country in `locale` ("Singapore", "シンガポール"); English when Intl cannot name it. */
+export function companyCountryName(
+	locale: string | null | undefined = "en"
+): string {
+	try {
+		return (
+			new Intl.DisplayNames([locale || "en"], { type: "region" }).of(
+				COMPANY.countryCode
+			) ?? COMPANY.country
+		);
+	} catch {
+		return COMPANY.country;
+	}
+}
+
+/** The company's registration facts, with the country and founding date in `locale`. */
 export function companyFacts(
 	locale: string | null | undefined = "en"
 ): readonly CompanyFact[] {
 	return [
 		{ label: "Company", value: COMPANY.legalName },
-		{ label: "Based in", value: COMPANY.country },
+		{ label: "Based in", value: companyCountryName(locale) },
 		{ label: "UEN", value: COMPANY.uen },
 		{ label: "Founded", value: formatIsoDate(COMPANY.foundingDate, locale) },
 		{ label: "Website", value: "amajor.ai", href: COMPANY.url, external: true },

@@ -703,10 +703,10 @@
   "policy v{version} · {elapsed} ms": "politique v{version} · {elapsed} ms",
   "project": "projet",
   "prompt": "prompt",
-  "ready": "prêts",
+  "ready": "prêt",
   "records": "enregistrements",
   "request": "requête",
-  "running": "exécutant",
+  "running": "en cours",
   "ryu": "ryu",
   "show": "afficher",
   "shown": "affichés",
@@ -730,6 +730,7 @@
   "with": "avec",
   "working": "au travail",
   "your browser": "votre navigateur",
+  "{age} ago": "il y a {age}",
   "{count} more": "{count} de plus",
   "{passed} passed, {failed} failed": "Réussis : {passed}, échecs : {failed}"
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useOptionalI18n } from "@ryu/i18n/react";
 import {
 	CardContent,
 	CardFooter,
@@ -18,6 +19,8 @@ import {
 	Users,
 	Wrench,
 } from "lucide-react";
+import { pricingFormat } from "./data/standalone-pricing-locale.ts";
+import { currencyAffixes } from "./price-ticker-parts.ts";
 import { useHelperTextSize } from "./pricing-appearance.tsx";
 import {
 	type MarketplacePassPlanCardProps,
@@ -38,6 +41,8 @@ export function LifetimePlanCard({
 }: PlanCardProps) {
 	const isCurrent = currentPlan === "desktop-license";
 	const helperText = useHelperTextSize();
+	const locale = useOptionalI18n()?.locale;
+	const { prefix, suffix } = currencyAffixes(locale);
 	return (
 		<PricingCardBorder variant="desktop-license">
 			<CardHeader>
@@ -52,9 +57,14 @@ export function LifetimePlanCard({
 			</CardHeader>
 			<CardContent className="flex-1">
 				<div className="mb-1 flex items-baseline gap-2">
-					<NumberTicker prefix="$" value={129} variant="featured-plan-price" />
+					<NumberTicker
+						prefix={prefix}
+						suffix={suffix}
+						value={129}
+						variant="featured-plan-price"
+					/>
 					<span className="font-heading text-muted-foreground text-xl tabular-nums line-through">
-						$200
+						{pricingFormat(locale).price(200)}
 					</span>
 					<span className="ms-1 text-muted-foreground">once</span>
 				</div>

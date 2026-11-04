@@ -2,11 +2,15 @@
 // where engines report scrollLeft from 0 down to negative values.
 import "./board-test-dom.ts";
 import { describe, expect, test } from "bun:test";
+import { DirectionProvider } from "@ryu/ui/components/direction.tsx";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
 	inlineArrowStep,
 	logicalArrowKey,
 	logicalScroll,
 	logicalSpan,
+	useInlineSign,
 } from "./inline-direction.ts";
 
 /** A horizontal scroller with fixed metrics and a recorded scrollTo. */
@@ -69,5 +73,28 @@ describe("arrow keys", () => {
 		expect(inlineArrowStep("ArrowLeft", element)).toBe(1);
 		expect(inlineArrowStep("ArrowRight", element)).toBe(-1);
 		expect(inlineArrowStep("Home", element)).toBe(0);
+	});
+});
+
+describe("useInlineSign", () => {
+	function SignProbe() {
+		return createElement("output", null, String(useInlineSign()));
+	}
+	const signUnder = (direction?: "ltr" | "rtl") =>
+		renderToStaticMarkup(
+			direction
+				? createElement(
+						DirectionProvider,
+						{ direction },
+						createElement(SignProbe)
+					)
+				: createElement(SignProbe)
+		);
+	test("is 1 left-to-right and without a direction provider", () => {
+		expect(signUnder("ltr")).toBe("<output>1</output>");
+		expect(signUnder()).toBe("<output>1</output>");
+	});
+	test("is -1 right-to-left", () => {
+		expect(signUnder("rtl")).toBe("<output>-1</output>");
 	});
 });

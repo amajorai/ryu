@@ -107,7 +107,7 @@ const ALLOWED_APP_ID_CONSTANTS: &[&str] = &[
     "plugins/builtins.rs::WHATSAPP_PLUGIN_ID",
     "plugins/builtins.rs::WORKFLOWS_PLUGIN_ID",
     "server/chat_suggestions.rs::PROMPT_SUGGESTIONS_PLUGIN_ID",
-    "server/mod.rs::GOAL_PLUGIN_ID",
+    "server/conversation_features/goal.rs::GOAL_PLUGIN_ID",
     "sidecar/mcp/honcho_registry_runtime_test.rs::HONCHO_PLUGIN_ID",
     "sidecar/mcp/tests/cloudflare_oauth_capabilities_runtime_test.rs::PLUGIN",
     "tool_exec/tests/mod.rs::SECRET_HEADER_TEST_PLUGIN",
@@ -202,8 +202,8 @@ fn no_new_app_id_constants_in_core() {
 /// without editing this list), plus the two handler files outside that naming.
 ///
 /// Not every handler lives in one of these files. `tools.call` and
-/// `plugins.installBundle` are implemented in `server/mod.rs`, and `events.emit`
-/// and `realtime.publish` in `sidecar/ext_proxy.rs`. Those two files are too large
+/// `plugins.installBundle` are implemented in `server/mcp_tools/`, and `events.emit`
+/// and `realtime.publish` in `sidecar/ext_proxy.rs`. Those files are too large
 /// and hold too many unrelated app-id comparisons (for example ext-proxy routing)
 /// to scan whole, so those four handlers are not covered here. As of 2026-10-11
 /// none of them pins an app; a new kernel handler belongs in its own

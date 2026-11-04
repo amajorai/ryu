@@ -677,7 +677,7 @@
   "research": "Recherche",
   "reward {reward}": "Belohnung {reward}",
   "routing": "Routing",
-  "running": "mit",
+  "running": "läuft",
   "ryu": "ryu",
   "show": "anzeigen",
   "shown": "angezeigt",
@@ -704,6 +704,7 @@
   "with": "mit",
   "working": "arbeiten",
   "your browser": "dem Browser",
+  "{age} ago": "vor {age}",
   "{attemptCount, plural, one {{attemptCountText} attempt} other {{attemptCountText} attempts}}": "{attemptCount, plural, one {{attemptCountText} Versuch} other {{attemptCountText} Versuche}}",
   "{attemptCount, plural, one {{attemptCountText} attempt} other {{attemptCountText} attempts}} · {lastAttempt}": "{attemptCount, plural, one {{attemptCountText} Versuch} other {{attemptCountText} Versuche}} · {lastAttempt}",
   "{count} more": "{count} weitere"

@@ -677,7 +677,7 @@
   "ready": "bereit",
   "records": "Datensätze",
   "request": "Anfrage",
-  "running": "mit",
+  "running": "läuft",
   "ryu": "ryu",
   "show": "anzeigen",
   "shown": "angezeigt",
@@ -701,6 +701,7 @@
   "with": "mit",
   "working": "arbeiten",
   "your browser": "dem Browser",
+  "{age} ago": "vor {age}",
   "{count} more": "{count} weitere",
   "{status} in Ryu storage": "{status} im Ryu-Speicher",
   "{status} in browser preview": "{status} in der Browservorschau"

@@ -65,21 +65,28 @@ export function stepGlanceFace(face: GlanceFace, delta: number): GlanceFace {
 
 export type GlanceKeyAction = "close" | "next" | "previous";
 
-/** The page-level keys Glance answers to. */
-export function glanceKeyAction(event: {
-	altKey: boolean;
-	ctrlKey: boolean;
-	key: string;
-	metaKey: boolean;
-}): GlanceKeyAction | null {
+/**
+ * The page-level keys Glance answers to. `sign` is the reading direction of
+ * the face pager (`inlineSign`, `-1` under `dir="rtl"`): its dots run from the
+ * inline start, so ArrowLeft moves to the next face in right-to-left layouts.
+ */
+export function glanceKeyAction(
+	event: {
+		altKey: boolean;
+		ctrlKey: boolean;
+		key: string;
+		metaKey: boolean;
+	},
+	sign: 1 | -1 = 1
+): GlanceKeyAction | null {
 	if (event.altKey || event.ctrlKey || event.metaKey) {
 		return null;
 	}
 	switch (event.key) {
 		case "ArrowRight":
-			return "next";
+			return sign === 1 ? "next" : "previous";
 		case "ArrowLeft":
-			return "previous";
+			return sign === 1 ? "previous" : "next";
 		case "Escape":
 			return "close";
 		default:

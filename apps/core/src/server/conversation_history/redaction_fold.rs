@@ -13,7 +13,9 @@
 //! fillers, variation selectors, the TAG block); fold Unicode space separators to a space, dash punctuation and
 //! minus signs to `-`, and Unicode decimal digits (`Nd`) to ASCII; inside every
 //! token (split on ASCII whitespace, NEL and the line/paragraph separators) that
-//! holds an ASCII letter or digit, fold Cyrillic and Greek look-alike letters
+//! holds an ASCII letter or digit, an `@`, an `_` or an `=`, or that spells a
+//! credential name or PEM label wholly in look-alikes ([`folds_look_alikes`]),
+//! fold Cyrillic and Greek look-alike letters
 //! ([`CONFUSABLES`]) and the ideographic full stop `U+3002` to ASCII; finally
 //! drop combining marks (`Mn`, `Me`) that sit on an ASCII character. The second
 //! shared fixture, `packages/core-client/fixtures/portable-history-fold-v1.json`,
@@ -47,8 +49,8 @@ pub(super) fn fold(text: &str) -> Cow<'_, str> {
 }
 
 /// Cyrillic and Greek letters drawn like an ASCII letter, sorted by code point.
-/// Folded only inside a token that already holds an ASCII letter or digit, so a
-/// mixed-script address reads as ASCII while Russian or Greek prose is left
+/// Folded only inside a token that [`folds_look_alikes`], so a mixed-script or
+/// all-look-alike address reads as ASCII while Russian or Greek prose is left
 /// alone. Same table as `CONFUSABLES` beside `foldShareText` and `foldRedactionText`.
 const CONFUSABLES: &[(char, char)] = &[
     ('\u{0391}', 'A'),
@@ -122,8 +124,82 @@ fn is_token_separator(c: char) -> bool {
     matches!(c, '\t'..='\r' | ' ' | '\u{85}' | '\u{2028}' | '\u{2029}')
 }
 
+/// Whether a token is shaped like PII or a credential rather than prose: it
+/// holds an ASCII letter or digit, an `@` (an address written wholly in
+/// look-alike letters), or an `_` or `=` (a credential key such as `API_KEY` or
+/// `TOKEN=` written wholly in look-alike letters), or it is a look-alike
+/// spelling of a credential name or PEM label ([`is_look_alike_keyword`]), such
+/// as `TOKEN:` or `KEY-----`. Prose colons, hyphens and punctuation do not
+/// qualify on their own, so ordinary Russian or Greek text keeps its script.
+/// Same rule as `isPiiShapedToken` beside `foldShareText` and
+/// `foldRedactionText`.
+fn folds_look_alikes(token: &str) -> bool {
+    token
+        .bytes()
+        .any(|b| b.is_ascii_alphanumeric() || matches!(b, b'@' | b'_' | b'='))
+        || is_look_alike_keyword(token)
+}
+
+/// The credential names and PEM labels the redaction patterns key on,
+/// lowercased, one word between punctuation: every spelling of a name, with
+/// each optional `[_-]` separator written as `-` or left out, has a listed
+/// word. Same list as `LOOK_ALIKE_KEYWORDS` beside `foldShareText` and
+/// `foldRedactionText`; `packages/core-client/fixtures/look-alike-keywords-v1.json`
+/// pins the parity.
+const LOOK_ALIKE_KEYWORDS: &[&str] = &[
+    "accesskey",
+    "accesstoken",
+    "apikey",
+    "authorization",
+    "authtoken",
+    "awssecretaccesskey",
+    "basic",
+    "bearer",
+    "begin",
+    "clientsecret",
+    "connection",
+    "connectionstring",
+    "database",
+    "databaseurl",
+    "ec",
+    "end",
+    "key",
+    "openssh",
+    "passwd",
+    "password",
+    "private",
+    "privatekey",
+    "refreshtoken",
+    "rsa",
+    "secret",
+    "secretaccesskey",
+    "token",
+];
+
+/// Whether a token is spelled wholly in look-alike letters ([`CONFUSABLES`])
+/// and ASCII punctuation, and one of its punctuation-delimited words reads as a
+/// [`LOOK_ALIKE_KEYWORDS`] entry: `TOKEN = value`, `"API-KEY": value` or a PEM
+/// `KEY-----` armor line with every letter a look-alike, where no `@`, `_` or
+/// `=` sits in the token. Its fold looks the same as the token, so a Russian
+/// or Greek word that happens to match loses nothing visible.
+fn is_look_alike_keyword(token: &str) -> bool {
+    let mut found = false;
+    let mut word = String::new();
+    for c in token.chars().chain(std::iter::once(' ')) {
+        if c == ' ' || c.is_ascii_punctuation() {
+            found |= LOOK_ALIKE_KEYWORDS.contains(&word.as_str());
+            word.clear();
+        } else if let Some(ascii) = confusable(c) {
+            word.push(ascii.to_ascii_lowercase());
+        } else {
+            return false;
+        }
+    }
+    found
+}
+
 fn fold_token(token: &str, out: &mut String) {
-    if !token.bytes().any(|b| b.is_ascii_alphanumeric()) {
+    if !folds_look_alikes(token) {
         out.push_str(token);
         return;
     }
@@ -133,8 +209,8 @@ fn fold_token(token: &str, out: &mut String) {
     }));
 }
 
-/// Fold look-alike letters and the ideographic full stop in every token that
-/// mixes them with ASCII letters or digits.
+/// Fold look-alike letters and the ideographic full stop in every PII-shaped
+/// token ([`folds_look_alikes`]).
 fn fold_mixed_script_tokens(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut start = 0;
@@ -253,55 +329,5 @@ fn is_decimal_digit(c: char) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::fold;
-
-    #[test]
-    fn ascii_is_borrowed_unchanged() {
-        assert!(matches!(fold("plain 123"), std::borrow::Cow::Borrowed(_)));
-    }
-
-    #[test]
-    fn folds_fullwidth_ignorable_dash_and_native_digits() {
-        assert_eq!(fold("５５５－１２３"), "555-123");
-        assert_eq!(fold("ava＠example.com"), "ava@example.com");
-        assert_eq!(fold("123\u{200B}-45\u{2011}6789"), "123-45-6789");
-        assert_eq!(fold("١٢٣ ۴۵۶ ४५६"), "123 456 456");
-        assert_eq!(fold("a\u{E0041}b\u{2063}c"), "abc");
-        assert_eq!(fold("1\u{2212}2\u{00A0}3"), "1-2 3");
-    }
-
-    #[test]
-    fn folds_look_alikes_full_stops_and_marks_in_mixed_tokens() {
-        assert_eq!(fold("ava@\u{0435}xample\u{3002}com"), "ava@example.com");
-        assert_eq!(fold("a\u{0301}va 4\u{20E3}"), "ava 4");
-        // Prose without an ASCII letter keeps its script and its marks.
-        assert_eq!(
-            fold("\u{043F}\u{0440}\u{0438}\u{0306}"),
-            "\u{043F}\u{0440}\u{0438}\u{0306}"
-        );
-    }
-
-    #[test]
-    fn confusables_are_sorted_for_the_binary_search() {
-        assert!(super::CONFUSABLES
-            .windows(2)
-            .all(|pair| pair[0].0 < pair[1].0));
-    }
-
-    #[test]
-    fn shared_fold_fixture_matches_core() {
-        let fixture = include_str!(
-            "../../../../../packages/core-client/fixtures/portable-history-fold-v1.json"
-        );
-        let rows: Vec<serde_json::Value> = serde_json::from_str(fixture).expect("fixture json");
-        assert!(!rows.is_empty());
-        for row in rows {
-            let note = row["note"].as_str().expect("note");
-            let input = row["input"].as_str().expect("input");
-            let expected = row["folded"].as_str().expect("folded");
-            assert_eq!(fold(input), expected, "{note}");
-            assert_eq!(fold(expected), expected, "idempotent: {note}");
-        }
-    }
-}
+#[path = "redaction_fold_tests.rs"]
+mod tests;

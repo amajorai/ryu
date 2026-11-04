@@ -660,10 +660,10 @@
   "play": "jouer",
   "project": "projet",
   "prompt": "prompt",
-  "ready": "prêts",
+  "ready": "prêt",
   "records": "enregistrements",
   "request": "requête",
-  "running": "exécutant",
+  "running": "en cours",
   "ryu": "ryu",
   "show": "afficher",
   "shown": "affichés",
@@ -688,6 +688,7 @@
   "with": "avec",
   "working": "au travail",
   "your browser": "votre navigateur",
+  "{age} ago": "il y a {age}",
   "{count, plural, one {{countText} subscription} other {{countText} subscriptions}}": "{count, plural, one {{countText} abonnement} other {{countText} abonnements}}",
   "{count} more": "{count} de plus"
 }

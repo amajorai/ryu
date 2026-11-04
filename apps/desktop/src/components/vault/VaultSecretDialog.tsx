@@ -21,6 +21,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
@@ -417,7 +418,7 @@ function SecretDetail({
 										size="sm"
 										variant="ghost"
 									>
-										<HugeiconsIcon
+										<DirectionalIcon
 											className="size-4"
 											icon={ArrowTurnBackwardIcon}
 										/>

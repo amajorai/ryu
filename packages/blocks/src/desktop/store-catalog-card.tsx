@@ -8,6 +8,7 @@ import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import type { ReactNode } from "react";
+import { formatRatingAverage } from "./rating-average.ts";
 
 export const noop = () => {
 	// Default no-op handler for the presentational layer.
@@ -147,7 +148,7 @@ export function StoreCardRating({
 				icon={StarIcon}
 			/>
 			<span className="font-medium text-foreground tabular-nums">
-				{(Math.round((average ?? 0) * 10) / 10).toFixed(1)}
+				{formatRatingAverage(average)}
 			</span>
 			<span className="tabular-nums">({formatCount(count) ?? "—"})</span>
 		</span>

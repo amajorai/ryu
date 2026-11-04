@@ -683,7 +683,7 @@
   "records": "Datensätze",
   "request": "Anfrage",
   "routing": "Routing",
-  "running": "mit",
+  "running": "läuft",
   "ryu": "ryu",
   "shop": "Laden",
   "show": "anzeigen",
@@ -708,6 +708,7 @@
   "with": "mit",
   "working": "arbeiten",
   "your browser": "dem Browser",
+  "{age} ago": "vor {age}",
   "{count} more": "{count} weitere",
   "{currency} invoice totals": "Rechnungssummen in {currency}"
 }

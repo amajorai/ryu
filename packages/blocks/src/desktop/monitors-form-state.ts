@@ -9,6 +9,10 @@ import type {
 	PublicNotifyTarget,
 } from "@ryuhq/core-client/monitors";
 import { z } from "zod";
+import {
+	formatThresholdInput,
+	parseThresholdInput,
+} from "./monitors-threshold-input.ts";
 
 type CheckKind = CheckType["type"];
 
@@ -139,7 +143,7 @@ export function formFromMonitor(m: Monitor): FormState {
 	} else if (c.type === "price") {
 		base.extractRegex = c.extract_regex;
 		base.comparator = c.comparator ?? "changed";
-		base.threshold = c.threshold == null ? "" : String(c.threshold);
+		base.threshold = formatThresholdInput(c.threshold);
 	} else if (c.type === "stock") {
 		base.pattern = c.in_stock_pattern;
 		base.isRegex = c.is_regex ?? false;
@@ -181,7 +185,7 @@ export function buildCheck(f: FormState): CheckType {
 				type: "price",
 				extract_regex: f.extractRegex,
 				comparator: f.comparator,
-				threshold: f.threshold.trim() ? Number(f.threshold) : null,
+				threshold: parseThresholdInput(f.threshold),
 			};
 		case "stock":
 			return {

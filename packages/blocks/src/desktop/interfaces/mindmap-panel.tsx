@@ -17,6 +17,7 @@ import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusLabel } from "./board-status.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import { agentById } from "./interface-renderer.ts";
 import { MINDMAP_EASE } from "./mindmap-node.tsx";
 
@@ -63,6 +64,7 @@ export function MindmapThreadPanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const title = thread
 		? thread.title.trim() || tl("Untitled thread")
@@ -77,7 +79,7 @@ export function MindmapThreadPanel({
 			aria-label={tl("Thread: {title}", { title })}
 			className="@max-[767px]:absolute @max-[767px]:inset-0 @max-[767px]:z-20 flex min-h-0 @max-[767px]:w-full w-[min(560px,48%)] @max-[767px]:min-w-0 min-w-[380px] shrink-0 flex-col border-border border-s @max-[767px]:border-s-0 bg-background"
 			data-testid="mindmap-thread-panel"
-			initial={animate ? { opacity: 0, x: 16 } : false}
+			initial={animate ? { opacity: 0, x: 16 * inlineSign } : false}
 			transition={{ duration: animate ? 0.2 : 0, ease: MINDMAP_EASE }}
 		>
 			<header className="flex h-14 shrink-0 items-center gap-3 border-border border-b ps-4 pe-2">

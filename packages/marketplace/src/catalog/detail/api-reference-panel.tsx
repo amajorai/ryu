@@ -37,6 +37,13 @@ import type {
 	CatalogMcpServer,
 	CatalogSidecar,
 } from "../types.ts";
+import {
+	composerControlLabel,
+	hookEventFallbackLabel,
+	hookEventLabel,
+	viewSurfaceLabel,
+} from "./api-reference-labels.ts";
+import { RawToken } from "./api-reference-raw-token.tsx";
 
 /** True when the manifest declared anything worth an API-reference tab. Used to
  *  decide whether the tab exists at all — an empty tab is worse than no tab. */
@@ -335,9 +342,12 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 									>
 										<div className="flex items-baseline justify-between gap-3">
 											<span className="min-w-0 truncate text-sm">
-												{tl("Runs at every {event}", {
-													event: hook.event.replace(/_/g, " "),
-												})}
+												{hookEventLabel(hook.event) ?? (
+													<RawToken
+														label={hookEventFallbackLabel(hook.event)}
+														token={hook.event}
+													/>
+												)}
 											</span>
 											<Badge className="shrink-0" variant="secondary">
 												Chat hook
@@ -373,7 +383,9 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 								</span>
 								<Badge className="shrink-0" variant="secondary">
 									{view.surface
-										? tl("{surface} view", { surface: view.surface })
+										? (viewSurfaceLabel(view.surface) ?? (
+												<RawToken label={tl("View")} token={view.surface} />
+											))
 										: "View"}
 								</Badge>
 							</li>
@@ -401,9 +413,12 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 								</span>
 								<Badge className="shrink-0" variant="secondary">
 									{control.type
-										? tl("Composer {controlType}", {
-												controlType: control.type,
-											})
+										? (composerControlLabel(control.type) ?? (
+												<RawToken
+													label={tl("Composer control")}
+													token={control.type}
+												/>
+											))
 										: "Composer control"}
 								</Badge>
 							</li>

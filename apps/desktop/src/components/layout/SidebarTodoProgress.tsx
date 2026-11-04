@@ -59,7 +59,7 @@ export function SidebarTodoProgress({
 			{showCelebration ? (
 				<span
 					aria-hidden="true"
-					className="pointer-events-none absolute inset-0 z-0 overflow-hidden bg-gradient-to-l from-success/20 via-success/10 to-transparent"
+					className="pointer-events-none absolute inset-0 z-0 overflow-hidden bg-gradient-to-l from-success/20 via-success/10 to-transparent rtl:bg-gradient-to-r"
 					data-testid="sidebar-todo-complete"
 				>
 					<HugeiconsIcon

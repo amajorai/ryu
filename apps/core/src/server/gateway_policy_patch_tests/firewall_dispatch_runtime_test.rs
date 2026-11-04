@@ -113,10 +113,10 @@ async fn shipped_firewall_dispatch_preserves_live_state_and_fails_closed_until_r
         |path| Err(format!("unexpected code: {path}")),
     )
     .unwrap();
-    let policies = super::super::manifest_policies(&manifest);
+    let policies = crate::server::manifest_policies(&manifest);
     let definition = &policies[0].definition;
     let client = reqwest::Client::new();
-    let apply = super::super::apply_firewall_policy;
+    let apply = crate::server::apply_firewall_policy;
     // The real managed endpoint begins quarantined. Policy reads cannot send
     // credentials until the listener proves possession and separated roles.
     assert!(crate::sidecar::gateway::local_gateway_quarantined());

@@ -154,7 +154,7 @@ impl FirewallScanner {
     }
 
     /// Whether the normalized scan still finds PII / a secret in `text`.
-    fn companion_survivors(&self, text: &str) -> (bool, bool) {
+    pub(super) fn companion_survivors(&self, text: &str) -> (bool, bool) {
         (
             self.find_match(text, &self.pii_patterns, DetectionKind::Pii)
                 .is_some(),

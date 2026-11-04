@@ -30,6 +30,7 @@
   "Cross-origin payment redirects are blocked.": "Se bloquean las redirecciones de pago entre orígenes.",
   "Daily spend cap": "Límite de gasto diario",
   "Endpoint returned HTTP {status}; no payment was required.": "El endpoint devolvió HTTP {status}; no se requería ningún pago.",
+  "Enter an amount, such as {example}.": "Introduce un importe, por ejemplo {example}.",
   "Every limit is enforced again immediately before signing.": "Cada límite se vuelve a aplicar justo antes de firmar.",
   "Expires": "Caduca",
   "Explicit approval is required.": "Se requiere aprobación explícita.",

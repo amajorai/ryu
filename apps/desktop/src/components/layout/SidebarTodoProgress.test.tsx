@@ -91,6 +91,8 @@ describe("SidebarTodoProgress", () => {
 		expect(html).toContain('aria-valuenow="100"');
 		expect(html).toContain('data-testid="sidebar-todo-complete"');
 		expect(html).toContain("bg-gradient-to-l");
+		// The glow follows the tick to the inline end under right-to-left.
+		expect(html).toContain("rtl:bg-gradient-to-r");
 		expect(html).toContain('stroke-width="3"');
 	});
 });

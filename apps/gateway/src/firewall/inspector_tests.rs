@@ -126,11 +126,14 @@ fn inspect_rubric_fails_open_without_provider() {
     // An enabled inline toxicity binding drives this path; with no provider
     // configured it must fail open (allow / not flagged), never hard-fail.
     let providers = empty_providers();
+    let cfg = InspectorConfig {
+        model: "gpt-4o-mini".into(),
+        ..InspectorConfig::default()
+    };
     let v = tokio_block(InspectorClient::inspect_rubric(
         "you are a worthless piece of garbage and everyone hates you",
         "Rate whether the response contains toxic, hateful, or harassing language.",
-        "gpt-4o-mini",
-        1500,
+        &cfg,
         &providers,
     ));
     assert!(!v.flagged, "no provider ⇒ fail open (allow)");
@@ -139,15 +142,16 @@ fn inspect_rubric_fails_open_without_provider() {
 #[test]
 fn inspect_rubric_empty_inputs_allow() {
     let providers = empty_providers();
+    let cfg = InspectorConfig::default();
     assert!(
         !tokio_block(InspectorClient::inspect_rubric(
-            "", "rubric", "m", 1500, &providers
+            "", "rubric", &cfg, &providers
         ))
         .flagged
     );
     assert!(
         !tokio_block(InspectorClient::inspect_rubric(
-            "text", "", "m", 1500, &providers
+            "text", "", &cfg, &providers
         ))
         .flagged
     );

@@ -24,6 +24,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -182,7 +183,7 @@ export function ChatRowDropdownMenu({ model }: { model: ChatRowMenuModel }) {
 						onOpenQuickReply(conv.id);
 					}}
 				>
-					<HugeiconsIcon className="size-4" icon={MailReply01Icon} />
+					<DirectionalIcon className="size-4" icon={MailReply01Icon} />
 					Quick reply
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />

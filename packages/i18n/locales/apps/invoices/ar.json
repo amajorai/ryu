@@ -683,7 +683,7 @@
   "records": "سجلات",
   "request": "الطلب",
   "routing": "توجيه",
-  "running": "يشغّل",
+  "running": "قيد التشغيل",
   "ryu": "ryu",
   "shop": "متجر",
   "show": "إظهار",
@@ -708,6 +708,7 @@
   "with": "مع",
   "working": "قيد العمل",
   "your browser": "متصفحك",
+  "{age} ago": "منذ {age}",
   "{count} more": "{count} أخرى",
   "{currency} invoice totals": "إجماليات الفواتير بعملة {currency}"
 }

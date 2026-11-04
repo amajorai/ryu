@@ -30,6 +30,7 @@
   "Cross-origin payment redirects are blocked.": "跨源支付重定向已被阻止。",
   "Daily spend cap": "每日支出上限",
   "Endpoint returned HTTP {status}; no payment was required.": "端点返回 HTTP {status}；无需付款。",
+  "Enter an amount, such as {example}.": "请输入金额，例如 {example}。",
   "Every limit is enforced again immediately before signing.": "每项限额都会在签名前立即再次执行。",
   "Expires": "过期时间",
   "Explicit approval is required.": "需要明确批准。",

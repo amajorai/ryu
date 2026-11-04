@@ -7,6 +7,7 @@ import {
 	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
+import { agentSyncWarnings } from "@/src/lib/agent-sync-scan-text.ts";
 import type {
 	AgentSyncScan,
 	AgentSyncScanItem,
@@ -135,8 +136,11 @@ export function ImportScanPreview({
 			{scan.warnings.length > 0 ? (
 				<SettingsSection title="Review before cutover">
 					<SettingsCard className="flex flex-col gap-1.5">
-						{scan.warnings.map((warning) => (
-							<p className="text-sm text-status-warning" key={warning}>
+						{agentSyncWarnings(scan, tl).map((warning, index) => (
+							<p
+								className="text-sm text-status-warning"
+								key={`${index}:${scan.warnings[index]}`}
+							>
 								{warning}
 							</p>
 						))}

@@ -135,7 +135,11 @@ function formatAmount(
 			style: "currency",
 		}).format(amount);
 	} catch {
-		return `${currency.toUpperCase()} ${amount.toFixed(2)}`;
+		const figure = numberFormatter(locale, {
+			maximumFractionDigits: 2,
+			minimumFractionDigits: 2,
+		}).format(amount);
+		return `${currency.toUpperCase()} ${figure}`;
 	}
 }
 

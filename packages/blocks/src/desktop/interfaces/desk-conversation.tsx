@@ -10,6 +10,7 @@ import {
 } from "react";
 import { ConversationHeader } from "./desk-conversation-header.tsx";
 import type { DeskRow } from "./desk-model.ts";
+import { useInlineSign } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 export type { DeskNeedsYouHint } from "./desk-conversation-no-selection.tsx";
@@ -60,6 +61,7 @@ export function DeskConversation({
 	stacked: boolean;
 	threadView: ReactNode;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const mainRef = useRef<HTMLDivElement>(null);
 	const overlayRef = useRef<HTMLDivElement>(null);
@@ -156,7 +158,7 @@ export function DeskConversation({
 				<motion.div
 					animate={{ opacity: 1, x: 0 }}
 					className="absolute end-0 top-14 bottom-0 z-20 flex max-w-full shadow-lg"
-					initial={reduceMotion ? false : { opacity: 0, x: 16 }}
+					initial={reduceMotion ? false : { opacity: 0, x: 16 * inlineSign }}
 					onBlur={onOverlayBlur}
 					onFocus={() => {
 						focusInOverlay.current = true;

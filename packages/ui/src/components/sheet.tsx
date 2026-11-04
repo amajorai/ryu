@@ -9,6 +9,7 @@ import { cancelToastDismissal } from "@ryu/ui/lib/toast-press.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 import { usePortalContainer } from "./portal-container.tsx";
+import { resolveSheetSide, type SheetSide } from "./sheet-side.ts";
 
 function Sheet({ onOpenChange, ...props }: SheetPrimitive.Root.Props) {
 	return (
@@ -58,11 +59,12 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
 function SheetContent({
 	className,
 	children,
-	side = "right",
+	side = "inline-end",
 	showCloseButton = true,
 	...props
 }: SheetPrimitive.Popup.Props & {
-	side?: "top" | "right" | "bottom" | "left";
+	/** A window edge, or a reading-direction edge ("inline-end" by default). */
+	side?: SheetSide;
 	showCloseButton?: boolean;
 }) {
 	const direction = useDirection();
@@ -74,7 +76,7 @@ function SheetContent({
 					"fixed z-50 flex flex-col border-border bg-popover bg-clip-padding text-popover-foreground text-sm shadow-(--shadow-popover) transition duration-(--duration-slow) ease-(--ease-enter) data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=bottom]:inset-x-0 data-[side=top]:inset-x-0 data-[side=left]:inset-y-0 data-[side=right]:inset-y-0 data-[side=top]:top-0 data-[side=right]:right-0 data-[side=bottom]:bottom-0 data-[side=left]:left-0 data-[side=bottom]:h-auto data-[side=left]:h-full data-[side=right]:h-full data-[side=top]:h-auto data-[side=left]:w-3/4 data-[side=right]:w-3/4 data-[side=top]:rounded-t-[var(--ryu-window-radius,0px)] data-[side=right]:rounded-r-[var(--ryu-window-radius,0px)] data-[side=bottom]:rounded-b-[var(--ryu-window-radius,0px)] data-[side=left]:rounded-l-[var(--ryu-window-radius,0px)] data-[side=bottom]:border-t data-[side=left]:border-r data-[side=top]:border-b data-[side=right]:border-l data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
 					className
 				)}
-				data-side={side}
+				data-side={resolveSheetSide(side, direction)}
 				data-slot="sheet-content"
 				{...props}
 				dir={direction}

@@ -655,7 +655,7 @@
   "ready": "bereit",
   "records": "Datensätze",
   "request": "Anfrage",
-  "running": "mit",
+  "running": "läuft",
   "ryu": "ryu",
   "show": "anzeigen",
   "shown": "angezeigt",
@@ -679,6 +679,7 @@
   "with": "mit",
   "working": "arbeiten",
   "your browser": "dem Browser",
+  "{age} ago": "vor {age}",
   "{count, plural, one {{length} visible record} other {{length} visible records}}": "{count, plural, one {{length} sichtbarer Eintrag} other {{length} sichtbare Einträge}}",
   "{count} more": "{count} weitere",
   "{primaryCurrency} ledger total": "Gesamtsumme im Kassenbuch ({primaryCurrency})"

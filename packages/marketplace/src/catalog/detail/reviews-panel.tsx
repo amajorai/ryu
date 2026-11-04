@@ -40,6 +40,7 @@ import type {
 	MarketplaceReview,
 	MarketplaceReviewsService,
 } from "../../host.tsx";
+import { formatRatingAverage } from "../../rating-format.ts";
 import { StarRating, StarRatingInput } from "../../star-rating.tsx";
 import type { MarketplaceKind } from "../../types.ts";
 import { formatDate } from "./detail-panels.tsx";
@@ -304,7 +305,7 @@ function RatingSummary({
 					<>
 						<div className="flex items-baseline gap-2">
 							<span className="font-medium text-3xl tabular-nums">
-								{(Math.round(average * 10) / 10).toFixed(1)}
+								{formatRatingAverage(average)}
 							</span>
 							<span className="text-muted-foreground text-sm">out of 5</span>
 						</div>

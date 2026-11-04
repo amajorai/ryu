@@ -13,6 +13,8 @@ import type {
 	SpaceImportRecord,
 	SpaceImportResultDocument,
 } from "@/src/lib/api/space-imports.ts";
+import { importStatusLabel } from "./import-failure-copy.ts";
+import { ImportMessage } from "./import-message.tsx";
 import {
 	formatBytes,
 	formatWhen,
@@ -77,7 +79,7 @@ export function ImportHistorySection({
 											{item.sourceName}
 										</p>
 										<Badge variant={statusVariant(item.status)}>
-											{item.status}
+											{importStatusLabel(item.status, tl)}
 										</Badge>
 									</div>
 									<p className="mt-1 text-muted-foreground text-xs">
@@ -97,17 +99,10 @@ export function ImportHistorySection({
 												)}`
 											: ""}
 									</p>
-									{item.message ? (
-										<p
-											className={
-												item.status === "failed"
-													? "mt-2 text-status-destructive text-xs"
-													: "mt-2 text-muted-foreground text-xs"
-											}
-										>
-											{item.message}
-										</p>
-									) : null}
+									<ImportMessage
+										failed={item.status === "failed"}
+										message={item.message}
+									/>
 								</div>
 								{item.status === "pending" || item.status === "running" ? (
 									<Spinner className="mt-1 size-4" />

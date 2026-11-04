@@ -126,6 +126,7 @@
   "This form changed. Reload it and try again.": "此表单已更改。请重新加载后重试。",
   "This form changed. Reload it before saving.": "此表单已更改。请在保存前重新加载。",
   "This form is no longer accepting responses.": "此表单已不再接受回复。",
+  "This form is no longer available.": "此表单已不再可用。",
   "This form link is already in use.": "此表单链接已被使用。",
   "This form link is reserved. Choose another link name.": "此表单链接已被保留。请选择其他链接名称。",
   "This permanently deletes the form and every response stored with it on this Ryu node.": "这将永久删除此表单以及此 Ryu 节点上随其存储的所有回复。",

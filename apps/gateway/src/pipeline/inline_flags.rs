@@ -148,20 +148,15 @@ pub(super) async fn flag_inline_binding(
                 return InlineFlag::Skip;
             }
             let ins = &scanner.config().inspector;
-            let timeout = if ins.timeout_ms == 0 {
-                1500
-            } else {
-                ins.timeout_ms
-            };
             let inference = auxiliary::GovernedInference::new(
                 Arc::clone(state),
                 ctx.clone(),
                 "inline-evaluator",
             );
-            let verdict = match InspectorClient::inspect_rubric(
-                text, rubric, &ins.model, timeout, &inference,
-            )
-            .await
+            // The judge reads under the inspector's model, timeout and
+            // window budget, so a raised `max_windows` judges a long output
+            // whole instead of leaving its head to the seed backstop.
+            let verdict = match InspectorClient::inspect_rubric(text, rubric, ins, &inference).await
             {
                 Ok(verdict) => verdict,
                 Err(error) => return InlineFlag::Denied(error),

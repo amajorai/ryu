@@ -167,7 +167,7 @@ export const GiftCard = forwardRef<
 									/>
 								}
 							>
-								<Undo2 aria-hidden="true" className="size-4" />
+								<Undo2 aria-hidden="true" className="size-4 rtl:-scale-x-100" />
 							</TooltipTrigger>
 							<TooltipContent side="bottom">Mark unopened</TooltipContent>
 						</Tooltip>

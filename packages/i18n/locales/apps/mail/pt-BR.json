@@ -488,6 +488,7 @@
   "Read the docs": "Ler a documentação",
   "Reason": "Motivo",
   "Receive signed event notifications for received, sent, delivery, bounce, complaint, rejection, and open events.": "Receba notificações assinadas de eventos de recebimento, envio, entrega, devolução, reclamação, rejeição e abertura.",
+  "Received": "Recebido",
   "Recent": "Recentes",
   "Red": "Vermelho",
   "Reference": "Referência",
@@ -759,12 +760,12 @@
   "play": "jogar",
   "project": "projeto",
   "prompt": "prompt",
-  "ready": "prontos",
+  "ready": "pronto",
   "records": "registros",
   "request": "solicitação",
   "research": "pesquisa",
   "routing": "roteamento",
-  "running": "executando",
+  "running": "em execução",
   "ryu": "ryu",
   "show": "mostrar",
   "shown": "exibidos",
@@ -792,6 +793,9 @@
   "with": "com",
   "working": "trabalhando",
   "your browser": "seu navegador",
+  "{age} ago": "há {age}",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, one {# anexo pronto} other {# anexos prontos}}",
-  "{count} more": "Mais {count}"
+  "{count} more": "Mais {count}",
+  "{recipients} · {status}": "{recipients} · {status}",
+  "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {Rascunho} sending {Enviando} sent {Enviado} failed {Falhou} inbound {Recebido} outbound {De saída} other {{value}}}"
 }

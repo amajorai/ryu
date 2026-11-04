@@ -22,6 +22,7 @@ import {
 	type PluginDoctorReport,
 } from "@/src/lib/api/plugins.ts";
 import { InstalledPluginEvalCard } from "./InstalledPluginEvalCard.tsx";
+import { pluginDoctorFindingCopy } from "./plugin-doctor-copy.ts";
 
 /** The catalog entry an installed app maps onto, so the shared detail tabs can
  *  grade and render it exactly as the store does.
@@ -204,19 +205,25 @@ function InstalledDoctorCard({
 					</div>
 					{report.findings.length > 0 ? (
 						<ul>
-							{report.findings.slice(0, 5).map((finding) => (
-								<li
-									className="border-border border-b py-2 last:border-b-0"
-									key={finding.checkId}
-								>
-									<p className="font-medium">
-										{finding.severity} · {finding.summary}
-									</p>
-									<p className="mt-0.5 text-muted-foreground">
-										{finding.detail}
-									</p>
-								</li>
-							))}
+							{report.findings.slice(0, 5).map((finding) => {
+								const copy = pluginDoctorFindingCopy(finding, tl);
+								return (
+									<li
+										className="border-border border-b py-2 last:border-b-0"
+										key={finding.checkId}
+									>
+										<p className="font-medium">
+											{tl("{severity} · {summary}", {
+												severity: copy.severity,
+												summary: copy.summary,
+											})}
+										</p>
+										<p className="mt-0.5 text-muted-foreground">
+											{copy.detail}
+										</p>
+									</li>
+								);
+							})}
 						</ul>
 					) : (
 						<p className="text-status-success">

@@ -488,6 +488,7 @@
   "Read the docs": "Dokumentation lesen",
   "Reason": "Grund",
   "Receive signed event notifications for received, sent, delivery, bounce, complaint, rejection, and open events.": "Erhalten Sie signierte Ereignisbenachrichtigungen für Empfang, Versand, Zustellung, Unzustellbarkeit, Beschwerden, Ablehnungen und Öffnungen.",
+  "Received": "Empfangen",
   "Recent": "Zuletzt verwendet",
   "Red": "Rot",
   "Reference": "Referenz",
@@ -764,7 +765,7 @@
   "request": "Anfrage",
   "research": "Recherche",
   "routing": "Routing",
-  "running": "mit",
+  "running": "läuft",
   "ryu": "ryu",
   "show": "anzeigen",
   "shown": "angezeigt",
@@ -792,6 +793,9 @@
   "with": "mit",
   "working": "arbeiten",
   "your browser": "dem Browser",
+  "{age} ago": "vor {age}",
   "{count, plural, one {# attachment} other {# attachments}} ready": "{count, plural, one {# Anhang} other {# Anhänge}} bereit",
-  "{count} more": "{count} weitere"
+  "{count} more": "{count} weitere",
+  "{recipients} · {status}": "{recipients} · {status}",
+  "{status, select, draft {Draft} sending {Sending} sent {Sent} failed {Failed} inbound {Received} outbound {Outgoing} other {{value}}}": "{status, select, draft {Entwurf} sending {Wird gesendet} sent {Gesendet} failed {Fehlgeschlagen} inbound {Empfangen} outbound {Ausgehend} other {{value}}}"
 }

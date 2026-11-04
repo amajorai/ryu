@@ -1,0 +1,32 @@
+{
+  "note": "The credential names and PEM labels a token spelled wholly in Cyrillic or Greek look-alikes may fold for: Core's redaction_fold::LOOK_ALIKE_KEYWORDS, foldShareText's and foldRedactionText's lists must all equal this one.",
+  "keywords": [
+    "accesskey",
+    "accesstoken",
+    "apikey",
+    "authorization",
+    "authtoken",
+    "awssecretaccesskey",
+    "basic",
+    "bearer",
+    "begin",
+    "clientsecret",
+    "connection",
+    "connectionstring",
+    "database",
+    "databaseurl",
+    "ec",
+    "end",
+    "key",
+    "openssh",
+    "passwd",
+    "password",
+    "private",
+    "privatekey",
+    "refreshtoken",
+    "rsa",
+    "secret",
+    "secretaccesskey",
+    "token"
+  ]
+}

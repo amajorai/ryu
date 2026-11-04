@@ -147,7 +147,7 @@ export function BlogTags({
 	}
 
 	return (
-		<div className="flex min-w-0 gap-2 overflow-x-auto py-1 [scrollbar-width:none] max-md:-mx-6 max-md:px-6 md:flex-wrap max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)]">
+		<div className="flex min-w-0 gap-2 overflow-x-auto py-1 [scrollbar-width:none] max-md:-mx-6 max-md:px-6 md:flex-wrap max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)] max-md:rtl:[mask-image:linear-gradient(to_left,black_85%,transparent)]">
 			{tags.map((tag) => {
 				const isActive = tag.value === activeTag || !(tag.value || activeTag);
 				const url = tag.value

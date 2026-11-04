@@ -265,8 +265,9 @@ export function JobsToolbar({
 						compact
 							? "order-last -mx-4 basis-full overflow-x-auto ps-4 pe-8"
 							: "flex-1 overflow-x-auto ps-1 pe-8",
-						// A trailing fade says more pills scroll in from the right.
-						"[mask-image:linear-gradient(to_right,black_calc(100%_-_2rem),transparent)] [scrollbar-width:none]"
+						// A trailing fade says more pills scroll in from the inline end
+						// (the left edge in a right-to-left locale).
+						"[mask-image:linear-gradient(to_right,black_calc(100%_-_2rem),transparent)] [scrollbar-width:none] rtl:[mask-image:linear-gradient(to_left,black_calc(100%_-_2rem),transparent)]"
 					)}
 				>
 					<FilterPill

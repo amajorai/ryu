@@ -1,6 +1,5 @@
 {
   "(authenticated)": "（已认证）",
-  "1 install": "1 次安装",
   "24/7 on-device speech capture into your meeting memory.": "在设备上全天候采集语音，存入你的会议记忆。",
   "A Twilio number receives forwarded calls. Purchasing one bills your Twilio account.": "Twilio 号码用于接收转接的来电。购买号码将向你的 Twilio 账户计费。",
   "A line can list at most {maxAllowedCallers} trusted callers.": "每条线路最多可列出 {maxAllowedCallers} 个受信任的来电者。",
@@ -592,7 +591,6 @@
   "No documents yet. Tap New to create a page.": "还没有文档。轻点“新建”以创建页面。",
   "No groups yet": "还没有群组",
   "No groups yet. Create one from the desktop app.": "还没有群组。请在桌面应用中创建。",
-  "No installs": "无安装",
   "No matches": "无匹配项",
   "No meetings recorded yet.": "尚未录制会议。",
   "No meetings yet": "还没有会议",
@@ -1150,7 +1148,6 @@
   "{count, plural, one {# match found} other {# matches found}}": "{count, plural, other {找到 # 个匹配项}}",
   "{count, plural, one {# member} other {# members}} · {coordination}": "{count, plural, other {# 名成员}} · {coordination}",
   "{count, plural, one {# runnable} other {# runnables}}": "{count, plural, other {# 个可运行项}}",
-  "{count} installs": "{count} 次安装",
   "{deviceLabel}. Add your Wi-Fi so the device can connect directly at home, or skip it to relay through this phone.": "{deviceLabel}。添加你的 Wi-Fi，让设备在家中直接连接；或跳过此步骤，通过这部手机中转。",
   "{minutes} min": "{minutes} 分钟",
   "{modelName} · mobile tools limited": "{modelName} · 移动端工具受限",

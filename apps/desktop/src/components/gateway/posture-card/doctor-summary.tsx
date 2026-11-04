@@ -12,6 +12,10 @@ import {
 	type GatewayPosture,
 } from "@/src/lib/api/gateway-posture.ts";
 import { StatusText } from "../quiet.tsx";
+import {
+	doctorSeverityLabel,
+	gatewayDoctorFindingCopy,
+} from "./doctor-finding-copy.ts";
 
 export const levelIndex = (posture: GatewayPosture): number =>
 	GATEWAY_POSTURE_OPTIONS.findIndex((option) => option.level === posture);
@@ -25,6 +29,8 @@ function severityTone(severity: GatewayDoctorFinding["severity"]): string {
 }
 
 function DoctorFindingRow({ finding }: { finding: GatewayDoctorFinding }) {
+	const tl = useLiteralMessages();
+	const copy = gatewayDoctorFindingCopy(finding, tl);
 	return (
 		<div
 			className="flex items-start gap-2 border-border border-b py-3 last:border-b-0"
@@ -32,15 +38,20 @@ function DoctorFindingRow({ finding }: { finding: GatewayDoctorFinding }) {
 			data-doctor-severity={finding.severity}
 		>
 			<HugeiconsIcon
-				aria-label={finding.severity}
+				aria-label={doctorSeverityLabel(finding.severity, tl)}
 				className={`mt-0.5 size-4 shrink-0 ${severityTone(finding.severity)}`}
 				icon={finding.severity === "info" ? CheckmarkCircle02Icon : Alert02Icon}
 			/>
 			<div className="min-w-0 flex-1 space-y-1">
-				<p className="text-sm">{finding.summary}</p>
+				<p className="text-sm">{copy.summary}</p>
 				<p className="text-(length:--text-detail) text-pretty text-muted-foreground leading-(--text-detail--line-height)">
-					{finding.detail}
-					{finding.recommendedAction ? ` ${finding.recommendedAction}` : ""}
+					<span>{copy.detail}</span>
+					{copy.action ? (
+						<>
+							{" "}
+							<span>{copy.action}</span>
+						</>
+					) : null}
 				</p>
 				{finding.settingPath ? (
 					<p className="font-mono text-muted-foreground text-xs">

@@ -12,6 +12,7 @@ import {
 	useId,
 	useState,
 } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 
 const MAX_PROMPT_LENGTH = 8000;
 
@@ -86,6 +87,7 @@ export function LiveChat({
 	threadView: ReactNode | null;
 	width: number;
 }) {
+	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	return (
 		<motion.aside
@@ -96,7 +98,7 @@ export function LiveChat({
 				overlay ? "absolute inset-0 z-30" : "relative shrink-0 border-s"
 			)}
 			data-testid="live-chat"
-			initial={reduceMotion ? false : { opacity: 0, x: 16 }}
+			initial={reduceMotion ? false : { opacity: 0, x: 16 * inlineSign }}
 			style={overlay ? undefined : { width }}
 			transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
 		>

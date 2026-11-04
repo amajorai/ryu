@@ -10,7 +10,9 @@ import type { LanguagePacksResult } from "./ipc.ts";
 // Writers: the Island picker, and Desktop, which mirrors its own choice here
 // (`apps/desktop/src/lib/ui-language-preference.ts`). Desktop seeds an unset key
 // at launch and writes on every later Desktop change, so the Island follows
-// Desktop without a launch overriding a newer Island choice.
+// Desktop without a launch overriding a newer Island choice. Desktop also
+// adopts a fixed choice made in the Island (`apps/desktop/src/lib/
+// ui-language-adopt.ts`), so the last writer wins on both surfaces and Core.
 //
 // - `auto`: follow the OS language (an official pack is matched by locale).
 // - `fixed`: use `packId`; `null` is an explicit English choice.
