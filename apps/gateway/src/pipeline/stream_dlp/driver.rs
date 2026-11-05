@@ -1,5 +1,6 @@
-//! The streaming driver around [`StreamingDlp`]: pulls provider chunks,
-//! releases scanned frames, and reports, counts and audits violations.
+//! Drives [`StreamingDlp`] over a provider body: logging, counting and
+//! auditing violations, refusing unscannable streams, and draining a blocked
+//! upstream so its usage still settles.
 
 use super::{DlpOutput, StreamingDlp, MAX_HELD_BYTES, OVERSIZED};
 use crate::config::FirewallPolicy;
@@ -36,10 +37,22 @@ pub(in crate::pipeline) fn dlp_body(
         /// observer), which panics if polled again, so it is never drained
         /// after this.
         upstream_ended: bool,
+        /// The Sanitize match let through so far. Its line is logged when
+        /// the stream ends unblocked (`Drop`): a survivor that blocks a
+        /// later step logs only the block, one line per decision.
+        sanitized: Option<String>,
+    }
+
+    impl Drop for Driver {
+        fn drop(&mut self) {
+            if let Some(pattern) = self.sanitized.take() {
+                self.log_let_through(&pattern);
+            }
+        }
     }
 
     impl Driver {
-        fn report(&self, output: &DlpOutput) {
+        fn report(&mut self, output: &DlpOutput) {
             let Some(found) = output.violation.as_ref() else {
                 return;
             };
@@ -60,6 +73,7 @@ pub(in crate::pipeline) fn dlp_body(
                 // A Sanitize stream ends blocked only when a match survives
                 // redaction; count and audit it like a Block.
                 FirewallPolicy::Sanitize if self.enforce && output.blocked => {
+                    self.sanitized = None;
                     tracing::warn!(request_id = %self.request_id, pattern = %pattern, "firewall: outbound match survived Sanitize; blocked (streaming)");
                     self.state.metrics.inc_firewall_blocked();
                     super::super::audit_stream_dlp_block(
@@ -70,19 +84,69 @@ pub(in crate::pipeline) fn dlp_body(
                     );
                 }
                 FirewallPolicy::Sanitize if self.enforce => {
-                    tracing::warn!(request_id = %self.request_id, pattern = %pattern, "firewall: sanitized outbound response (streaming)");
+                    self.sanitized.get_or_insert_with(|| pattern.clone());
                 }
                 FirewallPolicy::WarnAndContinue if self.outbound_enabled => {
-                    tracing::warn!(request_id = %self.request_id, pattern = %pattern, "firewall: outbound violation (warn-and-continue, streaming)");
+                    self.log_let_through(pattern);
                 }
                 _ => {}
             }
         }
 
-        fn refuse(&mut self, message: &str) -> bytes::Bytes {
+        fn log_let_through(&self, pattern: &str) {
+            crate::pipeline::outbound_detection::log_let_through(
+                self.scanner.config().log_detections,
+                &self.request_id,
+                pattern,
+                &self.policy,
+                true,
+            );
+        }
+
+        /// End the stream with `message`. `count` only for a firewall
+        /// verdict: a provider failure or the size cap is not a block, as on
+        /// the buffered path. After released text the notice starts on its
+        /// own paragraph, as a block notice does.
+        fn refuse(&mut self, message: &str, count: bool) -> bytes::Bytes {
             self.done = true;
-            self.state.metrics.inc_firewall_blocked();
-            bytes::Bytes::from(super::super::sse_content_frames(message))
+            if count {
+                // A block: the stream is never logged as sanitized.
+                self.sanitized = None;
+                self.state.metrics.inc_firewall_blocked();
+            }
+            let text = if self.dlp.released_any {
+                format!("\n\n{message}")
+            } else {
+                message.to_owned()
+            };
+            bytes::Bytes::from(super::super::sse_content_frames(&text))
+        }
+
+        /// Read the rest of the provider body without releasing it, so its
+        /// usage frame still settles the request (as a block does).
+        async fn drain(&mut self) {
+            if self.upstream_ended {
+                return;
+            }
+            let drain = async {
+                let mut bytes = 0usize;
+                while let Some(chunk) = self.upstream.next().await {
+                    match chunk {
+                        Ok(chunk) => bytes += chunk.len(),
+                        Err(_) => break,
+                    }
+                    if bytes > MAX_HELD_BYTES {
+                        break;
+                    }
+                }
+            };
+            if tokio::time::timeout(std::time::Duration::from_secs(300), drain)
+                .await
+                .is_err()
+            {
+                tracing::warn!(request_id = %self.request_id, "firewall: timed out draining refused provider stream for usage");
+            }
+            self.upstream_ended = true;
         }
     }
 
@@ -98,6 +162,7 @@ pub(in crate::pipeline) fn dlp_body(
         outbound_enabled,
         done: false,
         upstream_ended: false,
+        sanitized: None,
     };
 
     let stream = futures_util::stream::unfold(driver, |mut driver| async move {
@@ -109,6 +174,7 @@ pub(in crate::pipeline) fn dlp_body(
                     tracing::warn!(request_id = %driver.request_id, %error, "firewall: provider stream failed during outbound scan");
                     let refused = driver.refuse(
                         "[Ryu firewall] Unable to scan the response stream; request aborted.",
+                        false,
                     );
                     return Some((Ok::<_, std::io::Error>(refused), driver));
                 }
@@ -156,13 +222,16 @@ pub(in crate::pipeline) fn dlp_body(
                     tracing::warn!(request_id = %driver.request_id, %error, "firewall: failed to buffer stream for outbound scan");
                     let refused = driver.refuse(
                         "[Ryu firewall] Unable to scan the response stream; request aborted.",
+                        false,
                     );
                     return Some((Ok(refused), driver));
                 }
                 Err(error) => {
                     tracing::warn!(request_id = %driver.request_id, %error, "firewall: unscannable response stream");
+                    driver.drain().await;
                     let refused = driver.refuse(
                         "[Ryu firewall] Response blocked because the provider stream could not be scanned.",
+                        true,
                     );
                     return Some((Ok(refused), driver));
                 }
@@ -171,64 +240,4 @@ pub(in crate::pipeline) fn dlp_body(
         None
     });
     axum::body::Body::from_stream(stream)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::*;
-    use crate::config::{FirewallConfig, GatewayConfig};
-    use crate::state::AppState;
-
-    async fn drive(policy: FirewallPolicy, parts: &[&str]) -> String {
-        let config = GatewayConfig {
-            firewall: FirewallConfig {
-                policy: policy.clone(),
-                ..FirewallConfig::default()
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit");
-        let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
-        let state = Arc::new(AppState::new_for_test(config, audit, evals));
-        let ctx = crate::pipeline::test_support::plain_request_context();
-        let scanner = state.resolved_scanner(&ctx);
-        let mut raw = String::new();
-        for part in parts {
-            let frame =
-                serde_json::json!({ "choices": [{ "index": 0, "delta": { "content": part } }] });
-            raw.push_str(&format!("data: {frame}\n\n"));
-        }
-        raw.push_str("data: [DONE]\n\n");
-        let body = dlp_body(raw.into(), state, ctx, scanner, policy, true, true);
-        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
-        String::from_utf8(bytes.to_vec()).unwrap()
-    }
-
-    #[tokio::test]
-    async fn sanitize_masks_a_fold_only_address_split_across_deltas() {
-        let out = drive(
-            FirewallPolicy::Sanitize,
-            &["mail alice\u{FF20}exa", "mple.com today. ", "Bye. "],
-        )
-        .await;
-        assert!(!out.contains("alice") && !out.contains("mple.com"), "{out}");
-        assert!(out.ends_with("data: [DONE]\n\n"));
-    }
-
-    #[tokio::test]
-    async fn block_replaces_the_stream_with_the_notice() {
-        let out = drive(
-            FirewallPolicy::Block,
-            &["key sk-abcdefghijklmnopqrstuvwxyz0123 ", "ok. "],
-        )
-        .await;
-        assert!(!out.contains("sk-abcdefghijklmnopqrstuvwxyz0123"), "{out}");
-        assert!(out.contains("Response blocked by policy"), "{out}");
-    }
 }

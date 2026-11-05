@@ -393,10 +393,14 @@ async fn run(seal_key: SealKeyStatus) -> anyhow::Result<()> {
     // `into_make_service_with_connect_info` exposes the peer `SocketAddr` to
     // handlers via `ConnectInfo`. Admin endpoints (config/audit) use it to allow
     // no-master-key access only from loopback, never from a remote peer.
+    // SSE frames are small writes; without TCP_NODELAY Nagle holds each one until
+    // the client's delayed ACK (~40 ms on Linux, up to 200 ms on Windows), as
+    // measured in docs/gateway-guardrail-overhead-2026-10-31.md.
     let serve = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    );
+    )
+    .tcp_nodelay(true);
     // Core stops (and respawns) its managed Gateway with SIGTERM and a bounded
     // grace period. Exit promptly on it — in-flight requests are cut exactly as
     // before — but flush the consented OTLP batch first so spans that already

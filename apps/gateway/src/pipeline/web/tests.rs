@@ -403,3 +403,85 @@ fn sensitive_result_url_is_blocked_without_creating_a_broken_success_url() {
     ));
     assert_eq!(output["results"][0]["url"], url);
 }
+
+/// Web output logs one request-scoped line for its decision: a block always
+/// at `warn`; matches Sanitize or WarnAndContinue let through as one summary
+/// with the field-level hit count, at the level `log_detections` chooses. The
+/// scanner's own per-hit line never reaches `warn`.
+#[test]
+fn web_output_logs_one_line_per_decision() {
+    use crate::pipeline::log_capture::LogBuffer;
+
+    let (state, _, _) = state("http://127.0.0.1:1".into(), 6, true, false);
+    let ctx = context(&state);
+    let two_hits = || {
+        json!({"results":[
+            {"title":"one","snippet":"mail john@example.com","url":"https://example.com/a"},
+            {"title":"two","snippet":"mail jane@example.org","url":"https://example.com/b"},
+        ]})
+    };
+    for policy in [FirewallPolicy::Sanitize, FirewallPolicy::WarnAndContinue] {
+        for log_detections in [true, false] {
+            let mut firewall = state.config.firewall.clone();
+            firewall.policy = policy.clone();
+            firewall.log_detections = log_detections;
+            state.update_firewall_config(firewall);
+            let buffer = LogBuffer::default();
+            let mut output = two_hits();
+            {
+                let _guard = buffer.capture();
+                inspect_output(&state, &ctx, &mut output).unwrap();
+            }
+            let captured = buffer.text();
+            let lines = buffer.lines_with("firewall: outbound web results matched");
+            assert_eq!(lines.len(), 1, "{captured}");
+            assert!(lines[0].contains("hits=2"), "{captured}");
+            assert!(
+                lines[0].contains("request_id=web-financial-test"),
+                "{captured}"
+            );
+            let level = if log_detections { "WARN" } else { "DEBUG" };
+            assert!(lines[0].trim_start().starts_with(level), "{captured}");
+            assert_eq!(
+                buffer.warn_lines().len(),
+                usize::from(log_detections),
+                "{captured}"
+            );
+        }
+    }
+
+    for (policy, output) in [
+        (FirewallPolicy::Block, two_hits()),
+        (
+            FirewallPolicy::Sanitize,
+            json!({"results":[{"title":"t","snippet":"s","url":"https://example.com/john@example.com"}]}),
+        ),
+    ] {
+        for log_detections in [true, false] {
+            let mut firewall = state.config.firewall.clone();
+            firewall.policy = policy.clone();
+            firewall.log_detections = log_detections;
+            state.update_firewall_config(firewall);
+            let buffer = LogBuffer::default();
+            let mut output = output.clone();
+            {
+                let _guard = buffer.capture();
+                assert!(matches!(
+                    inspect_output(&state, &ctx, &mut output),
+                    Err(GatewayError::FirewallBlocked(..))
+                ));
+            }
+            let captured = buffer.text();
+            let warns = buffer.warn_lines();
+            assert_eq!(warns.len(), 1, "{captured}");
+            assert!(
+                warns[0].contains("firewall: blocked web output"),
+                "{captured}"
+            );
+            assert!(
+                warns[0].contains("request_id=web-financial-test"),
+                "{captured}"
+            );
+        }
+    }
+}

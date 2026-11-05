@@ -1,10 +1,8 @@
-//! Tests for the incremental outbound DLP state machine (`stream_dlp`).
-
 use super::*;
 use crate::config::FirewallConfig;
 use crate::firewall::FirewallScanner;
 
-fn scanner() -> FirewallScanner {
+pub(super) fn scanner() -> FirewallScanner {
     FirewallScanner::new_scoped(FirewallConfig::default())
 }
 
@@ -27,7 +25,7 @@ fn stream_of(words: &[&str]) -> String {
 }
 
 /// Content-only frames for testing token boundaries without envelope fields.
-fn bare_stream(parts: &[&str]) -> String {
+pub(super) fn bare_stream(parts: &[&str]) -> String {
     let mut raw = String::new();
     for part in parts {
         let frame = serde_json::json!({ "choices": [{ "delta": { "content": part } }] });
@@ -52,7 +50,7 @@ fn json_fragment(fragment: &str) -> String {
 }
 
 /// Feed `raw` split at the given byte offsets.
-fn run_streaming(
+pub(super) fn run_streaming(
     raw: &str,
     splits: &[usize],
     policy: FirewallPolicy,
@@ -87,7 +85,7 @@ fn run_streaming(
 }
 
 /// Deterministic pseudo-random split points.
-fn splits(raw: &str, seed: u64, count: usize) -> Vec<usize> {
+pub(super) fn splits(raw: &str, seed: u64, count: usize) -> Vec<usize> {
     let mut state = seed
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
@@ -134,7 +132,7 @@ const WORDS: &[&str] = &[
     "line\r\n",
 ];
 
-fn long_clean_stream(seed: u64, frames: usize) -> String {
+pub(super) fn long_clean_stream(seed: u64, frames: usize) -> String {
     let mut state = seed;
     let words: Vec<&str> = (0..frames)
         .map(|_| {
@@ -181,7 +179,7 @@ fn clean_output_is_released_before_the_stream_ends() {
 }
 
 /// OpenAI-shaped chunk with the boilerplate strings real providers send.
-fn provider_frame(index: usize, text: &str) -> String {
+pub(super) fn provider_frame(index: usize, text: &str) -> String {
     let frame = serde_json::json!({
         "id": "chatcmpl-9x7Yq2LmN4pQ",
         "object": "chat.completion.chunk",
@@ -249,7 +247,7 @@ fn realistic_frames_stream_early_and_still_block_a_secret() {
 }
 
 /// (name, fragments of one match). Every fragment is part of the match.
-fn secret_cases() -> Vec<(&'static str, Vec<&'static str>)> {
+pub(super) fn secret_cases() -> Vec<(&'static str, Vec<&'static str>)> {
     vec![
         (
             "openai key",
@@ -323,7 +321,10 @@ fn split_external_tokens_are_redacted_under_warn_and_sanitize() {
                 "buffered a split token fragment"
             );
         }
-        assert!(streamed.contains("[REDACTED]"));
+        // Text-level redaction replaces the token once and keeps the rest.
+        assert!(streamed.contains("[REDACTED:"));
+        assert!(streamed.contains("trailing context"));
+        assert!(buffered.contains("trailing context"));
     }
 }
 
@@ -412,34 +413,6 @@ fn no_fragment_of_a_secret_is_released_and_the_stream_is_blocked() {
                 );
             }
         }
-    }
-}
-
-#[test]
-fn invisible_padding_cannot_stretch_a_bounded_match_past_the_window() {
-    // `987 65 4321` with 80 zero-width spaces (240 bytes) after each digit of
-    // the leading groups: the raw text runs far past BOUNDED_MATCH_LEN while
-    // the scan view is the 11-byte SSN, so no digit may leave early.
-    let scanner = scanner();
-    let pad = "\u{200B}".repeat(80);
-    let mut owned = vec!["ssn ".to_owned()];
-    for group in ["987", "65"] {
-        for digit in group.chars() {
-            owned.push(format!("{digit}{pad}"));
-        }
-        owned.push(" ".to_owned());
-    }
-    owned.extend(["4321 ".to_owned(), "and more ".to_owned()]);
-    let parts: Vec<&str> = owned.iter().map(String::as_str).collect();
-    let raw = bare_stream(&parts);
-    // One push per frame, so each frame is a release decision of its own.
-    let frame_ends: Vec<usize> = raw.match_indices("\n\n").map(|(at, _)| at + 2).collect();
-    let (streamed, blocked) =
-        run_streaming(&raw, &frame_ends, FirewallPolicy::Block, &scanner).unwrap();
-    assert!(blocked, "{streamed}");
-    let released = streamed.split("Response blocked by policy").next().unwrap();
-    for digit in ['9', '8', '7', '6', '5'] {
-        assert!(!released.contains(digit), "{digit} released: {released}");
     }
 }
 

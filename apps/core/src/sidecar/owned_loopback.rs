@@ -63,6 +63,10 @@ async fn forward_connection<F: std::future::Future<Output = bool>>(
     backend: SocketAddr,
     authorized: impl FnOnce(SocketAddr, SocketAddr) -> F,
 ) {
+    // Nagle + delayed ACK would stall each small streamed write ~40 ms.
+    if let Err(error) = incoming.set_nodelay(true) {
+        tracing::debug!("owned loopback relay could not set TCP_NODELAY: {error}");
+    }
     // Connect before checking identity. No caller bytes have been sent, and
     // this established TCP peer cannot be replaced by a later port squatter.
     let Ok(Ok(mut outgoing)) = tokio::time::timeout(
@@ -73,6 +77,9 @@ async fn forward_connection<F: std::future::Future<Output = bool>>(
     else {
         return;
     };
+    if let Err(error) = outgoing.set_nodelay(true) {
+        tracing::debug!("owned loopback relay could not set backend TCP_NODELAY: {error}");
+    }
     let (Ok(local), Ok(peer)) = (outgoing.local_addr(), outgoing.peer_addr()) else {
         return;
     };

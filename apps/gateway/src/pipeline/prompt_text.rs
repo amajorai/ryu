@@ -250,12 +250,17 @@ pub(super) fn scan_definitions_inbound(
 /// content part, or structured tool-call arguments does not bypass the
 /// non-stream + cache-hit judge.
 pub(super) fn response_to_text(response: &Value) -> String {
-    let Some(choices) = response["choices"].as_array() else {
-        return String::new();
-    };
     let mut out = String::new();
-    for choice in choices {
-        collect_json_strings(choice, &mut out);
+    match &response["choices"] {
+        Value::Null => {}
+        Value::Array(choices) => {
+            for choice in choices {
+                collect_json_strings(choice, &mut out);
+            }
+        }
+        // An object (`{"0": {...}}`, which a client still indexes) or any
+        // other value: every string it holds is judged.
+        other => collect_json_strings(other, &mut out),
     }
     out
 }
@@ -373,9 +378,14 @@ pub(super) fn sanitize_inbound_or_block(
     }
 }
 
+/// An output evaluator's Sanitize of a non-stream response: every string
+/// sanitized on its own, and each choice's token mirrors (logprobs, token
+/// ids) dropped, as the DLP's own Sanitize and the streamed evaluator
+/// Sanitize drop them: a token sanitized alone still spells the value.
 pub(super) fn sanitize_response(
     response: &mut Value,
     scanner: &dyn crate::firewall::FirewallBackend,
 ) {
     sanitize_json_strings(response, scanner);
+    drop_choice_logprobs(response);
 }

@@ -17,16 +17,22 @@
 
 pub mod cmdscan;
 mod confusables;
+mod leak_patterns;
 mod normalize;
 mod patterns;
 mod protective;
 pub mod taxonomy;
 mod validators;
 
+pub use leak_patterns::{
+    ascii_boundaries_agree, build_outbound_patterns, build_outbound_patterns_with_twins,
+    build_pii_patterns, build_pii_patterns_with_twins, build_secret_patterns, Twinned,
+    EITHER_BOUNDARY,
+};
 pub use normalize::{fold_digit, fold_for_redaction, normalize_for_scan};
 pub use patterns::{
     build_bias_patterns, build_code_injection_patterns, build_injection_patterns,
-    build_outbound_patterns, build_pii_patterns, build_secret_patterns, build_toxicity_patterns,
+    build_toxicity_patterns,
 };
 pub use protective::is_protective_instruction_clause;
 pub use taxonomy::TaxonomyId;

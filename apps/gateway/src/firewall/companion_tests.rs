@@ -1,7 +1,7 @@
 //! Companion egress redaction must remove PII and secrets the normalized scan
 //! detects, not only what the raw-text patterns match.
 
-use super::redact::COMPANION_MASK;
+use super::companion::COMPANION_MASK;
 use super::*;
 
 /// A locally disabled firewall: companion redaction must ignore it.

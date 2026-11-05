@@ -1,5 +1,13 @@
 use super::*;
 
+mod evaluator_reply;
+mod head_split;
+mod per_string;
+pub(super) use evaluator_reply::evaluator_sanitized;
+use evaluator_reply::evaluator_sanitized_reply;
+use head_split::redact_head_then_rest;
+use per_string::redact_per_string;
+
 /// Decode and rebuild an SSE response so every JSON frame is inspected and the
 /// client never receives an unscanned raw frame. Unknown event lines and
 /// malformed data frames are rejected instead of being replayed.
@@ -8,10 +16,26 @@ pub(super) fn rewrite_sse_for_dlp(
     scanner: &dyn crate::firewall::FirewallBackend,
     policy: &FirewallPolicy,
 ) -> Result<(String, String, Option<(String, String)>), String> {
+    rewrite_sse(raw, scanner, policy, false)
+}
+
+/// `rewrite_sse_for_dlp`, with every string sanitized when `force_sanitize`
+/// (an output evaluator's Sanitize), as under a Sanitize DLP verdict.
+fn rewrite_sse(
+    raw: &str,
+    scanner: &dyn crate::firewall::FirewallBackend,
+    policy: &FirewallPolicy,
+    force_sanitize: bool,
+) -> Result<(String, String, Option<(String, String)>), String> {
     let mut frames = Vec::new();
+    // As the provider sent them: a split copies one-shot strings
+    // (`stop_reason`) onto both halves, which the lanes must not judge twice.
+    let mut provider_frames = Vec::new();
+    let mut refusals = Vec::new();
     let mut saw_done = false;
     for line in raw.lines() {
-        if line.trim().is_empty() {
+        // `:` lines are SSE comments (keep-alives) and carry no payload.
+        if line.trim().is_empty() || line.starts_with(':') {
             continue;
         }
         let Some(data) = line.strip_prefix("data:") else {
@@ -25,73 +49,91 @@ pub(super) fn rewrite_sse_for_dlp(
             saw_done = true;
             continue;
         }
-        frames.push(
-            serde_json::from_str::<Value>(data)
-                .map_err(|error| format!("provider stream frame is not valid JSON: {error}"))?,
-        );
+        let mut frame = serde_json::from_str::<Value>(data)
+            .map_err(|error| format!("provider stream frame is not valid JSON: {error}"))?;
+        // As the stream does: the standing refusal is judged on its own.
+        if refusals.is_empty() && crate::standing::refusal_frame_error(&frame).is_some() {
+            refusals.push(frame);
+            continue;
+        }
+        super::stream_dlp::envelope::normalize_padding(&mut frame);
+        // As the stream does: reasoning and answer in one delta are two frames.
+        // The provider frames stay whole for the envelope and lane passes.
+        provider_frames.push(frame.clone());
+        match split_boundary(&frame) {
+            Some([reasoning, answer]) => {
+                frames.extend([reasoning, answer]);
+            }
+            None => {
+                frames.push(frame);
+            }
+        }
     }
 
     let mut payload = Value::Array(frames);
-    let original_text = {
-        let mut text = String::new();
-        collect_sse_payload_text(&payload, &mut text);
-        text
-    };
-    let violation = scanner
-        .scan_outbound(&original_text)
+    // Each choice on its own, as a client merges choices by `index`, and
+    // separator-aware: a reasoning-to-answer switch is a text boundary.
+    let choice_texts = choice_scan_texts(payload.as_array().map_or(&[], Vec::as_slice));
+    let mut envelope = super::stream_dlp::envelope::EnvelopeLanes::default();
+    for frame in &provider_frames {
+        envelope.observe(frame);
+    }
+    let violation = choice_texts
+        .values()
+        .find_map(|text| scanner.scan_outbound(text))
         .or_else(|| {
-            let mut lanes = std::collections::BTreeMap::new();
-            if let Some(frames) = payload.as_array() {
-                for frame in frames {
-                    collect_sse_payload_lanes(frame, "", &mut lanes);
-                }
-            }
-            lanes.values().find_map(|text| scanner.scan_outbound(text))
+            detection_lanes(&provider_frames, envelope.judged_by_lanes())
+                .values()
+                .find_map(|text| scanner.scan_outbound(text))
         })
-        .or_else(|| scanner.scan_outbound(&json_string_projection(&payload)))
+        // A split candidate in the envelope (`model` changing between
+        // frames), judged joined as the stream judges it at its end.
+        .or_else(|| envelope.varying().then(|| envelope.scan(scanner)).flatten())
+        // Each frame's own strings, as the stream scans them: a newline join
+        // across frames is text no client builds.
+        .or_else(|| {
+            payload.as_array().and_then(|frames| {
+                frames
+                    .iter()
+                    .find_map(|frame| scanner.scan_outbound(&json_string_projection(frame)))
+            })
+        })
         .map(|match_| (match_.pattern_name.clone(), format!("{:?}", match_.kind)));
-    redact_json_strings(&mut payload, scanner);
-    let mut remaining = String::new();
-    collect_sse_payload_text(&payload, &mut remaining);
-    let mut remaining_lanes = std::collections::BTreeMap::new();
-    if let Some(frames) = payload.as_array() {
-        for frame in frames {
-            collect_sse_payload_lanes(frame, "", &mut remaining_lanes);
-        }
+    // The standing refusal keeps the DLP's own verdict (`refusal_trailer`).
+    let dlp_sanitize = violation.is_some() && matches!(policy, FirewallPolicy::Sanitize);
+    let sanitize = force_sanitize || dlp_sanitize;
+    // Content deltas are redacted at text level so a value split across deltas
+    // is replaced once and the answer around it survives; so are the leading
+    // content deltas before a tool call or other lane, when they split
+    // cleanly from it. Other payloads keep the per-string path and its
+    // fail-closed mask below.
+    let text_level = super::stream_dlp::redact::rewrite_frames(
+        &mut payload,
+        scanner,
+        sanitize,
+        &provider_frames,
+    ) || redact_head_then_rest(&mut payload, scanner, sanitize, &provider_frames);
+    if !text_level {
+        redact_per_string(&mut payload, scanner, sanitize, &provider_frames);
     }
-    // `sanitize_pending` also reads the normalized view, so a match that only
-    // the fold reveals (a zero-width split, fullwidth `＠`) masks the payload
-    // instead of passing the raw-text check unchanged.
-    let sanitizing = violation.is_some() && matches!(policy, FirewallPolicy::Sanitize);
-    if scanner.redact_outbound(&remaining).0 != remaining
-        || remaining_lanes.values().any(|text| {
-            scanner.redact_outbound(text).0 != *text
-                || (sanitizing && sanitize_pending(text, scanner))
-        })
-        || (sanitizing && sanitize_pending(&remaining, scanner))
-    {
-        mask_sse_payload_text(&mut payload);
-    }
-    let mut assembled = {
-        let mut text = String::new();
-        collect_json_strings_compact(&payload, &mut text);
-        text
-    };
-    if sanitizing {
-        sanitize_json_strings(&mut payload, scanner);
-        drop_choice_logprobs(&mut payload);
-        // Fail closed: the caller replaces the stream with a block notice.
+    // Fail closed: Sanitize rewrites the raw text while detection reads the
+    // scan view, and the mask rewrites only text fields, so a match that
+    // survives in the payload refuses the stream (the caller replaces it with
+    // a block notice) rather than releasing it as sanitized.
+    if sanitize {
         if let Some(survivor) = sse_sanitize_survivor(&payload, scanner) {
             return Err(format!(
                 "provider stream could not be redacted: {}",
                 survivor.pattern_name
             ));
         }
-        // Values only: the assembled text is what an output evaluator judges
-        // and what an evaluator Sanitize replays, so no object keys.
-        assembled = String::new();
-        collect_json_strings(&payload, &mut assembled);
     }
+    // What an output evaluator judges: the model's text as a client renders
+    // it, each choice on its own (deltas
+    // joined across frames, a newline at a reasoning-to-answer switch), never
+    // the envelope strings (id, model, object) between two deltas of one
+    // phrase, nor another choice's deltas between them (`evaluated_text`).
+    let assembled = evaluated_text(payload.as_array().map_or(&[], Vec::as_slice));
 
     let mut rewritten = String::new();
     if let Some(frames) = payload.as_array() {
@@ -103,10 +145,64 @@ pub(super) fn rewrite_sse_for_dlp(
             rewritten.push_str("\n\n");
         }
     }
-    if saw_done || !rewritten.is_empty() {
+    let done = saw_done || !rewritten.is_empty();
+    rewritten.push_str(&refusal_trailer(refusals, scanner, dlp_sanitize));
+    if done {
         rewritten.push_str("data: [DONE]\n\n");
     }
     Ok((rewritten, assembled, violation))
+}
+
+/// The model a provider stream names (its first frame's `model`), for the
+/// audit record, as the non-stream path reads `response["model"]`.
+pub(super) fn stream_model(raw: &str) -> String {
+    raw.lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .filter_map(|data| serde_json::from_str::<Value>(data.trim()).ok())
+        // Azure's first chunk names an empty model.
+        .find_map(|frame| {
+            frame
+                .get("model")?
+                .as_str()
+                .filter(|model| !model.is_empty())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+/// Whether a custom pattern joins the sets outbound DLP reads (PII and
+/// secrets); the other kinds are merged into evaluator sets.
+pub(super) fn outbound_custom_patterns(scanner: &FirewallScanner) -> bool {
+    scanner.config().custom_patterns.iter().any(|pattern| {
+        matches!(
+            pattern.kind,
+            crate::config::CustomPatternKind::Pii | crate::config::CustomPatternKind::Secret
+        )
+    })
+}
+
+/// The standing guard's refusal frames, sent after the model's frames and
+/// judged on their own: each string redacted (sanitized under an active
+/// Sanitize), never joined with model text or masked as part of a batch.
+pub(super) fn refusal_trailer(
+    refusals: Vec<Value>,
+    scanner: &dyn crate::firewall::FirewallBackend,
+    sanitize: bool,
+) -> String {
+    let mut out = String::new();
+    for mut frame in refusals {
+        if sanitize {
+            sanitize_json_strings(&mut frame, scanner);
+        } else {
+            redact_json_strings(&mut frame, scanner);
+        }
+        if let Ok(encoded) = serde_json::to_string(&frame) {
+            out.push_str("data: ");
+            out.push_str(&encoded);
+            out.push_str("\n\n");
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -150,16 +246,17 @@ pub(super) async fn apply_outbound_firewall_stream(
     let outbound_enabled = resolved.outbound_enabled();
     let policy = resolved.policy().clone();
     let enforce = outbound_enabled && !matches!(policy, FirewallPolicy::WarnAndContinue);
-    let has_output_eval = resolved.config().evaluators.iter().any(|b| b.enabled);
+    let has_output_eval = output_inline_bound(resolved.as_ref(), &state.evaluator_registry());
 
     // No stream gets a raw-byte fast path around DLP: structured tool calls,
     // error frames and outbound-only secret shapes are always parsed and
     // redacted. With the built-in patterns and no output evaluator, that runs
     // incrementally (see `stream_dlp`), so the client sees text as it is
-    // generated. Custom patterns (from any scope) may span unbounded
-    // whitespace, and output evaluators judge the whole reply, so both keep the
-    // fully buffered path.
-    let incremental = !has_output_eval && resolved.config().custom_patterns.is_empty();
+    // generated. Custom PII and secret patterns (from any scope) may span
+    // unbounded whitespace, and output evaluators judge the whole reply, so
+    // both keep the fully buffered path. Input evaluators and the other
+    // custom pattern kinds (merged into evaluator sets) never read the reply.
+    let incremental = !has_output_eval && !outbound_custom_patterns(resolved.as_ref());
     if incremental {
         let body = stream_dlp::dlp_body(
             stream_body,
@@ -210,8 +307,16 @@ pub(super) async fn apply_outbound_firewall_stream(
             );
         }
     };
-
     if let Some((pattern, kind)) = violation {
+        let log_let_through = |pattern: &str| {
+            super::outbound_detection::log_let_through(
+                resolved.config().log_detections,
+                &request_id,
+                pattern,
+                &policy,
+                true,
+            );
+        };
         match policy {
             FirewallPolicy::Block if enforce => {
                 warn!(
@@ -228,28 +333,19 @@ pub(super) async fn apply_outbound_firewall_stream(
                     crate::concurrency::AdmissionPermit::none(),
                 );
             }
-            FirewallPolicy::Sanitize if enforce => {
-                warn!(
-                    request_id = %request_id,
-                    pattern = %pattern,
-                    "firewall: sanitized outbound response (streaming)"
-                );
-            }
-            FirewallPolicy::WarnAndContinue if outbound_enabled => {
-                warn!(
-                    request_id = %request_id,
-                    pattern = %pattern,
-                    "firewall: outbound violation (warn-and-continue, streaming)"
-                );
-            }
+            FirewallPolicy::Sanitize if enforce => log_let_through(&pattern),
+            FirewallPolicy::WarnAndContinue if outbound_enabled => log_let_through(&pattern),
             _ => {}
         }
     }
 
     // ── Unified-evaluator OUTPUT inline guardrails (P3) ──
     if has_output_eval {
-        let (outcome, reason) =
+        let (outcome, evaluator, reason) =
             evaluate_output_inline_stream(&state, &ctx, resolved.as_ref(), &assembled).await;
+        // Audited as the non-stream path audits it: the deciding evaluator,
+        // and the model the provider named.
+        let model = stream_model(&raw);
         match outcome {
             InlineOutcome::Block => {
                 warn!(
@@ -258,34 +354,33 @@ pub(super) async fn apply_outbound_firewall_stream(
                     "inline evaluator: blocked outbound response (streaming)"
                 );
                 state.metrics.inc_firewall_blocked();
-                let model = ctx.agent_id.as_deref().unwrap_or("unknown");
-                audit_inline_evaluator(&state, &ctx, model, "output", "blocked", &reason);
+                audit_inline_evaluator(&state, &ctx, &model, &evaluator, "blocked", &reason);
                 return (
                     Body::from(sse_content_frames(&format!(
-                        "[Ryu firewall] Response blocked by evaluator: {reason}."
+                        "[Ryu firewall] Response blocked by evaluator '{evaluator}': {reason}."
                     ))),
                     crate::concurrency::AdmissionPermit::none(),
                 );
             }
             InlineOutcome::Sanitize => {
-                let model = ctx.agent_id.as_deref().unwrap_or("unknown");
-                let sanitized = sanitize_text_or_survivor(&assembled, resolved.as_ref())
-                    .unwrap_or_else(|_| SANITIZE_MASK.to_owned());
+                let (body, sanitized) = evaluator_sanitized_reply(resolved.as_ref(), &raw, &policy);
                 // Fail closed: a Sanitize evaluator whose detector still
-                // matches the redacted text blocks instead of replaying it, and
-                // so does a flag (a judge's) that redaction rewrote nothing for.
-                let unredacted = (sanitized == assembled)
-                    .then(|| format!("{reason}: flagged content could not be redacted"));
-                if let Some(survivor) = unredacted
-                    .or_else(|| output_sanitize_survivor(&state, resolved.as_ref(), &sanitized))
-                {
+                // matches the redacted reply blocks instead of replaying it,
+                // and so does a flag (a judge's) that redaction rewrote
+                // nothing for.
+                let survivor = sanitized.as_deref().and_then(|sanitized| {
+                    (sanitized == assembled)
+                        .then(|| format!("{reason}: flagged content could not be redacted"))
+                        .or_else(|| output_sanitize_survivor(&state, resolved.as_ref(), sanitized))
+                });
+                if let Some(survivor) = survivor {
                     warn!(
                         request_id = %request_id,
                         %survivor,
                         "inline evaluator: match survived Sanitize; blocked (streaming)"
                     );
                     state.metrics.inc_firewall_blocked();
-                    audit_inline_evaluator(&state, &ctx, model, "output", "blocked", &survivor);
+                    audit_inline_evaluator(&state, &ctx, &model, &evaluator, "blocked", &survivor);
                     return (
                         Body::from(sse_content_frames(&format!(
                             "[Ryu firewall] Response blocked by evaluator: {survivor}."
@@ -298,13 +393,19 @@ pub(super) async fn apply_outbound_firewall_stream(
                     %reason,
                     "inline evaluator: sanitized outbound response (streaming)"
                 );
-                audit_inline_evaluator(&state, &ctx, model, "output", "sanitized", &reason);
+                audit_inline_evaluator(&state, &ctx, &model, &evaluator, "sanitized", &reason);
                 return (
-                    Body::from(sse_content_frames(&sanitized)),
+                    Body::from(body),
                     crate::concurrency::AdmissionPermit::none(),
                 );
             }
-            InlineOutcome::Warn | InlineOutcome::Allow => {}
+            InlineOutcome::Warn => warn!(
+                request_id = %request_id,
+                evaluator = %evaluator,
+                %reason,
+                "inline evaluator: outbound flagged (warn-and-continue, streaming)"
+            ),
+            InlineOutcome::Allow => {}
         }
     }
 

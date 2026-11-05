@@ -63,6 +63,10 @@ pub async fn ensure_loopback_relay(relay_dir: &Path, port: u16) -> Result<()> {
             tokio::spawn(async move {
                 match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
                     Ok(mut outbound) => {
+                        // Nagle + delayed ACK would stall each small relayed write ~40 ms.
+                        if let Err(error) = outbound.set_nodelay(true) {
+                            tracing::debug!(port, %error, "agent relay could not set TCP_NODELAY");
+                        }
                         let _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await;
                     }
                     Err(error) => {

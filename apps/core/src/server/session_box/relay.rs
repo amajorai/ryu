@@ -58,7 +58,8 @@ pub(super) async fn dial(
     let headers = request.headers_mut();
     headers.insert("origin", origin.parse()?);
     headers.insert("sec-websocket-protocol", protocols.join(", ").parse()?);
-    let (upstream, _) = tokio_tungstenite::connect_async(request).await?;
+    // Nagle off: screen frames and input events are small, latency-bound writes.
+    let (upstream, _) = tokio_tungstenite::connect_async_with_config(request, None, true).await?;
     Ok(upstream)
 }
 
@@ -110,7 +111,7 @@ fn to_tungstenite(message: WsMessage) -> TsMessage {
     }
 }
 
-/// `None` for a raw frame, which a `connect_async` stream never yields.
+/// `None` for a raw frame, which a client stream never yields.
 fn to_axum(message: TsMessage) -> Option<WsMessage> {
     Some(match message {
         TsMessage::Text(text) => WsMessage::Text(text.to_string()),
@@ -124,4 +125,39 @@ fn to_axum(message: TsMessage) -> Option<WsMessage> {
         TsMessage::Close(None) => WsMessage::Close(None),
         TsMessage::Frame(_) => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dial;
+    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+    use tokio_tungstenite::MaybeTlsStream;
+
+    #[tokio::test]
+    async fn dial_turns_nagle_off_on_the_upstream_socket() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            // Echo the requested subprotocol: tungstenite rejects a reply without one.
+            let echo = |request: &Request, mut response: Response| {
+                if let Some(protocol) = request.headers().get("sec-websocket-protocol") {
+                    response
+                        .headers_mut()
+                        .insert("sec-websocket-protocol", protocol.clone());
+                }
+                Ok(response)
+            };
+            tokio_tungstenite::accept_hdr_async(socket, echo)
+                .await
+                .unwrap()
+        });
+        let url = format!("ws://{address}/v1/boxes/b/desktop/ws");
+        let upstream = dial(&url, "http://x", &["p".into()]).await.unwrap();
+        let MaybeTlsStream::Plain(socket) = upstream.get_ref() else {
+            panic!("a ws:// dial is plain TCP");
+        };
+        assert!(socket.nodelay().unwrap());
+        drop(server.await.unwrap());
+    }
 }

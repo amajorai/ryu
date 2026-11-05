@@ -4,7 +4,7 @@
 /// Luhn checksum validation for a digit string (credit-card mod-10). Reduces the
 /// false-positive rate of the broadened (separator-tolerant) card candidate: an
 /// arbitrary 13–19 digit run only trips the detector when it actually checksums.
-fn luhn_valid(digits: &str) -> bool {
+pub(crate) fn luhn_valid(digits: &str) -> bool {
     let mut sum = 0u32;
     let mut alt = false;
     let mut count = 0u32;
@@ -31,26 +31,37 @@ fn luhn_valid(digits: &str) -> bool {
 /// and a valid Luhn checksum. Non-ASCII decimal digits (Arabic-Indic,
 /// Devanagari, fullwidth, mathematical, …) count as their ASCII value, because
 /// the candidate regex's `\d` matches them and they render as the same number.
+///
+/// The digits are gathered on the stack: an ASCII digit byte never occurs
+/// inside a multi-byte UTF-8 character, a folded digit is one ASCII byte, and
+/// a 20th digit already fails the length check.
 pub fn is_credit_card_number(matched: &str) -> bool {
-    let digits: String = matched
-        .chars()
-        .filter_map(|c| {
-            if c.is_ascii_digit() {
-                Some(c)
-            } else {
-                crate::fold_digit(c)
-            }
-        })
-        .collect();
-    let len = digits.len();
+    let mut buf = [0u8; 19];
+    let mut len = 0;
+    for c in matched.chars() {
+        let digit = if c.is_ascii_digit() {
+            c
+        } else if c.is_ascii() {
+            continue;
+        } else if let Some(folded) = crate::fold_digit(c) {
+            folded
+        } else {
+            continue;
+        };
+        let Some(slot) = buf.get_mut(len) else {
+            return false;
+        };
+        // `fold_digit` yields an ASCII digit, so the cast keeps the value.
+        *slot = digit as u8;
+        len += 1;
+    }
     if !(13..=19).contains(&len) {
         return false;
     }
-    let first = digits.as_bytes()[0];
-    if !matches!(first, b'3' | b'4' | b'5' | b'6') {
+    if !matches!(buf[0], b'3' | b'4' | b'5' | b'6') {
         return false;
     }
-    luhn_valid(&digits)
+    luhn_valid(std::str::from_utf8(&buf[..len]).unwrap_or_default())
 }
 
 /// True when an `ipv4` match is a public/routable address worth flagging as PII.

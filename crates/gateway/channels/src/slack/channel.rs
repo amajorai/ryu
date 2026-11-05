@@ -214,7 +214,8 @@ impl Channel for SlackChannel {
                 }
             };
 
-            match tokio_tungstenite::connect_async(&ws_url).await {
+            // Nagle off: an envelope ack is never held for the peer's ACK.
+            match tokio_tungstenite::connect_async_with_config(&ws_url, None, true).await {
                 Ok((mut ws, _)) => {
                     debug!("slack socket-mode websocket connected");
                     // A live socket clears the failure budget: the next outage

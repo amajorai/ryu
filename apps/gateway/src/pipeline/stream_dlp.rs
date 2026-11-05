@@ -5,18 +5,19 @@
 //! exact, but the client sees nothing until generation finishes. This state
 //! machine produces the same frames incrementally.
 //!
-//! Redaction and sanitization are per JSON string, so each frame's output does
-//! not depend on later frames. Only the violation decision spans frames. That
-//! decision is made over a sliding region of the concatenated text, and a frame
-//! is released only when every match that could involve its text has been
-//! scanned:
+//! Content deltas are redacted at text level over the joined text (see
+//! `stream_dlp/redact.rs`); the violation decision is made over a sliding
+//! region of that text, and a frame is released only when every match that
+//! could involve its text has been scanned:
 //!
-//! - The scanned region always ends just after whitespace, and a frame is
-//!   released only when it ends at least [`BOUNDED_MATCH_LEN`] bytes of the
-//!   scan view (invisible characters count for nothing) before that point. Unbounded patterns (API keys, emails, connection strings)
-//!   contain no whitespace, so any run they could match is complete and already
-//!   scanned. Patterns that span whitespace are bounded, except for
-//!   keyword-padding forms (`Bearer`, `api_key =`, `passport no.`) whose
+//! - The scanned region always ends just after whitespace. Unbounded patterns
+//!   (API keys, emails, connection strings) contain no whitespace, so any run
+//!   they could match before that point is complete and already scanned.
+//!   Patterns that span whitespace are at most [`BOUNDED_MATCH_LEN`] long and
+//!   start at a recognisable token (digits, `aws`, `-----`, a padding keyword),
+//!   so a frame is released only up to the earliest such token in that window
+//!   (`release_cut`); plain prose streams word by word. Keyword-padding forms
+//!   (`Bearer`, `api_key =`, `passport no.`) can pad past the window; their
 //!   whitespace sits before the secret.
 //! - The scan region reaches back at least [`SCAN_BACK`] bytes from the last
 //!   release, then over [`SCAN_BACK_TOKENS`] more whitespace-separated tokens,
@@ -33,15 +34,15 @@
 //! resolved scanner with custom patterns from any scope keeps the buffered
 //! path. Both paths scan with the tenant-resolved scanner for the request.
 
-use std::collections::VecDeque;
-
-use serde_json::Value;
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::config::FirewallPolicy;
 use crate::firewall::{FirewallBackend, FirewallMatch};
 
 /// Longest built-in match that can contain whitespace without being one of the
-/// keyword-padding forms (card numbers, IBANs, phones, the AWS secret form).
+/// keyword-padding forms (card numbers, IBANs, phones, the AWS secret form),
+/// in bytes of the scan view (zero-width, combining and TAG characters count
+/// for nothing and a fullwidth one for its fold, see [`reach::scan_width`]).
 const BOUNDED_MATCH_LEN: usize = 192;
 /// Minimum back-context, in bytes, kept in the scan region before the last
 /// released position.
@@ -61,22 +62,7 @@ fn is_boundary_space(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
 }
 
-struct HeldFrame {
-    value: Value,
-    wire_bytes: usize,
-    /// Absolute end offset of this frame's text in the concatenated text.
-    end: usize,
-}
-
-/// What one step produced: SSE bytes to send, and whether the stream is over.
-#[derive(Default)]
-pub(super) struct DlpOutput {
-    pub(super) bytes: String,
-    /// A violation first seen in this step (for logging and metrics).
-    pub(super) violation: Option<FirewallMatch>,
-    /// The stream was ended by a `Block` violation; `bytes` ends with the notice.
-    pub(super) blocked: bool,
-}
+use records::{DlpOutput, HeldFrame, SentFrame};
 
 pub(super) struct StreamingDlp {
     policy: FirewallPolicy,
@@ -94,117 +80,53 @@ pub(super) struct StreamingDlp {
     scan_from: usize,
     scanned_to: usize,
     saw_done: bool,
+    /// The standing guard's refusal frames (`ingest::take_line`).
+    refusals: Vec<serde_json::Value>,
+    /// Wire bytes of `refusals`, counted towards the held limit.
+    refusal_bytes: usize,
     released_any: bool,
     violation: Option<FirewallMatch>,
     sanitize: bool,
     finished: bool,
+    /// Provider envelope values per field (see `envelope.rs`).
+    envelope: envelope::EnvelopeLanes,
+    /// Released frames still behind `scan_from`'s reach: raw start and end
+    /// offsets and the text actually sent, so the per-string fallback compares
+    /// against what the client received rather than the raw text.
+    recent: VecDeque<SentFrame>,
+    /// An open keyword-padding form whose keyword was drained before its value
+    /// arrived (`reach::keyword_tail`); prepended to detection scans.
+    carried: Option<String>,
+    /// `carried` as the raw text holds it, if it does (`carried::raw_tail`).
+    carried_raw: Option<String>,
+    /// Absolute offset just after the last ASCII whitespace received.
+    last_space: usize,
+    /// `(base, safe_end, cut)` of the last `release_cut`, reused while the scan end holds.
+    cut_memo: Option<(usize, usize, usize, bool)>,
+    /// `(token end, frames over it sent raw)` for a long-token scan start.
+    long_token: Option<(usize, bool)>,
+    /// The text lane (`TextLane`) the last frame that carried text ended in.
+    text_key: Option<super::TextLane>,
+    /// An SSE comment arrived since the last output.
+    keep_alive: bool,
+    /// The current ASCII-whitespace-free run and digit-group run (`reach.rs`).
+    run: reach::Run,
+    /// Delta text fields seen, resumed, and their released text (`lanes.rs`).
+    fields: lanes::Fields,
+    /// Released tails of fixed protocol fields (`fixed.rs`).
+    released_fixed: BTreeMap<String, String>,
+    /// Envelope runs of the released frames (`EnvelopeRuns`), and whether
+    /// the last released frame was a reasoning half.
+    released_runs: super::EnvelopeRuns,
+    released_half: bool,
+    /// Envelope string memo across releases (`redact::EnvelopeMemo`).
+    envelope_memo: redact::EnvelopeMemo,
+    memo: records::StepMemo,
 }
 
 impl StreamingDlp {
-    pub(super) fn new(policy: FirewallPolicy, enforce: bool) -> Self {
-        Self {
-            policy,
-            enforce,
-            line: Vec::new(),
-            held: VecDeque::new(),
-            held_wire_bytes: 0,
-            frame_violation: None,
-            buffer_remaining: false,
-            text: String::new(),
-            base: 0,
-            released_end: 0,
-            scan_from: 0,
-            scanned_to: 0,
-            saw_done: false,
-            released_any: false,
-            violation: None,
-            sanitize: false,
-            finished: false,
-        }
-    }
-
     fn len(&self) -> usize {
         self.base + self.text.len()
-    }
-
-    /// Feed provider bytes. Complete lines are parsed; frames are released once
-    /// safe. An `Err` means the stream cannot be scanned and must be refused.
-    pub(super) fn push(
-        &mut self,
-        chunk: &[u8],
-        scanner: &dyn FirewallBackend,
-    ) -> Result<DlpOutput, String> {
-        if self.finished {
-            return Ok(DlpOutput::default());
-        }
-        let mut start = 0;
-        for (index, byte) in chunk.iter().enumerate() {
-            if *byte == b'\n' {
-                self.line.extend_from_slice(&chunk[start..index]);
-                let line = std::mem::take(&mut self.line);
-                self.take_line(&line, scanner)?;
-                start = index + 1;
-            }
-        }
-        self.line.extend_from_slice(&chunk[start..]);
-        if self.held_wire_bytes.max(self.text.len()) + self.line.len() > MAX_HELD_BYTES {
-            return Err(OVERSIZED.to_owned());
-        }
-        Ok(self.advance(false, scanner))
-    }
-
-    /// End of the provider stream: release everything that is safe and close
-    /// with `[DONE]` exactly as the buffered path does.
-    pub(super) fn finish(&mut self, scanner: &dyn FirewallBackend) -> Result<DlpOutput, String> {
-        if self.finished {
-            return Ok(DlpOutput::default());
-        }
-        let line = std::mem::take(&mut self.line);
-        if !line.is_empty() {
-            self.take_line(&line, scanner)?;
-        }
-        let mut output = self.advance(true, scanner);
-        if !output.blocked && (self.saw_done || self.released_any) {
-            output.bytes.push_str("data: [DONE]\n\n");
-        }
-        self.finished = true;
-        Ok(output)
-    }
-
-    /// One line, with the same rules as `rewrite_sse_for_dlp` (which splits with
-    /// `str::lines`, so a trailing `\r` is dropped).
-    fn take_line(&mut self, raw: &[u8], scanner: &dyn FirewallBackend) -> Result<(), String> {
-        let raw = raw.strip_suffix(b"\r").unwrap_or(raw);
-        let line = String::from_utf8_lossy(raw);
-        if line.trim().is_empty() {
-            return Ok(());
-        }
-        let Some(data) = line.strip_prefix("data:") else {
-            return Err("provider stream contained an unscannable event frame".to_owned());
-        };
-        let data = data.trim();
-        if data.is_empty() {
-            return Ok(());
-        }
-        if data == "[DONE]" {
-            self.saw_done = true;
-            return Ok(());
-        }
-        let value = serde_json::from_str::<Value>(data)
-            .map_err(|error| format!("provider stream frame is not valid JSON: {error}"))?;
-        self.buffer_remaining |= !super::simple_content_delta(&value);
-        if self.frame_violation.is_none() {
-            self.frame_violation = scanner.scan_outbound(&super::json_string_projection(&value));
-        }
-        super::collect_sse_payload_text(&value, &mut self.text);
-        let end = self.len();
-        self.held_wire_bytes += raw.len();
-        self.held.push_back(HeldFrame {
-            value,
-            end,
-            wire_bytes: raw.len(),
-        });
-        Ok(())
     }
 
     fn advance(&mut self, final_step: bool, scanner: &dyn FirewallBackend) -> DlpOutput {
@@ -215,28 +137,115 @@ impl StreamingDlp {
         let safe_end = if final_step {
             len
         } else {
-            self.last_boundary_at_or_before(len)
+            // The last position that follows ASCII whitespace (tracked as text
+            // arrives, so a long token is not rescanned on every push).
+            self.last_space.max(self.scan_from)
         };
-        let region = &self.text[self.scan_from - self.base..safe_end - self.base];
-        let mut lanes = std::collections::BTreeMap::new();
-        if final_step && self.buffer_remaining {
-            lanes.insert(
-                "/choices/0/delta/content".to_owned(),
-                self.text[self.scan_from - self.base..self.released_end - self.base].to_owned(),
-            );
-            for frame in &self.held {
-                super::collect_sse_payload_lanes(&frame.value, "", &mut lanes);
+        let (lanes, held_pieces) = if final_step && self.buffer_remaining {
+            self.final_lanes()
+        } else {
+            (BTreeMap::new(), BTreeMap::new())
+        };
+        // Detection covers the held text plus the reach `scan_from` keeps behind
+        // the last release. While the stream is held whole (`buffer_remaining`)
+        // nothing is released before the final step, so earlier steps scan only
+        // the new text (with that reach) to let `Block` fire early without
+        // rescanning everything, and the final step rescans all of it.
+        let narrow = self.buffer_remaining && !final_step;
+        // Nothing new to judge while held whole: skip the reach walk.
+        let detect_from = if narrow && safe_end <= self.scanned_to {
+            safe_end
+        } else if narrow {
+            // A start inside a chain too long to reach back over would group
+            // it differently from the whole text: leave it to the final scan.
+            match self.scan_start_checked(self.scanned_to, scanner) {
+                (_, true) => safe_end,
+                (from, false) => from.max(self.scan_from),
             }
-        }
+        } else {
+            self.scan_from
+        };
+        let rescan_all = final_step && self.buffer_remaining;
+        // Release every held frame that ends at or before the cut. `safe_end`
+        // follows whitespace, so the whitespace-free run around any earlier
+        // position is complete and was inside the region just scanned; the cut
+        // stays behind any token that could open a bounded match still running
+        // past `safe_end` (see `release_cut`).
+        let cut = if final_step {
+            len
+        } else if self.buffer_remaining {
+            0
+        } else {
+            // Keyed on the candidate cut: past it `release_cut` reads nothing,
+            // so a cut pinned by an unbounded form is computed once per pin.
+            let candidate = if self.run.open_form && self.run.form_start < safe_end {
+                self.run.form_start.max(self.base)
+            } else {
+                safe_end
+            };
+            let (cut, capped) = match self.cut_memo {
+                Some((base, key, cut, capped)) if base == self.base && key == candidate => {
+                    (cut, capped)
+                }
+                _ => {
+                    let (cut, capped) = self.release_cut_checked(safe_end);
+                    self.cut_memo = Some((self.base, candidate, cut, capped));
+                    (cut, capped)
+                }
+            };
+            // Mostly stripped characters behind the cut: hold the rest whole
+            // (judged once at the end) rather than rescanning it every push.
+            self.buffer_remaining |= capped;
+            cut
+        };
+        // While an unbounded form holds its run (`release_cut`), nothing past
+        // the cut goes out: judge only up to it, so a long held run is scanned
+        // once when it closes rather than again on every step. The scan stops
+        // at the form's token start (a token edge); a cut held earlier, at a
+        // bounded-match opener, keeps that opener and anything it could run
+        // into unreleased until the run closes and is scanned whole.
+        let form_start = self.run.form_start.max(self.base);
+        let scan_end = if !final_step
+            && !self.buffer_remaining
+            && self.run.open_form
+            && self.run.form_start < safe_end
+            && cut <= form_start
+        {
+            form_start.max(detect_from).min(safe_end)
+        } else {
+            safe_end
+        };
+        // A group chain still growing at the scan end (`digits.rs`): its
+        // last candidate could be cut short. Neither judge nor release into
+        // it until it closes; then it is scanned whole from its start.
+        let (cut, scan_end) =
+            self.before_open_chain(final_step, safe_end, detect_from, cut, scan_end);
+        // Once a violation is recorded (Sanitize or Warn: Block ends the
+        // stream) a later match changes nothing: skip detection, so it is
+        // neither rescanned nor logged again.
+        let recorded = self.violation.is_some();
         let pending = self
             .frame_violation
             .take()
+            .filter(|_| !recorded)
             .or_else(|| {
-                (safe_end > self.scanned_to && safe_end > self.scan_from)
-                    .then(|| scanner.scan_outbound(region))
+                if recorded {
+                    return None;
+                }
+                ((scan_end > self.scanned_to || rescan_all) && scan_end > detect_from)
+                    .then(|| self.scan_region(detect_from, scan_end, scanner))
                     .flatten()
             })
-            .or_else(|| lanes.values().find_map(|text| scanner.scan_outbound(text)));
+            .or_else(|| {
+                (!recorded)
+                    .then(|| lanes.values().find_map(|text| scanner.scan_outbound(text)))
+                    .flatten()
+            })
+            .or_else(|| {
+                (!recorded && final_step && self.envelope.varying())
+                    .then(|| self.envelope.scan(scanner))
+                    .flatten()
+            });
         if self.violation.is_none() {
             if let Some(found) = pending {
                 output.violation = Some(found.clone());
@@ -265,198 +274,226 @@ impl StreamingDlp {
                 }
             }
         }
-        self.scanned_to = self.scanned_to.max(safe_end);
-        // `sanitize_pending` reads the normalized view too, so a match only the
-        // fold reveals (split across deltas by a zero-width character, or in
-        // fullwidth) masks the held payload rather than passing unchanged.
-        let needs_redaction = scanner.redact_outbound(region).0 != region
-            || (self.sanitize && super::sanitize_pending(region, scanner))
-            || lanes.values().any(|text| {
-                scanner.redact_outbound(text).0 != *text
-                    || (self.sanitize && super::sanitize_pending(text, scanner))
-            });
-        let mask_payload = if needs_redaction {
-            let mut remaining =
-                self.text[self.scan_from - self.base..self.released_end - self.base].to_owned();
-            let mut remaining_lanes = std::collections::BTreeMap::new();
-            remaining_lanes.insert(
-                "/choices/0/delta/content".to_owned(),
-                self.text[self.scan_from - self.base..self.released_end - self.base].to_owned(),
-            );
-            for frame in &self.held {
-                let mut value = frame.value.clone();
-                if self.sanitize {
-                    super::sanitize_json_strings(&mut value, scanner);
-                } else {
-                    super::redact_json_strings(&mut value, scanner);
-                }
-                super::collect_sse_payload_text(&value, &mut remaining);
-                super::collect_sse_payload_lanes(&value, "", &mut remaining_lanes);
-            }
-            scanner.redact_outbound(&remaining).0 != remaining
-                || (self.sanitize && super::sanitize_pending(&remaining, scanner))
-                || remaining_lanes.values().any(|text| {
-                    scanner.redact_outbound(text).0 != *text
-                        || (self.sanitize && super::sanitize_pending(text, scanner))
-                })
-        } else {
-            false
-        };
-        // Fail closed before releasing: the mask rewrites only choice text, so
-        // a split in another field of the held frames can survive Sanitize.
-        // Nothing is released while every frame is held, so check only then.
-        if self.sanitize && mask_payload && (final_step || !self.buffer_remaining) {
-            if let Some(found) = self.held_sanitize_survivor(scanner) {
-                return self.refuse_survivor(output, &found);
-            }
-        }
+        self.scanned_to = self.scanned_to.max(scan_end);
 
-        // Release every held frame that ends at least BOUNDED_MATCH_LEN
-        // scan-view bytes before `safe_end` (see `bounded_cut`). `safe_end`
-        // follows whitespace, so the whitespace-free run around any earlier
-        // position is complete and was inside the region just scanned, and
-        // any bounded match crossing it ends inside it too.
-        let cut = if final_step {
-            len
-        } else if self.buffer_remaining {
-            0
-        } else {
-            self.bounded_cut(safe_end)
-        };
         let mut release = 0;
         for (index, frame) in self.held.iter().enumerate() {
-            if (self.buffer_remaining && !final_step) || frame.end > cut {
+            // Only the newest provider frame is still fresh (`take_line`).
+            let awaits_next = frame.fresh && !final_step;
+            if (self.buffer_remaining && !final_step) || frame.end > cut || awaits_next {
                 break;
             }
             release = index + 1;
         }
-        for _ in 0..release {
-            let Some(mut frame) = self.held.pop_front() else {
-                break;
-            };
-            self.held_wire_bytes -= frame.wire_bytes;
-            if self.sanitize {
-                super::sanitize_json_strings(&mut frame.value, scanner);
-                super::drop_choice_logprobs(&mut frame.value);
-            } else {
-                super::redact_json_strings(&mut frame.value, scanner);
-            }
-            if mask_payload {
-                super::mask_sse_payload_text(&mut frame.value);
-            }
-            if let Ok(encoded) = serde_json::to_string(&frame.value) {
-                output.bytes.push_str("data: ");
-                output.bytes.push_str(&encoded);
-                output.bytes.push_str("\n\n");
-                self.released_any = true;
-            }
-            self.released_end = frame.end;
+        // Nothing to release: redaction is decided per release, so skip it.
+        if release == 0 {
+            return output;
         }
-        if release > 0 && !final_step {
-            self.move_scan_start();
+        if final_step && self.buffer_remaining && self.envelope.unmatched() {
+            let transform = redact::Transform::new(scanner, self.sanitize);
+            self.envelope.judge_pieces(&held_pieces, &transform);
         }
-        output
-    }
-
-    /// The position [`BOUNDED_MATCH_LEN`] bytes of the scan view before
-    /// `safe_end`. Lengths are counted as `normalize_for_scan` reads them:
-    /// invisible, combining and TAG characters count for nothing and a
-    /// fullwidth or other folded character for its ASCII fold, so zero-width
-    /// padding or 3-byte digits cannot stretch a bounded match past the window
-    /// and release its start before the scan sees all of it.
-    fn bounded_cut(&self, safe_end: usize) -> usize {
-        let head = &self.text[..safe_end - self.base];
-        let mut seen = 0;
-        let mut buffer = [0u8; 4];
-        for (index, c) in head.char_indices().rev() {
-            seen += if c.is_ascii() {
-                1
-            } else if ('\u{E0000}'..='\u{E007F}').contains(&c) {
-                0
-            } else {
-                ryu_gw_firewall::fold_for_redaction(c.encode_utf8(&mut buffer)).len()
-            };
-            if seen >= BOUNDED_MATCH_LEN {
-                return self.base + index;
+        let mut text_level = !self.buffer_remaining;
+        if final_step && self.buffer_remaining {
+            // A held-whole stream still releases its leading plain-content
+            // frames at text level when that is safe (`final_head`).
+            let (head, split) = self.final_head(release, scanner);
+            text_level = head == release;
+            if split {
+                let before = self.held.len();
+                self.release(
+                    head,
+                    true,
+                    final_step,
+                    safe_end,
+                    &lanes,
+                    scanner,
+                    &mut output,
+                );
+                release -= before - self.held.len();
             }
         }
-        self.base.min(safe_end.saturating_sub(BOUNDED_MATCH_LEN))
-    }
-
-    /// The redact-category match still on the held frames once they are
-    /// sanitized and masked as they would be released.
-    fn held_sanitize_survivor(&self, scanner: &dyn FirewallBackend) -> Option<FirewallMatch> {
-        let held = self
-            .held
-            .iter()
-            .map(|frame| {
-                let mut value = frame.value.clone();
-                super::sanitize_json_strings(&mut value, scanner);
-                super::mask_sse_payload_text(&mut value);
-                value
-            })
-            .collect();
-        super::sse_sanitize_survivor(&Value::Array(held), scanner)
-    }
-
-    /// End the stream with a block notice for a match Sanitize cannot remove.
-    fn refuse_survivor(&mut self, mut output: DlpOutput, found: &FirewallMatch) -> DlpOutput {
-        output.blocked = true;
-        output.violation.get_or_insert_with(|| found.clone());
-        self.finished = true;
-        let notice = format!(
-            "[Ryu firewall] Response blocked: {} could not be redacted.",
-            found.pattern_name
+        self.release(
+            release,
+            text_level,
+            final_step,
+            safe_end,
+            &lanes,
+            scanner,
+            &mut output,
         );
-        let separator = if self.released_any { "\n\n" } else { "" };
+        if !final_step {
+            self.move_scan_start(scanner);
+        }
         output
-            .bytes
-            .push_str(&super::sse_content_frames(&format!("{separator}{notice}")));
-        output
-    }
-
-    /// The last position at or before `limit` that follows ASCII whitespace.
-    fn last_boundary_at_or_before(&self, limit: usize) -> usize {
-        let bytes = self.text.as_bytes();
-        let end = limit.saturating_sub(self.base).min(bytes.len());
-        bytes[..end]
-            .iter()
-            .rposition(|byte| is_boundary_space(*byte))
-            .map_or(self.scan_from, |index| self.base + index + 1)
-    }
-
-    /// Move the scan start behind the last release: `SCAN_BACK` bytes, back to a
-    /// token start, then over `SCAN_BACK_TOKENS` more tokens and the whitespace
-    /// between them. The text before it is never needed again.
-    fn move_scan_start(&mut self) {
-        let bytes = self.text.as_bytes();
-        let mut index = self.released_end.saturating_sub(SCAN_BACK).max(self.base) - self.base;
-        // Back to the start of the token containing `index`.
-        while index > 0 && !is_boundary_space(bytes[index - 1]) {
-            index -= 1;
-        }
-        for _ in 0..SCAN_BACK_TOKENS {
-            while index > 0 && is_boundary_space(bytes[index - 1]) {
-                index -= 1;
-            }
-            while index > 0 && !is_boundary_space(bytes[index - 1]) {
-                index -= 1;
-            }
-        }
-        let new_from = self.base + index;
-        if new_from > self.scan_from {
-            self.scan_from = new_from;
-            // Only ASCII bytes are boundaries, so this is a char boundary.
-            self.text.drain(..new_from - self.base);
-            self.base = new_from;
-        }
     }
 }
 
-#[path = "stream_dlp_body.rs"]
-mod body;
-pub(super) use body::dlp_body;
-
+mod carried;
+mod digits;
+mod driver;
+pub(super) mod envelope;
+mod fixed;
+mod frames;
 #[cfg(test)]
-#[path = "stream_dlp_test.rs"]
-mod tests;
+mod gap_test;
+mod ingest;
+mod junction;
+mod lanes;
+mod legacy;
+mod long_cut;
+mod mirror;
+mod reach;
+mod records;
+pub(super) mod redact;
+mod release;
+#[cfg(test)]
+mod review_test;
+#[cfg(test)]
+mod round10_test;
+#[cfg(test)]
+mod round11_test;
+#[cfg(test)]
+mod round12_test;
+#[cfg(test)]
+mod round13_test;
+#[cfg(test)]
+mod round14_test;
+#[cfg(test)]
+mod round15_test;
+#[cfg(test)]
+mod round16_test;
+#[cfg(test)]
+mod round17_test;
+#[cfg(test)]
+mod round18_test;
+#[cfg(test)]
+mod round19_test;
+#[cfg(test)]
+mod round20_test;
+#[cfg(test)]
+mod round21_test;
+#[cfg(test)]
+mod round23_test;
+#[cfg(test)]
+mod round24_test;
+#[cfg(test)]
+mod round25_test;
+#[cfg(test)]
+mod round26_test;
+#[cfg(test)]
+mod round27_test;
+#[cfg(test)]
+mod round30_test;
+#[cfg(test)]
+mod round31_test;
+#[cfg(test)]
+mod round32_test;
+#[cfg(test)]
+mod round33_test;
+#[cfg(test)]
+mod round34_test;
+#[cfg(test)]
+mod round35_test;
+#[cfg(test)]
+mod round36_test;
+#[cfg(test)]
+mod round37_test;
+#[cfg(test)]
+mod round38_test;
+#[cfg(test)]
+mod round39_test;
+#[cfg(test)]
+mod round41_test;
+#[cfg(test)]
+mod round42_test;
+#[cfg(test)]
+mod round43_test;
+#[cfg(test)]
+mod round44_test;
+#[cfg(test)]
+mod round45_test;
+#[cfg(test)]
+mod round46_test;
+#[cfg(test)]
+mod round47_test;
+#[cfg(test)]
+mod round48_test;
+#[cfg(test)]
+mod round49_test;
+#[cfg(test)]
+mod round4_test;
+#[cfg(test)]
+mod round50_test;
+#[cfg(test)]
+mod round51_test;
+#[cfg(test)]
+mod round52_test;
+#[cfg(test)]
+mod round53_test;
+#[cfg(test)]
+mod round54_test;
+#[cfg(test)]
+mod round55_test;
+#[cfg(test)]
+mod round56_test;
+#[cfg(test)]
+mod round57_test;
+#[cfg(test)]
+mod round58_test;
+#[cfg(test)]
+mod round59_test;
+#[cfg(test)]
+mod round5_test;
+#[cfg(test)]
+mod round60_test;
+#[cfg(test)]
+mod round61_test;
+#[cfg(test)]
+mod round62_test;
+#[cfg(test)]
+mod round63_test;
+#[cfg(test)]
+mod round64_test;
+#[cfg(test)]
+mod round65_test;
+#[cfg(test)]
+mod round68_test;
+#[cfg(test)]
+mod round69_test;
+#[cfg(test)]
+mod round6_test;
+#[cfg(test)]
+mod round70_test;
+#[cfg(test)]
+mod round71_test;
+#[cfg(test)]
+mod round72_test;
+#[cfg(test)]
+mod round73_test;
+#[cfg(test)]
+mod round74_test;
+#[cfg(test)]
+mod round75_test;
+#[cfg(test)]
+mod round76_test;
+#[cfg(test)]
+mod round77_test;
+#[cfg(test)]
+mod round78_test;
+#[cfg(test)]
+mod round79_test;
+#[cfg(test)]
+mod round7_test;
+#[cfg(test)]
+mod round8_test;
+#[cfg(test)]
+mod round9_test;
+mod scan_start;
+#[cfg(test)]
+mod scan_test;
+mod spans;
+#[cfg(test)]
+mod text_level_test;
+
+pub(super) use driver::dlp_body;

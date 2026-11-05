@@ -255,7 +255,9 @@ impl Channel for DiscordChannel {
                 }
             };
             let url = format!("{gateway}?v=10&encoding=json");
-            let (mut ws, _) = match tokio_tungstenite::connect_async(&url).await {
+            // Nagle off: a heartbeat or resume frame is never held for an ACK.
+            let dialed = tokio_tungstenite::connect_async_with_config(&url, None, true).await;
+            let (mut ws, _) = match dialed {
                 Ok(pair) => pair,
                 Err(err) => {
                     reconnect_attempt = reconnect_attempt.saturating_add(1);

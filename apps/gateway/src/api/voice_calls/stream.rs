@@ -191,7 +191,8 @@ pub(super) async fn handle_twilio_stream(
             return;
         }
     };
-    let (core, _) = match connect_async(core_url).await {
+    // Nagle off: one small PCM frame goes out per Twilio media event.
+    let (core, _) = match connect_async_with_config(core_url, None, true).await {
         Ok(connection) => connection,
         Err(error) => {
             tracing::warn!(%error, "twilio voice bridge could not connect to Core voice");

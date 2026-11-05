@@ -161,11 +161,19 @@ fn buffered_sse_sanitize_refuses_a_surviving_split() {
     assert!(rewrite_sse_for_dlp(&raw, &scanner, &FirewallPolicy::Sanitize).is_err());
 }
 
+/// Neither half of the split SSN in `out`.
+fn split_ssn_leaks(out: &str) -> bool {
+    out.contains("123-45") || out.contains("6789")
+}
+
+/// A field beside `choices` is outside the text mask; its lane joins the two
+/// halves only across frames, where the per-frame scan view never does. The
+/// envelope lanes (`stream_dlp::envelope`) judge that field across frames and
+/// mask it in every frame; whatever still survives refuses the stream. Either
+/// way no half of the value reaches the client.
 #[test]
 fn buffered_sse_sanitize_refuses_a_cross_frame_split_the_mask_skips() {
     let scanner = FirewallScanner::new_scoped(sanitize_config());
-    // A field beside `choices` is outside the mask; its lane joins the two
-    // halves only across frames, where the per-frame scan view never does.
     let mut raw = String::new();
     for (content, extra) in [("hi ", "ssn 123-45"), ("there", "-6789")] {
         let frame = serde_json::json!({
@@ -175,12 +183,18 @@ fn buffered_sse_sanitize_refuses_a_cross_frame_split_the_mask_skips() {
         raw.push_str(&format!("data: {frame}\n\n"));
     }
     raw.push_str("data: [DONE]\n\n");
-    let error = rewrite_sse_for_dlp(&raw, &scanner, &FirewallPolicy::Sanitize)
-        .expect_err("a surviving cross-frame match refuses the stream");
-    assert!(error.contains("could not be redacted"), "{error}");
+    match rewrite_sse_for_dlp(&raw, &scanner, &FirewallPolicy::Sanitize) {
+        Err(error) => assert!(error.contains("could not be redacted"), "{error}"),
+        Ok((rewritten, _, _)) => {
+            assert!(
+                !split_ssn_leaks(&rewritten),
+                "client bytes leaked: {rewritten}"
+            );
+        }
+    }
 
-    // The incremental stream holds frames that carry a tool call and ends
-    // with a block notice instead of releasing the two halves.
+    // The incremental stream holds frames that carry a tool call and masks
+    // the field or ends with a block notice instead of releasing the halves.
     let mut raw = String::new();
     for (name, extra) in [("lookup", "ssn 123-45"), ("", "-6789")] {
         let frame = serde_json::json!({
@@ -199,9 +213,12 @@ fn buffered_sse_sanitize_refuses_a_cross_frame_split_the_mask_skips() {
     }
     let last = dlp.finish(&scanner).unwrap();
     out.push_str(&last.bytes);
-    assert!(last.blocked, "{out}");
-    assert!(out.contains("could not be redacted"), "{out}");
+    assert!(
+        !last.blocked || out.contains("could not be redacted"),
+        "{out}"
+    );
     assert!(!leaks(&out), "client bytes leaked: {out}");
+    assert!(!split_ssn_leaks(&out), "client bytes leaked: {out}");
 }
 
 #[test]

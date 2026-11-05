@@ -9,6 +9,21 @@ use sha2::Sha256;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+/// Logs a firewall match a non-blocking policy lets through: at `warn` when the
+/// resolved scanner's `[firewall] log_detections` is on, at `debug` otherwise,
+/// with the same fields and message either way. Defined before every `mod` so
+/// each pipeline module can use it; the `::tracing` paths keep it independent
+/// of the caller's imports.
+macro_rules! detection_log {
+    ($log_detections:expr, $($event:tt)+) => {
+        if $log_detections {
+            ::tracing::warn!($($event)+)
+        } else {
+            ::tracing::debug!($($event)+)
+        }
+    };
+}
+
 mod auxiliary;
 mod edit_rescan;
 #[cfg(test)]
@@ -16,7 +31,13 @@ mod edit_rescan_probe_tests;
 #[cfg(test)]
 mod edit_rescan_tests;
 pub(crate) mod inference_governance;
+mod line_aligned;
+#[cfg(test)]
+mod log_capture;
 mod media_knobs;
+mod outbound_detection;
+#[cfg(test)]
+mod outbound_detection_test;
 mod outbound_text;
 #[cfg(test)]
 mod outbound_text_tests;
@@ -239,6 +260,8 @@ mod inbound_inspector;
 use inbound_inspector::*;
 mod inbound_stages;
 use inbound_stages::*;
+#[cfg(test)]
+mod inbound_stages_test;
 mod multimodal;
 use multimodal::*;
 pub use multimodal::{run_multimodal, run_speech};

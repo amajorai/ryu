@@ -12,7 +12,7 @@ use crate::config::{CustomPatternKind, FirewallConfig, FirewallPolicy};
 /// (e.g. an out-of-process DLP engine) can register without touching the pipeline,
 /// mirroring the [`crate::budget::BudgetRegistry`] inversion. The trait carries
 /// exactly the surface the pipeline / passthrough / API drive through
-/// `AppState::with_firewall`. The hierarchical [`resolve::FirewallResolver`] and
+/// `AppState::with_firewall`. The hierarchical [`super::resolve::FirewallResolver`] and
 /// the inspector stay consumers of the concrete scanner and are unchanged.
 pub trait FirewallBackend: Send + Sync {
     /// The live firewall config (for `GET /v1/config` and enable checks).
@@ -27,9 +27,13 @@ pub trait FirewallBackend: Send + Sync {
     fn scan_outbound(&self, text: &str) -> Option<FirewallMatch>;
     /// Scan text against a caller-supplied locked-guardrail allowlist.
     fn scan_locked_guardrails(&self, text: &str, guardrails: &[String]) -> Option<FirewallMatch>;
-    /// Redact PII/secrets in a single string (best-effort sanitize).
+    /// Redact PII/secrets in a single string (best-effort sanitize). Must be a
+    /// pure function of `text`: the stream rewrite reuses one result. It must
+    /// keep the stream's field separator (`\n\0\n`) byte for byte, as must
+    /// `redact_outbound`; a rewrite that consumes it masks the frames instead.
     fn sanitize(&self, text: &str) -> String;
-    /// Redact outbound text, returning the redacted string + the hit pattern names.
+    /// Redact outbound text, returning the redacted string + the hit pattern
+    /// names. The string must be a pure function of `text`, like `sanitize`.
     fn redact_outbound(&self, text: &str) -> (String, Vec<&'static str>);
     /// Redact a violation excerpt for storage, ignoring `redact_pii` /
     /// `redact_secrets`; an empty result means the excerpt must be dropped.

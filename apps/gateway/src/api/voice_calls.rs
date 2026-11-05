@@ -22,7 +22,9 @@ use hmac::{Hmac, Mac};
 use serde_json::Value;
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
-use tokio_tungstenite::{connect_async, tungstenite::Message as CoreMessage};
+#[cfg(test)]
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::{connect_async_with_config, tungstenite::Message as CoreMessage};
 
 use crate::{config::GatewayConfig, state::SharedState};
 use ryu_gw_channels::voice_call::{

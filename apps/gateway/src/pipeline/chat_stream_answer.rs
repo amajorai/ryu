@@ -203,6 +203,13 @@ pub(super) async fn finish_stream_answer(
     observer.model_span = Some(model_span);
     // Standing is checked before every output window, beneath the
     // stream observer, so a stream cut by a refusal still settles.
+    // On line boundaries first, so a refusal never lands after half a line
+    // (the outbound DLP would reject the glued line as unscannable).
+    let stream_body = if ctx.standing.is_some() && state.resolve_cache.is_some() {
+        super::line_aligned::line_aligned(stream_body)
+    } else {
+        stream_body
+    };
     let stream_body =
         crate::standing::guard_stream(stream_body, Arc::clone(&state), ctx.standing.clone());
     let observed_body = observe_stream(stream_body, observer);

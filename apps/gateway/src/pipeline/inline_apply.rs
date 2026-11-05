@@ -366,15 +366,28 @@ pub(super) fn output_inline_wants_transform(
     })
 }
 
+/// Whether any enabled binding is an inline OUTPUT evaluator (any action:
+/// a Warn binding still judges the assembled reply). Only these read a
+/// stream's output (`evaluate_output_inline_stream`), so only these buffer it.
+pub(super) fn output_inline_bound(scanner: &FirewallScanner, registry: &EvaluatorRegistry) -> bool {
+    scanner.config().evaluators.iter().any(|b| {
+        b.enabled
+            && registry
+                .get(&b.id)
+                .is_some_and(|ev| ev.capabilities.inline && ev.target == EvaluatorTarget::Output)
+    })
+}
+
 /// Evaluate the resolved OUTPUT-target inline evaluators against assembled
 /// streamed text, returning the STRICTEST outcome (Block > Sanitize > Warn >
-/// Allow) plus a reason, so the streaming firewall can emit the right frame.
+/// Allow) plus the deciding evaluator's id and a reason, so the streaming
+/// firewall can emit the right frame and audit it as the non-stream path does.
 pub(super) async fn evaluate_output_inline_stream(
     state: &Arc<AppState>,
     ctx: &RequestContext,
     scanner: &FirewallScanner,
     assembled: &str,
-) -> (InlineOutcome, String) {
+) -> (InlineOutcome, String, String) {
     let registry = state.evaluator_registry();
     let bindings: Vec<crate::evaluators::EvaluatorBinding> = scanner
         .config()
@@ -386,6 +399,7 @@ pub(super) async fn evaluate_output_inline_stream(
 
     let mut strictest = InlineOutcome::Allow;
     let mut reason = String::new();
+    let mut winner = String::new();
     for binding in &bindings {
         let Some(ev) = registry.get(&binding.id) else {
             continue;
@@ -403,23 +417,29 @@ pub(super) async fn evaluate_output_inline_stream(
         )
         .await
         {
-            InlineFlag::Denied(error) => return (InlineOutcome::Block, error.to_string()),
+            // The non-stream path answers with an error; a stream can only
+            // replace the reply, so it fails closed as a block (and is
+            // audited as one).
+            InlineFlag::Denied(error) => {
+                return (InlineOutcome::Block, ev.id.clone(), error.to_string())
+            }
             InlineFlag::Skip => continue,
             InlineFlag::Ran { flagged, reason } => (flagged, reason),
             InlineFlag::ForceBlock { reason: fc_reason } => {
                 // Fail-closed → Block is the strictest possible streamed outcome;
                 // nothing can outrank it, so short-circuit.
-                return (InlineOutcome::Block, format!("{}: {fc_reason}", ev.id));
+                return (InlineOutcome::Block, ev.id.clone(), fc_reason);
             }
         };
         let outcome = inline_outcome(flagged, &inline_action_for(binding, ev));
         if inline_outcome_rank(outcome) > inline_outcome_rank(strictest) {
             strictest = outcome;
-            reason = format!("{}: {}", ev.id, r);
+            winner = ev.id.clone();
+            reason = r;
         }
     }
     let _ = ctx;
-    (strictest, reason)
+    (strictest, winner, reason)
 }
 
 /// Strictness rank for picking the winning streamed-output outcome.

@@ -64,9 +64,13 @@ pub(crate) struct Request {
     pub protocol: Protocol,
 }
 
-/// Read and authenticate one client request. Errors have already been answered
-/// on the socket where the protocol allows it.
+/// Read and authenticate one client request, first turning Nagle off so the
+/// relay forwards each streamed write at once. Errors have already been
+/// answered on the socket where the protocol allows it.
 pub(crate) async fn accept(socket: &mut TcpStream, credential: &Credential) -> Result<Request, ()> {
+    if let Err(error) = socket.set_nodelay(true) {
+        tracing::debug!(%error, "local egress: could not set TCP_NODELAY");
+    }
     let first = socket.read_u8().await.map_err(|_| ())?;
     if first == 5 {
         accept_socks(socket, credential).await
@@ -457,6 +461,7 @@ mod tests {
         });
         let (mut server, _) = listener.accept().await.unwrap();
         let request = accept(&mut server, &credential()).await.unwrap();
+        assert!(server.nodelay().unwrap());
         assert_eq!(
             request,
             Request {
@@ -481,6 +486,7 @@ mod tests {
         });
         let (mut server, _) = listener.accept().await.unwrap();
         assert!(accept(&mut server, &credential()).await.is_err());
+        assert!(server.nodelay().unwrap());
         assert_eq!(client.await.unwrap(), [5, 0xff]);
     }
 }

@@ -73,6 +73,10 @@ pub(super) async fn serve_until_shutdown(
             ))
             .into_make_service_with_connect_info::<server::core_identity::ConnectionAddrs>(),
     )
+    // SSE frames are small writes; without TCP_NODELAY Nagle holds each one until
+    // the client's delayed ACK (~40 ms on Linux, up to 200 ms on Windows), as
+    // measured in docs/gateway-guardrail-overhead-2026-10-31.md.
+    .tcp_nodelay(true)
     .with_graceful_shutdown(wait_for_shutdown_signal());
     // Graceful shutdown waits for every open connection, and the event streams
     // (downloads/all-events SSE, the realtime socket) never close on their own.

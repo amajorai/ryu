@@ -136,6 +136,9 @@ fn spawn_forwarder(port: u16, relay_dir: &Path) -> Result<()> {
                 }
             }
             for inbound in listener.incoming().flatten() {
+                // Nagle + delayed ACK would stall each small relayed write ~40 ms.
+                // The forked forwarder has no logger, so a failure is ignored.
+                let _ = inbound.set_nodelay(true);
                 let socket = socket.clone();
                 std::thread::spawn(move || {
                     let Ok(outbound) = std::os::unix::net::UnixStream::connect(&socket) else {

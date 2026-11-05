@@ -1,63 +1,14 @@
-//! Redaction paths of [`FirewallScanner`]: the config-gated `sanitize`, the
-//! unconditional companion egress redaction, and the outbound secret scrub.
+//! Companion egress redaction: an unconditional, config-ignoring guardrail,
+//! and the violation-excerpt redaction built on it.
 
 use ryu_gw_firewall::fold_for_redaction;
 
-use super::{is_credit_card_number, is_public_ipv4, DetectionKind, FirewallScanner};
+use super::{DetectionKind, FirewallScanner};
 
 /// Replaces companion text whose PII or secret survives both redaction passes.
 pub(crate) const COMPANION_MASK: &str = "[REDACTED:COMPANION_TEXT]";
 
 impl FirewallScanner {
-    /// Sanitize text by replacing matched patterns with a placeholder.
-    ///
-    /// Which categories are redacted is governed by `FirewallConfig.redact_pii`
-    /// and `FirewallConfig.redact_secrets`. Both default to `true`, preserving
-    /// the previous behaviour. Set either to `false` to suppress that category
-    /// independently of the Sanitize policy decision.
-    pub fn sanitize(&self, text: &str) -> String {
-        let mut result = text.to_string();
-
-        if self.config.redact_pii {
-            for (name, re) in &self.pii_patterns {
-                let placeholder = format!("[REDACTED:{}]", name.to_uppercase());
-                // The separator-tolerant / range-based kinds redact only genuine
-                // matches (Luhn-valid cards, public IPs) so Sanitize does not
-                // scrub arbitrary long digit runs or benign private/subnet IPs.
-                result = match name.as_str() {
-                    "credit_card" => re
-                        .replace_all(&result, |caps: &regex::Captures| {
-                            if is_credit_card_number(&caps[0]) {
-                                placeholder.clone()
-                            } else {
-                                caps[0].to_string()
-                            }
-                        })
-                        .to_string(),
-                    "ipv4" => re
-                        .replace_all(&result, |caps: &regex::Captures| {
-                            if is_public_ipv4(&caps[0]) {
-                                placeholder.clone()
-                            } else {
-                                caps[0].to_string()
-                            }
-                        })
-                        .to_string(),
-                    _ => re.replace_all(&result, placeholder.as_str()).to_string(),
-                };
-            }
-        }
-
-        if self.config.redact_secrets {
-            for (name, re) in &self.secret_patterns {
-                let placeholder = format!("[REDACTED:{}]", name.to_uppercase());
-                result = re.replace_all(&result, placeholder.as_str()).to_string();
-            }
-        }
-
-        result
-    }
-
     /// Apply companion egress redaction to each message body in place.
     ///
     /// Mirrors `sanitize_messages` in the pipeline module but uses the companion
@@ -180,25 +131,5 @@ impl FirewallScanner {
         } else {
             clean
         }
-    }
-
-    /// Redact secret-like tokens from outbound response/log/error text.
-    ///
-    /// Unlike `sanitize`, this is NOT config-gated on `redact_pii`/`redact_secrets`
-    /// — secret egress is always scrubbed when the firewall is enabled. Each match
-    /// is replaced with a STABLE marker (e.g. `[REDACTED:gh_pat]`) so the same
-    /// secret shape always produces the same placeholder. Returns the redacted text
-    /// and the list of marker labels that fired (for audit).
-    pub fn redact_outbound(&self, text: &str) -> (String, Vec<&'static str>) {
-        let mut result = text.to_string();
-        let mut hits: Vec<&'static str> = Vec::new();
-        for (marker, re) in &self.outbound_patterns {
-            if re.is_match(&result) {
-                hits.push(*marker);
-                let placeholder = format!("[REDACTED:{marker}]");
-                result = re.replace_all(&result, placeholder.as_str()).to_string();
-            }
-        }
-        (result, hits)
     }
 }

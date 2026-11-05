@@ -79,6 +79,45 @@ fn is_tag_char(c: char) -> bool {
     ('\u{E0000}'..='\u{E007F}').contains(&c)
 }
 
+/// The DLP's Sanitize rewrite of one string, failing closed: the order-free
+/// [`sanitize_text`](super::super::stream_dlp::redact::sanitize_text) (PII,
+/// secrets and the outbound scrub), refolded and rewritten again when a
+/// redact-category match survives on the scan view, and [`SANITIZE_MASK`]
+/// when one still survives. Every outbound Sanitize of response text uses it:
+/// each JSON string here, and the stream DLP's text-level `Transform`, so a
+/// value split across deltas is judged the same joined as one string.
+pub(in crate::pipeline) fn sanitize_text_closed(
+    scanner: &dyn FirewallBackend,
+    text: &str,
+) -> String {
+    sanitize_closed_with(text, scanner, &redact_categories(scanner.config()))
+}
+
+fn sanitize_closed_with(
+    text: &str,
+    scanner: &dyn FirewallBackend,
+    categories: &[String],
+) -> String {
+    let rewrite = |text: &str| super::super::stream_dlp::redact::sanitize_text(scanner, text);
+    let sanitized = rewrite(text);
+    if redact_survivor(&sanitized, scanner, categories).is_none() {
+        return sanitized;
+    }
+    // A TAG-bearing survivor is never refolded (see `sanitize_text_with`).
+    if sanitized.chars().any(is_tag_char) {
+        return SANITIZE_MASK.to_owned();
+    }
+    // Only the surviving values change where the rewrite aligns with the
+    // fold; otherwise the whole string is folded and rewritten again.
+    let refolded = super::super::stream_dlp::redact::sanitize_folded(scanner, &sanitized)
+        .unwrap_or_else(|| rewrite(&ryu_gw_firewall::fold_for_redaction(&sanitized)));
+    if redact_survivor(&refolded, scanner, categories).is_some() {
+        SANITIZE_MASK.to_owned()
+    } else {
+        refolded
+    }
+}
+
 /// Whether Sanitize has anything left to do in `text`: the raw pass rewrites
 /// it, or a redact-category match is on its normalized view.
 pub(in crate::pipeline) fn sanitize_pending(text: &str, scanner: &dyn FirewallBackend) -> bool {
@@ -102,22 +141,28 @@ pub(in crate::pipeline) fn outbound_sanitize_survivor(
 
 /// [`outbound_sanitize_survivor`] for a sanitized SSE payload (an array of
 /// frames): the per-frame scan view separates frames with their envelope
-/// keys, so a match split across frames is read on the concatenated delta
-/// text and on each cross-frame lane as well. The mask rewrites only the
-/// choice text, so a split in any other field survives it.
+/// keys, so a match split across frames is read on each choice's delta text
+/// (`choice_scan_texts`, which keeps a separator at a reasoning, answer or
+/// tool-call switch, as detection does) and on each cross-frame lane as
+/// well. The mask rewrites only the choice text, so a split in any other
+/// field survives it.
 pub(in crate::pipeline) fn sse_sanitize_survivor(
     payload: &Value,
     scanner: &dyn FirewallBackend,
 ) -> Option<FirewallMatch> {
     let categories = redact_categories(scanner.config());
-    let mut text = String::new();
-    super::collect_sse_payload_text(payload, &mut text);
+    let frames = payload.as_array().map_or(&[][..], Vec::as_slice);
+    let texts = super::choice_scan_texts(frames);
     let mut lanes = std::collections::BTreeMap::new();
-    for frame in payload.as_array().into_iter().flatten() {
+    for frame in frames {
         super::collect_sse_payload_lanes(frame, "", &mut lanes);
     }
     redact_survivor(&json_string_projection(payload), scanner, &categories)
-        .or_else(|| redact_survivor(&text, scanner, &categories))
+        .or_else(|| {
+            texts
+                .values()
+                .find_map(|text| redact_survivor(text, scanner, &categories))
+        })
         .or_else(|| {
             lanes
                 .values()
@@ -125,18 +170,14 @@ pub(in crate::pipeline) fn sse_sanitize_survivor(
         })
 }
 
-/// Sanitize every string and key, failing closed: a string whose match
-/// survives [`sanitize_text_or_survivor`] becomes [`SANITIZE_MASK`].
+/// Sanitize every string and key with [`sanitize_text_closed`]: a string
+/// whose match survives both passes becomes [`SANITIZE_MASK`].
 pub(in crate::pipeline) fn sanitize_json_strings(value: &mut Value, scanner: &dyn FirewallBackend) {
     sanitize_json_with(value, scanner, &redact_categories(scanner.config()));
 }
 
 fn sanitize_json_with(value: &mut Value, scanner: &dyn FirewallBackend, categories: &[String]) {
-    let sanitize = |text: &str| {
-        let sanitized = sanitize_text_with(text, scanner, categories)
-            .unwrap_or_else(|_| SANITIZE_MASK.to_owned());
-        scanner.redact_outbound(&sanitized).0
-    };
+    let sanitize = |text: &str| sanitize_closed_with(text, scanner, categories);
     match value {
         Value::String(text) => *text = sanitize(text),
         Value::Array(values) => {

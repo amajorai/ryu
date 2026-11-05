@@ -271,22 +271,12 @@ impl SidecarClient {
             Some(body) => serde_json::to_vec(body)?,
             None => Vec::new(),
         };
-        let mut head = format!(
-            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\nAccept: application/json\r\n",
-            self.port
-        );
-        if authorized {
-            head.push_str(&format!("Authorization: Bearer {}\r\n", self.token));
-        }
-        if body.is_some() {
-            head.push_str("Content-Type: application/json\r\n");
-        }
-        head.push_str(&format!("Content-Length: {}\r\n\r\n", payload.len()));
+        let token = authorized.then_some(self.token.as_str());
+        let request = encode_request(method, path, self.port, token, &payload, body.is_some());
         let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", self.port))
             .await
             .context("connect to the app sidecar")?;
-        stream.write_all(head.as_bytes()).await?;
-        stream.write_all(&payload).await?;
+        stream.write_all(&request).await?;
         stream.flush().await?;
         let mut raw = Vec::new();
         let mut chunk = [0u8; 16 * 1024];
@@ -302,6 +292,32 @@ impl SidecarClient {
         }
         parse_response(&raw)
     }
+}
+
+/// The whole request in one buffer, so it leaves in one write: a head written
+/// apart from its body would wait on the peer's delayed ACK under Nagle.
+fn encode_request(
+    method: &str,
+    path: &str,
+    port: u16,
+    token: Option<&str>,
+    payload: &[u8],
+    has_body: bool,
+) -> Vec<u8> {
+    let mut head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: application/json\r\n"
+    );
+    if let Some(token) = token {
+        head.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    if has_body {
+        head.push_str("Content-Type: application/json\r\n");
+    }
+    head.push_str(&format!("Content-Length: {}\r\n\r\n", payload.len()));
+    let mut request = Vec::with_capacity(head.len() + payload.len());
+    request.extend_from_slice(head.as_bytes());
+    request.extend_from_slice(payload);
+    request
 }
 
 fn parse_response(raw: &[u8]) -> Result<SidecarResponse> {
@@ -453,5 +469,17 @@ mod tests {
         let parsed = parse_response(chunked).unwrap();
         assert_eq!(parsed.status, 404);
         assert_eq!(parsed.body["error"], "no");
+    }
+
+    #[test]
+    fn requests_encode_head_and_body_into_one_buffer() {
+        let with_body = encode_request("POST", "/x", 7, Some("t"), b"{}", true);
+        let head = "POST /x HTTP/1.1\r\nHost: 127.0.0.1:7\r\nConnection: close\r\n\
+            Accept: application/json\r\nAuthorization: Bearer t\r\n\
+            Content-Type: application/json\r\nContent-Length: 2\r\n\r\n";
+        assert_eq!(with_body, [head.as_bytes(), b"{}"].concat());
+        let bare = String::from_utf8(encode_request("GET", "/y", 7, None, b"", false)).unwrap();
+        assert!(bare.ends_with("Content-Length: 0\r\n\r\n"));
+        assert!(!bare.contains("Content-Type") && !bare.contains("Authorization"));
     }
 }

@@ -4,7 +4,8 @@ use super::normalize_for_scan;
 use crate::confusables::fold_confusable;
 use crate::patterns::build_injection_patterns;
 use crate::protective::is_protective_instruction_clause;
-use crate::validators::{is_credit_card_number, is_public_ipv4};
+use crate::validators::{is_credit_card_number, is_public_ipv4, luhn_valid};
+use crate::{build_outbound_patterns, build_pii_patterns};
 
 /// The lookalike table folds Cyrillic and Greek letters and leaves the rest.
 #[test]
@@ -113,4 +114,87 @@ fn protective_clauses_require_the_complete_sentence() {
         let matched = pattern.find(attack).unwrap();
         assert!(!is_protective_instruction_clause(attack, matched.start()));
     }
+}
+
+#[test]
+fn leak_patterns_match_next_to_cjk_text_and_in_non_ascii_digits() {
+    let outbound = build_outbound_patterns();
+    let openai = &outbound
+        .iter()
+        .find(|(name, _)| *name == "openai_key")
+        .unwrap()
+        .1;
+    assert!(openai.is_match("\u{5bc6}\u{94a5}sk-abcdefghijklmnopqrstuvwxyz\u{3002}"));
+    assert!(!openai.is_match("xsk-abcdefghijklmnopqrstuvwxyz"));
+    let pii = build_pii_patterns();
+    let ssn = &pii.iter().find(|(name, _)| name == "ssn").unwrap().1;
+    assert!(ssn.is_match("\u{53f7}\u{7801}123-45-6789\u{3002}"));
+    assert!(ssn.is_match("SSN \u{661}\u{662}\u{663}-\u{664}\u{665}-\u{666}\u{667}\u{668}\u{669}"));
+    assert!(!ssn.is_match("x123-45-6789"));
+}
+
+/// The `is_credit_card_number` body before it gathered digits on the stack:
+/// non-ASCII decimal digits count as their ASCII value.
+fn card_by_string(matched: &str) -> bool {
+    let digits: String = matched
+        .chars()
+        .filter_map(|c| {
+            if c.is_ascii_digit() {
+                Some(c)
+            } else {
+                crate::fold_digit(c)
+            }
+        })
+        .collect();
+    let len = digits.len();
+    if !(13..=19).contains(&len) {
+        return false;
+    }
+    if !matches!(digits.as_bytes()[0], b'3' | b'4' | b'5' | b'6') {
+        return false;
+    }
+    luhn_valid(&digits)
+}
+
+/// The stack-buffer card check answers as the `String` one on valid and
+/// invalid cards, every length around the bounds, separators, non-ASCII
+/// digits and a non-card prefix.
+#[test]
+fn card_check_without_allocation_keeps_its_answers() {
+    let mut cases = vec![
+        String::new(),
+        "4111 1111 1111 1111".to_owned(),
+        "4111-1111-1111-1112".to_owned(),
+        "5500 0000 0000 0004".to_owned(),
+        "378282246310005".to_owned(),
+        "6011111111111117".to_owned(),
+        "7111111111111111".to_owned(),
+        "4\u{0661}11 1111 1111 1111".to_owned(),
+        "\u{0664}\u{0661}\u{0661}\u{0661}1111111111111".to_owned(),
+        "4111\u{00a0}1111\u{00a0}1111\u{00a0}1111".to_owned(),
+    ];
+    for len in 10..=22 {
+        for lead in ['3', '4', '7'] {
+            let mut digits = lead.to_string();
+            digits.extend((1..len).map(|i| char::from(b'0' + (i * 7 % 10) as u8)));
+            cases.push(digits.clone());
+            cases.push(format!("{digits}9"));
+            let grouped: Vec<String> = digits
+                .as_bytes()
+                .chunks(4)
+                .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
+                .collect();
+            cases.push(grouped.join(" "));
+            cases.push(grouped.join("-"));
+        }
+    }
+    let mut accepted = 0;
+    for case in &cases {
+        let expected = card_by_string(case);
+        assert_eq!(is_credit_card_number(case), expected, "{case:?}");
+        accepted += usize::from(expected);
+    }
+    assert!(accepted > 0);
+    assert!(is_credit_card_number("4111 1111 1111 1111"));
+    assert!(!is_credit_card_number("4111 1111 1111 1111 1111"));
 }

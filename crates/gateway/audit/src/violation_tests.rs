@@ -365,3 +365,28 @@ fn opening_the_outbox_expires_old_excerpts() {
     drop(reopened);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_file_backed_outbox_commits_with_synchronous_normal() {
+    let dir = std::env::temp_dir().join(format!("ryu-violation-sync-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("violations.db");
+    let outbox = ViolationOutbox::open(&path).unwrap();
+    let pragma = |name: &str| -> String {
+        lock(&outbox.conn)
+            .query_row(&format!("PRAGMA {name}"), [], |row| {
+                row.get::<_, rusqlite::types::Value>(0)
+            })
+            .map(|value| match value {
+                rusqlite::types::Value::Integer(n) => n.to_string(),
+                rusqlite::types::Value::Text(text) => text,
+                other => format!("{other:?}"),
+            })
+            .unwrap()
+    };
+    // 1 = NORMAL: no fsync per commit on the request path; WAL keeps it safe.
+    assert_eq!(pragma("synchronous"), "1");
+    assert_eq!(pragma("journal_mode"), "wal");
+    drop(outbox);
+    let _ = std::fs::remove_dir_all(&dir);
+}

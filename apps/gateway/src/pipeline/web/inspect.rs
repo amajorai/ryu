@@ -133,6 +133,8 @@ pub(super) fn inspect_output(
             "Invalid normalized web response".into(),
         ));
     };
+    let mut hits = 0usize;
+    let mut first_pattern = None;
     for result in results {
         for field in ["title", "snippet", "content", "url"] {
             let Some(text) = result.get(field).and_then(Value::as_str) else {
@@ -141,13 +143,23 @@ pub(super) fn inspect_output(
             if let Some(hit) = scanner.scan_outbound(text) {
                 match scanner.policy() {
                     FirewallPolicy::Block => {
+                        tracing::warn!(
+                            request_id = %ctx.request_id,
+                            pattern = %hit.pattern_name,
+                            "firewall: blocked web output"
+                        );
                         return Err(GatewayError::FirewallBlocked(
                             format!("Web output blocked: {}", hit.pattern_name),
                             super::super::firewall_policy_alert(scanner.config(), ctx, "block"),
-                        ))
+                        ));
                     }
                     FirewallPolicy::Sanitize => {
                         if field == "url" {
+                            tracing::warn!(
+                                request_id = %ctx.request_id,
+                                pattern = %hit.pattern_name,
+                                "firewall: blocked web output"
+                            );
                             return Err(GatewayError::FirewallBlocked(
                                 "Web result URL contains restricted output".into(),
                                 super::super::firewall_policy_alert(scanner.config(), ctx, "block"),
@@ -157,6 +169,11 @@ pub(super) fn inspect_output(
                         // refuses the results instead of returning it.
                         let sanitized = sanitize_text_or_survivor(text, scanner.as_ref()).map_err(
                             |survivor| {
+                                tracing::warn!(
+                                    request_id = %ctx.request_id,
+                                    pattern = %survivor.pattern_name,
+                                    "firewall: blocked web output"
+                                );
                                 GatewayError::FirewallBlocked(
                                     format!(
                                         "Web output blocked: {} survived redaction",
@@ -174,8 +191,19 @@ pub(super) fn inspect_output(
                     }
                     FirewallPolicy::WarnAndContinue => {}
                 }
+                hits += 1;
+                first_pattern.get_or_insert(hit.pattern_name);
             }
         }
+    }
+    if let Some(pattern) = first_pattern {
+        detection_log!(
+            scanner.config().log_detections,
+            request_id = %ctx.request_id,
+            hits,
+            pattern = %pattern,
+            "firewall: outbound web results matched"
+        );
     }
     Ok(())
 }

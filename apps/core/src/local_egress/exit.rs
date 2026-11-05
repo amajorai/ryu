@@ -348,7 +348,8 @@ async fn connect_once(url: &str, bearer: &str, state: &Mutex<LinkState>) -> Resu
     }
     let (socket, _) = match tokio::time::timeout(
         CONNECT_TIMEOUT,
-        tokio_tungstenite::connect_async(request),
+        // Nagle off: the mux sends one small frame per flush.
+        tokio_tungstenite::connect_async_with_config(request, None, true),
     )
     .await
     {

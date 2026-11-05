@@ -60,7 +60,8 @@ pub(super) async fn firewall_stage(
                 ));
             }
             FirewallPolicy::Sanitize => {
-                warn!(
+                detection_log!(
+                    scanner.config().log_detections,
                     request_id = %ctx.request_id,
                     pattern = %violation.pattern_name,
                     "firewall: inbound violation under Sanitize policy"
@@ -69,7 +70,8 @@ pub(super) async fn firewall_stage(
                     sanitize_inbound_or_block(state, ctx, body, scanner.as_ref(), "firewall")?;
             }
             FirewallPolicy::WarnAndContinue => {
-                warn!(
+                detection_log!(
+                    scanner.config().log_detections,
                     request_id = %ctx.request_id,
                     pattern = %violation.pattern_name,
                     "firewall: inbound violation (warn-and-continue)"

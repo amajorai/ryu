@@ -102,6 +102,12 @@ ignore = [
 	# release candidate). Used only by the authenticated vault transit engine
 	# (`apps/core/src/vault/transit.rs`). Revisit when rsa 0.10 is stable.
 	"RUSTSEC-2023-0071",
+	# `zip` < 9 `ZipArchive::extract()` aborts on a symlink entry with a huge
+	# declared size. The only < 9 copy is zip 8.6 from `anydoc` 0.2.4 (latest,
+	# requires `zip ^8.6`), used by the ryu-anydoc backend; anydoc only opens
+	# archives and reads named entries and never calls `extract()`. Core and the
+	# backup crate already use the patched zip 9. Revisit when anydoc moves to 9.
+	"RUSTSEC-2026-0429",
 	# Unmaintained (no vulnerability), transitive through the Tauri/GTK stack and
 	# zbus (`proc-macro-error`, `zbus_names`, `zvariant*`) and UniFFI 0.28
 	# (`basic-toml`). No compatible upgrade removes them without moving those
