@@ -3,6 +3,10 @@ import type { OrganizationOptions } from "better-auth/plugins";
 import { rememberMemberRoleBeforeUpdate } from "../lib/control-audit-recorder.ts";
 import { disableFamilyBotGrantsOnMemberExit } from "../lib/family-bot-grants.ts";
 import { clearPriorMembershipGrants } from "../lib/membership-grant-cleanup.ts";
+import {
+	retireBoxProofKeyOnDemotion,
+	retireBoxProofKeyOnDeparture,
+} from "../lib/retire-box-proof-key.ts";
 
 import {
 	notifyOrganizationHookActivity,
@@ -65,6 +69,16 @@ export const organizationMemberHooks = {
 			organizationId: member.organizationId,
 			userId: String(member.userId),
 		});
+		// Retire the org's hosted Box signing key while the removal can
+		// still be refused, and before the custom grants that say whether
+		// they could reach node root are deleted. The after hook's repeat
+		// for this member row is a no-op.
+		await retireBoxProofKeyOnDeparture({
+			memberId: String(member.id),
+			organizationId: member.organizationId,
+			role: member.role,
+			userId: String(member.userId),
+		});
 		// Revoke custom-role grants while the removal can still be
 		// refused: a failure here stops the removal instead of leaving
 		// grants that a later re-admission would revive. The after hook
@@ -76,6 +90,14 @@ export const organizationMemberHooks = {
 	},
 	beforeUpdateMemberRole: async (data) => {
 		await organizationAdmission.beforeUpdateMemberRole(data);
+		// A demotion that takes node root away retires the hosted Box signing
+		// key the member may have copied; a failure refuses the change.
+		await retireBoxProofKeyOnDemotion({
+			nextRole: data.newRole,
+			organizationId: data.member.organizationId,
+			previousRole: data.member.role,
+			userId: String(data.member.userId),
+		});
 	},
 	afterUpdateMemberRole: async ({
 		member,
@@ -102,7 +124,9 @@ export const organizationMemberHooks = {
 			userId: String(member.userId),
 		});
 		await revokeRemovedMemberGrants({
+			memberId: String(member.id),
 			organizationId: member.organizationId,
+			role: member.role,
 			userId: String(member.userId),
 		});
 		await disableFamilyBotGrantsOnMemberExit({

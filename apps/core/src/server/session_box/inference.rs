@@ -43,10 +43,43 @@ fn signer_key() -> anyhow::Result<String> {
         return Ok(key);
     }
     if crate::sidecar::gateway::remote_data_plane() {
+        if let Some((key, _)) = box_proof_key_from_env() {
+            return Ok(key);
+        }
         crate::sidecar::gateway::required_gateway_core_proof_key()
     } else {
         crate::sidecar::gateway::required_gateway_core_token()
     }
+}
+
+/// Env carrying a managed node's per-org Box signing key, delivered when the
+/// org's Box proof-key epoch is above 0 (`packages/api/src/lib/core-proof-key.ts`).
+const ENV_BOX_PROOF_KEY: &str = "RYU_GATEWAY_BOX_PROOF_KEY";
+/// Env carrying the epoch `RYU_GATEWAY_BOX_PROOF_KEY` was derived at.
+const ENV_BOX_PROOF_KEY_EPOCH: &str = "RYU_GATEWAY_BOX_PROOF_KEY_EPOCH";
+
+fn box_proof_key_from_env() -> Option<(String, u64)> {
+    box_proof_key(
+        std::env::var(ENV_BOX_PROOF_KEY).ok().as_deref(),
+        std::env::var(ENV_BOX_PROOF_KEY_EPOCH).ok().as_deref(),
+    )
+}
+
+/// The Box signing key and its epoch, when both are configured and valid.
+/// Without them Core signs with its Core proof key at epoch 0.
+pub(super) fn box_proof_key(key: Option<&str>, epoch: Option<&str>) -> Option<(String, u64)> {
+    let key = key.map(str::trim).filter(|key| !key.is_empty())?;
+    let epoch = epoch?.trim().parse::<u64>().ok()?;
+    ryu_gw_credentials::validate(key).ok()?;
+    Some((key.to_owned(), epoch))
+}
+
+/// The epoch Core signs a hosted Box key at (0 unless a Box key is set).
+fn key_epoch() -> u64 {
+    if !crate::sidecar::gateway::remote_data_plane() {
+        return 0;
+    }
+    box_proof_key_from_env().map_or(0, |(_, epoch)| epoch)
 }
 
 /// The Gateway URL a Box calls: the hosted fleet on a managed node, the Core
@@ -89,6 +122,7 @@ pub(super) fn scope_for(
         box_id: box_id.0.clone(),
         lease_epoch,
         expires_at: now + KEY_TTL_SECONDS,
+        key_epoch: key_epoch(),
     }
 }
 
@@ -290,4 +324,28 @@ fn upstream_gateway() -> String {
         return url;
     }
     crate::sidecar::gateway::gateway_url()
+}
+
+#[cfg(test)]
+mod box_proof_key_tests {
+    use super::box_proof_key;
+
+    const KEY: &str = "gwproof_box_0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn a_configured_box_key_carries_its_epoch() {
+        assert_eq!(
+            box_proof_key(Some(KEY), Some(" 3 ")),
+            Some((KEY.to_owned(), 3))
+        );
+    }
+
+    #[test]
+    fn a_missing_or_malformed_box_key_falls_back_to_the_proof_key() {
+        assert_eq!(box_proof_key(None, Some("3")), None);
+        assert_eq!(box_proof_key(Some(KEY), None), None);
+        assert_eq!(box_proof_key(Some(KEY), Some("-1")), None);
+        assert_eq!(box_proof_key(Some(" "), Some("3")), None);
+        assert_eq!(box_proof_key(Some("short"), Some("3")), None);
+    }
 }

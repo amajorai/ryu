@@ -13,6 +13,7 @@ import { z } from "zod";
 import { revokeDepartedMemberNodeCredentials } from "../lib/departed-member-node-credentials.ts";
 import { recordRoleGrantCleanupFailure } from "../lib/membership-grant-cleanup.ts";
 import type { ResentInvitationSeat } from "../lib/resent-invitation-seat.ts";
+import { retireBoxProofKeyOnDepartureWithRetry } from "../lib/retire-box-proof-key.ts";
 
 import {
 	directMemberClaimId,
@@ -33,17 +34,36 @@ import {
  * closed on re-admission.
  */
 export async function revokeRemovedMemberGrants(input: {
+	/** The removed member row's id, so one departure bumps the epoch once. */
+	memberId?: string | null;
 	organizationId: string;
+	/** The removed member's built-in role, when known. */
+	role?: string | null;
 	userId: string;
 }): Promise<void> {
+	const membership = {
+		organizationId: input.organizationId,
+		userId: input.userId,
+	};
+	// Retire the org's hosted Box signing key the member may have copied from
+	// a node. It reads their custom grants, so it runs before they are
+	// deleted; a failure is retried and then recorded for admins.
+	await retireBoxProofKeyOnDepartureWithRetry(input, async (error) => {
+		console.error("Failed to retire the org's Box signing key:", error);
+		await recordRoleGrantCleanupFailure({
+			...membership,
+			grant: "box_proof_key",
+			phase: "remove",
+		});
+	});
 	try {
-		await revokeOrganizationRoleAssignments(input);
+		await revokeOrganizationRoleAssignments(membership);
 	} catch (error) {
 		// The member row is already gone, so this cannot fail the request. The
 		// permission resolvers ignore grants older than the current membership,
 		// so a leftover row never comes back into force; record it for admins.
 		console.error("Failed to revoke removed member's role grants:", error);
-		await recordRoleGrantCleanupFailure({ ...input, phase: "remove" });
+		await recordRoleGrantCleanupFailure({ ...membership, phase: "remove" });
 	}
 	// Vault policies bound directly to the user would otherwise come back into
 	// force (secret reads, writes, approvals) if the same user were re-invited.
@@ -58,7 +78,7 @@ export async function revokeRemovedMemberGrants(input: {
 		// re-invite; record it for admins as for role grants.
 		console.error("Failed to revoke removed member's vault bindings:", error);
 		await recordRoleGrantCleanupFailure({
-			...input,
+			...membership,
 			grant: "vault_bindings",
 			phase: "remove",
 		});
@@ -67,7 +87,7 @@ export async function revokeRemovedMemberGrants(input: {
 	// otherwise keep authenticating as an org node. The gateway and Fleet
 	// resolvers re-check membership, so a failure here still fails closed.
 	try {
-		await revokeDepartedMemberNodeCredentials(input);
+		await revokeDepartedMemberNodeCredentials(membership);
 	} catch (error) {
 		console.error("Failed to revoke removed member's node credentials:", error);
 	}
@@ -127,10 +147,15 @@ export async function revokeStaleRoleGrantsBeforeAdmission(input: {
 	await revokeOrganizationRoleAssignments(input);
 }
 
-export const leftMemberSchema = z.object({
-	organizationId: z.coerce.string().min(1),
-	userId: z.coerce.string().min(1),
-});
+/** The member row `/organization/leave` returns, keyed for the exit cleanup. */
+export const leftMemberSchema = z
+	.object({
+		id: z.coerce.string().min(1).optional(),
+		organizationId: z.coerce.string().min(1),
+		role: z.string().nullish(),
+		userId: z.coerce.string().min(1),
+	})
+	.transform(({ id, ...member }) => ({ ...member, memberId: id ?? null }));
 
 export async function releaseSeatClaims(input: {
 	email?: string;

@@ -17,6 +17,7 @@ pub mod avatar;
 pub mod host_api;
 pub mod interface_color_theme;
 pub mod manifest;
+pub mod reserved_tool_servers;
 pub mod runnable;
 pub mod schema;
 pub mod tenancy;
@@ -35,6 +36,9 @@ pub use manifest::{
     PluginManifest, PluginTier, Requires, Surface, TurnHookContribution, UnmetRequirement,
     WidgetContribution, HOOK_EVENT_SEPARATOR, KERNEL_EVENTS, KERNEL_EVENT_OWNER,
     LEGACY_PLUGIN_ID_ALIASES, MAX_PLUGIN_ID_LEN, MAX_SECRET_KEY_LEN, RUNS_FAILURES_GRANT,
+};
+pub use reserved_tool_servers::{
+    is_reserved_tool_server, reserved_tool_server, RESERVED_TOOL_SERVERS,
 };
 pub use runnable::{RunnableKind, RunnableMeta};
 pub use schema::{

@@ -87,6 +87,7 @@ fn box_scope(org_id: &str, expires_at: u64) -> ryu_gw_credentials::BoxInferenceS
         box_id: BOX_ID.to_owned(),
         lease_epoch: 3,
         expires_at,
+        key_epoch: 0,
     }
 }
 

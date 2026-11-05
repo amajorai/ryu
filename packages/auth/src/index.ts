@@ -21,6 +21,7 @@ import { userInMfaRequiredOrganization } from "./lib/org-mfa-membership.ts";
 import { platformAdminAuditPlugin } from "./lib/platform-admin-audit-plugin.ts";
 import { stepUpGate } from "./lib/step-up-plugin.ts";
 import { supportAccessPlugin } from "./lib/support-access-plugin.ts";
+import { twoFactorStepUpGate } from "./lib/two-factor-step-up.ts";
 
 export { finalizeCanceledOrganizationInvitation } from "./auth-options/admission.ts";
 export { organizationSeatPathForTests } from "./auth-options/seat-claims.ts";
@@ -48,6 +49,9 @@ const authOptions = {
 		// Mandatory authenticator-or-passkey enrollment: status endpoint plus the
 		// guard against removing an account's last strong factor.
 		mfaEnrollmentPlugin({ userInMfaRequiredOrganization }),
+		// Revealing, re-minting or removing an enrolled authenticator needs a
+		// second-factor step-up; first enrollment stays password-gated.
+		twoFactorStepUpGate(),
 		// LAST on purpose. Before-hooks run in `[config.hooks.before, ...plugins]`
 		// order, so this has to sit after `bearer` — which rewrites an
 		// `Authorization` header into the session cookie — or the gate resolves no

@@ -246,6 +246,16 @@ pub(in crate::server) fn credential_route_policy(
     if is_gateway_operator_read_path(path) && !reaches_operator_role_gate(context) {
         return RoutePolicy::OwnerOnly;
     }
+    // The vault audit trail, its chain verification and external devices, the
+    // org-wide event stream, and the other `sys` Admin reads answer from the
+    // signer's vault-manager role (`gateway.configure`). The same scoped
+    // credentials must not inherit that view.
+    if matches!(*method, Method::GET | Method::HEAD)
+        && is_vault_operator_read_path(path)
+        && !reaches_operator_role_gate(context)
+    {
+        return RoutePolicy::OwnerOnly;
+    }
     if is_member_voice_path(path) && !is_owner_or_member_session(context) {
         return RoutePolicy::OwnerOnly;
     }
@@ -254,7 +264,23 @@ pub(in crate::server) fn credential_route_policy(
     {
         return RoutePolicy::OwnerOnly;
     }
+    if is_cloud_environment_mutation(method, path) && !is_owner_or_member_session(context) {
+        return RoutePolicy::OwnerOnly;
+    }
     route_policy(method, path)
+}
+
+/// Cloud environment writes (save, variable import, shared-template copy,
+/// GitHub connect) store install scripts, start instructions, internet policy
+/// and sealed-secret bindings that later run with the user's variables. A
+/// credential scoped to `gateway:route` alone (a hosted OAuth or MCP client
+/// delegation, a paired device) must not author them; only the owner token
+/// and a member's own signed-in session may. Reads and the separately
+/// `tools:exec`-gated setup check keep [`route_policy`]'s admission.
+pub(in crate::server) fn is_cloud_environment_mutation(method: &Method, path: &str) -> bool {
+    path_has_prefix(path, "/api/cloud-environments")
+        && !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
+        && !path.ends_with("/launch")
 }
 
 /// The voice HTTP routes [`route_policy`] opens to managed members.
@@ -273,6 +299,22 @@ pub(in crate::server) fn is_member_voice_path(path: &str) -> bool {
 /// [`credential_route_policy`]).
 pub(in crate::server) fn is_gateway_operator_read_path(path: &str) -> bool {
     path_has_prefix(path, "/api/gateway/traffic") || path_has_prefix(path, "/api/gateway/budget")
+}
+
+/// Vault reads whose handlers answer only to a vault manager (`require_sys`
+/// with `Admin`, or the manager's unfiltered event stream), so a scoped
+/// credential must not satisfy them with its signer's role (see
+/// [`credential_route_policy`]).
+pub(in crate::server) fn is_vault_operator_read_path(path: &str) -> bool {
+    path_has_prefix(path, "/api/vault/audit")
+        || matches!(
+            path,
+            "/api/vault/events"
+                | "/api/vault/policies"
+                | "/api/vault/broker/sessions"
+                | "/api/vault/sys/seal-provider"
+                | "/api/vault/sys/rekey"
+        )
 }
 
 /// Whether a credential speaks for a member's own signed-in session, so its

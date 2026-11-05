@@ -1,5 +1,7 @@
 //! Private local Gateway credentials shared by the standalone and Core hosts.
 pub mod config_file;
+mod org_box_proof;
+pub use org_box_proof::derive_org_box_proof_key;
 mod org_core_relay;
 pub use org_core_relay::{
     derive_org_core_relay_key, valid_org_core_relay_org, verify_org_core_relay_key,
@@ -507,6 +509,10 @@ pub struct BoxInferenceScope {
     pub lease_epoch: u64,
     /// Unix timestamp after which the key must be rejected.
     pub expires_at: u64,
+    /// The org's Box proof-key epoch the signing key was derived at
+    /// ([`derive_org_box_proof_key`]); omitted from the payload at 0.
+    #[serde(default, skip_serializing_if = "org_box_proof::is_zero")]
+    pub key_epoch: u64,
 }
 
 impl BoxInferenceScope {
@@ -1145,6 +1151,7 @@ mod tests {
             box_id: "bx_0123456789abcdef0123456789abcdef".into(),
             lease_epoch: 3,
             expires_at,
+            key_epoch: 0,
         }
     }
 

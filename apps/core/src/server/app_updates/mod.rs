@@ -3,6 +3,7 @@
 //! Split out of `server/mod.rs`; every item is re-exported from `crate::server`.
 
 mod per_plugin_byok;
+mod reserved_secret_slots;
 pub(in crate::server) use per_plugin_byok::*;
 mod app_disable;
 pub(crate) use app_disable::*;

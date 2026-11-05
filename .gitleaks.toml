@@ -104,6 +104,14 @@ regexes = [
 ]
 
 [[allowlists]]
+description = "GitHub's documented example OAuth token, used as a stream DLP fixture"
+targetRules = ["github-oauth"]
+# The example token from GitHub's "Authorizing OAuth apps" docs, used by
+# apps/gateway/src/pipeline/stream_dlp/round46_test.rs. Mirror commit b221df6
+# carries it as one literal; the source now splits it with concat!().
+regexes = ['''^gho_16C7e42F292c6912E7710c838347Ae178B4a$''']
+
+[[allowlists]]
 description = "Dummy values inside #[cfg(test)] modules of production sources, i18n text, and doc examples"
 targetRules = ["generic-api-key"]
 # Exact placeholder values; production files are not path-allowlisted.

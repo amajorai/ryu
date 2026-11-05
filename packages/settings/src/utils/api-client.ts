@@ -461,7 +461,10 @@ export const settingsApi = {
 		},
 
 		async confirmEmailChangeOld(token: string): Promise<void> {
-			await fetchApi(`/api/user/confirm-email-change-old?token=${token}`);
+			await fetchApi("/api/user/confirm-email-change-old", {
+				method: "POST",
+				body: JSON.stringify({ token }),
+			});
 		},
 
 		async confirmEmailChangeNew(token: string): Promise<void> {

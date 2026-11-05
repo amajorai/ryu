@@ -21,9 +21,12 @@ use crate::org_limits::{null_as_default, OrgLimits, RateCeiling, RemoteSpend};
 use crate::policy::{EffectivePolicy, ResolvedOrg};
 use crate::state::AppState;
 
+use crate::pipeline::core_proof::box_key_epoch::{
+    box_hosted_keys_at_epoch, box_token_key_epoch_hint, check_box_key_epoch,
+};
 use crate::pipeline::core_proof::{
-    box_hosted_proof_keys, box_org_budget, box_token_org_hint, check_box_identity, BoxBudgetError,
-    BoxOrgBudget, BOX_FEATURE,
+    box_org_budget, box_token_org_hint, check_box_identity, BoxBudgetError, BoxOrgBudget,
+    BOX_FEATURE,
 };
 use crate::pipeline::RequestContext;
 
@@ -265,7 +268,8 @@ pub(crate) async fn resolve_hosted_box(
 ) -> Result<HostedBox, GatewayError> {
     let invalid = || GatewayError::Unauthorized("Invalid Box inference credential".to_owned());
     let org_hint = box_token_org_hint(token).ok_or_else(invalid)?;
-    let scope = box_hosted_proof_keys(&org_hint)
+    let epoch_hint = box_token_key_epoch_hint(token).ok_or_else(invalid)?;
+    let scope = box_hosted_keys_at_epoch(&org_hint, epoch_hint)
         .iter()
         .find_map(|core_key| ryu_gw_credentials::BoxInferenceScope::verify(token, core_key).ok())
         .filter(|scope| scope.org_id == org_hint)
@@ -275,6 +279,8 @@ pub(crate) async fn resolve_hosted_box(
     let member = scope.user_id.as_deref();
     match box_org_budget(&state.http, &state.config.credits, &scope.org_id, member).await {
         Ok((budget, fetched_at)) => {
+            // A key signed at a retired epoch is refused (`box_key_epoch`).
+            check_box_key_epoch(&scope, budget.box_proof_key_epoch)?;
             let Some(governance) = box_governance(&scope.org_id, &budget, fetched_at) else {
                 tracing::warn!(
                     org_id = %scope.org_id,

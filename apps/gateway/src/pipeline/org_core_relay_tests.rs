@@ -166,6 +166,7 @@ async fn an_org_relay_key_signs_no_box_or_scoped_inference_credential() {
         box_id: "bx_0123456789abcdef0123456789abcdef".to_owned(),
         lease_epoch: 1,
         expires_at: now + 600,
+        key_epoch: 0,
     }
     .sign(&relay)
     .unwrap();

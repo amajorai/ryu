@@ -5,11 +5,12 @@ import { recordOrganizationControlAudit } from "./control-audit-recorder.ts";
 /**
  * Append a control audit row when a member's grant cleanup failed, so the
  * leftover `roleAssignment` rows (or, with `grant: "vault_bindings"`, the
- * `user:<id>` vault policy bindings) are visible to organization admins.
+ * `user:<id>` vault policy bindings, or with `grant: "box_proof_key"` a hosted
+ * Box signing key that was not retired) are visible to organization admins.
  * Never throws: the membership change has already happened.
  */
 export async function recordRoleGrantCleanupFailure(input: {
-	grant?: "vault_bindings";
+	grant?: "box_proof_key" | "vault_bindings";
 	organizationId: string;
 	phase: "add" | "remove";
 	userId: string;

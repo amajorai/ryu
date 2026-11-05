@@ -1186,6 +1186,11 @@ pub fn resolve_verbs(enabled: &[PluginManifest], config: &BindingConfig) -> Vec<
         }) else {
             continue;
         };
+        // A verb bound to a Core-reserved tool (`ryu_api.*`, `routines.*`) is never
+        // served: it would run that Core tool behind the verb's own approval.
+        if super::provider_target_guard::binding_targets_core(binding) {
+            continue;
+        }
         out.push(ResolvedVerb {
             verb,
             provider_id: provider_id.clone(),

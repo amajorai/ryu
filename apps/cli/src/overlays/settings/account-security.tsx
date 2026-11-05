@@ -24,6 +24,7 @@ import {
 import {
 	type Operation,
 	SCOPE,
+	STEP_UP_OPERATIONS,
 	type Stage,
 	type UnloadedEmailChange,
 	type UnloadedSecuritySession,
@@ -144,7 +145,7 @@ export function AccountSecurity({
 	const begin = (next: Operation) =>
 		void run(async (signal) => {
 			setOperation(next);
-			if (next === "password" || next === "email") {
+			if (STEP_UP_OPERATIONS.has(next)) {
 				const gate = await request(
 					authTarget,
 					`/api/step-up/status?scope=${SCOPE}`,

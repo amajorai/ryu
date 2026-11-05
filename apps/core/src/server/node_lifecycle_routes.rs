@@ -8,6 +8,13 @@
 //! `gateway:route` must not install, update, enable, disable or uninstall the
 //! node's packages through that role. [`super::credential_route_policy`] keeps
 //! these mutations for the owner token and a member's own signed-in session.
+//!
+//! The node onboarding mutations follow the same rule: saving or resetting the
+//! onboarding state and the node-wide skill-pack selection gate on
+//! `gateway.configure`, and the onboarding profile job (start, cancel,
+//! background) gates on the Admin role and can write an organization-wide
+//! memory. Every non-read `GatewayRoute`-admitted route whose handler
+//! authorizes from the caller's organization role belongs in this table.
 
 use axum::http::Method;
 
@@ -19,6 +26,9 @@ pub(super) fn is_role_gated_lifecycle_mutation(method: &Method, path: &str) -> b
     }
     super::path_has_prefix(path, "/api/marketplace/packages")
         || path == "/api/language-packs/import"
+        || path == "/api/onboarding/state"
+        || path == "/api/onboarding/skills"
+        || super::path_has_prefix(path, "/api/onboarding/profile")
 }
 
 #[cfg(test)]
@@ -29,13 +39,20 @@ mod tests {
     };
     use axum::http::Method;
 
-    const MUTATIONS: [&str; 6] = [
-        "/api/marketplace/packages/install",
-        "/api/marketplace/packages/update",
-        "/api/marketplace/packages/plugin/x/enable",
-        "/api/marketplace/packages/plugin/x/disable",
-        "/api/marketplace/packages/plugin/x/uninstall",
-        "/api/language-packs/import",
+    const MUTATIONS: [(Method, &str); 13] = [
+        (Method::POST, "/api/marketplace/packages/install"),
+        (Method::POST, "/api/marketplace/packages/update"),
+        (Method::POST, "/api/marketplace/packages/plugin/x/enable"),
+        (Method::POST, "/api/marketplace/packages/plugin/x/disable"),
+        (Method::POST, "/api/marketplace/packages/plugin/x/uninstall"),
+        (Method::POST, "/api/language-packs/import"),
+        (Method::PUT, "/api/onboarding/state"),
+        (Method::DELETE, "/api/onboarding/state"),
+        (Method::PUT, "/api/onboarding/skills"),
+        (Method::POST, "/api/onboarding/profile/start"),
+        (Method::POST, "/api/onboarding/profile/cancel/job-1"),
+        (Method::POST, "/api/onboarding/profile/background/job-1"),
+        (Method::POST, "/api/onboarding/profile"),
     ];
 
     fn context(credential: CredentialKind, client_id: Option<&str>) -> AuthorizationContext {
@@ -80,9 +97,9 @@ mod tests {
                 None,
             ),
         ];
-        for path in MUTATIONS {
+        for (method, path) in &MUTATIONS {
             for context in &refused {
-                let policy = policy(&Method::POST, path, context);
+                let policy = policy(method, path, context);
                 assert_eq!(
                     policy,
                     RoutePolicy::OwnerOnly,
@@ -108,9 +125,9 @@ mod tests {
                 Some(crate::authorization::delegation::NODE_LIST_CLIENT_ID),
             ),
         ];
-        for path in MUTATIONS {
+        for (method, path) in &MUTATIONS {
             for context in &admitted {
-                let policy = policy(&Method::POST, path, context);
+                let policy = policy(method, path, context);
                 assert_eq!(
                     policy,
                     RoutePolicy::requires([Capability::GatewayRoute]),
@@ -131,6 +148,11 @@ mod tests {
         for path in [
             "/api/marketplace/packages/installed",
             "/api/language-packs/installed",
+            "/api/onboarding/state",
+            "/api/onboarding/skills",
+            "/api/onboarding/access",
+            "/api/onboarding/profile/availability",
+            "/api/onboarding/profile/status/job-1",
         ] {
             assert_eq!(
                 policy(&Method::GET, path, &hosted),

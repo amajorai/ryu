@@ -19,6 +19,7 @@ mod agent_react_registry_runtime_test;
 pub(crate) mod app_visibility;
 pub mod artifact_tool;
 pub(crate) mod box_desktop;
+pub(crate) mod builtin_servers;
 pub mod capability_tools;
 pub mod catalog;
 pub mod challenges_tool;
@@ -39,6 +40,7 @@ pub mod marketplace_tool;
 pub mod notify_tool;
 pub mod orchestrator;
 mod owner_host_env;
+pub(crate) mod provider_target_guard;
 pub mod routines_tool;
 pub mod sandbox;
 pub mod search_conversations;
@@ -2595,7 +2597,10 @@ pub(crate) fn app_tool_registered_id(cfg: &crate::plugin_manifest::schema::ToolC
     match cfg.resolve_backend() {
         Ok(backend)
             if !matches!(backend, ToolBackend::Alias { .. })
-                && (cfg.slug.contains(TOOL_ID_SEP) || cfg.slug.contains(LEGACY_TOOL_ID_SEP)) =>
+                && (cfg.slug.contains(TOOL_ID_SEP) || cfg.slug.contains(LEGACY_TOOL_ID_SEP))
+                // A slug in a Core built-in server namespace (`channel.send`) must
+                // not claim that native id; it stays under `app.<slug>`.
+                && !builtin_servers::is_builtin_server_id(&slug) =>
         {
             slug
         }
@@ -2796,6 +2801,9 @@ impl CapabilityAdapterBridge {
                 return Err(format!(
                     "adapter may not call the capability facade tool '{requested}'"
                 ));
+            }
+            if provider_target_guard::is_core_reserved_target(requested) {
+                return Err(format!("adapter may not call the Core tool '{requested}'"));
             }
             return Ok(requested.to_owned());
         }
@@ -7615,9 +7623,12 @@ impl McpRegistry {
         // shadowed by a plugin that registered a tool under the same id. Registration
         // already refuses such an id (`register_app_tool_tagged`), so this is the
         // second of two locks on the same door — the bag can also be populated by
-        // older records seeded before the reservation existed.
+        // older records seeded before the reservation existed. Core built-in
+        // servers (`channel`, `spaces`, …) get the same two locks
+        // (`builtin_servers`), so a plugin can never intercept a Core tool.
         let is_native_app_tool = server != APP_TOOL_SERVER
             && !capability_tools::is_server(server)
+            && !builtin_servers::is_builtin_server(server)
             && self
                 .app_tools
                 .lock()
@@ -8544,8 +8555,11 @@ impl McpRegistry {
             };
             let target = resolved.binding.tool.clone();
             // Never let a provider point a verb back at the facade (a manifest-driven
-            // infinite loop), and never at an empty target.
-            if target.is_empty() || capability_tools::verb_by_id(&target).is_some() {
+            // infinite loop), never at an empty target, and never at a Core tool.
+            if target.is_empty()
+                || capability_tools::verb_by_id(&target).is_some()
+                || provider_target_guard::is_core_reserved_target(&target)
+            {
                 return Err(anyhow!(
                     "provider '{}' maps '{tool_id}' to an invalid target '{target}'",
                     resolved.provider_id
@@ -9016,6 +9030,17 @@ impl McpRegistry {
             tracing::warn!(
                 "refusing app tool registration for '{id}': that id is a reserved capability verb \
                  served by the layer facade"
+            );
+            return;
+        }
+        // A Core built-in server id (`channel.send`, `spaces.get_page`) is likewise
+        // reserved: a plugin tool registered under it would intercept agent calls
+        // meant for Core. `app_tool_registered_id` already keeps such slugs under
+        // `app.<slug>`; this refuses any other path that hands over a raw id.
+        if builtin_servers::is_builtin_server_id(&id) {
+            tracing::warn!(
+                "refusing app tool registration for '{id}': that id is in a Core built-in tool \
+                 server namespace"
             );
             return;
         }

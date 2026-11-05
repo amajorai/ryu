@@ -25,6 +25,12 @@ mod voice_route_policy_tests;
 mod gateway_audit_route_policy_tests;
 
 #[cfg(test)]
+mod cloud_environment_route_policy_tests;
+
+#[cfg(test)]
+mod vault_operator_read_route_policy_tests;
+
+#[cfg(test)]
 mod gateway_status_redaction_tests;
 
 #[cfg(test)]

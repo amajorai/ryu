@@ -1,6 +1,7 @@
 import type { TwoFactorActions } from "@ryu/settings/hooks/useTwoFactorDialog";
 import { z } from "zod";
 import { authClient, storeSessionToken } from "@/lib/auth-client.ts";
+import { throwTwoFactorResultError } from "./two-factor-step-up.ts";
 
 // Better Auth replaces the session when two-factor is turned on or off and
 // returns the replacement bearer in `set-auth-token`. The desktop signs every
@@ -51,7 +52,7 @@ export const twoFactorActions: TwoFactorActions = {
 			fetchOptions: adoptRotatedSession,
 		});
 		if (result.error) {
-			throw new Error(result.error.message);
+			throwTwoFactorResultError(result.error);
 		}
 	},
 	regenerateBackupCodes: async (password) => {
@@ -59,7 +60,7 @@ export const twoFactorActions: TwoFactorActions = {
 			password,
 		});
 		if (result.error) {
-			throw new Error(result.error.message);
+			throwTwoFactorResultError(result.error);
 		}
 		return result.data?.backupCodes ?? [];
 	},

@@ -30,9 +30,11 @@ import { Separator } from "@ryu/ui/components/separator.tsx";
 import { TextSwap } from "@ryu/ui/components/text-swap.tsx";
 import { SPRING_PANEL } from "@ryu/ui/lib/ease.ts";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { sileo } from "sileo";
+import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { twoFactorActions } from "./two-factor-actions.ts";
+import { withTwoFactorStepUp } from "./two-factor-step-up.ts";
 
 const STEP_DIALOG_LABEL = {
 	password: "Enable Two-Factor Authentication",
@@ -60,8 +62,14 @@ export function TwoFactorDialog({
 	onStatusChange,
 }: TwoFactorDialogProps) {
 	const tlRich = useRichLiteralMessages();
+	// Turning 2FA off or re-minting its codes needs a second-factor step-up.
+	const stepUp = useStepUp();
+	const actions = useMemo(
+		() => withTwoFactorStepUp(twoFactorActions, stepUp.prompt),
+		[stepUp.prompt]
+	);
 	const flow = useTwoFactorDialog({
-		actions: twoFactorActions,
+		actions,
 		isEnabled,
 		onStatusChange,
 	});
@@ -108,359 +116,369 @@ export function TwoFactorDialog({
 			};
 
 	return (
-		<Dialog onOpenChange={flow.handleOpenChange} open={flow.open}>
-			<DialogTrigger render={<Button size="sm" variant="ghost" />}>
-				{isEnabled ? "Manage 2FA" : "Enable 2FA"}
-			</DialogTrigger>
+		<>
+			<Dialog onOpenChange={flow.handleOpenChange} open={flow.open}>
+				<DialogTrigger render={<Button size="sm" variant="ghost" />}>
+					{isEnabled ? "Manage 2FA" : "Enable 2FA"}
+				</DialogTrigger>
 
-			<DialogContent
-				aria-label={STEP_DIALOG_LABEL[flow.step]}
-				className="overflow-hidden sm:max-w-[420px]"
-			>
-				<motion.div
-					className="grid"
-					layout={anim.layout}
-					transition={anim.panel}
+				<DialogContent
+					aria-label={STEP_DIALOG_LABEL[flow.step]}
+					className="overflow-hidden sm:max-w-[420px]"
 				>
-					<AnimatePresence initial={false} mode="popLayout">
-						{/* Keyed on `step` so each view mounts fresh and cross-fades with a
+					<motion.div
+						className="grid"
+						layout={anim.layout}
+						transition={anim.panel}
+					>
+						<AnimatePresence initial={false} mode="popLayout">
+							{/* Keyed on `step` so each view mounts fresh and cross-fades with a
 						    blur while the parent springs to the new height. */}
-						<motion.div
-							animate={{ opacity: 1, filter: "blur(0px)" }}
-							className="grid gap-4"
-							exit={anim.fade.exit}
-							initial={anim.fade.initial}
-							key={flow.step}
-							transition={anim.view}
-						>
-							{flow.step === "password" && (
-								<>
-									<DialogHeader>
-										<DialogTitle>Enable Two-Factor Authentication</DialogTitle>
-										<DialogDescription>
-											Enter your password to begin setting up 2FA.
-										</DialogDescription>
-									</DialogHeader>
-									<form className="space-y-4" onSubmit={flow.handleEnable}>
-										<div className="space-y-2">
-											<Label htmlFor="2fa-password">Password</Label>
-											<Input
-												autoComplete="current-password"
-												id="2fa-password"
-												onChange={(e) => flow.setPassword(e.target.value)}
-												required
-												type="password"
-												value={flow.password}
-											/>
+							<motion.div
+								animate={{ opacity: 1, filter: "blur(0px)" }}
+								className="grid gap-4"
+								exit={anim.fade.exit}
+								initial={anim.fade.initial}
+								key={flow.step}
+								transition={anim.view}
+							>
+								{flow.step === "password" && (
+									<>
+										<DialogHeader>
+											<DialogTitle>
+												Enable Two-Factor Authentication
+											</DialogTitle>
+											<DialogDescription>
+												Enter your password to begin setting up 2FA.
+											</DialogDescription>
+										</DialogHeader>
+										<form className="space-y-4" onSubmit={flow.handleEnable}>
+											<div className="space-y-2">
+												<Label htmlFor="2fa-password">Password</Label>
+												<Input
+													autoComplete="current-password"
+													id="2fa-password"
+													onChange={(e) => flow.setPassword(e.target.value)}
+													required
+													type="password"
+													value={flow.password}
+												/>
+											</div>
+											<DialogFooter>
+												<Button
+													onClick={() => flow.handleOpenChange(false)}
+													type="button"
+													variant="ghost"
+												>
+													Cancel
+												</Button>
+												<Button
+													disabled={flow.isBusy || !flow.password}
+													type="submit"
+												>
+													{flow.isBusy ? "Verifying…" : "Continue"}
+												</Button>
+											</DialogFooter>
+										</form>
+									</>
+								)}
+
+								{flow.step === "qr" && (
+									<>
+										<DialogHeader>
+											<DialogTitle>Scan QR Code</DialogTitle>
+											<DialogDescription>
+												Scan this with your authenticator app (Google
+												Authenticator, Authy, etc.), then enter the 6-digit
+												code.
+											</DialogDescription>
+										</DialogHeader>
+										<div className="flex flex-col items-center gap-4 py-2">
+											{flow.totpUri && (
+												<div className="rounded-lg border p-1">
+													<ExpandableQRCode size={180} value={flow.totpUri} />
+												</div>
+											)}
+											<div className="w-full">
+												<Button
+													className="h-auto"
+													onClick={() =>
+														flow.setShowManualSetup((shown) => !shown)
+													}
+													spacing="body-preview"
+													variant="link"
+												>
+													{flow.showManualSetup
+														? "Hide manual setup"
+														: "Can’t scan? Enter setup key manually"}
+												</Button>
+												{flow.showManualSetup && (
+													<div className="space-y-3 rounded-lg border border-border p-3">
+														<p className="text-muted-foreground text-xs">
+															{tlRich(
+																"In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.",
+																{},
+																{
+																	strong: (children) => (
+																		<strong>{children}</strong>
+																	),
+																}
+															)}
+														</p>
+														<div className="flex items-center gap-2">
+															<Input
+																aria-label="Authenticator setup key"
+																readOnly
+																tone="background"
+																value={totpSetupKey(flow.totpUri)}
+																variant="code-caption"
+															/>
+															<Button
+																aria-label="Copy authenticator setup key"
+																onClick={copyAuthenticatorSetupKey}
+																size="icon"
+																variant="ghost"
+															>
+																<HugeiconsIcon
+																	className="size-4"
+																	icon={Copy01Icon}
+																/>
+															</Button>
+														</div>
+														<details className="text-xs">
+															<summary className="cursor-pointer text-muted-foreground">
+																Show setup URL
+															</summary>
+															<code className="mt-2 block break-all rounded-lg bg-muted p-2">
+																{flow.totpUri}
+															</code>
+														</details>
+													</div>
+												)}
+											</div>
+										</div>
+										<DialogFooter>
+											<Button
+												onClick={() => flow.setStep("password")}
+												variant="ghost"
+											>
+												Back
+											</Button>
+											<Button onClick={() => flow.setStep("verify")}>
+												I've scanned it
+											</Button>
+										</DialogFooter>
+									</>
+								)}
+
+								{flow.step === "verify" && (
+									<>
+										<DialogHeader>
+											<DialogTitle>Verify Code</DialogTitle>
+											<DialogDescription>
+												Enter the 6-digit code from your authenticator app to
+												confirm setup.
+											</DialogDescription>
+										</DialogHeader>
+										<form className="space-y-4" onSubmit={flow.handleVerify}>
+											<div className="flex justify-center py-2">
+												<OTPInput
+													aria-label="Authenticator app code"
+													autoFocus
+													disabled={flow.isBusy}
+													errorMessage="Invalid code. Try again."
+													onChange={flow.changeOtp}
+													status={flow.otpStatus}
+													value={flow.otp}
+												/>
+											</div>
+											<DialogFooter>
+												<Button
+													onClick={() => flow.setStep("qr")}
+													type="button"
+													variant="ghost"
+												>
+													Back
+												</Button>
+												<Button
+													disabled={flow.isBusy || flow.otp.length !== 6}
+													type="submit"
+												>
+													{flow.isBusy ? "Verifying…" : "Verify"}
+												</Button>
+											</DialogFooter>
+										</form>
+									</>
+								)}
+
+								{flow.step === "backup" && (
+									<>
+										<DialogHeader>
+											<DialogTitle>Save Backup Codes</DialogTitle>
+											<DialogDescription>
+												Store these codes somewhere safe. Each can be used once
+												if you lose access to your authenticator app.
+											</DialogDescription>
+										</DialogHeader>
+										<div className="space-y-3">
+											{flow.saveReminder && (
+												<Alert variant="warning">
+													<AlertTitle>These codes are critical</AlertTitle>
+													<AlertDescription>
+														They&apos;re the only way back into your account if
+														you lose your authenticator app. Save them somewhere
+														safe now — they won&apos;t be shown again.
+													</AlertDescription>
+												</Alert>
+											)}
+											<div className="grid grid-cols-2 gap-1.5 rounded-lg bg-muted/50 p-4">
+												{flow.backupCodes.map((code) => (
+													<code
+														className="text-center font-mono text-sm tracking-wider"
+														key={code}
+													>
+														{code}
+													</code>
+												))}
+											</div>
+											<Button
+												className="w-full"
+												onClick={copyAllBackupCodes}
+												variant="ghost"
+											>
+												<MorphIconSwap
+													a={Copy01Icon}
+													b={Tick01Icon}
+													className="me-2 size-4"
+													state={copiedAll ? "b" : "a"}
+												/>
+												<TextSwap>
+													{copiedAll ? "Copied" : "Copy all codes"}
+												</TextSwap>
+											</Button>
+										</div>
+										<DialogFooter>
+											<Button onClick={flow.startConfirm}>
+												I&apos;ve saved them
+											</Button>
+										</DialogFooter>
+									</>
+								)}
+
+								{flow.step === "confirm" && (
+									<>
+										<DialogHeader>
+											<DialogTitle>Confirm Your Backup Codes</DialogTitle>
+											<DialogDescription>
+												Enter one of the codes above to prove you saved them. If
+												they don&apos;t match, we&apos;ll show them again —
+												it&apos;s that important.
+											</DialogDescription>
+										</DialogHeader>
+										<form
+											className="space-y-4"
+											onSubmit={flow.handleConfirmBackup}
+										>
+											<div className="space-y-2">
+												<Label htmlFor="2fa-confirm-code">Backup code</Label>
+												<Input
+													aria-invalid={flow.confirmStatus === "error"}
+													autoComplete="off"
+													autoFocus
+													disabled={flow.isBusy}
+													id="2fa-confirm-code"
+													onChange={(e) =>
+														flow.changeConfirmCode(e.target.value)
+													}
+													placeholder="XXXXX-XXXXX"
+													spellCheck={false}
+													value={flow.confirmCode}
+													variant="code"
+												/>
+												{flow.confirmStatus === "error" && (
+													<p className="text-sm text-status-destructive">
+														That code doesn&apos;t match. Save the codes above —
+														without them you can be locked out of your account.
+													</p>
+												)}
+											</div>
+											<DialogFooter>
+												<Button
+													onClick={() => flow.setStep("backup")}
+													type="button"
+													variant="ghost"
+												>
+													Back
+												</Button>
+												<Button
+													disabled={flow.isBusy || !flow.confirmCode.trim()}
+													type="submit"
+												>
+													Confirm
+												</Button>
+											</DialogFooter>
+										</form>
+									</>
+								)}
+
+								{flow.step === "manage" && (
+									<>
+										<DialogHeader>
+											<DialogTitle>
+												Manage Two-Factor Authentication
+											</DialogTitle>
+											<DialogDescription>
+												2FA is currently enabled on your account.
+											</DialogDescription>
+										</DialogHeader>
+										<div className="space-y-4">
+											<div className="space-y-2">
+												<Label htmlFor="2fa-manage-password">
+													Password required for all actions
+												</Label>
+												<Input
+													autoComplete="current-password"
+													id="2fa-manage-password"
+													onChange={(e) => flow.setPassword(e.target.value)}
+													placeholder="Enter your password"
+													type="password"
+													value={flow.password}
+												/>
+											</div>
+											<Separator />
+											<div className="flex flex-col gap-2">
+												<Button
+													disabled={flow.isBusy || !flow.password}
+													onClick={flow.handleRegenerateBackupCodes}
+													variant="ghost"
+												>
+													Regenerate Backup Codes
+												</Button>
+												<Button
+													disabled={flow.isBusy || !flow.password}
+													onClick={flow.handleDisable}
+													variant="destructive"
+												>
+													{flow.isBusy ? "Disabling…" : "Disable 2FA"}
+												</Button>
+											</div>
 										</div>
 										<DialogFooter>
 											<Button
 												onClick={() => flow.handleOpenChange(false)}
-												type="button"
 												variant="ghost"
 											>
-												Cancel
-											</Button>
-											<Button
-												disabled={flow.isBusy || !flow.password}
-												type="submit"
-											>
-												{flow.isBusy ? "Verifying…" : "Continue"}
+												Close
 											</Button>
 										</DialogFooter>
-									</form>
-								</>
-							)}
-
-							{flow.step === "qr" && (
-								<>
-									<DialogHeader>
-										<DialogTitle>Scan QR Code</DialogTitle>
-										<DialogDescription>
-											Scan this with your authenticator app (Google
-											Authenticator, Authy, etc.), then enter the 6-digit code.
-										</DialogDescription>
-									</DialogHeader>
-									<div className="flex flex-col items-center gap-4 py-2">
-										{flow.totpUri && (
-											<div className="rounded-lg border p-1">
-												<ExpandableQRCode size={180} value={flow.totpUri} />
-											</div>
-										)}
-										<div className="w-full">
-											<Button
-												className="h-auto"
-												onClick={() =>
-													flow.setShowManualSetup((shown) => !shown)
-												}
-												spacing="body-preview"
-												variant="link"
-											>
-												{flow.showManualSetup
-													? "Hide manual setup"
-													: "Can’t scan? Enter setup key manually"}
-											</Button>
-											{flow.showManualSetup && (
-												<div className="space-y-3 rounded-lg border border-border p-3">
-													<p className="text-muted-foreground text-xs">
-														{tlRich(
-															"In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.",
-															{},
-															{
-																strong: (children) => (
-																	<strong>{children}</strong>
-																),
-															}
-														)}
-													</p>
-													<div className="flex items-center gap-2">
-														<Input
-															aria-label="Authenticator setup key"
-															readOnly
-															tone="background"
-															value={totpSetupKey(flow.totpUri)}
-															variant="code-caption"
-														/>
-														<Button
-															aria-label="Copy authenticator setup key"
-															onClick={copyAuthenticatorSetupKey}
-															size="icon"
-															variant="ghost"
-														>
-															<HugeiconsIcon
-																className="size-4"
-																icon={Copy01Icon}
-															/>
-														</Button>
-													</div>
-													<details className="text-xs">
-														<summary className="cursor-pointer text-muted-foreground">
-															Show setup URL
-														</summary>
-														<code className="mt-2 block break-all rounded-lg bg-muted p-2">
-															{flow.totpUri}
-														</code>
-													</details>
-												</div>
-											)}
-										</div>
-									</div>
-									<DialogFooter>
-										<Button
-											onClick={() => flow.setStep("password")}
-											variant="ghost"
-										>
-											Back
-										</Button>
-										<Button onClick={() => flow.setStep("verify")}>
-											I've scanned it
-										</Button>
-									</DialogFooter>
-								</>
-							)}
-
-							{flow.step === "verify" && (
-								<>
-									<DialogHeader>
-										<DialogTitle>Verify Code</DialogTitle>
-										<DialogDescription>
-											Enter the 6-digit code from your authenticator app to
-											confirm setup.
-										</DialogDescription>
-									</DialogHeader>
-									<form className="space-y-4" onSubmit={flow.handleVerify}>
-										<div className="flex justify-center py-2">
-											<OTPInput
-												aria-label="Authenticator app code"
-												autoFocus
-												disabled={flow.isBusy}
-												errorMessage="Invalid code. Try again."
-												onChange={flow.changeOtp}
-												status={flow.otpStatus}
-												value={flow.otp}
-											/>
-										</div>
-										<DialogFooter>
-											<Button
-												onClick={() => flow.setStep("qr")}
-												type="button"
-												variant="ghost"
-											>
-												Back
-											</Button>
-											<Button
-												disabled={flow.isBusy || flow.otp.length !== 6}
-												type="submit"
-											>
-												{flow.isBusy ? "Verifying…" : "Verify"}
-											</Button>
-										</DialogFooter>
-									</form>
-								</>
-							)}
-
-							{flow.step === "backup" && (
-								<>
-									<DialogHeader>
-										<DialogTitle>Save Backup Codes</DialogTitle>
-										<DialogDescription>
-											Store these codes somewhere safe. Each can be used once if
-											you lose access to your authenticator app.
-										</DialogDescription>
-									</DialogHeader>
-									<div className="space-y-3">
-										{flow.saveReminder && (
-											<Alert variant="warning">
-												<AlertTitle>These codes are critical</AlertTitle>
-												<AlertDescription>
-													They&apos;re the only way back into your account if
-													you lose your authenticator app. Save them somewhere
-													safe now — they won&apos;t be shown again.
-												</AlertDescription>
-											</Alert>
-										)}
-										<div className="grid grid-cols-2 gap-1.5 rounded-lg bg-muted/50 p-4">
-											{flow.backupCodes.map((code) => (
-												<code
-													className="text-center font-mono text-sm tracking-wider"
-													key={code}
-												>
-													{code}
-												</code>
-											))}
-										</div>
-										<Button
-											className="w-full"
-											onClick={copyAllBackupCodes}
-											variant="ghost"
-										>
-											<MorphIconSwap
-												a={Copy01Icon}
-												b={Tick01Icon}
-												className="me-2 size-4"
-												state={copiedAll ? "b" : "a"}
-											/>
-											<TextSwap>
-												{copiedAll ? "Copied" : "Copy all codes"}
-											</TextSwap>
-										</Button>
-									</div>
-									<DialogFooter>
-										<Button onClick={flow.startConfirm}>
-											I&apos;ve saved them
-										</Button>
-									</DialogFooter>
-								</>
-							)}
-
-							{flow.step === "confirm" && (
-								<>
-									<DialogHeader>
-										<DialogTitle>Confirm Your Backup Codes</DialogTitle>
-										<DialogDescription>
-											Enter one of the codes above to prove you saved them. If
-											they don&apos;t match, we&apos;ll show them again —
-											it&apos;s that important.
-										</DialogDescription>
-									</DialogHeader>
-									<form
-										className="space-y-4"
-										onSubmit={flow.handleConfirmBackup}
-									>
-										<div className="space-y-2">
-											<Label htmlFor="2fa-confirm-code">Backup code</Label>
-											<Input
-												aria-invalid={flow.confirmStatus === "error"}
-												autoComplete="off"
-												autoFocus
-												disabled={flow.isBusy}
-												id="2fa-confirm-code"
-												onChange={(e) => flow.changeConfirmCode(e.target.value)}
-												placeholder="XXXXX-XXXXX"
-												spellCheck={false}
-												value={flow.confirmCode}
-												variant="code"
-											/>
-											{flow.confirmStatus === "error" && (
-												<p className="text-sm text-status-destructive">
-													That code doesn&apos;t match. Save the codes above —
-													without them you can be locked out of your account.
-												</p>
-											)}
-										</div>
-										<DialogFooter>
-											<Button
-												onClick={() => flow.setStep("backup")}
-												type="button"
-												variant="ghost"
-											>
-												Back
-											</Button>
-											<Button
-												disabled={flow.isBusy || !flow.confirmCode.trim()}
-												type="submit"
-											>
-												Confirm
-											</Button>
-										</DialogFooter>
-									</form>
-								</>
-							)}
-
-							{flow.step === "manage" && (
-								<>
-									<DialogHeader>
-										<DialogTitle>Manage Two-Factor Authentication</DialogTitle>
-										<DialogDescription>
-											2FA is currently enabled on your account.
-										</DialogDescription>
-									</DialogHeader>
-									<div className="space-y-4">
-										<div className="space-y-2">
-											<Label htmlFor="2fa-manage-password">
-												Password required for all actions
-											</Label>
-											<Input
-												autoComplete="current-password"
-												id="2fa-manage-password"
-												onChange={(e) => flow.setPassword(e.target.value)}
-												placeholder="Enter your password"
-												type="password"
-												value={flow.password}
-											/>
-										</div>
-										<Separator />
-										<div className="flex flex-col gap-2">
-											<Button
-												disabled={flow.isBusy || !flow.password}
-												onClick={flow.handleRegenerateBackupCodes}
-												variant="ghost"
-											>
-												Regenerate Backup Codes
-											</Button>
-											<Button
-												disabled={flow.isBusy || !flow.password}
-												onClick={flow.handleDisable}
-												variant="destructive"
-											>
-												{flow.isBusy ? "Disabling…" : "Disable 2FA"}
-											</Button>
-										</div>
-									</div>
-									<DialogFooter>
-										<Button
-											onClick={() => flow.handleOpenChange(false)}
-											variant="ghost"
-										>
-											Close
-										</Button>
-									</DialogFooter>
-								</>
-							)}
-						</motion.div>
-					</AnimatePresence>
-				</motion.div>
-			</DialogContent>
-		</Dialog>
+									</>
+								)}
+							</motion.div>
+						</AnimatePresence>
+					</motion.div>
+				</DialogContent>
+			</Dialog>
+			{stepUp.dialog}
+		</>
 	);
 }

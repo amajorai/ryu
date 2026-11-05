@@ -50,7 +50,11 @@ async function cleanUpScimRemovedMember(
 		userId: removed.userId,
 	};
 	await releaseSeatClaims(membership);
-	await revokeRemovedMemberGrants(membership);
+	await revokeRemovedMemberGrants({
+		...membership,
+		memberId: removed.memberId,
+		role: removed.role,
+	});
 	await disableFamilyBotGrantsOnMemberExit(membership);
 	await organizationAdmission.releaseMemberFamilyPlace(membership);
 	try {

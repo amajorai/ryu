@@ -1,6 +1,7 @@
 //! Per-plugin BYOK secrets.
 // test-exempt: moved verbatim out of server/mod.rs; tests in server/tests/.
 
+use super::reserved_secret_slots::reserved_secret_slot_refusal;
 use crate::server::*;
 
 // ── Per-plugin BYOK secrets ───────────────────────────────────────────────────
@@ -167,6 +168,9 @@ pub(in crate::server) async fn put_plugin_secret_handler(
             ),
         );
     }
+    if let Some(response) = reserved_secret_slot_refusal(&id, &key) {
+        return response;
+    }
     // Writes are bounded to plugins this node actually knows about, so the store
     // cannot be used as an arbitrary encrypted dumping ground. Reads and deletes
     // stay unbounded on purpose (an uninstalled plugin must still be cleanable).
@@ -210,6 +214,9 @@ pub(in crate::server) async fn delete_plugin_secret_handler(
     )
     .await
     {
+        return response;
+    }
+    if let Some(response) = reserved_secret_slot_refusal(&id, &key) {
         return response;
     }
     let store = match plugin_secret_store() {

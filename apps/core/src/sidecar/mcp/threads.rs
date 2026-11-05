@@ -40,6 +40,9 @@ use tokio::sync::Semaphore;
 use super::{RegistryTool, ToolPrincipal};
 use crate::server::conversations::ConversationStore;
 
+#[path = "threads_run_access.rs"]
+mod run_access;
+
 /// Reserved registry server name for the built-in coordinator-threads provider.
 pub const SERVER_NAME: &str = "threads";
 
@@ -473,6 +476,10 @@ async fn create_thread(
     let title = opt_str(&arguments, "title");
     let agent_id = opt_str(&arguments, "agent_id");
     let cwd = opt_str(&arguments, "cwd");
+    // A thread bound to an agent the principal may not run never gets a row.
+    if agent_id.is_some() {
+        run_access::require_principal_may_run(principal, agent_id.as_deref()).await?;
+    }
     let thread_id = uuid::Uuid::new_v4().to_string();
     // The new worker thread is born OWNED by this turn's principal. Previously it
     // was minted untenanted, which on an org-bound node made it invisible and
@@ -758,14 +765,6 @@ async fn send_message_to_thread(
         return Ok(not_found());
     }
 
-    let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() else {
-        return Ok(json!({
-            "ok": false,
-            "available": false,
-            "error": "agent runner is not available on this node (cannot run worker threads)",
-        }));
-    };
-
     // Resolve the worker's agent + working folder from its stored row.
     let (uid, org, bound) = principal.filter_args();
     let summary = store
@@ -775,6 +774,17 @@ async fn send_message_to_thread(
         return Ok(not_found());
     };
     let agent_id = summary.agent_id.clone();
+    // Sending runs this agent for the principal: re-check `agent.run` on the
+    // agent actually run, every time, so revoked access stops the thread.
+    run_access::require_principal_may_run(principal, agent_id.as_deref()).await?;
+
+    let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() else {
+        return Ok(json!({
+            "ok": false,
+            "available": false,
+            "error": "agent runner is not available on this node (cannot run worker threads)",
+        }));
+    };
     // Echoed back so the coordinator's transcript can label the session card
     // without a second read.
     let title = summary.title.clone();

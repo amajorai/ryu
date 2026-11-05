@@ -2,8 +2,8 @@ import { client, mongoClient } from "@ryu/db";
 import { env } from "@ryu/env/server";
 import type { BetterAuthOptions } from "better-auth";
 import { sessionCookieCache } from "../lib/session-cache.ts";
+import { validateProviderUserInfo } from "../lib/social-link-email-verified.ts";
 import { ACCOUNT_LINKING_SOCIAL_PROVIDER_IDS } from "../lib/social-provider-policy.ts";
-import { validateSsoIdentityUserInfo } from "../lib/sso-email-domain.ts";
 import { encryptedMongoAdapter } from "../lib/sso-provider-encryption.ts";
 
 import { releaseReservationsOfFailedInvitationWrites } from "./invitation-emails.ts";
@@ -93,8 +93,10 @@ export const baseAuthOptions = {
 		// account, or signs a provider user in. SSO identities must stay on the
 		// provider's DNS-verified domain (asserted and stored address alike), so
 		// an organization cannot pre-register or take over an address it does
-		// not own (lib/sso-email-domain.ts). Other sources pass through.
-		validateUserInfo: validateSsoIdentityUserInfo,
+		// not own (lib/sso-email-domain.ts). Social providers are trusted for
+		// explicit linking only: an implicit link by matching email needs the
+		// provider's own email_verified (lib/social-link-email-verified.ts).
+		validateUserInfo: validateProviderUserInfo,
 		additionalFields: {
 			// Match the twoFactor plugin's server-owned field in the canonical
 			// options so getSession inference retains the existing enrollment state.

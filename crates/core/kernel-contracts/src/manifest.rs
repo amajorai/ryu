@@ -1805,7 +1805,10 @@ impl PluginManifest {
             }
             let slug = canonical_provider_tool_id(&tool.slug);
             if tool.slug.contains('.') || tool.slug.contains("__") {
-                ids.insert(slug);
+                // A dotted slug in a Core-reserved namespace owns nothing.
+                if crate::reserved_tool_servers::reserved_tool_server(&slug).is_none() {
+                    ids.insert(slug);
+                }
             } else {
                 ids.insert(format!("app.{slug}"));
             }
@@ -1817,6 +1820,11 @@ impl PluginManifest {
         let target = canonical_provider_tool_id(target.trim());
         if native_ids.contains(&target) {
             return true;
+        }
+        // A target in a Core-reserved namespace (`ryu_api`, `routines`, the
+        // facade) is never owned through an `mcp_servers` key, whatever its name.
+        if crate::reserved_tool_servers::reserved_tool_server(&target).is_some() {
+            return false;
         }
         self.mcp_servers.keys().any(|server| {
             target

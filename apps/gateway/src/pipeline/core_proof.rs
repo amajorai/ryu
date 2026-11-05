@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "box_key_epoch.rs"]
+pub(super) mod box_key_epoch;
+
 /// Constant-time string equality — no early return on the first differing byte, so
 /// comparing a caller-supplied key against the configured master key leaks no timing
 /// signal about how many leading bytes matched. Length mismatch short-circuits (key
@@ -213,6 +216,10 @@ pub(super) struct BoxOrgBudget {
     /// The org's policy, limits and standing; `None` from an older plane.
     #[serde(default)]
     pub(super) governance: Option<super::auth_identity::box_governance::BoxOrgGovernance>,
+    /// The org's current Box proof-key epoch (`box_key_epoch`); 0 from an
+    /// older plane.
+    #[serde(default)]
+    pub(super) box_proof_key_epoch: u64,
 }
 
 /// Where and how the hosted org budget lookup authenticates.
