@@ -20,6 +20,8 @@ import type {
 	UptimeDay,
 } from "./status-model-types.ts";
 
+export { formatUptime } from "./status-uptime-format.ts";
+
 /**
  * Status page view model. Agents are the page's components, grouped by team;
  * a thread whose last run failed or was interrupted is an open incident, and
@@ -323,12 +325,6 @@ export function uptimeShare(days: readonly UptimeDay[]): number {
 		}
 	}
 	return Math.max(0, (days.length - lost) / days.length);
-}
-
-/** "99.98" style: two decimals, dropping to none for a clean 100. */
-export function formatUptime(share: number): string {
-	const percent = Math.floor(share * 10_000) / 100;
-	return percent >= 100 ? "100" : percent.toFixed(2);
 }
 
 function overallState(

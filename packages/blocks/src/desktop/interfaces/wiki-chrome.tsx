@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import {
@@ -294,6 +294,7 @@ function WikiSearch({
 	snapshot: InterfaceSnapshot;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const nav = useWikiNav();
 	const reduceMotion = useReducedMotion();
 	const listId = useId();
@@ -477,8 +478,15 @@ function WikiSearch({
 								<Search className="size-4" strokeWidth={1.75} />
 							</span>
 							<span className="min-w-0 truncate">
-								Search for pages containing{" "}
-								<b className="font-semibold">{trimmed}</b>
+								{tlRich(
+									"Search for pages containing <b>{query}</b>",
+									{ query: trimmed },
+									{
+										b: (children) => (
+											<b className="font-semibold">{children}</b>
+										),
+									}
+								)}
 							</span>
 						</div>
 					</motion.div>

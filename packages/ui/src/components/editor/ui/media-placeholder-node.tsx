@@ -242,7 +242,7 @@ export const PlaceholderElement = withHOC(
 									<div>–</div>
 									<div className="flex items-center tabular-nums">
 										<Loader2Icon className="me-1 size-3.5 animate-spin text-muted-foreground" />
-										{progress ?? 0}%
+										{formatPercent((progress ?? 0) / 100, 0, activeLocale())}
 									</div>
 								</div>
 							)}

@@ -565,6 +565,22 @@
     ],
     "reason": "audio format"
   },
+  "ABCD-EFGH": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Sample device code shown as a placeholder"
+  },
   "ACP + A2A": {
     "locales": [
       "ar",
@@ -1097,6 +1113,22 @@
       "fr"
     ],
     "reason": "Product name plus vision, the same word in French."
+  },
+  "Apple Watch": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Apple product name"
   },
   "Apps": {
     "locales": [
@@ -1751,6 +1783,15 @@
       "pt-BR"
     ],
     "reason": "'Bot' is the established term in these locales (glossary Bot)"
+  },
+  "Bot:": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Bot is used as-is in these languages"
   },
   "Bot: {name}": {
     "locales": [
@@ -3604,6 +3645,15 @@
     ],
     "reason": "Endpoint is the standard Italian technical term"
   },
+  "Endpoint <code>{endpoint}</code>": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Endpoint is the standard term in these languages"
+  },
   "Endpoints": {
     "locales": [
       "es",
@@ -3797,6 +3847,13 @@
       "fr"
     ],
     "reason": "French word is spelled identically"
+  },
+  "Experimental": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "Same word in Spanish and Portuguese"
   },
   "Export {operationId} · {bundleHash}": {
     "locales": [
@@ -7167,6 +7224,22 @@
     ],
     "reason": "Meta Muse agent product name"
   },
+  "NPS (0–10)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Acronym and number range"
+  },
   "NVIDIA Inception": {
     "locales": [
       "ar",
@@ -10470,6 +10543,14 @@
     ],
     "reason": "identical spelling is the correct word in this language"
   },
+  "Seed {seed}": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Seed is the standard term in these languages"
+  },
   "Self-hosting": {
     "locales": [
       "it"
@@ -12063,6 +12144,22 @@
     ],
     "reason": "identical spelling is the correct native word in this locale"
   },
+  "Variable": {
+    "locales": [
+      "de",
+      "es",
+      "fr"
+    ],
+    "reason": "Same word in these languages"
+  },
+  "Variable {number}": {
+    "locales": [
+      "de",
+      "es",
+      "fr"
+    ],
+    "reason": "Same word in these languages"
+  },
   "Variables": {
     "locales": [
       "es",
@@ -13322,6 +13419,13 @@
       "de"
     ],
     "reason": "'in' is the German preposition"
+  },
+  "in {group}": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "Same preposition in German and Italian"
   },
   "input": {
     "locales": [
@@ -14894,6 +14998,13 @@
     ],
     "reason": "Only placeholders and separators."
   },
+  "{key} (test)": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "Test is the same word in French and Italian"
+  },
   "{key} {action}": {
     "locales": [
       "ar",
@@ -14909,6 +15020,21 @@
       "zh-CN"
     ],
     "reason": "Only placeholders; the key name and the translated verb are filled in."
+  },
+  "{key}: {label}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders, separators and symbols only"
   },
   "{kind, select, agent {Agent: {name}} skill {Skill: {name}} other {Tool: {name}}}": {
     "locales": [
@@ -15474,6 +15600,16 @@
     ],
     "reason": "The translation uses a range mark (\"{start}~{end}\") with no words to translate."
   },
+  "{option} {slot}": {
+    "locales": [
+      "ar",
+      "hi",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders only; word order is the same"
+  },
   "{parent} → {child}": {
     "locales": [
       "de",
@@ -15783,6 +15919,20 @@
     ],
     "reason": "GiB is the unit symbol these locales use."
   },
+  "{size} MB": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "zh-CN"
+    ],
+    "reason": "Unit symbol is the same"
+  },
   "{size} RAM": {
     "locales": [
       "de",
@@ -15884,6 +16034,21 @@
       "ru"
     ],
     "reason": "Only placeholders and punctuation; nothing to translate."
+  },
+  "{start} → {end}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders, separators and symbols only"
   },
   "{state} {progress}": {
     "locales": [
@@ -16336,6 +16501,22 @@
       "ru"
     ],
     "reason": "placeholders and punctuation only; nothing to translate"
+  },
+  "{value}×": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders, separators and symbols only"
   },
   "{verdictLabel}.": {
     "locales": [

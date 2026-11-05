@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -12,7 +12,11 @@ import {
 	AlertDialogTitle,
 } from "@ryu/ui/components/alert-dialog.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
-import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import {
+	categoryConfirmBody,
+	categoryTitle,
+	shownConfirmWord,
+} from "@/src/components/settings/DangerZoneSettings-copy.ts";
 import type { DangerCategory } from "@/src/components/settings/DangerZoneSettings-data.ts";
 
 /** Reset node: type the node's name to arm a full wipe. */
@@ -107,6 +111,10 @@ export function ClearCategoryDialog({
 	typed: string;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
+	// Already in the active language: the DOM localizer must not re-translate
+	// it, and the person types exactly what this shows.
+	const word = active ? shownConfirmWord(active, tl) : "";
 	return (
 		<AlertDialog
 			onOpenChange={(open) => {
@@ -118,36 +126,39 @@ export function ClearCategoryDialog({
 		>
 			<AlertDialogContent>
 				<AlertDialogHeader>
-					<AlertDialogTitle>{active?.title}?</AlertDialogTitle>
+					<AlertDialogTitle>
+						{active ? categoryTitle(active, tl) : null}?
+					</AlertDialogTitle>
 					<AlertDialogDescription>
-						{active
-							? tl(
-									"This will delete {count} {noun}. {detail} This cannot be undone.",
-									{
-										count: formatCount(active.count) ?? "—",
-										detail: active.detail,
-										noun: active.noun,
-									}
-								)
-							: ""}
+						{active ? categoryConfirmBody(active, tl) : ""}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 
 				<div className="flex flex-col gap-1.5">
 					<span className="text-muted-foreground text-xs">
-						Type{" "}
-						<span className="font-medium text-foreground">
-							{active?.confirm_word}
-						</span>{" "}
-						to confirm.
+						{tlRich(
+							"Type <word>{word}</word> to confirm.",
+							{ word },
+							{
+								word: (chunk) => (
+									<span
+										className="font-medium text-foreground"
+										data-ryu-i18n="off"
+									>
+										{chunk}
+									</span>
+								),
+							}
+						)}
 					</span>
 					<Input
 						aria-label={tl("Type {confirmWord} to confirm", {
-							confirmWord: active?.confirm_word ?? "the confirmation word",
+							confirmWord: word || tl("the confirmation word"),
 						})}
 						autoComplete="off"
+						data-ryu-i18n="off"
 						onChange={(e) => setTyped(e.target.value)}
-						placeholder={active?.confirm_word}
+						placeholder={word}
 						value={typed}
 					/>
 				</div>

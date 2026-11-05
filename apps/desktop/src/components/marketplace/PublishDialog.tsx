@@ -267,11 +267,17 @@ export function PublishDialog({
 						)}
 
 						<div className="rounded-xl bg-muted p-3 text-muted-foreground text-sm">
-							The repository must use the <code>ryu-app</code>,{" "}
-							<code>ryu-plugin</code>, <code>ryu-language-pack</code>, or{" "}
-							<code>ryu-marketplace</code> topic and contain a{" "}
-							<code>ryu.package.json</code>. Buyers install through Ryu; they do
-							not need GitHub access.
+							{tlRich(
+								"The repository must use the <code>{app}</code>, <code>{plugin}</code>, <code>{languagePack}</code>, or <code>{marketplace}</code> topic and contain a <code>{manifest}</code>. Buyers install through Ryu; they do not need GitHub access.",
+								{
+									app: "ryu-app",
+									languagePack: "ryu-language-pack",
+									manifest: "ryu.package.json",
+									marketplace: "ryu-marketplace",
+									plugin: "ryu-plugin",
+								},
+								{ code: (children) => <code>{children}</code> }
+							)}
 						</div>
 
 						{disclosure ? <div className="text-sm">{disclosure}</div> : null}

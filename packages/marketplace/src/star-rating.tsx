@@ -15,6 +15,7 @@ import visualStyles from "./marketplace-visual.module.css";
 
 import { StarIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { activeLocale, numberFormatter } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	isNativeNumber,
@@ -27,6 +28,15 @@ import { formatRatingAverage } from "./rating-format.ts";
 
 const STAR_VALUES = [1, 2, 3, 4, 5] as const;
 const MAX_RATING = 5;
+const AT_MOST_ONE_DECIMAL: Intl.NumberFormatOptions = {
+	maximumFractionDigits: 1,
+};
+
+/** The average inside the accessible name, in the UI language ("4.3", "4,3"),
+ *  with no trailing ".0" so a whole rating still reads "Rated 4 out of 5". */
+function formatRatingLabelValue(rounded: number): string {
+	return numberFormatter(activeLocale(), AT_MOST_ONE_DECIMAL).format(rounded);
+}
 
 /** One display star for a fractional value: full, half, or empty. */
 function DisplayStar({
@@ -95,11 +105,11 @@ export function StarRating({
 		count === undefined
 			? tl("Rated {rating} out of {maxRating}", {
 					maxRating: MAX_RATING,
-					rating: rounded,
+					rating: formatRatingLabelValue(rounded),
 				})
 			: tl("Rated {rating} out of {maxRating} from {reviewCount} reviews", {
 					maxRating: MAX_RATING,
-					rating: rounded,
+					rating: formatRatingLabelValue(rounded),
 					reviewCount: formatNumber(count),
 				});
 	return (

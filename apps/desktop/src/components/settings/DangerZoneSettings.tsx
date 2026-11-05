@@ -14,7 +14,6 @@
 
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useState } from "react";
@@ -24,6 +23,12 @@ import {
 	ClearCategoryDialog,
 	ResetNodeDialog,
 } from "@/src/components/settings/DangerZoneSettings-confirm-dialogs.tsx";
+import {
+	categoryDeleted,
+	categorySummary,
+	categoryTitle,
+	isConfirmWord,
+} from "@/src/components/settings/DangerZoneSettings-copy.ts";
 import {
 	clearCategory,
 	clearClientStateForFreshNode,
@@ -218,10 +223,7 @@ export function DangerZoneSettings() {
 			await queryClient.invalidateQueries({ queryKey: ["data-counts"] });
 			sileo.success({
 				title: "Deleted",
-				description: tl("{count} {noun} deleted.", {
-					count: removed,
-					noun: active.noun,
-				}),
+				description: categoryDeleted(active, removed, tl),
 			});
 			setActive(null);
 		} catch (e) {
@@ -236,9 +238,7 @@ export function DangerZoneSettings() {
 		}
 	};
 
-	const armed =
-		active !== null &&
-		typed.trim().toLowerCase() === active.confirm_word.toLowerCase();
+	const armed = active !== null && isConfirmWord(active, typed, tl);
 
 	return (
 		<div className="flex flex-col gap-6">
@@ -276,16 +276,12 @@ export function DangerZoneSettings() {
 											size="sm"
 											variant="destructive"
 										>
-											{def.title}
+											{categoryTitle(def, tl)}
 										</Button>
 									}
-									description={
-										def.count === 0
-											? tl("No {noun}", { noun: def.noun })
-											: `${formatCount(def.count) ?? "—"} ${def.noun}`
-									}
+									description={categorySummary(def, tl)}
 									key={def.id}
-									title={def.title}
+									title={categoryTitle(def, tl)}
 								/>
 							))
 						)}

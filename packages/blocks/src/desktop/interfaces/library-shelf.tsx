@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -107,7 +108,7 @@ export function BookTile({
 						{chapterCountLabel(book.chapters.length)}
 					</span>
 					<span className="shrink-0 tabular-nums">
-						{empty ? "New" : `${percent.toString()}%`}
+						{empty ? "New" : formatPercent(percent / 100)}
 					</span>
 				</span>
 			</button>

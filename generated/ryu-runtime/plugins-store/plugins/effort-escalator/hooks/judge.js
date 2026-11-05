@@ -41,6 +41,9 @@ const transcript = (Array.isArray(ctx.transcript) ? ctx.transcript : []).slice(-
 if (!transcript) return { kind: "none" };
 const verdict = await host.sideModel({
   model_pref_key: "effort-escalator-judge-model",
+  // The reason is shown to the user, so it is written in the UI language; the
+  // STUCK: verdict stays English (Core says so).
+  reply_language: "ui",
   system: "You are a cheap, read-only task-progress judge. Return exactly STUCK: yes or STUCK: no, followed by one short reason. Say yes only when the worker is looping, blocked, repeatedly failing, or clearly not making progress toward the user's request.",
   prompt: `<conversation-data>\n${transcript}\n</conversation-data>\nIs the worker stuck?`,
 });
@@ -60,6 +63,7 @@ return {
   kind: "note",
   text: await host.t("Effort Escalator detected stalled work; the next turn will use escalation {level}. {reason}", {
     level: state.escalations,
-    reason: state.reason,
+    // The note shows the judge's reason, not its machine-read STUCK: verdict.
+    reason: state.reason.replace(/^\s*stuck:\s*yes\b[\s.:;,\-\u2013\u2014]*/i, "").trim(),
   }),
 };

@@ -364,7 +364,7 @@
   "{count, plural, one {{countText} planned case} other {{countText} planned cases}} will produce evidence, a coverage score, and failure bundles.": "{count, plural, one {{countText} запланированный случай даст} few {{countText} запланированных случая дадут} many {{countText} запланированных случаев дадут} other {{countText} запланированного случая дадут}} доказательства, оценку покрытия и пакеты сбоев.",
   "{count, plural, one {{countText} run} other {{countText} runs}} kept for {name}; verdicts are never overwritten.": "Для {name} {count, plural, one {сохранён {countText} запуск} few {сохранено {countText} запуска} many {сохранено {countText} запусков} other {сохранено {countText} запуска}}; вердикты никогда не перезаписываются.",
   "{count, plural, one {{length} context file attached} other {{length} context files attached}}": "{count, plural, one {Прикреплён {length} файл контекста} few {Прикреплено {length} файла контекста} many {Прикреплено {length} файлов контекста} other {Прикреплено {length} файла контекста}}",
-  "{coverage}% signal coverage": "Покрытие сигналов: {coverage}%",
+  "{coverage} signal coverage": "Покрытие сигналов: {coverage}",
   "{durationMs} ms · {evidenceLevel}": "{durationMs} мс · {evidenceLevel}",
   "{feature} · Updated {updated}": "{feature} · Обновлено {updated}",
   "{feature} · {length} steps": "{feature} · шагов: {length}",

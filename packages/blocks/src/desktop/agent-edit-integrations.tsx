@@ -8,6 +8,7 @@ import {
 	Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import type { ReactNode } from "react";
@@ -77,6 +78,17 @@ export function AgentIntegrationsView({
 	onOpenDocs,
 	snippet,
 }: AgentIntegrationsViewProps) {
+	const tlRich = useRichLiteralMessages();
+	const codeTags = {
+		code: (children: ReactNode) => (
+			<code
+				className="type-caption rounded bg-muted px-1 font-mono"
+				translate="no"
+			>
+				{children}
+			</code>
+		),
+	};
 	return (
 		<div className="flex flex-col gap-6">
 			<SettingsSection
@@ -133,32 +145,20 @@ export function AgentIntegrationsView({
 						<code translate="no">{snippet}</code>
 					</pre>
 					<p className="text-muted-foreground text-xs">
-						The TypeScript example uses{" "}
-						<code
-							className="type-caption rounded bg-muted px-1 font-mono"
-							translate="no"
-						>
-							@ryuhq/client
-						</code>{" "}
-						to call a saved agent. Use{" "}
-						<code
-							className="type-caption rounded bg-muted px-1 font-mono"
-							translate="no"
-						>
-							@ryuhq/sdk
-						</code>{" "}
-						when you are authoring a new agent, tool, or app.
+						{tlRich(
+							"The TypeScript example uses <code>{clientPackage}</code> to call a saved agent. Use <code>{sdkPackage}</code> when you are authoring a new agent, tool, or app.",
+							{ clientPackage: "@ryuhq/client", sdkPackage: "@ryuhq/sdk" },
+							codeTags
+						)}
 					</p>
 
 					<div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-xs">
 						<p className="text-muted-foreground">
-							Endpoint{" "}
-							<code
-								className="type-caption rounded bg-muted px-1 font-mono"
-								translate="no"
-							>
-								{coreUrl}/api/chat/stream
-							</code>
+							{tlRich(
+								"Endpoint <code>{endpoint}</code>",
+								{ endpoint: `${coreUrl}/api/chat/stream` },
+								codeTags
+							)}
 						</p>
 						{onOpenDocs ? (
 							<Button
@@ -173,20 +173,13 @@ export function AgentIntegrationsView({
 					</div>
 
 					<p aria-live="polite" className="text-muted-foreground text-xs">
-						{hasToken ? (
-							<>
-								This node requires auth. Keep its token in{" "}
-								<code
-									className="type-caption rounded bg-muted px-1 font-mono"
-									translate="no"
-								>
-									RYU_TOKEN
-								</code>
-								and out of source control.
-							</>
-						) : (
-							"This local node currently accepts requests without a token."
-						)}
+						{hasToken
+							? tlRich(
+									"This node requires auth. Keep its token in <code>{envVar}</code> and out of source control.",
+									{ envVar: "RYU_TOKEN" },
+									codeTags
+								)
+							: "This local node currently accepts requests without a token."}
 					</p>
 				</SettingsCard>
 			</SettingsSection>

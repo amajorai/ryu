@@ -6,11 +6,13 @@ import {
 	Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import { Label } from "@ryu/ui/components/label";
 import { Spinner } from "@ryu/ui/components/spinner";
+import type { ReactNode } from "react";
 import { SettingsCard, SettingsSection } from "./settings-items.tsx";
 
 // ── Bring external agent (BYOA) ───────────────────────────────────────────────
@@ -42,6 +44,14 @@ export function AgentByoaView({
 	onCopyKey,
 	onGenerate,
 }: AgentByoaViewProps) {
+	const tlRich = useRichLiteralMessages();
+	const codeTags = {
+		code: (children: ReactNode) => (
+			<code className="type-caption rounded bg-muted px-1 font-mono">
+				{children}
+			</code>
+		),
+	};
 	return (
 		<SettingsSection
 			caption="Point any OpenAI-compatible agent (OpenClaw, Hermes, LangChain, etc.) at the Ryu gateway as its base URL. It authenticates with the key below, and the gateway applies Ryu's firewall, per-agent budget, and routing — without changing the agent code."
@@ -93,15 +103,11 @@ export function AgentByoaView({
 									</Button>
 								</div>
 								<p className="text-muted-foreground text-xs">
-									Set this as your agent's{" "}
-									<code className="type-caption rounded bg-muted px-1 font-mono">
-										base_url
-									</code>{" "}
-									or{" "}
-									<code className="type-caption rounded bg-muted px-1 font-mono">
-										OPENAI_BASE_URL
-									</code>
-									.
+									{tlRich(
+										"Set this as your agent's <code>{setting}</code> or <code>{envVar}</code>.",
+										{ envVar: "OPENAI_BASE_URL", setting: "base_url" },
+										codeTags
+									)}
 								</p>
 							</div>
 						) : null}
@@ -140,20 +146,15 @@ export function AgentByoaView({
 									</Button>
 								</div>
 								<p className="text-muted-foreground text-xs">
-									Set this as your agent's{" "}
-									<code className="type-caption rounded bg-muted px-1 font-mono">
-										api_key
-									</code>{" "}
-									or{" "}
-									<code className="type-caption rounded bg-muted px-1 font-mono">
-										OPENAI_API_KEY
-									</code>
-									. The gateway applies Ryu's firewall and per-agent budget to
-									all requests tagged with{" "}
-									<code className="type-caption rounded bg-muted px-1 font-mono">
-										x-ryu-agent-id: {agentId}
-									</code>
-									.
+									{tlRich(
+										"Set this as your agent's <code>{setting}</code> or <code>{envVar}</code>. The gateway applies Ryu's firewall and per-agent budget to all requests tagged with <code>{header}</code>.",
+										{
+											envVar: "OPENAI_API_KEY",
+											header: `x-ryu-agent-id: ${agentId}`,
+											setting: "api_key",
+										},
+										codeTags
+									)}
 								</p>
 							</div>
 						) : null}

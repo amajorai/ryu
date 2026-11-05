@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { Product } from "../data/products.tsx";
 import { docsHref } from "../data/resources.tsx";
 import { getStandaloneProductPricing } from "../data/standalone-pricing.ts";
@@ -18,32 +19,35 @@ export function productAvailabilityLabel(product: Product): string {
 		: "Generally available";
 }
 
-/** The first sentence of a pricing string, for a one-line fact. */
-function leadSentence(text: string): string {
-	const match = text.match(/^(.+?[.!?])(?:\s|$)/s);
-	return (match?.[1] ?? text).trim();
-}
-
 /**
  * Facts every product page can state from typed catalog and pricing data, so
  * the "At a glance" sheet exists before a profile is written. They are not
  * grounded by quote (they are the typed source themselves):
  * - Availability: the catalog status;
  * - Category: the catalog category;
- * - Pricing: the first sentence of the published standalone price, linked to
- *   the pricing section, only when `hasPublishedPricing`;
+ * - Pricing: the published standalone price's own lead message (or the whole
+ *   price when it is one sentence), linked to the pricing section, only when
+ *   `hasPublishedPricing`. The lead is never cut out of the longer message, so
+ *   it stays a whole catalog message the localizer can translate;
  * - Docs: the "Read the docs" CTA's path, when the product has one.
+ *
+ * The price is English by default (server copy the DOM localizer translates);
+ * pass `tl` and `locale` to get it translated and formatted directly.
  */
-export function productBaseFacts(product: Product): ProductFactRow[] {
+export function productBaseFacts(
+	product: Product,
+	tl?: LiteralMessage,
+	locale?: string | null
+): ProductFactRow[] {
 	const facts: ProductFactRow[] = [
 		{ label: "Availability", value: productAvailabilityLabel(product) },
 		{ label: "Category", value: product.category },
 	];
-	const pricing = getStandaloneProductPricing(product.slug);
+	const pricing = getStandaloneProductPricing(product.slug, tl, locale);
 	if (product.standalone && pricing && hasPublishedPricing(product.slug)) {
 		facts.push({
 			label: "Pricing",
-			value: leadSentence(pricing.price),
+			value: pricing.lead ?? pricing.price,
 			href: `#${PRODUCT_SECTION_NAV.pricing?.id ?? "pricing"}`,
 		});
 	}

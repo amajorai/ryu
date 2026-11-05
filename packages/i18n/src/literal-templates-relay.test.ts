@@ -75,3 +75,58 @@ describe("relayed reasons", () => {
 		).toBeUndefined();
 	});
 });
+
+describe("label arguments", () => {
+	const labels = (): LiteralTemplateIndex =>
+		new LiteralTemplateIndex({
+			...JAPANESE,
+			"More about {titleLabel}": "{titleLabel}の詳細",
+			"See pricing for {nameLabel} in {regionLabel}":
+				"{regionLabel}の{nameLabel}の料金を見る",
+			Departures: "出発",
+			Connections: "接続",
+		});
+
+	test("a `…Label` value that is a catalog key is translated", () => {
+		expect(labels().match("More about Departures", "ja")).toBe("出発の詳細");
+		expect(
+			labels().match("See pricing for Connections in Departures", "ja")
+		).toBe("出発の接続の料金を見る");
+	});
+
+	test("label lookup does not depend on the locale's word order", () => {
+		const german = new LiteralTemplateIndex({
+			"Docs for {nameLabel} (opens in a new tab)":
+				"Dokumentation für {nameLabel} (wird in einem neuen Tab geöffnet)",
+			Extensions: "Erweiterungen",
+		});
+		expect(german.match("Docs for Extensions (opens in a new tab)", "de")).toBe(
+			"Dokumentation für Erweiterungen (wird in einem neuen Tab geöffnet)"
+		);
+		const arabic = new LiteralTemplateIndex({
+			"More about {titleLabel}": "المزيد عن {titleLabel}",
+			Planets: "الكواكب",
+		});
+		expect(arabic.match("More about Planets", "ar")).toBe("المزيد عن الكواكب");
+	});
+
+	test("a plain `{title}` argument stays verbatim: it may be user content", () => {
+		const index = new LiteralTemplateIndex({
+			"More about {title}": "{title}について",
+			Departures: "出発",
+		});
+		expect(index.match("More about Departures", "ja")).toBe(
+			"Departuresについて"
+		);
+	});
+
+	test("a `…Label` value without an exact entry stays verbatim", () => {
+		expect(labels().match("More about My own board", "ja")).toBe(
+			"My own boardの詳細"
+		);
+		// Only exact entries: a label is never matched against templates.
+		expect(labels().match("More about Renamed Open settings", "ja")).toBe(
+			"Renamed Open settingsの詳細"
+		);
+	});
+});

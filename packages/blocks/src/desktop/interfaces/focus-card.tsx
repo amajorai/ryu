@@ -5,6 +5,7 @@ import {
 	AvatarImage,
 } from "@ryu/ui/components/avatar.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import {
 	Tooltip,
@@ -211,7 +212,7 @@ function StepButton({
 					/>
 				}
 			>
-				<Icon aria-hidden="true" />
+				<Icon aria-hidden="true" className={DIRECTIONAL_ICON_CLASS} />
 			</TooltipTrigger>
 			<TooltipContent side="top">
 				{label}
@@ -280,6 +281,11 @@ export function FocusCard({
 	const inlineSign = useInlineSign();
 	const reduceMotion = useReducedMotion();
 	const offset = reduceMotion ? 0 : 24 * inlineSign;
+	// Under dir="rtl" ArrowRight steps back and ArrowLeft forward.
+	const [backKey, forwardKey] =
+		inlineSign === -1
+			? ["ArrowRight", "ArrowLeft"]
+			: ["ArrowLeft", "ArrowRight"];
 	return (
 		<div className="flex w-full flex-col gap-4">
 			<article
@@ -311,14 +317,14 @@ export function FocusCard({
 							keys="K"
 							label="Previous"
 							onClick={onPrevious}
-							shortcut="K ArrowLeft"
+							shortcut={`K ${backKey}`}
 						/>
 						<StepButton
 							icon={ChevronRight}
 							keys="J"
 							label={hasNext ? "Next" : "Finish"}
 							onClick={onNext}
-							shortcut="J ArrowRight"
+							shortcut={`J ${forwardKey}`}
 						/>
 					</div>
 					<span className="flex-1" />

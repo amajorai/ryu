@@ -12,6 +12,11 @@ import {
 } from "../lib/installer-progress.ts";
 import { formatNativeCaptureError } from "../lib/native-capture-error.ts";
 import { isOnboardingActive } from "../lib/onboarding-active.ts";
+import {
+	type InstallerErrorPayload,
+	installerErrorText,
+	installerProgressText,
+} from "./installer-error-text.ts";
 
 /** Terminates a `listenWhenReady(...).then(...)` chain. Outside Tauri the gate
  *  already resolves to a no-op unlisten, so reaching here means a real subscribe
@@ -19,6 +24,9 @@ import { isOnboardingActive } from "../lib/onboarding-active.ts";
 function ignoreSubscribeFailure<TError>(error: TError): void {
 	console.error("tauri event subscription failed", error);
 }
+
+/** An installer event, including the coded failure fields of newer builds. */
+type InstallerEvent = InstallerProgress & InstallerErrorPayload;
 
 /** Toasts for native events: background installer progress and Quick Capture. */
 export function useNativeEventToasts(botProduct: boolean): void {
@@ -35,16 +43,13 @@ export function useNativeEventToasts(botProduct: boolean): void {
 		// no-op in onboarding avoids stacking a toast over the progress card; outside
 		// the wizard this keeps background setup visible too.
 		const unlisteners: (() => void)[] = [];
-		listenWhenReady<InstallerProgress>("installer-progress", ({ payload }) => {
+		listenWhenReady<InstallerEvent>("installer-progress", ({ payload }) => {
 			if (isOnboardingActive()) {
 				return;
 			}
 			const tl = tlRef.current;
 			const label = installerComponentLabel(payload.component);
-			const progress =
-				payload.percent === undefined
-					? undefined
-					: `${payload.percent}% of setup`;
+			const progress = installerProgressText(payload.percent, tl);
 			if (payload.phase === "binary" && payload.status === "started") {
 				toast.show({
 					title: tl("Installing {componentLabel}", { componentLabel: label }),
@@ -65,7 +70,7 @@ export function useNativeEventToasts(botProduct: boolean): void {
 				);
 			} else if (payload.phase === "core" && payload.status === "started") {
 				toast.show({
-					title: "Starting Ryu Core",
+					title: tl("Starting Ryu Core"),
 					description: progress,
 					type: "loading",
 					duration: null,
@@ -76,9 +81,10 @@ export function useNativeEventToasts(botProduct: boolean): void {
 					payload.status === "started"
 				) {
 					toast.show({
-						title: "Setting up Ryu",
-						description:
-							"Bundled models, engines, and skills are downloading in the background.",
+						title: tl("Setting up Ryu"),
+						description: tl(
+							"Bundled models, engines, and skills are downloading in the background."
+						),
 						type: "loading",
 						duration: null,
 					});
@@ -87,9 +93,13 @@ export function useNativeEventToasts(botProduct: boolean): void {
 				payload.phase === "bootstrap" &&
 				payload.status === "complete"
 			) {
-				toast.success("Core is ready; bundled defaults continue downloading");
+				toast.success(
+					tl("Core is ready; bundled defaults continue downloading")
+				);
 			} else if (payload.phase === "error") {
-				toast.error(payload.error ?? "Ryu setup failed");
+				// A coded failure picks the sentence; raw `error`/`detail` text
+				// stays in the native log and is never shown.
+				toast.error(installerErrorText(payload, tl));
 			}
 		})
 			.then((fn) => unlisteners.push(fn))

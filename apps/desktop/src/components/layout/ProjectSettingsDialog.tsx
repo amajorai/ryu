@@ -2,7 +2,7 @@
 // existing AGENTS.md / agents.md / CLAUDE.md from the folder; first save creates
 // AGENTS.md when none exists. Uses the same Plate MarkdownEditor as Spaces pages.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -16,7 +16,7 @@ import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { NodeFolderBrowser } from "@/src/components/chat/NodeFolderBrowser.tsx";
 import { CloneFolderDialog } from "@/src/components/chat/ProjectPicker.tsx";
 import { MarkdownEditor } from "@/src/components/editor/MarkdownEditor.tsx";
@@ -54,6 +54,14 @@ export function ProjectSettingsDialog({
 	path: string;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
+	const fileNameTags = {
+		code: (children: ReactNode) => (
+			<code className="rounded bg-muted px-1 font-mono text-xs">
+				{children}
+			</code>
+		),
+	};
 	const node = useActiveNode();
 	const projectNames = useWorkspaceStore((s) => s.projectNames);
 	const setProjectName = useWorkspaceStore((s) => s.setProjectName);
@@ -318,12 +326,11 @@ export function ProjectSettingsDialog({
 					<DialogHeader className="shrink-0" purpose="project-settings">
 						<DialogTitle>Edit project</DialogTitle>
 						<DialogDescription>
-							Set how this folder appears in the sidebar and the instructions
-							agents read from{" "}
-							<code className="rounded bg-muted px-1 font-mono text-xs">
-								{fileName}
-							</code>
-							.
+							{tlRich(
+								"Set how this folder appears in the sidebar and the instructions agents read from <code>{fileName}</code>.",
+								{ fileName },
+								fileNameTags
+							)}
 						</DialogDescription>
 					</DialogHeader>
 					{saveError ? (
@@ -398,15 +405,11 @@ export function ProjectSettingsDialog({
 								</div>
 							)}
 							<p className="text-muted-foreground text-xs">
-								Same editor as Spaces pages. Agents pick up{" "}
-								<code className="rounded bg-muted px-1 font-mono text-xs">
-									AGENTS.md
-								</code>{" "}
-								(or an existing{" "}
-								<code className="rounded bg-muted px-1 font-mono text-xs">
-									CLAUDE.md
-								</code>
-								) at the project root.
+								{tlRich(
+									"Same editor as Spaces pages. Agents pick up <code>{primary}</code> (or an existing <code>{fallback}</code>) at the project root.",
+									{ fallback: "CLAUDE.md", primary: "AGENTS.md" },
+									fileNameTags
+								)}
 							</p>
 						</div>
 

@@ -11,7 +11,7 @@ import {
 	ViewOffSlashIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -106,6 +106,7 @@ function SecretDetail({
 	target: ApiTarget;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const queryClient = useQueryClient();
 	const stepUp = useStepUp();
 	const coords = vaultCoordsOf(secret);
@@ -343,8 +344,15 @@ function SecretDetail({
 					<div className="min-w-0">
 						<Label htmlFor="vault-detail-expand">Expand references</Label>
 						<p className="text-muted-foreground text-xs">
-							Replace <code className="font-mono">{REFERENCE_EXAMPLE}</code>{" "}
-							with other vault values when used.
+							{tlRich(
+								"Replace <code>{reference}</code> with other vault values when used.",
+								{ reference: REFERENCE_EXAMPLE },
+								{
+									code: (children) => (
+										<code className="font-mono">{children}</code>
+									),
+								}
+							)}
 						</p>
 					</div>
 					<Switch

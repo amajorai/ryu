@@ -6,6 +6,7 @@ import {
 	useImagePreviewValue,
 	useScaleInput,
 } from "@platejs/media/react";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva } from "class-variance-authority";
@@ -136,7 +137,7 @@ export function MediaPreviewDialog() {
 										<span>%</span>
 									</>
 								) : (
-									<span {...scaleTextProps}>{`${scale * 100}%`}</span>
+									<span {...scaleTextProps}>{formatPercent(scale)}</span>
 								)}
 							</div>
 							<button

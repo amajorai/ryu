@@ -2,6 +2,7 @@
 
 import { Delete02Icon, PlayIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatDurationUnit } from "@ryu/i18n/format-intl";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
@@ -171,7 +172,7 @@ export function MonitorDetail({
 								)}
 								{s.latency_ms == null ? null : (
 									<span className="text-muted-foreground text-xs">
-										{s.latency_ms}ms
+										{formatDurationUnit(s.latency_ms, "millisecond")}
 									</span>
 								)}
 							</li>

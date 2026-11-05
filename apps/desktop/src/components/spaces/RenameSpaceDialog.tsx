@@ -1,3 +1,4 @@
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -25,6 +26,7 @@ export function RenameSpaceDialog({
 	open: boolean;
 	space: Space;
 }) {
+	const tlRich = useRichLiteralMessages();
 	const inputId = useId();
 	const [name, setName] = useState(space.name);
 	const [busy, setBusy] = useState(false);
@@ -71,7 +73,11 @@ export function RenameSpaceDialog({
 					<DialogHeader>
 						<DialogTitle>Rename space</DialogTitle>
 						<DialogDescription>
-							Choose a new name for <strong>{space.name}</strong>.
+							{tlRich(
+								"Choose a new name for <strong>{spaceName}</strong>.",
+								{ spaceName: space.name },
+								{ strong: (children) => <strong>{children}</strong> }
+							)}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="flex flex-col gap-1.5 py-4">

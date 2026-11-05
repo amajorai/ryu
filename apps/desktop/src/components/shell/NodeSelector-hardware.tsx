@@ -11,7 +11,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import { Progress } from "@ryu/ui/components/progress.tsx";
 import {
 	Tooltip,
 	TooltipContent,
@@ -34,6 +33,7 @@ import {
 	computerName,
 	type LayoutCssVariables,
 } from "./NodeSelector-status.tsx";
+import { UsageMeter } from "./NodeSelector-usage-meter.tsx";
 
 const GPU_VENDOR_NVIDIA = /^NVIDIA\s+(GeForce\s+)?/i;
 const GPU_VENDOR_AMD = /^AMD\s+(Radeon\s+)?/i;
@@ -234,12 +234,7 @@ function NodeHardwareBody({ info }: { info: SystemInfo }) {
 					{ramPct !== null && (
 						<HardwareRow
 							label="Usage"
-							value={
-								<div className="flex items-center gap-2">
-									<Progress className="h-1.5 w-20" value={ramPct} />
-									<span className="tabular-nums">{ramPct}%</span>
-								</div>
-							}
+							value={<UsageMeter percent={ramPct} />}
 						/>
 					)}
 					{info.unifiedMemory ? (
@@ -257,12 +252,7 @@ function NodeHardwareBody({ info }: { info: SystemInfo }) {
 					{diskPct !== null && (
 						<HardwareRow
 							label="Usage"
-							value={
-								<div className="flex items-center gap-2">
-									<Progress className="h-1.5 w-20" value={diskPct} />
-									<span className="tabular-nums">{diskPct}%</span>
-								</div>
-							}
+							value={<UsageMeter percent={diskPct} />}
 						/>
 					)}
 				</SettingsGroup>

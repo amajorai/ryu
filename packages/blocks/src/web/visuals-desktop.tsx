@@ -391,7 +391,7 @@ export function DevicesVisual() {
 						<span className="h-5 w-10 rounded-b-md border border-foreground/40 border-t-0" />
 					</div>
 					<figcaption className="text-muted-foreground text-sm">
-						Watch
+						Apple Watch
 					</figcaption>
 				</figure>
 				<figure className="flex flex-col items-center gap-2">

@@ -7,7 +7,7 @@
 // data as Agent edit → Tools / Memory & Spaces; this panel is the compact surface
 // for feature settings that need cross-allow without leaving the page.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
@@ -115,6 +115,7 @@ const DEFAULT_MEMORY_LEVELS: MemoryScope[] = [
  */
 export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const [friendly] = useFriendlyMode();
 	const scopeLabels = memoryScopeLabels(friendly);
 	const [agent, setAgent] = useState<Agent | null>(null);
@@ -329,14 +330,11 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 
 	return (
 		<SettingsSection
-			caption={
-				<>
-					Cross-app reach for <strong>{agent.name}</strong>. New agents start
-					with registered app tools; Spaces feed retrieval and these groups
-					narrow that reach. Same allowlists as Agent edit. Changes apply
-					everywhere this agent runs, including agent-ask.
-				</>
-			}
+			caption={tlRich(
+				"Cross-app reach for <strong>{agentName}</strong>. New agents start with registered app tools; Spaces feed retrieval and these groups narrow that reach. Same allowlists as Agent edit. Changes apply everywhere this agent runs, including agent-ask.",
+				{ agentName: agent.name },
+				{ strong: (children) => <strong>{children}</strong> }
+			)}
 			title="Agent access"
 		>
 			<SettingsCard className="space-y-4">

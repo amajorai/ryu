@@ -3,6 +3,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
+import { useInlineSign } from "./inline-direction.ts";
 import {
 	type ActivityBucket,
 	type ActivityRun,
@@ -72,6 +73,7 @@ function BucketTooltip({
 }) {
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
+	const inlineSign = useInlineSign();
 	const titles = bucket.threadIds
 		.slice(0, TOOLTIP_TITLES)
 		.map((id) => snapshot.threads.find((thread) => thread.id === id))
@@ -82,15 +84,17 @@ function BucketTooltip({
 	const before = index / total > 0.5;
 	const edge = before ? (index / total) * 100 : ((index + 1) / total) * 100;
 	const placement = before
-		? { right: `calc(${100 - edge}% + 8px)` }
-		: { left: `calc(${edge}% + 8px)` };
+		? { insetInlineEnd: `calc(${100 - edge}% + 8px)` }
+		: { insetInlineStart: `calc(${edge}% + 8px)` };
 	return (
 		<motion.div
 			animate={{ opacity: 1, x: 0 }}
 			aria-hidden="true"
 			className="pointer-events-none absolute top-0 z-10 w-56 rounded-md border border-border bg-popover px-3 py-2 text-popover-foreground shadow-foreground/10 shadow-md"
 			exit={{ opacity: 0 }}
-			initial={reduceMotion ? false : { opacity: 0, x: before ? 4 : -4 }}
+			initial={
+				reduceMotion ? false : { opacity: 0, x: (before ? 4 : -4) * inlineSign }
+			}
 			style={placement}
 			transition={{ duration: 0.12 }}
 		>

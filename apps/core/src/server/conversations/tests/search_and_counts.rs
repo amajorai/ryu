@@ -159,7 +159,7 @@ async fn learning_projection_excludes_structured_and_identity_fields() {
     store
         .update_message_parts(
             &assistant_id,
-            r#"[{"type":"tool","secret":"do-not-learn"}]"#,
+            r#"[{"type":"tool","secret":"do-not-learn"}]"#, // Test vector, not a credential. gitleaks:allow skipcq
         )
         .await
         .unwrap();

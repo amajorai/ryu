@@ -9,7 +9,7 @@
 
 import { Copy01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
@@ -55,6 +55,7 @@ export function NetworkSettings() {
 }
 
 function NetworkSettingsForNode({ target }: { target: ApiTarget }) {
+	const tlRich = useRichLiteralMessages();
 	const active = useNetworkOwner();
 	const tl = useLiteralMessages();
 	const [readError, setReadError] = useState<string | null>(null);
@@ -364,13 +365,11 @@ function NetworkSettingsForNode({ target }: { target: ApiTarget }) {
 								{tailcatCopied ? "Copied" : "Copy"}
 							</Button>
 						}
-						description={
-							<>
-								Pass this address to a Tailcat client, for example{" "}
-								<code>tailcat &lt;address&gt; &lt;port&gt;</code>. Treat it like
-								a password. It is replaced when this listener stops or restarts.
-							</>
-						}
+						description={tlRich(
+							"Pass this address to a Tailcat client, for example <code>{command}</code>. Treat it like a password. It is replaced when this listener stops or restarts.",
+							{ command: "tailcat <address> <port>" },
+							{ code: (children) => <code>{children}</code> }
+						)}
 						title="Tailcat address"
 					>
 						<Input

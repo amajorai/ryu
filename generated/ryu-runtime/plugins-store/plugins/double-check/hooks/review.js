@@ -7,6 +7,13 @@
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
+
 if (!(ctx.flags && ctx.flags["io.ryu.double-check"])) {
 	return { kind: "none" };
 }
@@ -22,15 +29,30 @@ const lastUser = ctx.transcript
 	.findLast((message) => message.role === "user");
 const review = await host.sideModel({
 	system:
-		"You are a meticulous reviewer. Check the assistant's last answer for factual errors, unsupported claims, or missing steps. If it is correct and complete, reply with exactly: Looks correct. Otherwise give a brief, specific correction.",
+		"You are a meticulous reviewer. Check the assistant's last answer for factual errors, unsupported claims, or missing steps. If it is correct and complete, reply with exactly: RESULT: correct. Otherwise give a brief, specific correction.",
 	prompt:
 		"User asked:\n" +
 		(lastUser ? lastUser.content : "(unknown)") +
 		"\n\nAssistant answered:\n" +
 		lastAssistant.content,
 	model_pref_key: "double-check-model",
+	// A correction is shown to the user, so it is written in the UI language;
+	// the `RESULT: correct` sentinel stays English (Core says so).
+	reply_language: "ui",
 });
-if (!review || !review.trim()) {
+const text = typeof review === "string" ? review.trim() : "";
+if (!text) {
 	return { kind: "none" };
 }
-return { kind: "note", text: review.trim() };
+// The clean verdict is a sentinel the hook renders itself, so it reads in the
+// user's language. A bare "Looks correct." is the verdict older prompts asked for.
+// A reviewer that adds a line after the sentinel keeps that line, but the
+// English sentinel itself is never shown.
+const lineBreak = text.search(/\r?\n/);
+const head = (lineBreak < 0 ? text : text.slice(0, lineBreak)).replace(/[*_`]/g, "").trim();
+const rest = lineBreak < 0 ? "" : text.slice(lineBreak).trim();
+if (/^result:\s*correct\.?$/i.test(head) || (!rest && /^looks correct\.?$/i.test(head))) {
+	const clean = await host.t("Looks correct.");
+	return { kind: "note", text: rest ? clean + "\n\n" + rest : clean };
+}
+return { kind: "note", text: text };

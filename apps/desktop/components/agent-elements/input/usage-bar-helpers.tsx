@@ -5,6 +5,7 @@ import type {
 	UsageValue,
 	UsageWindow,
 } from "@/src/lib/api/usage.ts";
+import { usagePercentText } from "./usage-percent.ts";
 
 /**
  * How many of each row kind the non-compact bar shows inline before the rest move
@@ -236,7 +237,7 @@ function formatValue(value: UsageValue): string {
 		return formatDollars(value.number);
 	}
 	if (value.kind === "percent") {
-		return `${Math.round(value.number)}%`;
+		return usagePercentText(value.number);
 	}
 	const count = formatCount(value.number) ?? "—";
 	return value.unit ? `${count} ${value.unit}` : count;

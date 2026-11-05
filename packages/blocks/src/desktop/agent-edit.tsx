@@ -13,6 +13,7 @@
 // server component, so the block accepts an injected editor node (or falls
 // back to a read-only textarea) instead of importing PlateJS.
 
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { Switch } from "@ryu/ui/components/switch";
 import type { ReactNode } from "react";
@@ -84,20 +85,17 @@ export function ClaudeGatewayConfigView({
 	loaded = true,
 	onToggle,
 }: ClaudeGatewayConfigViewProps) {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<SettingsSection
-			caption={
-				<>
-					Route Claude Code's model traffic through the Ryu gateway so the
-					firewall, PII/DLP redaction, and audit log govern it. Your Claude
-					Pro/Max subscription is preserved — the gateway forwards your own
-					login upstream unchanged and never uses an API key. Don't set{" "}
-					<code>ANTHROPIC_API_KEY</code> or <code>ANTHROPIC_AUTH_TOKEN</code> —
-					either overrides your subscription and switches you to API billing.
-					The proxy is loopback-only: it only governs Claude Code running on
-					this machine, so your subscription login never leaves your device.
-				</>
-			}
+			caption={tlRich(
+				"Route Claude Code's model traffic through the Ryu gateway so the firewall, PII/DLP redaction, and audit log govern it. Your Claude Pro/Max subscription is preserved — the gateway forwards your own login upstream unchanged and never uses an API key. Don't set <code>{apiKeyVar}</code> or <code>{authTokenVar}</code> — either overrides your subscription and switches you to API billing. The proxy is loopback-only: it only governs Claude Code running on this machine, so your subscription login never leaves your device.",
+				{
+					apiKeyVar: "ANTHROPIC_API_KEY",
+					authTokenVar: "ANTHROPIC_AUTH_TOKEN",
+				},
+				{ code: (children) => <code>{children}</code> }
+			)}
 			title="Gateway routing"
 		>
 			<SettingsGroup>
@@ -146,19 +144,14 @@ export function CodexGatewayConfigView({
 	loaded = true,
 	onToggle,
 }: CodexGatewayConfigViewProps) {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<SettingsSection
-			caption={
-				<>
-					Route Codex's model traffic through the Ryu gateway so the firewall,
-					PII/DLP redaction, and audit log govern it. This governs your{" "}
-					<strong>ChatGPT-login</strong> (subscription) Codex — the gateway
-					forwards your own OAuth login and account id upstream unchanged and
-					never injects an API key, so your subscription billing is preserved.
-					The proxy is loopback-only: it only governs Codex running on this
-					machine, so your subscription login never leaves your device.
-				</>
-			}
+			caption={tlRich(
+				"Route Codex's model traffic through the Ryu gateway so the firewall, PII/DLP redaction, and audit log govern it. This governs your <strong>ChatGPT-login</strong> (subscription) Codex — the gateway forwards your own OAuth login and account id upstream unchanged and never injects an API key, so your subscription billing is preserved. The proxy is loopback-only: it only governs Codex running on this machine, so your subscription login never leaves your device.",
+				{},
+				{ strong: (children) => <strong>{children}</strong> }
+			)}
 			title="Gateway routing"
 		>
 			<SettingsGroup>
@@ -208,21 +201,14 @@ export function GatewayRoutingConfigView({
 	loaded = true,
 	onToggle,
 }: GatewayRoutingConfigViewProps) {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<SettingsSection
-			caption={
-				<>
-					Point this agent at the Ryu gateway instead of a provider. When on,
-					Ryu injects <code>OPENAI_BASE_URL</code> + <code>OPENAI_API_KEY</code>{" "}
-					(the local gateway) into the agent at launch, so its model calls are
-					governed by the firewall, PII/DLP redaction, budgets, and audit log —
-					no manual environment wiring on your part. This only takes effect for
-					agents that read <code>OPENAI_BASE_URL</code> (an OpenAI-compatible
-					agent); agents that speak another wire format or use their own gateway
-					ignore it. The gateway is loopback-only, so the agent's traffic is
-					governed on this machine before it leaves your device.
-				</>
-			}
+			caption={tlRich(
+				"Point this agent at the Ryu gateway instead of a provider. When on, Ryu injects <code>{baseUrlVar}</code> + <code>{apiKeyVar}</code> (the local gateway) into the agent at launch, so its model calls are governed by the firewall, PII/DLP redaction, budgets, and audit log — no manual environment wiring on your part. This only takes effect for agents that read <code>{baseUrlVar}</code> (an OpenAI-compatible agent); agents that speak another wire format or use their own gateway ignore it. The gateway is loopback-only, so the agent's traffic is governed on this machine before it leaves your device.",
+				{ apiKeyVar: "OPENAI_API_KEY", baseUrlVar: "OPENAI_BASE_URL" },
+				{ code: (children) => <code>{children}</code> }
+			)}
 			title="Gateway routing"
 		>
 			<SettingsGroup>

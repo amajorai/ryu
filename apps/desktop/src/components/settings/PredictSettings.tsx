@@ -10,6 +10,7 @@
 // The in-editor copilot ghost text (PlateJS, inside Spaces docs) is a SEPARATE
 // surface configured by Settings → Editor & Embeddings ("Inline AI editing").
 
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -65,6 +66,7 @@ export function PredictSettings() {
 }
 
 function LoadedPredictSettings({ target }: { target: ApiTarget }) {
+	const tlRich = useRichLiteralMessages();
 	const [cfg, setCfg] = useState<PredictConfig>(DEFAULT_PREDICT_CONFIG);
 	const [allowlistText, setAllowlistText] = useState("");
 	const [debounceText, setDebounceText] = useState(
@@ -224,24 +226,25 @@ function LoadedPredictSettings({ target }: { target: ApiTarget }) {
 			) : null}
 			<fieldset className="space-y-6" disabled={disabled}>
 				<SettingsSection
-					caption={
-						<>
-							Inline ghost-text autocomplete in <strong>any</strong> text field.
-							press <kbd className="rounded-sm bg-muted px-1">Tab</kbd> to
-							accept. The companion reads the text before your cursor, asks the
-							model below for a continuation (through the Gateway, like every
-							model call), and shows it inline. Password and secure fields are
-							never read.
-						</>
-					}
+					caption={tlRich(
+						"Inline ghost-text autocomplete in <strong>any</strong> text field. Press <kbd>Tab</kbd> to accept. The companion reads the text before your cursor, asks the model below for a continuation (through the Gateway, like every model call), and shows it inline. Password and secure fields are never read.",
+						{},
+						{
+							kbd: (children) => (
+								<kbd className="rounded-sm bg-muted px-1">{children}</kbd>
+							),
+							strong: (children) => <strong>{children}</strong>,
+						}
+					)}
 					title="Autocomplete (everywhere)"
 				>
 					<SettingsCard>
 						<p className="text-muted-foreground text-sm">
-							Autocomplete is on because the <strong>Autocomplete</strong>{" "}
-							plugin is enabled. To turn it off everywhere, disable the plugin
-							in <strong>Settings → Plugins</strong>. The settings below tune
-							what it does once it is on.
+							{tlRich(
+								"Autocomplete is on because the <strong>Autocomplete</strong> plugin is enabled. To turn it off everywhere, disable the plugin in <strong>Settings → Plugins</strong>. The settings below tune what it does once it is on.",
+								{},
+								{ strong: (children) => <strong>{children}</strong> }
+							)}
 						</p>
 					</SettingsCard>
 				</SettingsSection>
@@ -331,13 +334,11 @@ function LoadedPredictSettings({ target }: { target: ApiTarget }) {
 				>
 					<SettingsCard>
 						<p className="text-muted-foreground text-sm">
-							To configure the model behind the editor's own ghost-text
-							completion, open{" "}
-							<strong>
-								Settings → Editor &amp; Embeddings → Inline AI editing
-							</strong>
-							. That picker drives autocomplete inside Spaces documents; this
-							page drives system-wide autocomplete.
+							{tlRich(
+								"To configure the model behind the editor's own ghost-text completion, open <strong>Settings → Editor & Embeddings → Inline AI editing</strong>. That picker drives autocomplete inside Spaces documents; this page drives system-wide autocomplete.",
+								{},
+								{ strong: (children) => <strong>{children}</strong> }
+							)}
 						</p>
 					</SettingsCard>
 				</SettingsSection>

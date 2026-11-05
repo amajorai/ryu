@@ -104,7 +104,7 @@ test("actual Desktop shell overlays side panes in a narrow window and restores t
 		position: { x: 20, y: 200 },
 	});
 	await expect(right).toHaveCount(0);
-	// Toggle Right Panel opens and closes the sheet in a narrow window.
+	// Toggle Side Panel opens and closes the sheet in a narrow window.
 	await page.keyboard.press("ControlOrMeta+Alt+ArrowRight");
 	await expect(right).toBeVisible();
 	await page.keyboard.press("ControlOrMeta+Alt+ArrowRight");
@@ -338,14 +338,14 @@ test("actual chat opens its panels as workbench tabs from its header", async ({
 	});
 	await page.goto("/merged-workbench-proof.html");
 	const right = page.locator('section[aria-label="Right"]');
-	const show = page.getByRole("button", { name: "Show right panel" });
+	const show = page.getByRole("button", { name: "Show side panel" });
 	await expect(show).toBeVisible();
 	await expect(right).toHaveCount(0);
 
 	// No project is open, so the empty Right pane opens the chat's Context.
 	await show.click();
 	await expect(right.getByRole("tab", { name: /^Context: / })).toBeVisible();
-	const hide = page.getByRole("button", { name: "Hide right panel" });
+	const hide = page.getByRole("button", { name: "Hide side panel" });
 	await expect(hide).toHaveAttribute("aria-pressed", "true");
 	await mkdir(proof, { recursive: true });
 	await page.screenshot({ path: `${proof}/merged-workbench-chat-panels.png` });

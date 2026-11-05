@@ -364,7 +364,7 @@
   "{count, plural, one {{countText} planned case} other {{countText} planned cases}} will produce evidence, a coverage score, and failure bundles.": "{count, plural, one {{countText} नियोजित केस} other {{countText} नियोजित केस}} साक्ष्य, कवरेज स्कोर और विफलता बंडल तैयार करेंगे।",
   "{count, plural, one {{countText} run} other {{countText} runs}} kept for {name}; verdicts are never overwritten.": "{name} के लिए {count, plural, one {{countText} रन रखा गया} other {{countText} रन रखे गए}}; निर्णय कभी अधिलेखित नहीं होते।",
   "{count, plural, one {{length} context file attached} other {{length} context files attached}}": "{count, plural, one {{length} संदर्भ फ़ाइल संलग्न} other {{length} संदर्भ फ़ाइलें संलग्न}}",
-  "{coverage}% signal coverage": "{coverage}% सिग्नल कवरेज",
+  "{coverage} signal coverage": "{coverage} सिग्नल कवरेज",
   "{durationMs} ms · {evidenceLevel}": "{durationMs} ms · {evidenceLevel}",
   "{feature} · Updated {updated}": "{feature} · {updated} अपडेट किया गया",
   "{feature} · {length} steps": "{feature} · {length} चरण",

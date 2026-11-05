@@ -156,20 +156,20 @@ export function Village3dPrompt({
 		);
 	}
 	if (loading) {
-		return <span>Loading agents</span>;
+		return <span>{tl("Loading agents")}</span>;
 	}
 	return (
 		<span className="inline-flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
 			<span className="inline-flex items-center gap-1.5">
 				<Keycap className="h-5">WASD</Keycap>
-				Move
+				{tl("Move around")}
 			</span>
 			<span className="inline-flex items-center gap-1.5">
 				<Keycap className="h-5 min-w-5">E</Keycap>
-				{answer ? "Answer" : "Talk"}
+				{answer ? tl("Answer them") : tl("Talk to them")}
 			</span>
 			{orbit ? (
-				<span className="@max-[640px]:hidden">Drag to look around</span>
+				<span className="@max-[640px]:hidden">{tl("Drag to look around")}</span>
 			) : null}
 		</span>
 	);

@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./cloud-environments": "./src/cloud-environments.ts",
+    "./cloud-environments-issue": "./src/cloud-environments-issue.ts",
     "./managed-ssh": "./src/managed-ssh.ts",
     "./managed-agents": "./src/managed-agents.ts",
     "./marketplace-wallpaper": "./src/marketplace-wallpaper.ts",

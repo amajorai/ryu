@@ -31,6 +31,7 @@ import {
 	UsageRing,
 	windowKey,
 } from "./usage-bar-helpers.tsx";
+import { usagePercentText } from "./usage-percent.ts";
 
 interface UsageFillStyle extends CSSProperties {
 	"--usage-fill": string;
@@ -420,7 +421,9 @@ export function UsageWindowMeter({
 						linearBar
 					))}
 				{showPercent ? (
-					<span className="text-xs tabular-nums">{Math.round(shown)}%</span>
+					<span className="text-xs tabular-nums">
+						{usagePercentText(shown)}
+					</span>
 				) : null}
 			</TooltipTrigger>
 			<TooltipContent>

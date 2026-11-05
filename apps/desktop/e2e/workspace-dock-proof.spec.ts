@@ -320,7 +320,7 @@ test("real dock launchpad, terminal failure/retry/history, pin/move and session 
 		)
 		.toBe(true);
 	const uid = (await snapshot(page)).projects["/fixture/project"][0].uid;
-	await menu(page, "Terminal", "Move to right panel");
+	await menu(page, "Terminal", "Move to side panel");
 	await expect
 		.poll(
 			async () =>

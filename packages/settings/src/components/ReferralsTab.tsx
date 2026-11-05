@@ -1,5 +1,6 @@
 "use client";
 
+import { errorText } from "@ryu/i18n/error-text";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SensitiveDataScope } from "@ryu/ui/components/sensitive-value.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
@@ -99,7 +100,7 @@ function ReferralsTabContent({
 		},
 		onError: (e) =>
 			sileo.error({
-				title: e instanceof Error ? e.message : "Failed to enable program",
+				title: errorText(e, "Failed to enable program"),
 			}),
 	});
 
@@ -122,7 +123,7 @@ function ReferralsTabContent({
 		},
 		onError: (e) =>
 			sileo.error({
-				title: e instanceof Error ? e.message : "Failed to start onboarding",
+				title: errorText(e, "Failed to start onboarding"),
 			}),
 	});
 
@@ -134,7 +135,7 @@ function ReferralsTabContent({
 		},
 		onError: (e) =>
 			sileo.error({
-				title: e instanceof Error ? e.message : "Failed to start payout",
+				title: errorText(e, "Failed to start payout"),
 			}),
 	});
 
@@ -147,7 +148,7 @@ function ReferralsTabContent({
 		},
 		onError: (e) =>
 			sileo.error({
-				title: e instanceof Error ? e.message : "Failed to save commission",
+				title: errorText(e, "Failed to save commission"),
 			}),
 	});
 

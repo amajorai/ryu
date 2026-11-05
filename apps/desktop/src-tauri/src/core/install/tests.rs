@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use super::binaries::{resolved_installed_path, CLI, CORE, GATEWAY};
 use super::installer_script::{
-    bundled_install_script, installer_scratch_dir, write_installer_script,
+    bundled_install_script, installer_exit_event, installer_scratch_dir, write_installer_script,
     DESKTOP_INSTALLER_START_CORE,
 };
 use super::stack::{
@@ -316,5 +316,17 @@ fn staged_binaries_are_pinned_before_any_of_them_runs() {
     assert!(
         !script.contains(concat!(".tempfile", "()")),
         "the installer script must not be staged in the system temp directory"
+    );
+}
+
+#[test]
+fn the_installer_exit_event_carries_a_code_and_no_english_sentence() {
+    let event = installer_exit_event("exit status: 1");
+    assert_eq!(event["phase"], "error");
+    assert_eq!(event["code"], "installer_exit");
+    assert_eq!(event["detail"], "exit status: 1");
+    assert!(
+        event.get("error").is_none(),
+        "the webview words the failure from the code; no sentence crosses the boundary"
     );
 }

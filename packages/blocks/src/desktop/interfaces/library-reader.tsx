@@ -1,5 +1,6 @@
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Popover,
 	PopoverContent,
@@ -158,7 +159,10 @@ function TurnButton({
 			variant="ghost"
 		>
 			{direction === "previous" ? (
-				<Icon aria-hidden="true" className="size-4" />
+				<Icon
+					aria-hidden="true"
+					className={cn("size-4", DIRECTIONAL_ICON_CLASS)}
+				/>
 			) : null}
 			<span
 				className={cn(
@@ -179,7 +183,10 @@ function TurnButton({
 				) : null}
 			</span>
 			{direction === "next" ? (
-				<Icon aria-hidden="true" className="size-4" />
+				<Icon
+					aria-hidden="true"
+					className={cn("size-4", DIRECTIONAL_ICON_CLASS)}
+				/>
 			) : null}
 		</Button>
 	);

@@ -207,7 +207,7 @@ function ProofArtifact() {
 		onMoveToOtherPanel: (uid) => moveTab("bottom", uid),
 		onTogglePin: (uid) => togglePin("bottom", uid),
 		otherPanelIcon: ArrowRight01Icon,
-		otherPanelLabel: "right panel",
+		otherPanelLabel: "Move to side panel",
 		pinDisabledReason,
 		tabs: bottomTabs,
 	};
@@ -224,7 +224,7 @@ function ProofArtifact() {
 		onMoveToOtherPanel: (uid) => moveTab("right", uid),
 		onTogglePin: (uid) => togglePin("right", uid),
 		otherPanelIcon: ArrowDown01Icon,
-		otherPanelLabel: "bottom panel",
+		otherPanelLabel: "Move to bottom panel",
 		pageTypes: PAGE_TYPES,
 		pinDisabledReason,
 		tabs: rightTabs,

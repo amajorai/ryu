@@ -1,5 +1,6 @@
 import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatDurationUnit } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -248,7 +249,7 @@ export function AddNodeDialog({
 									</ItemTitle>
 								</ItemContent>
 								<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums">
-									{d.latency_ms}ms
+									{formatDurationUnit(Math.round(d.latency_ms), "millisecond")}
 								</span>
 							</Item>
 						))}

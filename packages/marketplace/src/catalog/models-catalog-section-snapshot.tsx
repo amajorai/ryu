@@ -10,7 +10,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { isBlockedRepoFit } from "@ryu/blocks/desktop/model-fit.ts";
 import { activeLocale, translate as tl } from "@ryu/i18n/core";
 import { formatByteSize, formatDurationUnit } from "@ryu/i18n/format-intl";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { formatCurrency } from "@ryu/ui/lib/number-format.ts";
 import type { ReactNode } from "react";
@@ -30,13 +30,16 @@ export function StatsBlock({
 	present: boolean;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	if (!stats) {
 		if (!present) {
 			return (
 				<section className="rounded-lg bg-muted px-4 py-3 text-muted-foreground text-xs">
-					Add an Artificial Analysis API key (
-					<code>ARTIFICIAL_ANALYSIS_API_KEY</code>) to see independent speed,
-					quality, and price benchmarks here.
+					{tlRich(
+						"Add an Artificial Analysis API key (<code>{envVar}</code>) to see independent speed, quality, and price benchmarks here.",
+						{ envVar: "ARTIFICIAL_ANALYSIS_API_KEY" },
+						{ code: (children) => <code>{children}</code> }
+					)}
 				</section>
 			);
 		}

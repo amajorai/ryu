@@ -7,7 +7,9 @@
  * copied into every satellite.
  */
 
+import { translate as tl } from "@ryu/i18n/lite";
 import { isNativeText } from "../lib/native-primitive-observation.ts";
+
 export type SandboxToastKind = "error" | "info" | "success" | "warning";
 
 export interface SandboxToastOptions {
@@ -47,14 +49,18 @@ function getContainer(): HTMLElement | null {
 
 	const existing = document.getElementById(CONTAINER_ID);
 	if (existing) {
+		// The frame's language can change after the first toast.
+		existing.setAttribute("aria-label", tl("Notifications"));
 		return existing;
 	}
 
 	const container = document.createElement("div");
 	container.id = CONTAINER_ID;
-	container.setAttribute("aria-label", "Notifications");
+	container.setAttribute("aria-label", tl("Notifications"));
+	// Logical inset and accent edge: the stack sits at the trailing corner and
+	// the stripe on the leading edge in either reading direction.
 	container.style.cssText =
-		"position:fixed;bottom:16px;right:16px;z-index:2147483647;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none;";
+		"position:fixed;bottom:16px;inset-inline-end:16px;z-index:2147483647;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none;";
 	document.body.appendChild(container);
 	return container;
 }
@@ -84,7 +90,7 @@ function showToast(
 		"max-width:22rem",
 		"padding:10px 12px",
 		"border:1px solid var(--border,#3f3f46)",
-		`border-left:3px solid ${BORDER_COLORS[kind]}`,
+		`border-inline-start:3px solid ${BORDER_COLORS[kind]}`,
 		"border-radius:10px",
 		"background:var(--muted,#18181b)",
 		"color:var(--foreground,#fafafa)",

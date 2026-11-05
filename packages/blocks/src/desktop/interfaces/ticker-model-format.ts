@@ -45,13 +45,15 @@ export function formatPercent(value: number | null): string {
 	if (value === null) {
 		return "—";
 	}
-	if (value > 0) {
-		return `+${percentFormat.format(value)}%`;
-	}
-	if (value < 0) {
-		return `${MINUS}${percentFormat.format(-value)}%`;
-	}
-	return `${percentFormat.format(0)}%`;
+	// The locale's own percent sign and placement, with a true minus sign.
+	return numberFormatter(activeLocale(), {
+		maximumFractionDigits: 1,
+		minimumFractionDigits: 1,
+		signDisplay: "exceptZero",
+		style: "percent",
+	})
+		.format(value / 100)
+		.replace("-", MINUS);
 }
 
 /**

@@ -199,6 +199,7 @@ impl McpOAuthManager {
                 status: FlowState::Pending,
                 expires_at,
                 error: None,
+                error_code: None,
             },
             authorization_url: authorization_url.as_str().to_owned(),
             owner_user_id: spec.owner_user_id,

@@ -18,6 +18,7 @@ import type {
 	ChatStreamHandle,
 	CommandAction,
 } from "@ryu/command/types";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import type { KeyboardEvent, ReactNode } from "react";
@@ -102,17 +103,20 @@ function makeSeedTransport(options: {
 	};
 }
 
-/** A back chevron without pulling another icon import into the JSX. */
-function BackChevron() {
+/**
+ * A back chevron without pulling another icon import into the JSX. It points
+ * toward the inline start, so it mirrors under `dir="rtl"`.
+ */
+export function BackChevron() {
 	return (
 		<svg
 			aria-hidden="true"
-			className="size-3 rotate-180"
+			className={`size-3 ${DIRECTIONAL_ICON_CLASS}`}
 			fill="none"
 			viewBox="0 0 24 24"
 		>
 			<path
-				d="M9 6l6 6-6 6"
+				d="M15 18l-6-6 6-6"
 				stroke="currentColor"
 				strokeLinecap="round"
 				strokeLinejoin="round"

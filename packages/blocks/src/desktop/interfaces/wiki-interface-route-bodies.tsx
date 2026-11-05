@@ -147,13 +147,11 @@ export function RouteTalk({
 	return (
 		<TalkPage
 			agents={snapshot.agents}
-			intro={
-				<>
-					This is the talk page for the{" "}
-					<b className="font-semibold">Main Page</b>. Topics here are threads
-					not assigned to an agent; adding a topic starts a thread right away.
-				</>
-			}
+			intro={tlRich(
+				"This is the talk page for the <b>Main Page</b>. Topics here are threads not assigned to an agent; adding a topic starts a thread right away.",
+				{},
+				{ b: (children) => <b className="font-semibold">{children}</b> }
+			)}
 			now={now}
 			onOpenThread={onOpenThread}
 			onStart={onStart}

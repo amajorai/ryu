@@ -1,4 +1,5 @@
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import {
 	Tooltip,
@@ -17,6 +18,7 @@ import { BoardStatusDot } from "./board-status.tsx";
 import { FOCUS_TOOLTIP_KBD } from "./focus-card.tsx";
 import type { FocusItem } from "./focus-model.ts";
 import { FocusStrip } from "./focus-strip.tsx";
+import { useInlineSign } from "./inline-direction.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 /** One of the header's previous/next pair: a ghost icon button with its shortcut. */
@@ -51,7 +53,7 @@ function FrameStep({
 					/>
 				}
 			>
-				<Icon aria-hidden="true" />
+				<Icon aria-hidden="true" className={DIRECTIONAL_ICON_CLASS} />
 			</TooltipTrigger>
 			<TooltipContent side="bottom">
 				{label}
@@ -95,6 +97,11 @@ export function FocusFrame({
 	threadView: ReactNode;
 }) {
 	const reduceMotion = useReducedMotion();
+	// Under dir="rtl" ArrowRight steps back and ArrowLeft forward.
+	const [backKey, forwardKey] =
+		useInlineSign() === -1
+			? ["ArrowRight", "ArrowLeft"]
+			: ["ArrowLeft", "ArrowRight"];
 	return (
 		<motion.div
 			animate={{ opacity: 1, scale: 1 }}
@@ -137,14 +144,14 @@ export function FocusFrame({
 							keys="K"
 							label="Previous thread"
 							onClick={onPrevious}
-							shortcut="K ArrowLeft"
+							shortcut={`K ${backKey}`}
 						/>
 						<FrameStep
 							icon={ChevronRight}
 							keys="J"
 							label={hasNext ? "Next thread" : "Finish"}
 							onClick={onNext}
-							shortcut="J ArrowRight"
+							shortcut={`J ${forwardKey}`}
 						/>
 					</div>
 				</div>

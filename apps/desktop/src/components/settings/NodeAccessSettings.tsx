@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -63,6 +63,7 @@ function isTauri(): boolean {
 
 export function NodeAccessSettings() {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const node = useActiveNode();
 	const target: ApiTarget = {
 		url: node.url,
@@ -422,11 +423,13 @@ export function NodeAccessSettings() {
 							</div>
 						}
 						description={
-							source === "env" ? (
-								<>
-									Set by <code>RYU_TOKEN</code>, so rotating here has no effect.
-								</>
-							) : undefined
+							source === "env"
+								? tlRich(
+										"Set by <code>{envVar}</code>, so rotating here has no effect.",
+										{ envVar: "RYU_TOKEN" },
+										{ code: (children) => <code>{children}</code> }
+									)
+								: undefined
 						}
 						title={
 							<Label className="font-normal" htmlFor="node-token">

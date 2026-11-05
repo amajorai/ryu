@@ -7,7 +7,7 @@ import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { EvalCaseScore, ModelEvalResult } from "@/src/lib/api/gateway.ts";
 import type { PromptReview } from "@/src/lib/api/prompt-suites.ts";
 import type { PromptVariantRun, TestCaseRow } from "@/src/lib/prompt-studio.ts";
-import { pct } from "./PromptStudio-format.ts";
+import { pct, pctRange } from "./PromptStudio-format.ts";
 import {
 	CaseLabel,
 	MatrixCell,
@@ -126,8 +126,11 @@ export function PromptResultCard({
 										/>
 									</div>
 									<span className="type-micro text-center text-muted-foreground">
-										{index * 25}–{index === 3 ? 100 : (index + 1) * 25}% ·{" "}
-										{count}
+										{pctRange(
+											index * 0.25,
+											index === 3 ? 1 : (index + 1) * 0.25
+										)}{" "}
+										· {count}
 									</span>
 								</div>
 							))}

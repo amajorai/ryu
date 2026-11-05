@@ -11,6 +11,7 @@
 
 import { Alert02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	Alert,
 	AlertDescription,
@@ -53,6 +54,7 @@ export default function CommunityTrustNotice({
 	tone?: "banner" | "inline";
 }) {
 	const host = useCatalogHost();
+	const tlRich = useRichLiteralMessages();
 	const topicLabel = topic?.trim() ? topic.trim() : BOTH_TOPICS;
 
 	return (
@@ -65,11 +67,17 @@ export default function CommunityTrustNotice({
 			<HugeiconsIcon className="text-status-warning" icon={Alert02Icon} />
 			<AlertTitle>Not reviewed by Ryu</AlertTitle>
 			<AlertDescription>
-				Third-party listings from the GitHub topic{" "}
-				<code className="rounded-lg bg-muted px-1 py-0.5 font-mono text-xs">
-					{topicLabel}
-				</code>
-				. Install at your own discretion.{" "}
+				{tlRich(
+					"Third-party listings from the GitHub topic <code>{topic}</code>. Install at your own discretion.",
+					{ topic: topicLabel },
+					{
+						code: (children) => (
+							<code className="rounded-lg bg-muted px-1 py-0.5 font-mono text-xs">
+								{children}
+							</code>
+						),
+					}
+				)}{" "}
 				<button
 					className="underline underline-offset-3 hover:text-foreground"
 					onClick={() => host.openExternal(COMMUNITY_TRUST_DOC_URL)}

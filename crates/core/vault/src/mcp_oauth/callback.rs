@@ -25,7 +25,7 @@ impl McpOAuthManager {
                     && flow.view.expires_at > chrono::Utc::now().timestamp()
                     && flow.state == state
             })
-            .context("OAuth callback state is invalid or already used")?;
+            .context(INVALID_STATE_MESSAGE)?;
         Ok(McpBinding {
             owner_user_id: flow.owner_user_id.clone(),
             profile_id: flow.view.profile_id.clone(),
@@ -46,9 +46,7 @@ impl McpOAuthManager {
         returned_issuer: Option<String>,
         oauth_error: Option<String>,
     ) -> Result<String> {
-        let state = returned_state
-            .as_deref()
-            .context("OAuth callback omitted state")?;
+        let state = returned_state.as_deref().context(STATE_OMITTED_MESSAGE)?;
         let flow_id = self
             .flows
             .read()
@@ -61,7 +59,7 @@ impl McpOAuthManager {
                     && flow.state == state
             })
             .map(|(flow_id, _)| flow_id.clone())
-            .context("OAuth callback state is invalid or already used")?;
+            .context(INVALID_STATE_MESSAGE)?;
         self.complete_callback(&flow_id, code, returned_state, returned_issuer, oauth_error)
             .await?
             .context("hosted OAuth callback produced no confirmation code")
@@ -99,7 +97,7 @@ impl McpOAuthManager {
         oauth_error: Option<String>,
     ) -> Result<Option<String>> {
         if chrono::Utc::now().timestamp() >= pending.view.expires_at {
-            bail!("OAuth flow expired");
+            bail!(EXPIRED_MESSAGE);
         }
         if let Some(error) = oauth_error {
             bail!(
@@ -116,18 +114,14 @@ impl McpOAuthManager {
         // stays acceptable unless the server promised to send `iss`.
         if let Some(returned_issuer) = returned_issuer.as_deref() {
             if trim_trailing_slash(returned_issuer) != trim_trailing_slash(&pending.issuer) {
-                bail!("OAuth issuer did not match");
+                bail!(ISSUER_MISMATCH_MESSAGE);
             }
         } else if pending.view.callback_mode == CallbackMode::Hosted {
-            bail!(
-                "OAuth callback omitted the required issuer: hosted callbacks need an \
-                 authorization server that returns the RFC 9207 `iss` parameter; \
-                 use a local desktop connection instead"
-            );
+            bail!(HOSTED_ISSUER_MISSING_MESSAGE);
         } else if pending.require_issuer_parameter {
-            bail!("OAuth callback omitted the required issuer");
+            bail!(ISSUER_MISSING_MESSAGE);
         }
-        let code = code.context("OAuth callback did not contain a code")?;
+        let code = code.context(MISSING_CODE_MESSAGE)?;
         let mut form = vec![
             ("grant_type", "authorization_code".to_owned()),
             ("code", code),
@@ -206,10 +200,10 @@ impl McpOAuthManager {
         let mut flows = self.flows.write().await;
         let flow = flows.get_mut(flow_id).context("OAuth flow not found")?;
         if flow.callback_claimed {
-            bail!("OAuth callback was already used");
+            bail!(CALLBACK_USED_MESSAGE);
         }
         if returned_state != Some(flow.state.as_str()) {
-            bail!("OAuth state did not match");
+            bail!(STATE_MISMATCH_MESSAGE);
         }
         flow.callback_claimed = true;
         Ok(flow.clone())
@@ -228,6 +222,7 @@ impl McpOAuthManager {
             ) {
                 flow.view.status = FlowState::Failed;
                 flow.view.error = Some(message.to_owned());
+                flow.view.error_code = Some(FlowErrorCode::classify(message));
                 flow.held = None;
                 scrub_flow_secrets(flow);
             }
@@ -260,7 +255,8 @@ impl McpOAuthManager {
             };
             if expired {
                 flow.view.status = FlowState::Failed;
-                flow.view.error = Some("OAuth flow expired".to_owned());
+                flow.view.error = Some(EXPIRED_MESSAGE.to_owned());
+                flow.view.error_code = Some(FlowErrorCode::Expired);
                 unconfirmed = flow.held.take();
                 scrub_flow_secrets(flow);
             }

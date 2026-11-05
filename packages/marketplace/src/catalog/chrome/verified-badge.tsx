@@ -47,11 +47,8 @@ import {
 	type VerificationDetails,
 	VerificationPopover,
 } from "@ryu/ui/components/verification-popover.tsx";
-import {
-	type PublisherTrustLevel,
-	publisherTrustLabel,
-	publisherTrustTooltip,
-} from "@ryuhq/protocol/publisher-trust";
+import type { PublisherTrustLevel } from "@ryuhq/protocol/publisher-trust";
+import { publisherTrustCopy } from "./verified-badge-copy.ts";
 
 /** Human label per verification tier.
  *
@@ -88,11 +85,14 @@ export function verifiedLabel(
 	const known = tier ? TIER_LABEL.get(tier.trim().toLowerCase()) : undefined;
 	return known
 		? tl("Verified organization — {known}", { known })
-		: "Verified organization";
+		: tl("Verified organization");
 }
 
-export function trustLabel(level: PublisherTrustLevel): string {
-	return publisherTrustLabel(level);
+export function trustLabel(
+	tl: LiteralMessage,
+	level: PublisherTrustLevel
+): string {
+	return publisherTrustCopy(tl, level).label;
 }
 
 /**
@@ -149,10 +149,10 @@ export default function VerifiedBadge({
 		return null;
 	}
 	const label = hasExplicitPublisherTrust
-		? trustLabel(level)
+		? trustLabel(tl, level)
 		: verifiedLabel(tl, tier);
 	const tooltip = hasExplicitPublisherTrust
-		? publisherTrustTooltip(level)
+		? publisherTrustCopy(tl, level).tooltip
 		: label;
 	const details = verificationDetails ?? {
 		methods: [

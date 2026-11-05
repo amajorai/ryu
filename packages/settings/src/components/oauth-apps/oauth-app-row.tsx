@@ -8,6 +8,7 @@ import { activeLocale, formatRelativeTime } from "@ryu/i18n/lite";
 import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type { OwnedOAuthApp } from "../../utils/api-client.ts";
+import { oauthApplicationTypeLabel } from "../settings-protocol-labels.ts";
 import {
 	SETTINGS_ROW_REVEAL_CLASS,
 	SettingsItem,
@@ -75,7 +76,7 @@ export function OAuthAppRow({
 			description={tl("{clientType} · {applicationType} · Created {created}", {
 				clientType:
 					app.clientType === "public" ? tl("Public") : tl("Confidential"),
-				applicationType: app.applicationType,
+				applicationType: oauthApplicationTypeLabel(tl, app.applicationType),
 				created,
 			})}
 			title={

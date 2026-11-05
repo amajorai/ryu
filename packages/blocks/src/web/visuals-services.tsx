@@ -228,11 +228,21 @@ export function MessagingVisual() {
 		{
 			channel: "SMS",
 			to: "+65 •••• 4821",
-			state: "delivered",
+			state: t("delivered"),
 			tone: "success",
 		},
-		{ channel: "WhatsApp", to: "+44 •••• 1907", state: "held", tone: "info" },
-		{ channel: "Voice", to: "+1 •••• 5530", state: "settled", tone: "success" },
+		{
+			channel: "WhatsApp",
+			to: "+44 •••• 1907",
+			state: t("held"),
+			tone: "info",
+		},
+		{
+			channel: "Voice",
+			to: "+1 •••• 5530",
+			state: t("settled"),
+			tone: "success",
+		},
 	];
 	return (
 		<WindowFrame title="Ryu Messaging · outbound">
@@ -267,7 +277,7 @@ export function MessagingVisual() {
 								</span>
 							</span>
 							<span className="type-micro font-mono text-muted-foreground/70">
-								{message.state}
+								<LiteralText text={message.state} />
 							</span>
 						</div>
 					))}

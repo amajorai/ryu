@@ -48,9 +48,7 @@ test("renders Core-owned categories and disables an empty category", async ({
 }) => {
 	await openProof(page);
 	await expect(page.getByText("4 chats", { exact: true })).toBeVisible();
-	await expect(
-		page.getByText("3 meeting notes", { exact: true })
-	).toBeVisible();
+	await expect(page.getByText("3 items", { exact: true })).toBeVisible();
 	await expect(page.getByText("No spaces", { exact: true })).toBeVisible();
 	await expect(
 		page.getByRole("button", { name: "Delete all spaces", exact: true })
@@ -172,17 +170,13 @@ test("shows a failed category delete and lets the user retry it", async ({
 	await expect(
 		page.getByText("Could not delete", { exact: true })
 	).toBeVisible();
-	await expect(
-		page.getByText("3 meeting notes", { exact: true })
-	).toBeVisible();
+	await expect(page.getByText("3 items", { exact: true })).toBeVisible();
 	await expect(dialog).toBeVisible();
 	await dialog.getByRole("button", { name: "Delete", exact: true }).click();
 	await expect(
-		page.getByText("3 meeting notes deleted.", { exact: true })
+		page.getByText("3 items deleted.", { exact: true })
 	).toBeVisible();
-	await expect(
-		page.getByText("No meeting notes", { exact: true })
-	).toBeVisible();
+	await expect(page.getByText("No items", { exact: true })).toBeVisible();
 	const calls = (await proofState(page)).apiCalls.filter(
 		(call) => call.path === "/api/data/clear"
 	);

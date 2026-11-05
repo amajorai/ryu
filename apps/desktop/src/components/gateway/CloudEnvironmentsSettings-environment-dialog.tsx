@@ -19,9 +19,9 @@ import { Switch } from "@ryu/ui/components/switch.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import {
 	type CloudEnvironmentRuntime,
-	cloudEnvironmentRuntimeIssue,
 	DEFAULT_CLOUD_ENVIRONMENT_RUNTIME,
 } from "@ryuhq/protocol/cloud-environments";
+import { cloudEnvironmentIssue } from "@ryuhq/protocol/cloud-environments-issue";
 import { useState } from "react";
 import {
 	SettingsGroup,
@@ -129,10 +129,7 @@ export function EnvironmentDialog({
 	const runtime = environment.runtime ?? DEFAULT_CLOUD_ENVIRONMENT_RUNTIME;
 	const updateRuntime = (change: Partial<CloudEnvironmentRuntime>) =>
 		update({ runtime: { ...runtime, ...change } });
-	const runtimeIssue = cloudEnvironmentRuntimeIssue(
-		environment,
-		availableVault
-	);
+	const runtimeIssue = cloudEnvironmentIssue(environment, availableVault);
 	// Fresh cloud box rollout gate (UI-only). Core cannot read per-user flags; the
 	// node's Box configuration stays the hard gate for prepare/launch.
 	const boxBackendEnabled = useFeatureFlag(CLOUD_TASKS_BOX_BACKEND_FLAG);

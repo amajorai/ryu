@@ -118,7 +118,10 @@ async function readPolicyFile(file: string): Promise<VaultPolicyFile> {
 		);
 	} catch (error) {
 		throw new UsageError(
-			`Policy file ${file} must be JSON: ${error instanceof Error ? error.message : String(error)}`
+			tf("Policy file {file} must be JSON: {reason}", {
+				file,
+				reason: error instanceof Error ? error.message : String(error),
+			})
 		);
 	}
 	if (!parsed.success) {

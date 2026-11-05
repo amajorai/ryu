@@ -236,7 +236,7 @@ function BudgetRule({
 							</SelectContent>
 						</Select>
 					}
-					title={<Label htmlFor="policy-budget-window">Window</Label>}
+					title={<Label htmlFor="policy-budget-window">Time window</Label>}
 				/>
 				{budget ? (
 					<SettingsItem

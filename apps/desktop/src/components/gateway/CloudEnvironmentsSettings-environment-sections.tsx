@@ -11,6 +11,7 @@ import {
 	CLOUD_ENVIRONMENT_LIFETIME_MINUTES,
 	type CloudEnvironmentRuntime,
 } from "@ryuhq/protocol/cloud-environments";
+import type { CloudEnvironmentIssue } from "@ryuhq/protocol/cloud-environments-issue";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -21,6 +22,7 @@ import type {
 	CloudVaultEntry,
 	CloudVaultKind,
 } from "@/src/lib/api/cloud-environments.ts";
+import { cloudEnvironmentIssueMessage } from "./CloudEnvironmentsSettings-issue-copy.ts";
 import {
 	RUNTIME_AGENT_OPTIONS,
 	runtimeExecutor,
@@ -37,8 +39,9 @@ export function EnvironmentRuntimeSection({
 	updateRuntime: (change: Partial<CloudEnvironmentRuntime>) => void;
 	boxBackendEnabled: boolean;
 	boxPreviewBlocked: boolean;
-	runtimeIssue: string | null;
+	runtimeIssue: CloudEnvironmentIssue | null;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<SettingsSection
 			caption="Choose where tasks run and which agent drives them. With Ryu, the agent stays on your computer and only commands and files run in the cloud. Claude Code, Codex, OpenCode and Cursor run inside the cloud box."
@@ -146,7 +149,7 @@ export function EnvironmentRuntimeSection({
 				) : null}
 				{runtimeIssue ? (
 					<p className="text-sm text-status-destructive" role="alert">
-						{runtimeIssue}
+						{cloudEnvironmentIssueMessage(tl, runtimeIssue)}
 					</p>
 				) : null}
 			</div>

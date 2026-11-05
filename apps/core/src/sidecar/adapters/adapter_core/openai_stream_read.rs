@@ -53,7 +53,7 @@ where
             let chunk = match chunk {
                 Ok(c) => c,
                 Err(e) => {
-                    let detail = openai_record_stream_failure(
+                    let failure = openai_record_stream_failure(
                         &e,
                         ctx.stream_hop,
                         ctx.failure_sink,
@@ -67,7 +67,7 @@ where
                     if st.text_open {
                         yield ui_text_end(ctx.text_id);
                     }
-                    for line in error_ui_lines(&detail) {
+                    for line in error_ui_frames(&failure) {
                         yield line;
                     }
                     *failed = true;

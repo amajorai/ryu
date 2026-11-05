@@ -1,15 +1,24 @@
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+
 interface IconProps extends React.SVGAttributes<SVGElement> {
 	height?: number;
 	width?: number;
 }
 
 /**
- * Shown when sidebar is open: filled panel on the LEFT to indicate the sidebar
- * is there, with the content area on the right (mirrored from the original).
+ * Shown when sidebar is open: filled panel on the inline-start edge (left in
+ * LTR; the glyph mirrors under RTL, where the sidebar sits on the right).
  */
 export function IconSidebarOpen(props: IconProps) {
 	return (
-		<svg fill="none" viewBox="0 0 24 24" width="24" {...props}>
+		<svg
+			fill="none"
+			viewBox="0 0 24 24"
+			width="24"
+			{...props}
+			className={cn(DIRECTIONAL_ICON_CLASS, props.className)}
+		>
 			{/* Flip horizontally so filled panel is on the left */}
 			<g transform="translate(24, 0) scale(-1, 1)">
 				<g transform="scale(1.05, 1.05) translate(-1.5, -1.15)">
@@ -29,11 +38,18 @@ export function IconSidebarOpen(props: IconProps) {
 
 /**
  * Shown when sidebar is hidden/docked: outer border with a thin vertical line
- * on the left side to indicate the sidebar is docked there, hidden.
+ * on the inline-start side to indicate the sidebar is docked there, hidden
+ * (mirrored under RTL with the sidebar).
  */
 export function IconSidebarClosed(props: IconProps) {
 	return (
-		<svg fill="none" viewBox="0 0 24 24" width="24" {...props}>
+		<svg
+			fill="none"
+			viewBox="0 0 24 24"
+			width="24"
+			{...props}
+			className={cn(DIRECTIONAL_ICON_CLASS, props.className)}
+		>
 			<g transform="scale(1.05, 1.05) translate(-1.5, -1.15)">
 				{/* Outer border ring */}
 				<path

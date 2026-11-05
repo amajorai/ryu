@@ -11,6 +11,7 @@
 
 import { Package01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -33,6 +34,7 @@ export default function SpaceAppDocPage({
 	pluginId: string;
 	documentId: string;
 }) {
+	const tlRich = useRichLiteralMessages();
 	const { companions } = usePluginContributions();
 	const openTab = useTabSelector((state) => state.openTab);
 	// The owning app's companion (its UI bundle carries the editor). Resolve by the
@@ -58,9 +60,11 @@ export default function SpaceAppDocPage({
 					</EmptyMedia>
 					<EmptyTitle>App not available</EmptyTitle>
 					<EmptyDescription>
-						This document is owned by the app <code>{pluginId}</code>, which is
-						not installed or enabled. Enable it from the Apps store to open this
-						document.
+						{tlRich(
+							"This document is owned by the app <code>{pluginId}</code>, which is not installed or enabled. Enable it from the Apps store to open this document.",
+							{ pluginId },
+							{ code: (children) => <code>{children}</code> }
+						)}
 					</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>

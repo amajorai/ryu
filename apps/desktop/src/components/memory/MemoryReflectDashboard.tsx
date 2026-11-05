@@ -1,5 +1,7 @@
 import { Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { activeLocale } from "@ryu/i18n/core";
+import { numberFormatter } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -51,7 +53,12 @@ function formatTrend(trend: number | null): string | null {
 	if (trend === null || trend === 0) {
 		return null;
 	}
-	return `${trend > 0 ? "+" : ""}${trend}%`;
+	// "+12%" / "−12 %": the locale's own sign and percent placement.
+	return numberFormatter(activeLocale(), {
+		maximumFractionDigits: 1,
+		signDisplay: "exceptZero",
+		style: "percent",
+	}).format(trend / 100);
 }
 
 function formatHour(hour: number): string {

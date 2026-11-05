@@ -364,7 +364,7 @@
   "{count, plural, one {{countText} planned case} other {{countText} planned cases}} will produce evidence, a coverage score, and failure bundles.": "{count, plural, zero {{countText} حالة مخططة} one {{countText} حالة مخططة} two {{countText} حالة مخططة} few {{countText} حالات مخططة} many {{countText} حالة مخططة} other {{countText} حالة مخططة}} ستنتج أدلة ودرجة تغطية وحزم إخفاق.",
   "{count, plural, one {{countText} run} other {{countText} runs}} kept for {name}; verdicts are never overwritten.": "تم الاحتفاظ بـ {count, plural, zero {{countText} تشغيل} one {{countText} تشغيل} two {{countText} تشغيل} few {{countText} تشغيلات} many {{countText} تشغيلًا} other {{countText} تشغيل}} لـ {name}؛ ولا يتم استبدال الأحكام أبدًا.",
   "{count, plural, one {{length} context file attached} other {{length} context files attached}}": "{count, plural, zero {{length} ملف سياق مرفق} one {{length} ملف سياق مرفق} two {{length} ملف سياق مرفق} few {{length} ملفات سياق مرفقة} many {{length} ملف سياق مرفق} other {{length} ملف سياق مرفق}}",
-  "{coverage}% signal coverage": "تغطية الإشارات {coverage}%",
+  "{coverage} signal coverage": "تغطية الإشارات {coverage}",
   "{durationMs} ms · {evidenceLevel}": "{durationMs} ms · {evidenceLevel}",
   "{feature} · Updated {updated}": "{feature} · تم التحديث {updated}",
   "{feature} · {length} steps": "{feature} · {length} من الخطوات",

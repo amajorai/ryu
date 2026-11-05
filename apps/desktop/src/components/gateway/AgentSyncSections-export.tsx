@@ -30,6 +30,12 @@ import {
 	useAgentSyncProfiles,
 } from "./AgentSyncSections-profiles.ts";
 import {
+	acpPersistenceText,
+	exportCountsText,
+	exportSafetyText,
+	resumeProofText,
+} from "./AgentSyncSections-proof.ts";
+import {
 	ConflictList,
 	LoadErrorRow,
 	ProfileList,
@@ -393,21 +399,21 @@ export function AgentSyncExportSection({ target }: { target: ApiTarget }) {
 						<ProofRow title="Bundle SHA-256" value={result.bundleHash} />
 						<ProofRow
 							title="Projected counts"
-							value={`${result.agents} agents · ${result.skills} skills · ${result.conversations} conversations · ${result.messages} messages`}
+							value={exportCountsText(tl, result)}
 						/>
 						<ProofRow
 							title="ACP persistence"
-							value={`${result.acpResume.filter((entry) => entry.mode !== "replay").length} ACP loads/resumes · ${result.acpResume.filter((entry) => entry.mode === "replay").length} transcript replays`}
+							value={acpPersistenceText(tl, result)}
 						/>
 						<ProofRow title="Bundle path" value={result.bundlePath} />
 						<ProofRow
 							title="Safety result"
-							value={`${result.conflicts} conflicts · ${result.projectedFiles} files written`}
+							value={exportSafetyText(tl, result)}
 						/>
 						{resumeResults.length > 0 ? (
 							<ProofRow
 								title="ACP resume proof"
-								value={`${resumeResults.filter((entry) => entry.mode !== "replay").length} load/resume · ${resumeResults.filter((entry) => entry.mode === "replay").length} replay fallback`}
+								value={resumeProofText(tl, resumeResults)}
 							/>
 						) : null}
 					</SettingsGroup>

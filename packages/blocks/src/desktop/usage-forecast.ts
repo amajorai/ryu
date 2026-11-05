@@ -9,6 +9,8 @@
  * share it.
  */
 
+import { formatPercent } from "@ryu/i18n/format-percent";
+
 /** Two-sided 80% prediction range, z for the 90th percentile. */
 const PREDICTION_Z = 1.2816;
 const DEFAULT_FIT_WINDOW = 28;
@@ -180,5 +182,6 @@ export function formatForecastChange(forecast: UsageForecast): string {
 		return "Steady";
 	}
 	const rounded = Math.round(Math.abs(forecast.changePercent));
-	return `${forecast.direction === "up" ? "↑" : "↓"} ${rounded}%`;
+	const arrow = forecast.direction === "up" ? "↑" : "↓";
+	return `${arrow} ${formatPercent(rounded / 100)}`;
 }

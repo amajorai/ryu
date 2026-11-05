@@ -17,7 +17,7 @@ import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { useEffect, useState } from "react";
-import { presetSummary } from "@/src/lib/splitPresets.ts";
+import { presetSummaryMessage } from "@/src/lib/split-preset-summary.ts";
 import { useSplitPresetStore } from "@/src/store/useSplitPresetStore.ts";
 import {
 	SettingsGroup,
@@ -140,7 +140,7 @@ export function SplitPresetSettings() {
 									{preset.name}
 								</span>
 								<span className="font-normal text-muted-foreground text-xs">
-									{presetSummary(preset)}
+									{presetSummaryMessage(tl, preset)}
 								</span>
 							</span>
 						}

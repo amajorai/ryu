@@ -32,6 +32,13 @@ export {
 
 export interface StandaloneProductPricing {
 	details: readonly string[];
+	/**
+	 * The price's opening sentence as its own whole message, for one-line facts
+	 * (the /products index and a product's At a glance sheet). Set on every
+	 * price longer than one sentence: cutting a translated sentence out of a
+	 * longer message would leave English the catalog cannot match.
+	 */
+	lead?: string;
 	name: string;
 	price: string;
 	slug: string;
@@ -115,11 +122,23 @@ export function standaloneProductPricing(
 	locale?: string | null
 ): readonly StandaloneProductPricing[] {
 	const f = pricingFormat(locale);
+	const boxRates = {
+		boxSmallHour: f.usdRate(box.smallHourUsd),
+		boxDefaultHour: f.usdRate(box.defaultHourUsd),
+		boxLargeHour: f.usdRate(box.largeHourUsd),
+		minimumMinutes: f.count(box.minimumMinutesPerStart),
+	};
+	const mailBaseline = {
+		inboxes: f.count(mail.free.inboxes),
+		emails: f.count(mail.free.monthlyEmails),
+		storageGib: f.count(mail.free.storageGib),
+	};
 	return [
 		{
 			slug: "gateway",
 			name: "Ryu Gateway",
 			status: "Available",
+			lead: tl("Self-hosting is free."),
 			price: tl(
 				"Self-hosting is free. Managed model use is billed at cost, with no per-token markup."
 			),
@@ -199,13 +218,14 @@ export function standaloneProductPricing(
 			slug: "box",
 			name: "Ryu Box",
 			status: "Metered",
+			lead: tl(
+				"Ryu capacity, per running hour: small {boxSmallHour}, default {boxDefaultHour}, large {boxLargeHour}, billed per minute with a {minimumMinutes}-minute minimum per start.",
+				boxRates
+			),
 			price: tl(
 				"Ryu capacity, per running hour: small {boxSmallHour}, default {boxDefaultHour}, large {boxLargeHour}, billed per minute with a {minimumMinutes}-minute minimum per start. Saved state and snapshots: {boxStorageGibMonth} per GiB-month above the {includedGib} GiB each paid organization includes.",
 				{
-					boxSmallHour: f.usdRate(box.smallHourUsd),
-					boxDefaultHour: f.usdRate(box.defaultHourUsd),
-					boxLargeHour: f.usdRate(box.largeHourUsd),
-					minimumMinutes: f.count(box.minimumMinutesPerStart),
+					...boxRates,
 					boxStorageGibMonth: f.usd(box.storageGibMonthUsd, 2),
 					includedGib: f.count(box.includedStorageGib.paid),
 				}
@@ -264,13 +284,13 @@ export function standaloneProductPricing(
 			slug: "mail",
 			name: "Ryu Mail",
 			status: "Included",
+			lead: tl(
+				"Free baseline: {inboxes} inbox, {emails} emails per month, and {storageGib} GiB of stored mail, once per person; emails are counted per recipient.",
+				mailBaseline
+			),
 			price: tl(
 				"Free baseline: {inboxes} inbox, {emails} emails per month, and {storageGib} GiB of stored mail, once per person; emails are counted per recipient. Larger hosted quotas are included with eligible plans.",
-				{
-					inboxes: f.count(mail.free.inboxes),
-					emails: f.count(mail.free.monthlyEmails),
-					storageGib: f.count(mail.free.storageGib),
-				}
+				mailBaseline
 			),
 			details: [
 				tl(
@@ -336,6 +356,7 @@ export function standaloneProductPricing(
 			slug: "hire",
 			name: "Ryu Hire",
 			status: "Early access",
+			lead: tl("Not yet available."),
 			price: tl(
 				"Not yet available. No Hire price, run estimate, or credit settlement is published."
 			),

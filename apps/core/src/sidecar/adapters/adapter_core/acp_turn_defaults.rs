@@ -127,6 +127,13 @@ pub(crate) fn apply_acp_session_defaults(
     }
 }
 
+fn identity_unavailable(error: &dyn std::fmt::Display) -> String {
+    rejection_text(
+        crate::i18n::messages::TURN_CONVERSATION_IDENTITY_UNAVAILABLE_MESSAGE,
+        Some(&error.to_string()),
+    )
+}
+
 pub(crate) async fn capture_acp_conversation_generation(
     req: &mut ChatStreamRequest,
     conversations: &ConversationStore,
@@ -141,7 +148,7 @@ pub(crate) async fn capture_acp_conversation_generation(
     let mut identity = conversations
         .get_access_meta_with_generation(id)
         .await
-        .map_err(|error| format!("Conversation identity unavailable: {error}"))?;
+        .map_err(|error| identity_unavailable(&error))?;
     if identity.is_none() && req.persist {
         let tenancy = req
             .verified_caller
@@ -154,11 +161,11 @@ pub(crate) async fn capture_acp_conversation_generation(
         let created = conversations
             .ensure_conversation_with_generation(id, req.agent_id.as_deref(), None, tenancy)
             .await
-            .map_err(|error| format!("Conversation identity unavailable: {error}"))?;
+            .map_err(|error| identity_unavailable(&error))?;
         identity = conversations
             .get_access_meta_with_generation(id)
             .await
-            .map_err(|error| format!("Conversation identity unavailable: {error}"))?;
+            .map_err(|error| identity_unavailable(&error))?;
         if identity.as_ref().map(|(_, generation)| generation.as_str()) != Some(created.as_str()) {
             return Err("Conversation changed during admission".to_owned());
         }

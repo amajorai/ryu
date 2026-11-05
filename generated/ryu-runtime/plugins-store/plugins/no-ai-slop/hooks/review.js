@@ -140,7 +140,8 @@ const report = await host.runAgent({
 		"\n\n## What to return\n\n" +
 		"Report only the slop you can point at. For each one: quote the exact phrase, name the pattern, and give the replacement in a few words. No preamble, no score, no praise, no guess about whether AI wrote it.\n" +
 		"If the draft is clean, reply with exactly: SLOP: none\n" +
-		"Otherwise start your reply with the line: SLOP: found",
+		"Otherwise start your reply with the line: SLOP: found" +
+		reportLanguage(mode),
 	agent_id: ctx.agent_id,
 	// No tools: this is pure text judgement, and a fresh context every pass is the
 	// point — the reviewer never sees the conversation that produced the draft, so
@@ -171,3 +172,19 @@ return {
 		findings +
 		"\n\nRewrite that answer to fix them. Keep the substance, the facts, and your own voice; change only what the report names. Reply with the rewritten answer alone — do not describe the edit, do not mention this review, and do not thank the reviewer.",
 };
+
+// Report mode shows the findings to the user, so they are written in the UI
+// language (`ctx.locale`); `runAgent` has no `reply_language` opt-in. Quotes
+// from the draft and the machine-read `SLOP:` lines stay as they are. Revise
+// mode hands the findings back to the agent, so it gets no language line.
+function reportLanguage(currentMode) {
+	const locale = typeof ctx.locale === "string" ? ctx.locale.trim() : "";
+	if (currentMode !== "report" || !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/.test(locale) || /^en\b/i.test(locale)) {
+		return "";
+	}
+	return (
+		"\nWrite your notes in the language with the BCP 47 tag " +
+		locale +
+		". Quote phrases exactly as they appear in the draft, and keep the SLOP: lines in English."
+	);
+}

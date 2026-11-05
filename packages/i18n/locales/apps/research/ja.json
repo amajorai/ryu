@@ -58,7 +58,7 @@
   "active": "アクティブ",
   "campaign history is still within the direct-reasoning threshold": "キャンペーン履歴はまだ直接推論のしきい値内です",
   "research engine returned no campaign history document": "リサーチエンジンがキャンペーン履歴ドキュメントを返しませんでした",
-  "total": "件",
+  "total": "合計",
   "unknown campaign: {campaignId}": "不明なキャンペーン: {campaignId}",
   "{store} holds sealed data but no sealing key was delivered; writes are refused": "{store} には封印されたデータがありますが、封印キーが渡されていません。書き込みは拒否されます",
   "{store} was sealed under a different key; writes are refused until that key is restored": "{store} は別のキーで封印されています。そのキーが復元されるまで書き込みは拒否されます",

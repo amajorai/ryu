@@ -51,6 +51,9 @@ const advice = await host.sideModel({
 	prompt: prompt,
 	model_pref_key: "advisor-model",
 	effort: "high",
+	// Toggle-mode advice is a note the user reads, so it is written in the UI
+	// language; on-demand advice goes back to the agent and needs no opt-in.
+	...(onDemand ? {} : { reply_language: "ui" }),
 });
 const adviceText = parsePrimitiveText(advice) === undefined ? "" : advice.trim();
 if (!adviceText) {

@@ -30,6 +30,10 @@ import type {
 	McpOAuthServerDeclaration,
 } from "@/src/lib/api/plugins.ts";
 import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
+import {
+	mcpOAuthErrorText,
+	mcpOAuthRefusalCode,
+} from "@/src/lib/mcp-oauth-error-text.ts";
 import { McpOAuthCodeForm } from "./McpOAuthCodeForm.tsx";
 import { ConnectionStatusBadge } from "./ToolkitResults.tsx";
 
@@ -119,12 +123,23 @@ export function OAuthServerCard({
 		}
 		if (flow.data?.status === "failed") {
 			setFlowId(null);
+			const { errorCode } = flow.data;
 			sileo.error({
-				description: flow.data.error ?? undefined,
+				description: errorCode
+					? mcpOAuthErrorText(errorCode, app.name, tl)
+					: undefined,
 				title: failedTitle,
 			});
 		}
-	}, [connectedTitle, failedTitle, flow.data, flowId, status.refetch]);
+	}, [
+		app.name,
+		connectedTitle,
+		failedTitle,
+		flow.data,
+		flowId,
+		status.refetch,
+		tl,
+	]);
 
 	const handleConnect = async (accessLevel: ConnectionAccessLevel) => {
 		const started = await connect.mutateAsync({
@@ -150,11 +165,7 @@ export function OAuthServerCard({
 			setConfirmError(null);
 		} catch (error) {
 			setConfirmError(
-				error instanceof ApiError
-					? (error.serverMessage ?? error.message)
-					: error instanceof Error
-						? error.message
-						: "Could not confirm the code."
+				mcpOAuthErrorText(mcpOAuthRefusalCode(error), app.name, tl)
 			);
 		}
 	};

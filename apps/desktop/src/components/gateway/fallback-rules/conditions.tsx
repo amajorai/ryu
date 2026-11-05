@@ -267,7 +267,9 @@ export function conditionRows({
 				</Select>
 			}
 			key="window"
-			title={<label htmlFor={`subscription-window-${ruleId}`}>Window</label>}
+			title={
+				<label htmlFor={`subscription-window-${ruleId}`}>Time window</label>
+			}
 		/>,
 		<ThresholdInput
 			disabled={disabled}

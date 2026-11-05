@@ -2,7 +2,7 @@
 
 import { CheckmarkBadge04Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
@@ -189,6 +189,7 @@ export function RyuPiConfigView({
 	onSave,
 }: RyuPiConfigViewProps) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	if (loading) {
 		return (
 			<div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -206,13 +207,11 @@ export function RyuPiConfigView({
 
 	return (
 		<SettingsSection
-			caption={
-				<>
-					The Ryu agent runs Core&apos;s own Pi against an isolated config
-					(never your personal <code>~/.pi</code>). Pick the provider and model
-					Pi should use.
-				</>
-			}
+			caption={tlRich(
+				"The Ryu agent runs Core's own Pi against an isolated config (never your personal <code>{folder}</code>). Pick the provider and model Pi should use.",
+				{ folder: "~/.pi" },
+				{ code: (children) => <code>{children}</code> }
+			)}
 			headerAction={
 				<Badge
 					size="compact"

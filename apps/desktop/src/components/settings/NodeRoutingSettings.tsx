@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
@@ -76,6 +76,7 @@ export function NodeRoutingSettings() {
 
 function ScopedNodeRoutingSettings({ target }: { target: ApiTarget }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const [prefs, setPrefs] = useState<NodeRoutingPreferences>(
 		EMPTY_NODE_ROUTING_PREFERENCES
 	);
@@ -363,12 +364,11 @@ function ScopedNodeRoutingSettings({ target }: { target: ApiTarget }) {
 					</SettingsItem>
 					<SettingsItem
 						bare
-						description={
-							<>
-								Optional JSON array of additive rules with <code>kind</code>,{" "}
-								<code>name</code>, and <code>regex</code>. Leave blank to clear.
-							</>
-						}
+						description={tlRich(
+							"Optional JSON array of additive rules with <code>{kindField}</code>, <code>{nameField}</code>, and <code>{regexField}</code>. Leave blank to clear.",
+							{ kindField: "kind", nameField: "name", regexField: "regex" },
+							{ code: (children) => <code>{children}</code> }
+						)}
 						title="Extra firewall rules"
 					>
 						<Textarea

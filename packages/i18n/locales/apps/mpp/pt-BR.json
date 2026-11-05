@@ -32,7 +32,7 @@
   "Endpoint returned HTTP {status}; no payment was required.": "O endpoint retornou HTTP {status}; nenhum pagamento era necessário.",
   "Enter an amount, such as {example}.": "Insira um valor, como {example}.",
   "Every limit is enforced again immediately before signing.": "Cada limite é aplicado novamente logo antes da assinatura.",
-  "Expires": "Expira em",
+  "Expires": "Expira",
   "Explicit approval is required.": "É necessária aprovação explícita.",
   "Fund testnet": "Adicionar fundos na testnet",
   "HTTP method": "Método HTTP",

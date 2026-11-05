@@ -364,7 +364,7 @@
   "{count, plural, one {{countText} planned case} other {{countText} planned cases}} will produce evidence, a coverage score, and failure bundles.": "{count, plural, other {{countText} 件の計画済みケース}}により、エビデンス、カバレッジスコア、失敗バンドルが生成されます。",
   "{count, plural, one {{countText} run} other {{countText} runs}} kept for {name}; verdicts are never overwritten.": "{name} の{count, plural, other {実行 {countText} 件}}を保持しています。判定が上書きされることはありません。",
   "{count, plural, one {{length} context file attached} other {{length} context files attached}}": "{count, plural, other {{length} 件のコンテキストファイルを添付済み}}",
-  "{coverage}% signal coverage": "シグナルカバレッジ {coverage}%",
+  "{coverage} signal coverage": "シグナルカバレッジ {coverage}",
   "{durationMs} ms · {evidenceLevel}": "{durationMs} ミリ秒 · {evidenceLevel}",
   "{feature} · Updated {updated}": "{feature} · {updated} に更新",
   "{feature} · {length} steps": "{feature} · {length} ステップ",

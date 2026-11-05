@@ -82,6 +82,7 @@ describe("catalog-free entries", () => {
 		"react-rich-text.tsx",
 		"official-catalog.ts",
 		"account-locale.ts",
+		"error-text.ts",
 	]) {
 		test(`${entry} never reaches the bundled catalogs, fflate or zod`, () => {
 			const modules = reachable(entry);

@@ -351,8 +351,10 @@ async fn connect_with_fallback_tries_fallback_on_primary_failure() {
     // Both primary and fallback should fail; the error message must mention
     // both failures so the operator can diagnose the full chain.
     let err = result.expect_err("both providers are unreachable");
+    assert_eq!(err.code, "fallback_failed");
+    let err = err.message;
     assert!(
-        err.contains("Primary provider failed"),
+        err.contains("primary provider failed"),
         "error should describe primary failure: {err}"
     );
     assert!(
@@ -395,6 +397,8 @@ async fn connect_with_fallback_returns_primary_error_when_no_fallback_configured
     )
     .await;
     let err = result.expect_err("unreachable primary");
+    assert_eq!(err.code, "model_unreachable");
+    let err = err.message;
     // Must be a plain transport error, not a "combined" message.
     assert!(
         !err.contains("fallback"),

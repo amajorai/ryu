@@ -18,6 +18,7 @@ import {
 } from "@ryu/ui/components/profile-charts.tsx";
 import type { ReactNode } from "react";
 import type { ProfileStats, UsageDay } from "@/src/lib/api/profile.ts";
+import { formatFixedDecimals } from "@/src/lib/fixed-decimal-format.ts";
 import { formatCost, formatNumber } from "./StatsTab-format.ts";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
@@ -99,7 +100,7 @@ export function StatsUsageSections({
 					<LifetimeStat
 						sub="agent runtime"
 						title="Agent hours"
-						value={agentHours.toFixed(1)}
+						value={formatFixedDecimals(agentHours, 1)}
 					/>
 					<LifetimeStat title="Total spend" value={formatCost(costMicroUsd)} />
 					<LifetimeStat title="Requests" value={formatNumber(requestCount)} />

@@ -107,7 +107,7 @@ async function openPanel(page: import("@playwright/test").Page): Promise<void> {
 	const rightToggle = toggleButtons.nth(2);
 	await rightToggle.hover();
 	await expect(
-		page.getByText("Show right panel", { exact: true })
+		page.getByText("Show side panel", { exact: true })
 	).toBeVisible();
 	await rightToggle.click();
 	await expect(page.getByTestId("workspace-panel-state")).toHaveAttribute(

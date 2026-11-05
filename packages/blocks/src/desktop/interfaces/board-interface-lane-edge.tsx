@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -43,7 +44,10 @@ export function LaneEdge({
 			type="button"
 		>
 			<span className="flex h-11 flex-col items-center justify-center gap-0.5">
-				<Icon aria-hidden="true" className="size-4" />
+				<Icon
+					aria-hidden="true"
+					className={cn("size-4", DIRECTIONAL_ICON_CLASS)}
+				/>
 				<span className="text-xs tabular-nums leading-4">{count}</span>
 			</span>
 		</button>

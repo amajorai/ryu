@@ -86,6 +86,23 @@ pub(super) fn forward_installer_event(app: &AppHandle, line: &str) {
     }
 }
 
+/// The `installer-progress` failure event for an installer that exited with a
+/// non-success status. The native layer never words the sentence: it sends the
+/// stable `code` (`installer_exit`), which the webview maps to a translated
+/// sentence (`apps/desktop/src/boot/installer-error-text.ts`), and keeps the
+/// exit status as a technical `detail` that is logged, never shown.
+pub(super) fn installer_exit_event(detail: &str) -> serde_json::Value {
+    serde_json::json!({
+        "version": 1,
+        "phase": "error",
+        "component": "installer",
+        "status": "failed",
+        "percent": 0,
+        "code": "installer_exit",
+        "detail": detail,
+    })
+}
+
 /// Run the same canonical installer used by headless users from the copy pinned
 /// inside this signed bundle. A private file in Ryu's own scratch folder (see
 /// [`installer_scratch_dir`]) lets the shell process be supervised and its stdout streamed without introducing a mutable network
@@ -198,19 +215,10 @@ pub(super) async fn run_unified_installer(
         .await
         .map_err(|e| format!("wait for canonical installer: {e}"))?;
     if !status.success() {
-        let error = format!("canonical installer exited with {status}");
-        let _ = app.emit(
-            "installer-progress",
-            serde_json::json!({
-                "version": 1,
-                "phase": "error",
-                "component": "installer",
-                "status": "failed",
-                "percent": 0,
-                "error": error,
-            }),
-        );
-        return Err(error);
+        let detail = status.to_string();
+        tracing::warn!(%detail, "canonical installer exited unsuccessfully");
+        let _ = app.emit("installer-progress", installer_exit_event(&detail));
+        return Err(format!("canonical installer exited with {detail}"));
     }
     Ok(())
 }

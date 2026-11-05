@@ -379,6 +379,19 @@ it("preserves native status classifications, scalar legacy messages and upgrade 
 	expect(hasTeamsBillingAuth()).toBe(false);
 	expect(calls[0]?.authorization).toBeNull();
 });
+it("rewords the server's seat verdict as a whole plural sentence", async () => {
+	responseStatus = 422;
+	response = {
+		error:
+			"Your organization has 1 members. Allocate at least 1 billed seats or remove members first.",
+		needsUpgrade: true,
+	};
+	await expect(fetchTeamsSeatStatus()).rejects.toMatchObject({
+		kind: "needs_upgrade",
+		message:
+			"Your organization has 1 member. Allocate at least 1 billed seat or remove members first.",
+	});
+});
 it("rejects incomplete successful endpoint replies instead of claiming typed financial records", async () => {
 	response = {};
 	await expect(checkoutTeams("monthly", 5)).rejects.toThrow();

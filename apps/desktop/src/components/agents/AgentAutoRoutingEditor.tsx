@@ -51,6 +51,7 @@ import {
 	getAgentAutoRouting,
 	setAgentAutoRouting,
 } from "@/src/lib/api/preferences.ts";
+import { formatFixedDecimals } from "@/src/lib/fixed-decimal-format.ts";
 import { useAgentAutoDialog } from "@/src/store/useAgentAutoDialog.ts";
 import {
 	ClassifyTierNote,
@@ -367,7 +368,7 @@ export function AgentAutoRoutingEditor() {
 								</div>
 								<div className="flex flex-col gap-1.5">
 									<FluidSlider
-										format={(v) => v.toFixed(2)}
+										format={(v) => formatFixedDecimals(v, 2)}
 										label="Similarity threshold"
 										max={1}
 										min={0}

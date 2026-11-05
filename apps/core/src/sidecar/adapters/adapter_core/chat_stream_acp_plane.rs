@@ -71,7 +71,7 @@ pub(super) async fn dispatch_acp_plane<F>(
     if user_message.is_empty() {
         return turn_rejection
             .reject_acp(
-                "No user message to send to ACP agent".to_owned(),
+                rejection_text(crate::i18n::messages::TURN_NO_USER_MESSAGE_MESSAGE, None),
                 &worktree_diffs,
                 req.conversation_id.as_deref(),
                 worktree_guard,
@@ -91,7 +91,10 @@ pub(super) async fn dispatch_acp_plane<F>(
             if let Err(error) = crate::pi_config::persist_turn_model(model) {
                 return turn_rejection
                     .reject_acp(
-                        format!("Could not apply Pi model selection: {error}"),
+                        rejection_text(
+                            crate::i18n::messages::TURN_PI_MODEL_SELECTION_FAILED_MESSAGE,
+                            Some(&error.to_string()),
+                        ),
                         &worktree_diffs,
                         req.conversation_id.as_deref(),
                         worktree_guard,

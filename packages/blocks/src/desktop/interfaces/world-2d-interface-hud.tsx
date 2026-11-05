@@ -129,7 +129,7 @@ export function World2dHud({
 				</span>
 				<span className="inline-flex items-center gap-1.5">
 					<PixelKey>E</PixelKey>
-					Talk
+					{tr("Talk to them")}
 				</span>
 				<span className="inline-flex items-center gap-1.5">
 					<PixelKey>{visitable === 1 ? "1" : `1–${visitable % 10}`}</PixelKey>

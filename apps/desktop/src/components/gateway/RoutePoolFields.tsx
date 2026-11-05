@@ -5,8 +5,10 @@
 // global Smart routing card and the per-agent pool editor so both speak the same
 // syntax: comma-separated, case-insensitive, `*` as a wildcard in model ids.
 
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
+import type { ReactNode } from "react";
 
 export function RoutePoolFields({
 	disabled,
@@ -26,6 +28,8 @@ export function RoutePoolFields({
 	/** Comma-separated provider ids, as typed. */
 	providers: string;
 }) {
+	const tlRich = useRichLiteralMessages();
+	const codeTags = { code: (children: ReactNode) => <code>{children}</code> };
 	const modelsId = `${idPrefix}-allowed-models`;
 	const providersId = `${idPrefix}-allowed-providers`;
 	return (
@@ -41,9 +45,11 @@ export function RoutePoolFields({
 					value={models}
 				/>
 				<p className="text-muted-foreground text-xs" id={`${modelsId}-hint`}>
-					Comma-separated model ids; <code>*</code> matches anything. For
-					example <code>*claude*, gpt-*</code> keeps routing on Claude and GPT
-					models from any provider.
+					{tlRich(
+						"Comma-separated model ids; <code>{wildcard}</code> matches anything. For example <code>{example}</code> keeps routing on Claude and GPT models from any provider.",
+						{ example: "*claude*, gpt-*", wildcard: "*" },
+						codeTags
+					)}
 				</p>
 			</div>
 			<div className="flex flex-col gap-1.5">
@@ -57,10 +63,11 @@ export function RoutePoolFields({
 					value={providers}
 				/>
 				<p className="text-muted-foreground text-xs" id={`${providersId}-hint`}>
-					Comma-separated provider ids, such as <code>anthropic</code>,{" "}
-					<code>openrouter</code>, a custom endpoint&apos;s id, or{" "}
-					<code>core</code> for agents served through this node. A routed model
-					must match both lists.
+					{tlRich(
+						"Comma-separated provider ids, such as <code>{first}</code>, <code>{second}</code>, a custom endpoint's id, or <code>{core}</code> for agents served through this node. A routed model must match both lists.",
+						{ core: "core", first: "anthropic", second: "openrouter" },
+						codeTags
+					)}
 				</p>
 			</div>
 		</div>

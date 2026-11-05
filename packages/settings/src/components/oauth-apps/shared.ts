@@ -1,4 +1,5 @@
 import { RYU_SUPPORTED_SCOPES } from "@ryu/auth/scopes";
+import { errorText } from "@ryu/i18n/error-text";
 
 export const DEFAULT_SCOPES = ["openid", "profile", "email", "offline_access"];
 export const OAUTH_SCOPE_CATALOG = [...new Set(RYU_SUPPORTED_SCOPES)];
@@ -12,7 +13,7 @@ export function errorMessage(
 	error: Error | null | undefined,
 	fallback: string
 ): string {
-	return error instanceof Error && error.message ? error.message : fallback;
+	return errorText(error, fallback);
 }
 
 export function scopeLabel(scope: string): string {

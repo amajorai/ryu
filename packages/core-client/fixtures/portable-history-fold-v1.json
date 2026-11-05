@@ -92,7 +92,7 @@
   {
     "note": "look-alike PEM labels fold, including a standalone EC",
     "input": "-----BEGIN ЕС PRIVATE ΚΕΥ-----",
-    "folded": "-----BEGIN EC PRIVATE KEY-----"
+    "folded": "-----BEGIN EC PRIVATE\u0020KEY-----"
   },
   {
     "note": "a database or connection name spelled wholly in look-alikes folds like the other credential names",

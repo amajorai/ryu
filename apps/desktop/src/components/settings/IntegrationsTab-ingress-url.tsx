@@ -20,6 +20,7 @@
  * to enable Self-hosted relay" while another backend is active,
  * rather than as a URL the current backend uses.
  */
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { SettingsItem } from "./shared/settings-items.tsx";
@@ -41,6 +42,7 @@ export function IngressUrlSetting({
 	saving: boolean;
 	value: string;
 }) {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<SettingsItem title="Self-hosted relay public URL">
 			<div className="flex items-center gap-2">
@@ -71,15 +73,14 @@ export function IngressUrlSetting({
 				</p>
 			) : null}
 			<p className="text-muted-foreground text-xs">
-				Save this first, then pick <em>Self-hosted relay</em> above: that
-				backend serves whatever base is configured and this node refuses the
-				selection until one is. Use the address this node is reachable at from
-				the public internet: scheme and host, no path (your reverse proxy or
-				tunnel); webhook paths are appended to it. The other backends publish a
-				URL of their own and ignore this. Set{" "}
-				<code>RYU_WEBHOOK_INGRESS_URL</code> in this node's environment instead
-				if you prefer. It takes precedence over this field, and pins the backend
-				to Self-hosted relay.
+				{tlRich(
+					"Save this first, then pick <em>Self-hosted relay</em> above: that backend serves whatever base is configured and this node refuses the selection until one is. Use the address this node is reachable at from the public internet: scheme and host, no path (your reverse proxy or tunnel); webhook paths are appended to it. The other backends publish a URL of their own and ignore this. Set <code>{envVar}</code> in this node's environment instead if you prefer. It takes precedence over this field, and pins the backend to Self-hosted relay.",
+					{ envVar: "RYU_WEBHOOK_INGRESS_URL" },
+					{
+						code: (children) => <code>{children}</code>,
+						em: (children) => <em>{children}</em>,
+					}
+				)}
 			</p>
 		</SettingsItem>
 	);

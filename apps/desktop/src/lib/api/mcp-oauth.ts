@@ -63,6 +63,8 @@ export interface McpOAuthFlow {
 	accessLevel: ConnectionAccessLevel;
 	callbackMode: "loopback" | "hosted";
 	error: string | null;
+	/** Why a `failed` flow failed (`expired`, `too_many_attempts`, …); null on older nodes. */
+	errorCode: string | null;
 	expiresAt: number;
 	flowId: string;
 	pluginId: string;
@@ -215,6 +217,7 @@ interface FlowWire {
 	access_level?: unknown;
 	callback_mode: "loopback" | "hosted";
 	error?: string | null;
+	error_code?: string | null;
 	expires_at: number;
 	flow_id: string;
 	plugin_id: string;
@@ -229,6 +232,7 @@ const flowWireCodec = z
 		access_level: gatewayJsonValueSchema.optional(),
 		callback_mode: z.union([z.literal("loopback"), z.literal("hosted")]),
 		error: z.union([z.string(), z.null()]).optional(),
+		error_code: z.union([z.string(), z.null()]).optional(),
 		expires_at: z.number(),
 		flow_id: z.string(),
 		plugin_id: z.string(),
@@ -282,6 +286,7 @@ function mapFlow(response: FlowWire): McpOAuthFlow {
 		accessLevel: normalizeConnectionAccessLevel(response.access_level),
 		callbackMode: response.callback_mode,
 		error: response.error ?? null,
+		errorCode: response.error_code ?? null,
 		expiresAt: response.expires_at,
 		flowId: response.flow_id,
 		pluginId: response.plugin_id,

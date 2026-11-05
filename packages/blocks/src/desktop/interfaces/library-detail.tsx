@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -267,7 +268,7 @@ export function BookDetail({
 								Finished
 							</dt>
 							<dd className="flex items-center gap-2.5 font-semibold text-foreground text-sm tabular-nums">
-								{percent}%
+								{formatPercent(percent / 100)}
 								<ProgressTrack
 									className="w-full max-w-20 flex-1"
 									value={percent}

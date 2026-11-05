@@ -1,3 +1,9 @@
+"use client";
+
+// A client component: it reads the locale through useRichLiteralMessages, and
+// the server-rendered public agent page (apps/web public-agent-page.tsx)
+// renders it directly.
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "../lib/utils.ts";
 
 /**
@@ -34,6 +40,7 @@ export function PoweredByRyuBadge({
 	placement = "inline",
 	source,
 }: PoweredByRyuBadgeProps) {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<a
 			aria-label="Powered by Ryu — make your own"
@@ -57,7 +64,15 @@ export function PoweredByRyuBadge({
 				<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" fill="#facc15" />
 			</svg>
 			<span>
-				Powered by <strong className="font-bold">Ryu</strong>
+				{tlRich(
+					"Powered by <strong>Ryu</strong>",
+					{},
+					{
+						strong: (children) => (
+							<strong className="font-bold">{children}</strong>
+						),
+					}
+				)}
 			</span>
 		</a>
 	);

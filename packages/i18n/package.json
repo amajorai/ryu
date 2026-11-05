@@ -8,6 +8,7 @@
     "./account-locale": "./src/account-locale.ts",
     "./catalog-locale": "./src/catalog-locale.ts",
     "./core": "./src/core.ts",
+    "./error-text": "./src/error-text.ts",
     "./format-intl": "./src/format-intl.ts",
     "./format-percent": "./src/format-percent.ts",
     "./lite": "./src/lite.ts",

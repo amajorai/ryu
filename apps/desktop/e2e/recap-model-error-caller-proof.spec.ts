@@ -98,7 +98,7 @@ test("ChatPage keeps a real Recap model failure local and persists the explicit 
 		};
 	});
 	const hidePanel = page
-		.getByRole("button", { name: "Hide right panel", exact: true })
+		.getByRole("button", { name: "Hide side panel", exact: true })
 		.first();
 	if (await hidePanel.isVisible()) {
 		await hidePanel.click();
@@ -142,7 +142,7 @@ test("ChatPage keeps a real Recap model failure local and persists the explicit 
 			`${JSON.stringify({ request: bodies[index], history }, null, 2)}\n`
 		);
 		const hideRight = page
-			.getByRole("button", { name: "Hide right panel", exact: true })
+			.getByRole("button", { name: "Hide side panel", exact: true })
 			.first();
 		if (await hideRight.isVisible()) {
 			await hideRight.click();

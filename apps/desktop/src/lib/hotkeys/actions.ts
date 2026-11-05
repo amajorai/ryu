@@ -137,7 +137,7 @@ export const DESKTOP_HOTKEYS: HotkeyRegistry = [
 	},
 	{
 		id: "workbench.move-tab-to-right",
-		label: "Move Tab to Right Pane",
+		label: "Move Tab to Side Pane",
 		category: "Layout",
 		defaultBinding: null,
 	},
@@ -229,11 +229,11 @@ export const DESKTOP_HOTKEYS: HotkeyRegistry = [
 	},
 	{
 		id: "chat.toggle-right-panel",
-		label: "Toggle Right Panel",
+		label: "Toggle Side Panel",
 		category: "Chat",
 		defaultBinding: "Mod+Alt+Right",
 		description:
-			"Show or hide the focused chat's right dock (files, context, subagents…). Outside a chat, shows or hides the Right pane when it has tabs.",
+			"Show or hide the focused chat's side dock (files, context, subagents…). Outside a chat, shows or hides the side pane when it has tabs.",
 	},
 	{
 		id: "chat.voice-mode",

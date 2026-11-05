@@ -2,6 +2,7 @@ import { useMediaQuery } from "@ryu/ui/hooks/use-mobile.ts";
 import type { UIMessage } from "ai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentAvailability } from "../agent-availability.tsx";
+import { useChatErrorDisplay } from "./agent-chat-draft-error.ts";
 import {
 	appendDraftInsertion,
 	mergeDraftSeedWithInsertions,
@@ -127,7 +128,8 @@ export function useAgentChatDraft({
 	// groupMessagesIntoTurns / the TOC continuously, and re-arms the pinned-message
 	// measuring effect every pass (the escalation path to React error #185).
 	const voiceMessages = voiceMode?.active ? voiceMode.messages : undefined;
-	const errorMessage = error?.message;
+	// A network failure shows the translated sentence, not the browser's English.
+	const errorDisplay = useChatErrorDisplay(error);
 	// What the transcript shows after the conversation's own messages: the live
 	// call's turns, then the failed request. One function so the live transcript
 	// view (`liveMessages`) extends its newer messages exactly the same way.
@@ -137,7 +139,7 @@ export function useAgentChatDraft({
 				voiceMessages && voiceMessages.length > 0
 					? [...base, ...voiceMessages]
 					: base;
-			return errorMessage === undefined
+			return errorDisplay === undefined
 				? withVoice
 				: [
 						...withVoice,
@@ -148,13 +150,16 @@ export function useAgentChatDraft({
 								{
 									type: "error",
 									title: "Request failed",
-									message: errorMessage,
+									message: errorDisplay.message,
+									...(errorDisplay.i18n === undefined
+										? {}
+										: { i18n: errorDisplay.i18n }),
 								},
 							],
 						} satisfies RenderedMessage,
 					];
 		},
-		[errorMessage, voiceMessages]
+		[errorDisplay, voiceMessages]
 	);
 	const transcriptMessages = useMemo(
 		() =>

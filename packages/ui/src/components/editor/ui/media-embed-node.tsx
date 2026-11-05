@@ -76,7 +76,7 @@ export const MediaEmbedElement = withHOC(
 								isYoutube ? (
 									<div>
 										<LiteYouTubeEmbed
-											announce={tl("Watch")}
+											announce={tl("Watch video")}
 											id={requireMediaEmbedId(embed?.id)}
 											title={tl("YouTube video")}
 											wrapperClass={cn(

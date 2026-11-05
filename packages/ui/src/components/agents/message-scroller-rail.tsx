@@ -116,7 +116,7 @@ export function CollapsedMessageRail({
 				aria-label={tl("Browse {count} messages", {
 					count: String(items.length),
 				})}
-				className="absolute top-1/2 left-1 z-20 flex h-[5.5rem] w-7 -translate-y-1/2 flex-col items-center justify-center gap-1.5 rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+				className="absolute start-1 top-1/2 z-20 flex h-[5.5rem] w-7 -translate-y-1/2 flex-col items-center justify-center gap-1.5 rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 				data-active-message-id={activeId}
 				data-count={items.length}
 				data-slot="message-navigation-collapsed-rail"
@@ -137,7 +137,7 @@ export function CollapsedMessageRail({
 				align="center"
 				className="w-[min(22rem,calc(100vw-2rem))] gap-0 overflow-hidden p-0"
 				data-message-navigation-popover="true"
-				side="right"
+				side="inline-end"
 				sideOffset={10}
 			>
 				<div className="flex items-center justify-between border-border border-b px-3 py-2.5">

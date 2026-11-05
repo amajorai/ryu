@@ -4,7 +4,7 @@ import {
 	RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import {
 	AlertDialog,
@@ -49,6 +49,7 @@ import { useVaultPageState } from "./VaultPage.state.ts";
 
 export default function VaultPage() {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const {
 		activeEnvironment,
 		availableScopes,
@@ -122,13 +123,13 @@ export default function VaultPage() {
 							</Button>
 						</>
 					}
-					subtitle={
-						<>
-							Encrypted secrets that MCP calls use through{" "}
-							<code className="font-mono">secret:NAME</code>, never through the
-							chat.
-						</>
-					}
+					subtitle={tlRich(
+						"Encrypted secrets that MCP calls use through <code>{reference}</code>, never through the chat.",
+						{ reference: "secret:NAME" },
+						{
+							code: (children) => <code className="font-mono">{children}</code>,
+						}
+					)}
 					title="Vault"
 				/>
 

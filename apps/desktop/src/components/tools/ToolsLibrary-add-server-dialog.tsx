@@ -1,6 +1,6 @@
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -44,6 +44,7 @@ export function AddServerDialog({
 	) => Promise<CreateMcpServerResult>;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const transportItems = mcpTransportItems(tl);
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
@@ -202,9 +203,13 @@ export function AddServerDialog({
 				<DialogHeader>
 					<DialogTitle>Add MCP server</DialogTitle>
 					<DialogDescription>
-						Register a new MCP server. The entry is saved to{" "}
-						<code className="text-xs">~/.ryu/state/mcp.json</code> and takes
-						effect immediately, no restart required.
+						{tlRich(
+							"Register a new MCP server. The entry is saved to <code>{path}</code> and takes effect immediately, no restart required.",
+							{ path: "~/.ryu/state/mcp.json" },
+							{
+								code: (children) => <code className="text-xs">{children}</code>,
+							}
+						)}
 					</DialogDescription>
 				</DialogHeader>
 

@@ -21,6 +21,7 @@ import {
 	STORE_LOAD_ERROR_SENTENCE,
 	StoreErrorDetails,
 } from "@ryu/blocks/desktop/store-error-details.tsx";
+import { errorText } from "@ryu/i18n/error-text";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -155,7 +156,7 @@ function ListingReviews({
 						...prev,
 						loading: false,
 						loadingMore: false,
-						error: e instanceof Error ? e.message : "Could not load reviews.",
+						error: errorText(e, "Could not load reviews."),
 					}));
 				});
 		},
@@ -413,9 +414,7 @@ function WriteReviewForm({
 			// The server's message is the useful one here — it distinguishes "verified
 			// purchasers only" from a transport failure, and only it knows which.
 			.catch((e) => {
-				setError(
-					e instanceof Error ? e.message : "Could not save your review."
-				);
+				setError(errorText(e, "Could not save your review."));
 			})
 			.finally(() => setBusy(false));
 	};
@@ -427,9 +426,7 @@ function WriteReviewForm({
 			.remove({ id, kind })
 			.then(() => onSaved())
 			.catch((e) => {
-				setError(
-					e instanceof Error ? e.message : "Could not delete your review."
-				);
+				setError(errorText(e, "Could not delete your review."));
 			})
 			.finally(() => setBusy(false));
 	};

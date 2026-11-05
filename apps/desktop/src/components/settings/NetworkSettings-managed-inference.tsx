@@ -3,6 +3,7 @@
 // Managed inference card for a self-hosted node (split out of
 // NetworkSettings.tsx, which re-exports `ManagedInferenceSettings`).
 
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { useEffect, useState } from "react";
@@ -55,6 +56,7 @@ export function ManagedInferenceSettings() {
 }
 
 function ManagedInferenceSettingsForNode({ target }: { target: ApiTarget }) {
+	const tlRich = useRichLiteralMessages();
 	const active = useNetworkOwner();
 	const [readError, setReadError] = useState<string | null>(null);
 	const [readAttempt, setReadAttempt] = useState(0);
@@ -197,14 +199,11 @@ function ManagedInferenceSettingsForNode({ target }: { target: ApiTarget }) {
 							The token’s issuing organization
 						</span>
 					}
-					description={
-						<>
-							The saved <code>rgw_</code> token stays bound to the organization
-							that issued it. Switching the active organization in Ryu does not
-							retarget this node. To move its billing, replace the token with
-							one from the other organization&apos;s Gateway keys page.
-						</>
-					}
+					description={tlRich(
+						"The saved <code>{tokenPrefix}</code> token stays bound to the organization that issued it. Switching the active organization in Ryu does not retarget this node. To move its billing, replace the token with one from the other organization's Gateway keys page.",
+						{ tokenPrefix: "rgw_" },
+						{ code: (children) => <code>{children}</code> }
+					)}
 					title="Node billing owner"
 				/>
 				<SettingsItem title="Fleet URL">

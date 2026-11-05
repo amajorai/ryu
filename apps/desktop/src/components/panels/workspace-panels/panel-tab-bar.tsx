@@ -131,6 +131,10 @@ interface PanelTabBarProps {
 	/** Pin/unpin a project-shareable tab. Omitted when the dock has no project folder. */
 	onTogglePin?: (uid: string) => void;
 	otherPanelIcon: typeof Cancel01Icon;
+	/** Extra classes for `otherPanelIcon` (DIRECTIONAL_ICON_CLASS for the arrow
+	 *  toward the inline-end side panel, so it mirrors under RTL). */
+	otherPanelIconClassName?: string;
+	/** The whole English "Move to …" menu item text, translated here. */
 	otherPanelLabel: string;
 	/** Main-tab PAGES offered under a "Pages" submenu of "+". Separate from
 	 *  `addTypes` because that list also feeds the launchpad's cards, where a long
@@ -152,6 +156,7 @@ export function PanelTabBar({
 	onTogglePin,
 	pinDisabledReason,
 	otherPanelIcon,
+	otherPanelIconClassName,
 	otherPanelLabel,
 	onAdd,
 	addTypes,
@@ -291,8 +296,11 @@ export function PanelTabBar({
 								<>
 									<ContextMenuSeparator />
 									<ContextMenuItem onClick={() => onMoveToOtherPanel(tab.uid)}>
-										<HugeiconsIcon className="size-4" icon={otherPanelIcon} />
-										{tl("Move to {otherPanelLabel}", { otherPanelLabel })}
+										<HugeiconsIcon
+											className={cn("size-4", otherPanelIconClassName)}
+											icon={otherPanelIcon}
+										/>
+										{tl(otherPanelLabel)}
 									</ContextMenuItem>
 								</>
 							)}

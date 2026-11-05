@@ -1,5 +1,6 @@
 import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	type TwoFactorStep,
 	totpSetupKey,
@@ -58,6 +59,7 @@ export function TwoFactorDialog({
 	isEnabled,
 	onStatusChange,
 }: TwoFactorDialogProps) {
+	const tlRich = useRichLiteralMessages();
 	const flow = useTwoFactorDialog({
 		actions: twoFactorActions,
 		isEnabled,
@@ -201,8 +203,15 @@ export function TwoFactorDialog({
 											{flow.showManualSetup && (
 												<div className="space-y-3 rounded-lg border border-border p-3">
 													<p className="text-muted-foreground text-xs">
-														In your authenticator app, choose{" "}
-														<strong>Enter setup key</strong> and paste this key.
+														{tlRich(
+															"In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.",
+															{},
+															{
+																strong: (children) => (
+																	<strong>{children}</strong>
+																),
+															}
+														)}
 													</p>
 													<div className="flex items-center gap-2">
 														<Input

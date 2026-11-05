@@ -17,6 +17,7 @@ import {
 	resolveFocusIndex,
 } from "./focus-model.ts";
 import { FOCUS_STRIP_SELECTOR, FocusStrip } from "./focus-strip.tsx";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 
@@ -164,7 +165,14 @@ export function FocusInterface({
 			if (event.defaultPrevented || event.isComposing) {
 				return;
 			}
-			const action = focusKeyAction(event);
+			// ArrowLeft steps forward under dir="rtl", like the strip above.
+			const action = focusKeyAction({
+				altKey: event.altKey,
+				ctrlKey: event.ctrlKey,
+				key: logicalArrowKey(event.key, rootRef.current),
+				metaKey: event.metaKey,
+				shiftKey: event.shiftKey,
+			});
 			if (!action) {
 				return;
 			}

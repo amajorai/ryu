@@ -7,7 +7,7 @@ use url::Url;
 const LOCAL_OWNER: &str = "local";
 const DEFAULT_PROFILE: &str = "personal";
 
-pub use broker::{CallbackMode, ConnectStarted, FlowState, FlowView};
+pub use broker::{CallbackMode, ConnectStarted, FlowErrorCode, FlowState, FlowView};
 
 #[derive(Debug, Clone)]
 pub struct ConnectSpec {

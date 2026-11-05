@@ -27,6 +27,10 @@ import {
 import { deriveTodoProgress } from "@/src/lib/todo-progress.ts";
 import { deriveBlocker } from "./interface-detail-blocker.ts";
 import {
+	activityMessage,
+	toolRepeatsKindVerb,
+} from "./interface-detail-messages.ts";
+import {
 	basename,
 	clamp,
 	DETAIL_MAX,
@@ -94,38 +98,16 @@ export function toolTarget(input: unknown): string | null {
 	return null;
 }
 
-const KIND_VERBS: Record<InterfaceActivityKind, string> = {
-	answer: "Writing",
-	ask: "Asking",
-	delegate: "Delegating",
-	edit: "Editing",
-	plan: "Planning",
-	read: "Reading",
-	run: "Running",
-	search: "Searching",
-	think: "Thinking",
-	tool: "Using",
-	web: "Fetching",
-	write: "Writing",
-};
-
 /** "Editing snapshot.ts", "Running bun test", "Using create pull request". */
 export function activityLabel(
 	kind: InterfaceActivityKind,
 	tool: string | null,
 	target: string | null
 ): string {
-	const verb = KIND_VERBS[kind];
-	if (target) {
-		return clamp(`${verb} ${target}`, LABEL_MAX);
+	if (!target && kind === "tool" && tool) {
+		return clamp(activityMessage(kind, toolDisplayName(tool)), LABEL_MAX);
 	}
-	if (kind === "answer") {
-		return "Writing the answer";
-	}
-	if (kind === "tool" && tool) {
-		return clamp(`${verb} ${toolDisplayName(tool)}`, LABEL_MAX);
-	}
-	return verb;
+	return clamp(activityMessage(kind, target), LABEL_MAX);
 }
 
 const LEADING_VERB = /^[A-Z][a-z]+ing\b/;
@@ -159,7 +141,7 @@ export function toolActivityLabel(
 	// A known target is the most useful word: "Running bun test".
 	const target = toolTarget(part.input);
 	if (target) {
-		return clamp(`${KIND_VERBS[kind]} ${target}`, LABEL_MAX);
+		return clamp(activityMessage(kind, target), LABEL_MAX);
 	}
 	const title = registryTitle(part);
 	if (title && LEADING_VERB.test(title)) {
@@ -167,18 +149,17 @@ export function toolActivityLabel(
 	}
 	const toolName = tool ? toolDisplayName(tool) : "";
 	if (title && title.toLowerCase() !== toolName.toLowerCase()) {
-		return clamp(`${KIND_VERBS[kind]} ${title}`, LABEL_MAX);
+		return clamp(activityMessage(kind, title), LABEL_MAX);
 	}
 	if (!tool) {
 		return activityLabel(kind, null, null);
 	}
-	const verb = KIND_VERBS[kind];
 	const display = formatToolDisplayName(tool);
 	// "Edit" while its input streams reads "Editing", not "Editing Edit".
-	const stem = display.toLowerCase().replace(/e$/, "");
-	return stem && verb.toLowerCase().startsWith(stem)
-		? verb
-		: clamp(`${verb} ${display}`, LABEL_MAX);
+	return clamp(
+		activityMessage(kind, toolRepeatsKindVerb(kind, display) ? null : display),
+		LABEL_MAX
+	);
 }
 
 function lastUserIndex(messages: readonly DetailMessage[]): number {

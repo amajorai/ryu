@@ -2,7 +2,11 @@
 
 import { InternetIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useRichLiteralMessages } from "@ryu/i18n/react";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useRichLiteralMessages,
+} from "@ryu/i18n/react";
 import {
 	DropdownMenuContent,
 	DropdownMenuGroup,
@@ -200,12 +204,12 @@ function ChannelItems({
 }
 
 /** What the "Desktop App" header says after the section name. */
-function sectionNote(state: DownloadState): string {
+export function sectionNote(state: DownloadState, tl: LiteralMessage): string {
 	if (state.kind === "ready") {
 		return state.servedVersion;
 	}
 	if (state.kind === "building") {
-		return `${state.version} building`;
+		return tl("{version} is still building", { version: state.version });
 	}
 	// "unavailable" and "unknown" are already spelled out on the row itself;
 	// repeating them in the header would just be noise.
@@ -230,6 +234,7 @@ export function DownloadDropdownContent({
 	siteOrigin?: string;
 }) {
 	const tlRich = useRichLiteralMessages();
+	const tl = useLiteralMessages();
 	const [os, setOs] = useState<DownloadOS>("macos");
 	const [arch, setArch] = useState<DownloadArch>("intel");
 	const [allReleases, setAllReleases] = useState<Release[]>([]);
@@ -277,7 +282,7 @@ export function DownloadDropdownContent({
 	// of the release carrying the binary (never `releases[0]`'s — during a release
 	// window those differ), or why there is nothing to hand over yet.
 	const primary = resolveDownloadState(releases, os, arch);
-	const primaryNote = sectionNote(primary);
+	const primaryNote = sectionNote(primary, tl);
 
 	return (
 		<DropdownMenuContent

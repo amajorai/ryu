@@ -77,7 +77,14 @@ pub async fn confirm_flow(
         Err(response) => return response,
     };
     if body.code.is_empty() || body.code.len() > MAX_CODE_LEN {
-        return error(StatusCode::BAD_REQUEST, "confirmation code is required");
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "confirmation code is required",
+                "code": crate::mcp_oauth::FlowErrorCode::CodeMismatch.as_str(),
+            })),
+        )
+            .into_response();
     }
     let manager = crate::mcp_oauth::global();
     match manager.flow(&owner_user_id, &flow_id).await {
@@ -88,12 +95,24 @@ pub async fn confirm_flow(
         .confirm_hosted_flow(&owner_user_id, &flow_id, &body.code)
         .await
     {
-        return error(StatusCode::BAD_REQUEST, message);
+        return coded_refusal(&message.to_string());
     }
     match manager.flow(&owner_user_id, &flow_id).await {
         Ok(flow) => (StatusCode::OK, Json(json!(flow))).into_response(),
         Err(message) => error(StatusCode::NOT_FOUND, message),
     }
+}
+
+/// A refused confirmation: the English `error` older desktops show, plus a
+/// stable `code` (`code_mismatch`, `too_many_attempts`, `expired`, …) that
+/// newer clients word in the user's language.
+fn coded_refusal(message: &str) -> Response {
+    let code = crate::mcp_oauth::FlowErrorCode::classify(message);
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({ "error": message, "code": code.as_str() })),
+    )
+        .into_response()
 }
 
 #[cfg(test)]
@@ -124,6 +143,20 @@ mod tests {
     fn the_confirmation_copy_follows_the_locale_direction() {
         let arabic = confirmation_page_copy_for("ar");
         assert_eq!((arabic.lang.as_str(), arabic.dir.as_str()), ("ar", "rtl"));
+    }
+
+    #[tokio::test]
+    async fn a_refused_confirmation_carries_its_code() {
+        let response = coded_refusal("Too many incorrect confirmation codes");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body,
+            json!({"error": "Too many incorrect confirmation codes", "code": "too_many_attempts"})
+        );
     }
 
     #[test]

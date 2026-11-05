@@ -101,7 +101,7 @@ const toolbarButtonVariants = cva(
 
 const dropdownArrowVariants = cva(
 	cn(
-		"inline-flex items-center justify-center rounded-r-md font-medium text-foreground text-sm transition-colors disabled:pointer-events-none disabled:opacity-50"
+		"inline-flex items-center justify-center rounded-e-md font-medium text-foreground text-sm transition-colors disabled:pointer-events-none disabled:opacity-50"
 	),
 	{
 		defaultVariants: {

@@ -37,7 +37,7 @@ export interface ProductsIndexRow {
 	readonly href: string;
 	readonly name: string;
 	/**
-	 * The first sentence of the published standalone price; only set when the
+	 * The published standalone price's lead message; only set when the
 	 * product page states that price (`productBaseFacts`, which checks
 	 * `hasPublishedPricing`).
 	 */

@@ -18,6 +18,7 @@ import {
 } from "@/src/lib/api/usage.ts";
 import { formatMeter, formatReset, windowKey } from "./usage-bar-helpers.tsx";
 import { MeterTooltipRow, WindowTooltipRow } from "./usage-bar-meters.tsx";
+import { usagePercentText } from "./usage-percent.ts";
 
 /**
  * The agent picker's per-row usage indicator: the tightest possible read of an
@@ -85,7 +86,7 @@ export const AgentUsageBadge = memo(function AgentUsageBadge({
 					/>
 				}
 			>
-				{worst ? `${Math.round(used)}%` : formatMeter(usage.meters[0])}
+				{worst ? usagePercentText(used) : formatMeter(usage.meters[0])}
 			</TooltipTrigger>
 			<TooltipContent>
 				<div className="flex flex-col gap-0.5 text-xs">
@@ -235,7 +236,7 @@ export const ProviderUsageBadge = memo(function ProviderUsageBadge({
 					/>
 				}
 			>
-				{worst ? `${Math.round(used)}%` : "—"}
+				{worst ? usagePercentText(used) : "—"}
 			</TooltipTrigger>
 			<TooltipContent>
 				<div className="flex flex-col gap-0.5 text-xs">
@@ -296,7 +297,7 @@ export const AccountUsageBadge = memo(function AccountUsageBadge({
 					/>
 				}
 			>
-				{Math.round(used)}%
+				{usagePercentText(used)}
 			</TooltipTrigger>
 			<TooltipContent>
 				<div className="flex flex-col gap-0.5 text-xs">
@@ -419,7 +420,7 @@ export const ModelUsageBadge = memo(function ModelUsageBadge({
 					/>
 				}
 			>
-				{Math.round(used)}%
+				{usagePercentText(used)}
 			</TooltipTrigger>
 			<TooltipContent>
 				<div className="flex flex-col gap-0.5 text-xs">

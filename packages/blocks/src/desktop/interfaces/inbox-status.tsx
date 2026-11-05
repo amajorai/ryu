@@ -1,4 +1,5 @@
 import { translate as tr } from "@ryu/i18n/lite";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import {
@@ -68,6 +69,7 @@ export function InboxStatusIcon({
 				"size-4 shrink-0",
 				unassigned ? "text-muted-foreground" : meta.tone,
 				animate && status === "working" && "motion-safe:animate-spin",
+				Icon === Reply && DIRECTIONAL_ICON_CLASS,
 				className
 			)}
 		/>

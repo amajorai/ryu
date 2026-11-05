@@ -54,7 +54,9 @@ function scoreBar(value: number) {
 					style={gatewayScoreVariables1}
 				/>
 			</div>
-			<span className="w-10 text-end text-xs tabular-nums">{pct}%</span>
+			<span className="w-10 text-end text-xs tabular-nums">
+				{formatPercent(pct / 100)}
+			</span>
 		</div>
 	);
 }

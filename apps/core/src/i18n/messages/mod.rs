@@ -6,7 +6,7 @@
 //! [`super::Message::new`] reproduces. `tools/generate-core-i18n.mjs --check`
 //! fails when a template breaks that shape or the extractor would skip it.
 //! Topic-specific templates live in the sibling modules (`approvals`, `acp`,
-//! `chat_turns`, `cloud_tasks`, `consent`, `notifications`, `context`, `import`, `providers`, `routing`, `update`,
+//! `chat_turns`, `cloud_tasks`, `consent`, `notifications`, `context`, `gateway_failures`, `import`, `providers`, `routing`, `update`,
 //! `voice`) and are re-exported here.
 //! Every message is a whole sentence; never assemble one from fragments.
 #![allow(clippy::useless_format)]
@@ -19,6 +19,7 @@ mod chat_turns;
 mod cloud_tasks;
 mod consent;
 mod context;
+mod gateway_failures;
 mod import;
 mod notifications;
 mod providers;
@@ -39,6 +40,8 @@ pub use cloud_tasks::*;
 pub use consent::*;
 #[allow(unused_imports)]
 pub use context::*;
+#[allow(unused_imports)]
+pub use gateway_failures::*;
 #[allow(unused_imports)]
 pub use import::*;
 #[allow(unused_imports)]
@@ -316,6 +319,7 @@ pub(super) fn all() -> impl Iterator<Item = &'static Template> {
         cloud_tasks::ALL,
         consent::ALL,
         context::ALL,
+        gateway_failures::ALL,
         import::ALL,
         notifications::ALL,
         providers::ALL,

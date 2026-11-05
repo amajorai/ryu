@@ -1,4 +1,5 @@
 import { Badge } from "@ryu/ui/components/badge.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ThreadStatus } from "@ryuhq/protocol/interfaces";
 import {
@@ -71,6 +72,7 @@ export function DeskStatusIcon({
 				"size-3.5 shrink-0",
 				meta.tone,
 				live && status === "working" && "motion-safe:animate-spin",
+				Icon === Reply && DIRECTIONAL_ICON_CLASS,
 				className
 			)}
 		/>
@@ -143,7 +145,10 @@ export function DeskStatusPill({
 			data-status={status}
 			variant="outline"
 		>
-			<Icon aria-hidden="true" />
+			<Icon
+				aria-hidden="true"
+				className={cn(Icon === Reply && DIRECTIONAL_ICON_CLASS)}
+			/>
 			<span>{threadStatusLabel(status)}</span>
 		</Badge>
 	);

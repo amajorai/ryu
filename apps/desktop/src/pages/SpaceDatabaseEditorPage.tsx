@@ -1,7 +1,7 @@
 import { Add01Icon, LibraryIcon, PlayIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DataGrid } from "@ryu/ui/components/data-grid/data-grid.tsx";
 import {
@@ -66,6 +66,7 @@ export default function SpaceDatabaseEditorPage({
 	databaseId: string;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const {
 		activeViewId,
 		collabStatus,
@@ -330,8 +331,11 @@ export default function SpaceDatabaseEditorPage({
 					<DialogHeader>
 						<DialogTitle>Query database</DialogTitle>
 						<DialogDescription>
-							Run read-only SQL against this database. Use the table name{" "}
-							<code>data</code>; results stop at 500 rows or 1 MB.
+							{tlRich(
+								"Run read-only SQL against this database. Use the table name <code>{table}</code>; results stop at 500 rows or 1 MB.",
+								{ table: "data" },
+								{ code: (children) => <code>{children}</code> }
+							)}
 						</DialogDescription>
 					</DialogHeader>
 					<label className="grid gap-2 text-sm" htmlFor="space-database-query">

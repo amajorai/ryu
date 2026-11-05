@@ -54,7 +54,7 @@ pub(crate) async fn connect_with_fallback(
     stream_hop: StreamHop,
     // Author-owned host conversation for the primary Gateway attempt only.
     host_conversation_id: Option<&str>,
-) -> Result<reqwest::Response, String> {
+) -> Result<reqwest::Response, acp::AcpFailure> {
     match connect_openai(
         messages,
         primary_base_url,
@@ -149,9 +149,7 @@ pub(crate) async fn connect_with_fallback(
                         fallback_err = %fallback_err,
                         "ryu-agent: fallback recovery also failed; returning error to client"
                     );
-                    Err(format!(
-                        "Primary provider failed ({primary_err}); fallback also failed ({fallback_err})"
-                    ))
+                    Err(fallback_failure(&primary_err, &fallback_err))
                 }
             }
         }

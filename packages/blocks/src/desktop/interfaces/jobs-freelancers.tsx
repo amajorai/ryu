@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -321,7 +322,9 @@ export function FreelancerProfilePane({
 						hint="Delivered jobs (in review or closed) out of every job that was delivered or went on hold. Reads New until two jobs have settled."
 						label="Job success"
 						value={
-							profile.successRate === null ? null : `${profile.successRate}%`
+							profile.successRate === null
+								? null
+								: formatPercent(profile.successRate / 100)
 						}
 					/>
 					<Stat

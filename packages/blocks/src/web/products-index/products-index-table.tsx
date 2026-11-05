@@ -58,7 +58,7 @@ function PricingCell({ row }: { row: ProductsIndexRow }) {
 	}
 	return (
 		<Link
-			aria-label={tl("See pricing for {name}", { name: row.name })}
+			aria-label={tl("See pricing for {nameLabel}", { nameLabel: row.name })}
 			className={textLinkClass}
 			href={nextLinkHref("/pricing")}
 		>
@@ -78,8 +78,8 @@ function DocsCell({ row }: { row: ProductsIndexRow }) {
 	}
 	return (
 		<a
-			aria-label={tl("Docs for {name} (opens in a new tab)", {
-				name: row.name,
+			aria-label={tl("Docs for {nameLabel} (opens in a new tab)", {
+				nameLabel: row.name,
 			})}
 			className={cn(textLinkClass, "whitespace-nowrap")}
 			href={row.docsHref}

@@ -4,7 +4,7 @@ import {
 	LOGIN_APPROVAL_SURFACE_LABELS,
 	type LoginApprovalRequest,
 } from "@ryu/auth/lib/login-approval-contract";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Dialog,
@@ -138,6 +138,7 @@ export function LoginApprovalWait({
 	userCode,
 	verificationUriComplete,
 }: LoginApprovalWaitProps) {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<Dialog onOpenChange={(nextOpen) => !nextOpen && onCancel()} open={open}>
 			<DialogContent
@@ -176,8 +177,11 @@ export function LoginApprovalWait({
 								/>
 							</div>
 							<p className="max-w-xs text-muted-foreground text-xs">
-								Open Ryu Mobile, choose <strong>Scan sign-in QR</strong>, then
-								review and approve this request.
+								{tlRich(
+									"Open Ryu Mobile, choose <strong>Scan sign-in QR</strong>, then review and approve this request.",
+									{},
+									{ strong: (children) => <strong>{children}</strong> }
+								)}
 							</p>
 						</div>
 					) : null}

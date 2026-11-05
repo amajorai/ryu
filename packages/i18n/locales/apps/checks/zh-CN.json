@@ -364,7 +364,7 @@
   "{count, plural, one {{countText} planned case} other {{countText} planned cases}} will produce evidence, a coverage score, and failure bundles.": "{count, plural, other {{countText} 个计划用例}}将生成证据、覆盖率评分和失败包。",
   "{count, plural, one {{countText} run} other {{countText} runs}} kept for {name}; verdicts are never overwritten.": "已为 {name} 保留 {count, plural, other {{countText} 次运行}}；判定结果永远不会被覆盖。",
   "{count, plural, one {{length} context file attached} other {{length} context files attached}}": "{count, plural, other {已附加 {length} 个上下文文件}}",
-  "{coverage}% signal coverage": "{coverage}% 信号覆盖率",
+  "{coverage} signal coverage": "信号覆盖率 {coverage}",
   "{durationMs} ms · {evidenceLevel}": "{durationMs} 毫秒 · {evidenceLevel}",
   "{feature} · Updated {updated}": "{feature} · 更新于 {updated}",
   "{feature} · {length} steps": "{feature} · {length} 个步骤",

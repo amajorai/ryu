@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { activeLocale, dateFormatter, translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
@@ -83,7 +84,7 @@ function HappinessMeter({
 }) {
 	return (
 		<span className="inline-flex items-center gap-2">
-			{value}%
+			{formatPercent(value / 100)}
 			<span
 				aria-label="Happiness"
 				aria-valuemax={100}

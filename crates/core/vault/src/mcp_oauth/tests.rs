@@ -14,6 +14,7 @@ pub(super) fn pending_flow(flow_id: &str) -> PendingFlow {
             status: FlowState::Pending,
             expires_at: i64::MAX,
             error: None,
+            error_code: None,
         },
         authorization_url: "https://auth.example/authorize".to_owned(),
         owner_user_id: "user".to_owned(),

@@ -1,5 +1,6 @@
 import { SecurityCheckIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { errorText } from "@ryu/i18n/error-text";
 import { activeLocale, formatRelativeTime } from "@ryu/i18n/lite";
 import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
@@ -13,6 +14,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { settingsApi } from "../utils/api-client.ts";
+import {
+	supportScopeList,
+	supportSessionEndLabel,
+} from "./settings-protocol-labels.ts";
 import {
 	SETTINGS_SECTION_HEADER_CLASS,
 	SettingsGroup,
@@ -85,8 +90,7 @@ export function SupportAccessTab() {
 		},
 		onError: (e) =>
 			sileo.error({
-				title:
-					e instanceof Error ? e.message : "Failed to grant support access",
+				title: errorText(e, "Failed to grant support access"),
 			}),
 	});
 
@@ -151,7 +155,7 @@ export function SupportAccessTab() {
 							</div>
 							<p className="text-detail text-muted-foreground">
 								{tl("Scopes: {scopeList}. Expires {relativeTime}.", {
-									scopeList: grant.scopes.join(", ") || tl("none"),
+									scopeList: supportScopeList(tl, grant.scopes, locale),
 									relativeTime: formatRelativeTime(
 										locale,
 										new Date(grant.expiresAt)
@@ -250,7 +254,7 @@ export function SupportAccessTab() {
 									</ItemTitle>
 									{entry.endedAt ? (
 										<span className="text-detail text-muted-foreground">
-											{entry.endedReason ?? "ended"}
+											{supportSessionEndLabel(tl, entry.endedReason)}
 										</span>
 									) : (
 										<Badge variant="secondary">active</Badge>
@@ -260,7 +264,7 @@ export function SupportAccessTab() {
 									<p>{entry.reason}</p>
 									<p>
 										{tl("Scopes: {scopeList} · {relativeTime}", {
-											scopeList: entry.scopes.join(", ") || tl("none"),
+											scopeList: supportScopeList(tl, entry.scopes, locale),
 											relativeTime: formatRelativeTime(
 												locale,
 												new Date(entry.startedAt)

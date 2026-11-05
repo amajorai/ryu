@@ -58,7 +58,7 @@
   "active": "当前",
   "campaign history is still within the direct-reasoning threshold": "活动历史仍在直接推理阈值之内",
   "research engine returned no campaign history document": "研究引擎未返回营销活动历史文档",
-  "total": "个",
+  "total": "总计",
   "unknown campaign: {campaignId}": "未知活动：{campaignId}",
   "{store} holds sealed data but no sealing key was delivered; writes are refused": "{store} 包含已封存的数据，但未提供封存密钥；已拒绝写入",
   "{store} was sealed under a different key; writes are refused until that key is restored": "{store} 已使用其他密钥封存；在恢复该密钥前将拒绝写入",

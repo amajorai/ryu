@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PreviewRail } from "../motion/preview-rail.tsx";
 import { MessageScroller } from "./message-scroller.tsx";
+import { CollapsedMessageRail } from "./message-scroller-rail.tsx";
 
 // The transcript's turn-navigation rail and its hover previews sit on the
 // inline start and open toward the inline end, so under a right-to-left
@@ -41,6 +42,24 @@ describe("message rail under right-to-left", () => {
 			expect.arrayContaining(["end-3", "start-8"])
 		);
 		expect(previews).not.toMatch(PHYSICAL_INLINE);
+	});
+
+	test("the collapsed rail stays on the inline start like the expanded one", () => {
+		const html = renderToStaticMarkup(
+			<div dir="rtl">
+				<CollapsedMessageRail
+					activeId="a"
+					items={[
+						{ id: "a", label: "First" },
+						{ id: "b", label: "Second" },
+					]}
+					onItemSelect={() => undefined}
+				/>
+			</div>
+		);
+		const trigger = classesOf(html, "button", "top-1/2");
+		expect(trigger.split(" ")).toContain("start-1");
+		expect(trigger).not.toMatch(PHYSICAL_INLINE);
 	});
 
 	test("the shared preview rail uses logical insets on either side", () => {

@@ -234,13 +234,13 @@ test("creates and persists Ryu, provider-credit, and subscription-window rules t
 	card = ruleCard(section, ruleId);
 	await chooseOption(
 		page,
-		card.getByRole("combobox", { name: "Window" }),
+		card.getByRole("combobox", { name: "Time window" }),
 		"Weekly"
 	);
 	snapshot = await waitForWriteCount(page, 8);
-	await expect(card.getByRole("combobox", { name: "Window" })).toContainText(
-		"Weekly"
-	);
+	await expect(
+		card.getByRole("combobox", { name: "Time window" })
+	).toContainText("Weekly");
 	expect(snapshot.policy.rules[0]?.when).toMatchObject({ window: "weekly" });
 	card = ruleCard(section, ruleId);
 	const percentThreshold = card.getByLabel("Percent left, below");

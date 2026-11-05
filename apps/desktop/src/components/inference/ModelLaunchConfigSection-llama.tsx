@@ -1,6 +1,7 @@
 // llama.cpp-specific field groups (MoE offload, chat template, RoPE / YaRN) and
 // the speculative decoding group for ModelLaunchConfigSection.
 
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import {
@@ -136,6 +137,7 @@ export function LaunchSpeculativeGroup({
 	meshLlmEngine: boolean;
 	sglangEngine: boolean;
 }) {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<>
 			{llamaCppEngine || sglangEngine || meshLlmEngine ? (
@@ -217,9 +219,11 @@ export function LaunchSpeculativeGroup({
 					</FieldGrid>
 					{llamaCppEngine ? (
 						<p className="text-muted-foreground text-xs">
-							MTP needs a model with MTP heads. Some (e.g. Gemma-4 E2B/E4B) need
-							a separate <code>*-assist-*.gguf</code> as the draft model; others
-							carry the head in-file (leave draft model blank).
+							{tlRich(
+								"MTP needs a model with MTP heads. Some (e.g. Gemma-4 E2B/E4B) need a separate <code>{pattern}</code> as the draft model; others carry the head in-file (leave draft model blank).",
+								{ pattern: "*-assist-*.gguf" },
+								{ code: (children) => <code>{children}</code> }
+							)}
 						</p>
 					) : null}
 				</FieldGroup>

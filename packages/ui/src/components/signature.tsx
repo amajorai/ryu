@@ -80,6 +80,7 @@ async function loadFontFromPaths(fontPaths: string[]): Promise<SignatureFont> {
 		}
 	}
 
+	// i18n-extract: developer-error
 	throw new Error(`Font could not be loaded from: ${fontPaths.join(", ")}`);
 }
 

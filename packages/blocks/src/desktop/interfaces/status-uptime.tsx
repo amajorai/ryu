@@ -138,7 +138,7 @@ export function StatusUptime({ component }: { component: StatusComponent }) {
 						id={tooltipId}
 						role="tooltip"
 						style={{
-							left: `clamp(0px, calc(${position}% - ${TOOLTIP_WIDTH} / 2), calc(100% - ${TOOLTIP_WIDTH}))`,
+							insetInlineStart: `clamp(0px, calc(${position}% - ${TOOLTIP_WIDTH} / 2), calc(100% - ${TOOLTIP_WIDTH}))`,
 						}}
 					>
 						<p className="font-semibold text-foreground">

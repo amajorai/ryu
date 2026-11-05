@@ -36,6 +36,9 @@ mod custody_legacy_tests;
 mod custody_tests;
 mod disconnect;
 mod discovery;
+mod error_code;
+#[cfg(test)]
+mod error_code_tests;
 mod requests;
 #[cfg(test)]
 mod tests;
@@ -47,6 +50,8 @@ pub use callback_page::{
     CallbackPageCopyFn,
 };
 use discovery::*;
+pub use error_code::FlowErrorCode;
+use error_code::*;
 use requests::*;
 pub use requests::{connection_key, request};
 
@@ -167,6 +172,9 @@ pub struct FlowView {
     pub status: FlowState,
     pub expires_at: i64,
     pub error: Option<String>,
+    /// Why the flow failed, for clients that word `error` themselves.
+    #[serde(default)]
+    pub error_code: Option<FlowErrorCode>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -54,6 +54,16 @@ mod tests {
         }
     }
 
+    /// The bindings a real request from this credential carries: its own
+    /// client id, so the grant's client constraint is satisfied and the
+    /// decision comes from the route policy under test.
+    fn bindings(context: &AuthorizationContext) -> RequestBindings {
+        RequestBindings {
+            client_id: context.constraints.client_id.clone(),
+            ..Default::default()
+        }
+    }
+
     fn policy(method: &Method, path: &str, context: &AuthorizationContext) -> RoutePolicy {
         super::super::credential_route_policy(method, path, context, true)
     }
@@ -80,7 +90,7 @@ mod tests {
                     context.credential
                 );
                 assert_eq!(
-                    context.authorize(&policy, &RequestBindings::default(), 0),
+                    context.authorize(&policy, &bindings(context), 0),
                     AuthorizationDecision::Deny(DenialReason::OwnerRequired),
                     "{path} {:?}",
                     context.credential
@@ -108,7 +118,7 @@ mod tests {
                     context.credential
                 );
                 assert_eq!(
-                    context.authorize(&policy, &RequestBindings::default(), 0),
+                    context.authorize(&policy, &bindings(context), 0),
                     AuthorizationDecision::Allow
                 );
             }

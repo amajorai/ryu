@@ -296,7 +296,10 @@ export function CampaignDetail({
 					variant={CAMPAIGN_STATUS_VARIANT[campaign.status] ?? "outline"}
 				/>
 				<span className="text-muted-foreground text-xs">
-					{formatDate(campaign.starts_at)} → {formatDate(campaign.ends_at)}
+					{tl("{start} → {end}", {
+						end: formatDate(campaign.ends_at),
+						start: formatDate(campaign.starts_at),
+					})}
 				</span>
 				<span className="text-muted-foreground text-xs">
 					· {formatPayoutRule(campaign.payout)}
@@ -354,7 +357,9 @@ export function CampaignDetail({
 					<StatTile
 						hint={
 							campaign.budget_cents > 0
-								? `of ${formatCents(summary.budget_cents)}`
+								? tl("of {amount}", {
+										amount: formatCents(summary.budget_cents),
+									})
 								: "no budget cap"
 						}
 						label="Accrued"
@@ -379,7 +384,10 @@ export function CampaignDetail({
 							creators: String(summary.creators),
 						})}
 						label="Submissions"
-						value={`${summary.submissions.pending} pending · ${summary.submissions.approved} approved`}
+						value={tl("{pending} pending · {approved} approved", {
+							approved: formatCount(summary.submissions.approved),
+							pending: formatCount(summary.submissions.pending),
+						})}
 					/>
 				</div>
 			) : null}

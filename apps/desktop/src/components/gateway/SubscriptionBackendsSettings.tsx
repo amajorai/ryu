@@ -12,7 +12,7 @@
 // code or token. See docs/subscription-cloud-sessions.md.
 
 import { CLOUD_TASKS_SUBSCRIPTION_BACKENDS_FLAG } from "@ryu/auth/lib/feature-flags";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -101,6 +101,7 @@ export function SubscriptionBackendsSettings({
 	target: ApiTarget;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const flagEnabled = useFeatureFlag(CLOUD_TASKS_SUBSCRIPTION_BACKENDS_FLAG);
 	const [view, setView] = useState<CloudTaskBackendsView | null>(null);
 	const [draft, setDraft] = useState<CloudTaskRoutingSettings | null>(null);
@@ -303,11 +304,11 @@ export function SubscriptionBackendsSettings({
 					<div className="space-y-3">
 						<p className="font-medium text-sm">Environments</p>
 						<p className="text-muted-foreground text-xs">
-							Claude runs <code>claude --cloud</code> in a local checkout, and
-							its cloud session clones that checkout's GitHub remote at its
-							current branch. Runs on this node, for Claude or Codex, work in
-							their own branch of the same checkout. Codex cloud submits to the
-							Codex environment you name.
+							{tlRich(
+								"Claude runs <code>{command}</code> in a local checkout, and its cloud session clones that checkout's GitHub remote at its current branch. Runs on this node, for Claude or Codex, work in their own branch of the same checkout. Codex cloud submits to the Codex environment you name.",
+								{ command: "claude --cloud" },
+								{ code: (children) => <code>{children}</code> }
+							)}
 						</p>
 						{environments.map((environment) => (
 							<div className="grid gap-2 sm:grid-cols-2" key={environment.id}>
@@ -364,11 +365,11 @@ export function SubscriptionBackendsSettings({
 					</div>
 				) : null}
 				<p className="text-muted-foreground text-xs">
-					Claude Max and Team plans also include monthly API credits. Link a
-					Claude Console organization to your plan, then bind that
-					organization's API key as <code>ANTHROPIC_API_KEY</code> in an
-					environment: a Ryu Box run then spends those credits on the model, and
-					its Box time still uses Ryu credits.
+					{tlRich(
+						"Claude Max and Team plans also include monthly API credits. Link a Claude Console organization to your plan, then bind that organization's API key as <code>{envVar}</code> in an environment: a Ryu Box run then spends those credits on the model, and its Box time still uses Ryu credits.",
+						{ envVar: "ANTHROPIC_API_KEY" },
+						{ code: (children) => <code>{children}</code> }
+					)}
 				</p>
 				<p className="text-muted-foreground text-xs">
 					No live screen. Provider's cloud: review and stop on the provider's

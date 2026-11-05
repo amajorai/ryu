@@ -305,7 +305,7 @@ export function AgentLabel({
 							className="absolute top-1/2 left-[calc(100%+8px)] flex h-6 -translate-y-1/2 items-center gap-1.5 rounded-md border border-border bg-card pr-2 pl-0.5 font-medium text-card-foreground text-xs shadow-sm"
 						>
 							<Keycap className="h-5 min-w-5">E</Keycap>
-							Talk
+							{tl("Talk to them")}
 						</span>
 					) : null}
 				</button>

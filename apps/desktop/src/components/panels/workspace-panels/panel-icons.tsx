@@ -1,3 +1,6 @@
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+
 // ── Panel layout icons — same visual language as SidebarToggleIcon ────────────
 
 const RING_PATH =
@@ -5,7 +8,8 @@ const RING_PATH =
 
 // Open: solid filled strip on the edge → the panel is docked and visible.
 // Closed: thin line on the edge → the panel is hidden but lives there.
-// Same ring/visual language as the left sidebar's IconSidebarOpen/Closed pair.
+// Same ring/visual language as the sidebar's IconSidebarOpen/Closed pair.
+// The side-panel glyphs mirror under RTL: that dock sits at the inline end.
 
 export function BottomPanelIconOpen({ className }: { className?: string }) {
 	return (
@@ -53,7 +57,7 @@ export function RightPanelIconOpen({ className }: { className?: string }) {
 	return (
 		<svg
 			aria-hidden="true"
-			className={className}
+			className={cn(DIRECTIONAL_ICON_CLASS, className)}
 			fill="none"
 			viewBox="0 0 24 24"
 		>
@@ -74,7 +78,7 @@ export function RightPanelIconClosed({ className }: { className?: string }) {
 	return (
 		<svg
 			aria-hidden="true"
-			className={className}
+			className={cn(DIRECTIONAL_ICON_CLASS, className)}
 			fill="none"
 			viewBox="0 0 24 24"
 		>

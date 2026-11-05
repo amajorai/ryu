@@ -1,6 +1,6 @@
 import { Add01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -69,6 +69,7 @@ export function TeamDialog({
 	agents: readonly TeamAgentOption[];
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const [name, setName] = useState("");
 	const [description, setDescription] = useState("");
 	const [coordination, setCoordination] = useState<Coordination>("broadcast");
@@ -149,8 +150,11 @@ export function TeamDialog({
 					<DialogHeader>
 						<DialogTitle>{isEdit ? "Edit group" : "New group"}</DialogTitle>
 						<DialogDescription>
-							A group is a set of agents you can call together with{" "}
-							<code>@group-name</code> in chat.
+							{tlRich(
+								"A group is a set of agents you can call together with <code>{mention}</code> in chat.",
+								{ mention: "@group-name" },
+								{ code: (children) => <code>{children}</code> }
+							)}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="flex flex-col gap-4 py-4">

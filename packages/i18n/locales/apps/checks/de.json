@@ -364,7 +364,7 @@
   "{count, plural, one {{countText} planned case} other {{countText} planned cases}} will produce evidence, a coverage score, and failure bundles.": "{count, plural, one {{countText} geplanter Fall erzeugt} other {{countText} geplante Fälle erzeugen}} Nachweise, einen Abdeckungswert und Fehlerpakete.",
   "{count, plural, one {{countText} run} other {{countText} runs}} kept for {name}; verdicts are never overwritten.": "{count, plural, one {{countText} Lauf} other {{countText} Läufe}} für {name} aufbewahrt; Urteile werden nie überschrieben.",
   "{count, plural, one {{length} context file attached} other {{length} context files attached}}": "{count, plural, one {{length} Kontextdatei angehängt} other {{length} Kontextdateien angehängt}}",
-  "{coverage}% signal coverage": "{coverage} % Signalabdeckung",
+  "{coverage} signal coverage": "{coverage} Signalabdeckung",
   "{durationMs} ms · {evidenceLevel}": "{durationMs} ms · {evidenceLevel}",
   "{feature} · Updated {updated}": "{feature} · Aktualisiert {updated}",
   "{feature} · {length} steps": "{feature} · {length} Schritte",

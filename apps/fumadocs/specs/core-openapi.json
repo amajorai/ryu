@@ -34881,6 +34881,20 @@
           }
         }
       },
+      "FlowErrorCode": {
+        "type": "string",
+        "enum": [
+          "code_mismatch",
+          "too_many_attempts",
+          "expired",
+          "cancelled",
+          "not_awaiting",
+          "issuer_mismatch",
+          "missing_code",
+          "invalid_state",
+          "protocol"
+        ]
+      },
       "FlowState": {
         "type": "string",
         "enum": [
@@ -34914,6 +34928,17 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "error_code": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FlowErrorCode",
+                "description": "Why the flow failed, for clients that word `error` themselves."
+              }
             ]
           },
           "expires_at": {

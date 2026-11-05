@@ -140,7 +140,7 @@
   "Unbound policy": "未紐付けのポリシー",
   "Uncertain after crash": "クラッシュ後に不確定",
   "Untitled policy": "無題のポリシー",
-  "Updated": "更新:",
+  "Updated": "更新日",
   "Verified agents fail closed until a default-deny policy is created and bound.": "デフォルト拒否ポリシーが作成されバインドされるまで、検証済みエージェントは既定でブロックされます。",
   "Verified agents using this policy": "このポリシーを使用している検証済みエージェント",
   "Verified effects (required)": "検証済みの効果 (必須)",

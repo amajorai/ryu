@@ -1,6 +1,6 @@
 import { SquareLock01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { grantDescription, grantLabel } from "../grant-labels.ts";
 import type { CatalogEntry, PluginCatalogDetail } from "../types.ts";
@@ -49,6 +49,7 @@ export function DependenciesPanel({
 	showTechnical?: boolean;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const requires = detail?.requires ?? entry.requires ?? null;
 	const apps = requires?.apps ?? [];
 	const grants = detail?.permissionGrants?.length
@@ -104,9 +105,15 @@ export function DependenciesPanel({
 				<section className="flex flex-col gap-2">
 					<h3 className="font-medium text-sm">Requires Ryu</h3>
 					<p className="text-muted-foreground text-sm">
-						This plugin declares it needs Ryu{" "}
-						<code className="font-mono">{engineReq}</code>. An incompatible node
-						refuses to load it rather than failing at runtime.
+						{tlRich(
+							"This plugin declares it needs Ryu <code>{requirement}</code>. An incompatible node refuses to load it rather than failing at runtime.",
+							{ requirement: engineReq },
+							{
+								code: (children) => (
+									<code className="font-mono">{children}</code>
+								),
+							}
+						)}
 					</p>
 				</section>
 			) : null}

@@ -18,7 +18,7 @@
 
 import { Cancel01Icon, LockedIcon, PlayIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -81,6 +81,7 @@ export function PromptStudio({
 	engine = "",
 }: PromptStudioProps) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const [editorRevision, setEditorRevision] = useState(0);
 	const lastEditorValueRef = useRef(value);
 	// Variable values entered by the user for the preview substitution.
@@ -251,11 +252,17 @@ export function PromptStudio({
 					</div>
 				)}
 				<p className="text-muted-foreground text-xs">
-					Use{" "}
-					<code className="type-caption rounded bg-muted px-1 font-mono">
-						{"{{variable_name}}"}
-					</code>{" "}
-					for named placeholders. Fill them in below before previewing.
+					{tlRich(
+						"Use <code>{placeholder}</code> for named placeholders. Fill them in below before previewing.",
+						{ placeholder: "{{variable_name}}" },
+						{
+							code: (children) => (
+								<code className="type-caption rounded bg-muted px-1 font-mono">
+									{children}
+								</code>
+							),
+						}
+					)}
 				</p>
 			</div>
 

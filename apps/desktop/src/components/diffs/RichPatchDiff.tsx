@@ -15,6 +15,7 @@ import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createSelectionAction } from "./rich-patch-selection-action.ts";
 
 export interface ReviewCommentMetadata {
 	body: string;
@@ -56,47 +57,6 @@ function annotationComments(
 		}
 		return [annotation];
 	});
-}
-
-function createSelectionAction(
-	filePath: string | undefined,
-	onSelection: ((text: string) => void) | undefined
-) {
-	return (context: { close: () => void; getSelectionText: () => string }) => {
-		const root = document.createElement("div");
-		root.className =
-			"flex items-center gap-1 rounded-lg border border-border/70 bg-popover p-1 text-popover-foreground shadow-xl";
-
-		const copy = document.createElement("button");
-		copy.className = "rounded-md px-2 py-1 text-xs hover:bg-muted";
-		copy.textContent = "Copy";
-		copy.type = "button";
-		copy.addEventListener("click", () => {
-			const text = context.getSelectionText();
-			if (text.trim()) {
-				void navigator.clipboard?.writeText(text);
-			}
-			context.close();
-		});
-
-		if (onSelection) {
-			const addToChat = document.createElement("button");
-			addToChat.className =
-				"rounded-md px-2 py-1 font-medium text-xs hover:bg-muted";
-			addToChat.textContent = "Add to chat";
-			addToChat.type = "button";
-			addToChat.addEventListener("click", () => {
-				const text = context.getSelectionText();
-				if (text.trim()) {
-					onSelection(filePath ? `${filePath}\n\n${text}` : text);
-				}
-				context.close();
-			});
-			root.append(addToChat);
-		}
-		root.append(copy);
-		return root;
-	};
 }
 
 export function RichPatchDiff({
@@ -260,8 +220,8 @@ export function RichPatchDiff({
 	);
 
 	const renderSelectionAction = useMemo(
-		() => createSelectionAction(filePath, onSelection),
-		[filePath, onSelection]
+		() => createSelectionAction(filePath, onSelection, tl),
+		[filePath, onSelection, tl]
 	);
 	const editorOptions = useMemo<EditorOptions<ReviewCommentMetadata>>(
 		() => ({

@@ -18,6 +18,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { translate as tl } from "@ryu/i18n/core";
+import { formatDurationUnit } from "@ryu/i18n/format-intl";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Card, CardContent } from "@ryu/ui/components/card";
@@ -115,7 +116,7 @@ function NodeStatusCell({
 					<span
 						className={`font-mono text-xs tabular-nums ${latencyColor(latencyMs)}`}
 					>
-						{latencyMs} ms
+						{formatDurationUnit(latencyMs, "millisecond")}
 					</span>
 				)}
 				<Badge variant={online ? "default" : "destructive"}>

@@ -7,7 +7,7 @@ import {
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Card, CardContent, CardHeader } from "@ryu/ui/components/card.tsx";
@@ -151,6 +151,7 @@ function ProposalCard({
 
 export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const [review, setReview] = useState<DreamReview | null>(null);
 	const [settings, setSettings] = useState<DreamSettings>({
 		automatic: false,
@@ -316,8 +317,11 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 					<EmptyHeader>
 						<EmptyTitle>Dream is not available on this node yet</EmptyTitle>
 						<EmptyDescription>
-							Update Core to enable review proposals. The desktop is ready for
-							the Dream API at <code>/api/memory/dream/review</code>.
+							{tlRich(
+								"Update Core to enable review proposals. The desktop is ready for the Dream API at <code>{endpoint}</code>.",
+								{ endpoint: "/api/memory/dream/review" },
+								{ code: (children) => <code>{children}</code> }
+							)}
 						</EmptyDescription>
 					</EmptyHeader>
 					<Button onClick={() => void load()} variant="ghost">

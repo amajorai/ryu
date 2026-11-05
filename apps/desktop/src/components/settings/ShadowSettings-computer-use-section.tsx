@@ -1,3 +1,4 @@
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	Alert,
 	AlertDescription,
@@ -26,6 +27,7 @@ export function ShadowComputerUseSection({
 }: {
 	state: ShadowComputerUseState;
 }) {
+	const tlRich = useRichLiteralMessages();
 	const {
 		clearJevKey,
 		computerUse,
@@ -319,8 +321,11 @@ export function ShadowComputerUseSection({
 				</p>
 			)}
 			<p className="px-3 text-muted-foreground text-xs">
-				Invoke the configured path through the <code>shadow.computer_use</code>{" "}
-				tool after the user requests a computer task.
+				{tlRich(
+					"Invoke the configured path through the <code>{tool}</code> tool after the user requests a computer task.",
+					{ tool: "shadow.computer_use" },
+					{ code: (children) => <code>{children}</code> }
+				)}
 			</p>
 		</SettingsSection>
 	);

@@ -322,7 +322,7 @@ export const COSTUME_SLOTS: {
 			])
 		),
 	},
-	{ slot: "finish", label: "Finish", options: COSTUME_FINISHES },
+	{ slot: "finish", label: "Surface finish", options: COSTUME_FINISHES },
 	{ slot: "eyes", label: "Eyes", options: COSTUME_EYES },
 	{ slot: "brows", label: "Brows", options: COSTUME_BROWS },
 	{ slot: "mouth", label: "Mouth", options: COSTUME_MOUTHS },

@@ -265,7 +265,7 @@ where
                         &mut reply_all,
                     )
                     .await;
-                    for line in error_ui_lines(&e) {
+                    for line in error_ui_frames(&e) {
                         yield Ok::<_, std::convert::Infallible>(line);
                     }
                     return;
@@ -283,7 +283,7 @@ where
             crate::policy_alerts::dispatch_from_headers(upstream.headers());
 
             if !upstream.status().is_success() {
-                let detail = openai_record_upstream_failure(
+                let failure = openai_record_upstream_failure(
                     upstream,
                     failure_sink,
                     &mut model_span_id,
@@ -292,7 +292,7 @@ where
                     &mut reply_all,
                 )
                 .await;
-                for line in error_ui_lines(&detail) {
+                for line in error_ui_frames(&failure) {
                     yield Ok::<_, std::convert::Infallible>(line);
                 }
                 return;

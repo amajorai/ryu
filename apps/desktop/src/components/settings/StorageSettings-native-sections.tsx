@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -48,7 +49,7 @@ export function renderChangeLocationBody({
 			<div className="flex flex-col gap-1.5">
 				<div className="text-muted-foreground text-xs tabular-nums">
 					{progress.phase === "extract" ? "Restoring" : "Copying"}…
-					{progressPct === null ? "" : ` ${progressPct}%`}
+					{progressPct === null ? "" : ` ${formatPercent(progressPct / 100)}`}
 				</div>
 				<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
 					<div

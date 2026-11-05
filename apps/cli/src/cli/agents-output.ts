@@ -102,7 +102,12 @@ export function refuseRemotePeerChange(
 ): void {
 	if (isRemotePeerEngine(engine ?? view.engine)) {
 		throw new Error(
-			`'${view.name}' ${REMOTE_PEER_IDENTITY_NOTE.title.toLowerCase()}. ${REMOTE_PEER_IDENTITY_NOTE.description} Nothing was saved.`
+			// One sentence, not the note's title lowercased into a template:
+			// lowercasing a translated title breaks languages that capitalize nouns.
+			tf("'{name}' runs on another node. {description} Nothing was saved.", {
+				description: tr(REMOTE_PEER_IDENTITY_NOTE.description),
+				name: view.name,
+			})
 		);
 	}
 }

@@ -33,6 +33,11 @@ import {
 	useAgentSyncProfiles,
 } from "./AgentSyncSections-profiles.ts";
 import {
+	capabilityRecordsText,
+	importBindingsText,
+	importCountsText,
+} from "./AgentSyncSections-proof.ts";
+import {
 	PROVIDER_ROOT_HINTS,
 	PROVIDERS,
 } from "./AgentSyncSections-providers.ts";
@@ -404,12 +409,12 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 					<SettingsGroup>
 						<ProofRow
 							title="Profiles and bindings"
-							value={`${status?.profiles.length ?? 0} profiles · ${status?.bindings.length ?? 0} ACP bindings`}
+							value={importBindingsText(tl, status)}
 						/>
 						<ProofRow title="Operation ID" value={importResult.operationId} />
 						<ProofRow
 							title="Imported counts"
-							value={`${importResult.imported} imported · ${importResult.skipped} skipped · ${importResult.failed} failed`}
+							value={importCountsText(tl, importResult)}
 						/>
 						<ProofRow
 							title="Conflict count"
@@ -417,7 +422,7 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 						/>
 						<ProofRow
 							title="ACP resume versus replay"
-							value={`${status?.bindings.filter((binding) => binding.capabilities && JSON.stringify(binding.capabilities).includes("loadSession")).length ?? 0} capability records · replay fallback remains available`}
+							value={capabilityRecordsText(tl, status)}
 						/>
 					</SettingsGroup>
 				</SettingsSection>

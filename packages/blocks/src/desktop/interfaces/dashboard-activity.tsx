@@ -53,8 +53,8 @@ function BucketTooltip({
 			initial={reduceMotion ? false : { opacity: 0 }}
 			style={
 				before
-					? { right: `calc(${100 - edge}% + 8px)` }
-					: { left: `calc(${edge}% + 8px)` }
+					? { insetInlineEnd: `calc(${100 - edge}% + 8px)` }
+					: { insetInlineStart: `calc(${edge}% + 8px)` }
 			}
 			transition={{ duration: 0.1 }}
 		>

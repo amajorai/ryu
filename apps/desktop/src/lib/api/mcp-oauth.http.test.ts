@@ -194,6 +194,7 @@ test("flow status reads the encoded flow path and normalizes the access level", 
 		server_name: "mail",
 		status: "failed",
 		error: "denied",
+		error_code: "protocol",
 	};
 	const flow = await fetchMcpOAuthFlow(target, "@ryu/x", "f/1");
 	expect(calls[0]?.path).toBe("/api/plugins/%40ryu%2Fx/auth/flows/f%2F1");
@@ -201,6 +202,7 @@ test("flow status reads the encoded flow path and normalizes the access level", 
 		accessLevel: "risk_based",
 		callbackMode: "hosted",
 		error: "denied",
+		errorCode: "protocol",
 		expiresAt: 5,
 		flowId: "f/1",
 		pluginId: "@ryu/x",

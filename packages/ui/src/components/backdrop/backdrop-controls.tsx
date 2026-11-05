@@ -7,6 +7,8 @@
 // and segmented choices for selects. The same component edits wallpapers,
 // banners and anything else that renders a `<Backdrop>`.
 
+import { activeLocale } from "@ryu/i18n/core";
+import { formatNumberValue } from "@ryu/i18n/format-intl";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { sentenceLabel } from "@ryu/i18n/sentence-label";
 import { Plus, RotateCcw, X } from "lucide-react";
@@ -79,7 +81,11 @@ function formatNumber(
 	spec: Extract<BackdropParamSpec, { kind: "number" }>,
 	value: number
 ) {
-	return spec.step >= 1 ? value.toFixed(0) : value.toFixed(2);
+	const digits = spec.step >= 1 ? 0 : 2;
+	return formatNumberValue(activeLocale(), value, {
+		maximumFractionDigits: digits,
+		minimumFractionDigits: digits,
+	});
 }
 
 function Control({

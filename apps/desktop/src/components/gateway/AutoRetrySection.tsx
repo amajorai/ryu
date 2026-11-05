@@ -22,6 +22,8 @@
 // real downgrade and it is why this ships off by default with a notify-only
 // setting to try first.
 
+import { translate as tl } from "@ryu/i18n/core";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
@@ -275,7 +277,9 @@ export function AutoRetrySection({
 								<FluidSlider
 									aria-label="Percent left below which a window counts as spent"
 									disabled={disabled}
-									format={(v) => `${v}% left`}
+									format={(v) =>
+										tl("{percent} left", { percent: formatPercent(v / 100) })
+									}
 									label="Count a window as spent below"
 									max={25}
 									min={0}

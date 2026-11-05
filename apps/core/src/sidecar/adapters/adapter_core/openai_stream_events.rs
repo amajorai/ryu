@@ -89,7 +89,7 @@ pub(crate) async fn openai_close_model_span(
 
 /// Record a connect failure (span, run scope, watch, `failed` persist) before the error frames.
 pub(crate) async fn openai_record_connect_failure<F, Fut>(
-    e: &str,
+    failure: &acp::AcpFailure,
     sink: OpenAiFailureSink<'_>,
     model_span_id: &mut Option<String>,
     run_finisher: &mut Option<ryu_tracing::ScopeGuard>,
@@ -99,6 +99,7 @@ pub(crate) async fn openai_record_connect_failure<F, Fut>(
     F: FnOnce(String, &'static str, Vec<Value>) -> Fut,
     Fut: std::future::Future<Output = Option<String>>,
 {
+    let e = &failure.to_string();
     if let Some(span_id) = model_span_id.take() {
         let _ = sink.traces.close_span(&span_id, Some(e)).await;
     }
@@ -117,12 +118,17 @@ pub(crate) async fn openai_record_connect_failure<F, Fut>(
     // good reply on reload.
     if sink.watch.retryable().is_none() {
         if let Some(p) = persist.take() {
-            let _ = p(std::mem::take(reply_all), "failed", Vec::new()).await;
+            let _ = p(
+                std::mem::take(reply_all),
+                "failed",
+                vec![failure_part(failure)],
+            )
+            .await;
         }
     }
 }
 
-/// Record a non-success upstream response and return the detail the error frames carry.
+/// Record a non-success upstream response and return the failure the error frames carry.
 pub(crate) async fn openai_record_upstream_failure<F, Fut>(
     upstream: reqwest::Response,
     sink: OpenAiFailureSink<'_>,
@@ -130,7 +136,7 @@ pub(crate) async fn openai_record_upstream_failure<F, Fut>(
     run_finisher: &mut Option<ryu_tracing::ScopeGuard>,
     persist: &mut Option<F>,
     reply_all: &mut String,
-) -> String
+) -> acp::AcpFailure
 where
     F: FnOnce(String, &'static str, Vec<Value>) -> Fut,
     Fut: std::future::Future<Output = Option<String>>,
@@ -153,6 +159,9 @@ where
             }
         })
         .unwrap_or_else(|| format!("Agent returned HTTP {status}"));
+    // What the card shows: classified on the same typed fields, without the
+    // " ({type})" suffix the log detail above keeps.
+    let failure = upstream_failure(status.as_u16(), &body);
     if let Some(span_id) = model_span_id.take() {
         let _ = sink.traces.close_span(&span_id, Some(&detail)).await;
     }
@@ -174,13 +183,18 @@ where
     );
     if sink.watch.retryable().is_none() {
         if let Some(p) = persist.take() {
-            let _ = p(std::mem::take(reply_all), "failed", Vec::new()).await;
+            let _ = p(
+                std::mem::take(reply_all),
+                "failed",
+                vec![failure_part(&failure)],
+            )
+            .await;
         }
     }
-    detail
+    failure
 }
 
-/// Record a mid-stream read failure and return the detail the error frames carry.
+/// Record a mid-stream read failure and return the failure the error frames carry.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn openai_record_stream_failure<F, Fut>(
     e: &reqwest::Error,
@@ -191,7 +205,7 @@ pub(crate) async fn openai_record_stream_failure<F, Fut>(
     persist: &mut Option<F>,
     reply_all: &mut String,
     iter_reply: &str,
-) -> String
+) -> acp::AcpFailure
 where
     F: FnOnce(String, &'static str, Vec<Value>) -> Fut,
     Fut: std::future::Future<Output = Option<String>>,
@@ -199,6 +213,7 @@ where
     // A stalled provider surfaces here once the idle read
     // timeout trips; name it so the turn ends as an error.
     let detail = describe_stream_error(e, stream_hop.idle_read_timeout());
+    let failure = stream_failure(e, stream_hop.idle_read_timeout());
     if let Some(span_id) = model_span_id.take() {
         let _ = sink.traces.close_span(&span_id, Some(&detail)).await;
     }
@@ -208,9 +223,14 @@ where
     crate::sidecar::gen_ai_spans::record_agent_error(sink.turn_error_span, "stream_error");
     reply_all.push_str(iter_reply);
     if let Some(p) = persist.take() {
-        let _ = p(std::mem::take(reply_all), "failed", Vec::new()).await;
+        let _ = p(
+            std::mem::take(reply_all),
+            "failed",
+            vec![failure_part(&failure)],
+        )
+        .await;
     }
-    detail
+    failure
 }
 
 /// Fold one parsed SSE chunk into the iteration state, yielding its UI frames.

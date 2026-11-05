@@ -1,6 +1,7 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -182,7 +183,8 @@ function RailItem({
 					<Icon
 						aria-hidden="true"
 						className={cn(
-							urgent ? "text-primary" : "text-sidebar-foreground/70"
+							urgent ? "text-primary" : "text-sidebar-foreground/70",
+							Icon === Reply && DIRECTIONAL_ICON_CLASS
 						)}
 					/>
 				)}

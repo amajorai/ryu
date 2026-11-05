@@ -26,6 +26,7 @@ import type { z } from "zod";
 import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 import { billingStatusUpdateSchema } from "./billing-login-stream-contracts.ts";
 import { walletResponseSchema } from "./credits-wire-contracts.ts";
+import { localizeServerSentence } from "./server-sentence-copy.ts";
 import {
 	hostedAgentsCheckoutSchema,
 	organizationMembershipsSchema,
@@ -95,7 +96,7 @@ async function toError(resp: Response): Promise<TeamsBillingError> {
 	let needsUpgrade = false;
 	try {
 		const body = teamsBillingErrorReplySchema.parse(await resp.json());
-		message = body.message ?? body.error;
+		message = localizeServerSentence(body.message ?? body.error);
 		needsUpgrade = Boolean(body.needsUpgrade);
 	} catch {
 		// Non-JSON body.

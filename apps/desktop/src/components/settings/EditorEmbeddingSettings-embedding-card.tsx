@@ -1,3 +1,4 @@
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -233,7 +234,7 @@ export function EmbeddingCard({ target }: { target: ApiTarget }) {
 										})
 									: "All embeddings up to date"}
 						</span>
-						<span className="tabular-nums">{pct}%</span>
+						<span className="tabular-nums">{formatPercent(pct / 100)}</span>
 					</div>
 					<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
 						<div

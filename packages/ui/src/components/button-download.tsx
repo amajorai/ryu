@@ -1,5 +1,6 @@
 "use client";
 
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { CheckCircle2, Download } from "lucide-react";
@@ -28,7 +29,7 @@ export default function DownloadButton({
 				progress={progress}
 				variant="progress"
 			>
-				{progress}%
+				{formatPercent(progress / 100)}
 			</Button>
 		);
 	}

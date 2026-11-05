@@ -187,8 +187,11 @@ export async function setConversationPinned(
 		}
 	);
 	if (!response.ok) {
+		const { status } = response;
 		throw new Error(
-			`${pinned ? "Pin" : "Unpin"} conversation failed: ${response.status}`
+			pinned
+				? `Pin conversation failed: ${status}`
+				: `Unpin conversation failed: ${status}`
 		);
 	}
 }

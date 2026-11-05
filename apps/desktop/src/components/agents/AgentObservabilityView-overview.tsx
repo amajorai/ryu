@@ -158,7 +158,10 @@ export function ObservabilityOverviewSection({
 							label="Prompt cache"
 							value={formatPercent(summary.promptCacheHitRate)}
 						/>
-						<SummaryCard label="Window" value={windowLabel(timeRange)} />
+						<SummaryCard
+							label={tl("Time window")}
+							value={windowLabel(timeRange)}
+						/>
 					</div>
 					<details className="group">
 						<summary className="w-fit cursor-pointer text-detail text-muted-foreground hover:text-foreground">

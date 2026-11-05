@@ -39,6 +39,7 @@ import {
 } from "./NodeLayerMenu.tsx";
 import { PanelSection } from "./NodePanelNav.tsx";
 import { installEngine, useNodeEngines } from "./NodeSelector-engines.tsx";
+import { speechModelDetail } from "./NodeSelector-speech-model-size.ts";
 import {
 	SpeechProcessingOptionMenus,
 	useVoiceAndSandboxQuery,
@@ -49,9 +50,8 @@ import {
  * Audio engine + voice, the Voice Recognition engine, and the sandbox
  * backend the agent's `sandbox_exec` tool runs in.
  *
- * These share ONE poll (Audio engines + Voice Recognition preference + sandbox backends + a
- * sidecar sample) so adding three layers to the dropdown costs one request, not
- * four. Each layer renders as the same submenu as the engines above it.
+ * These share ONE poll (Audio engines, Voice Recognition preference, sandbox backends,
+ * a sidecar sample), so three layers cost one request, not four. Each renders as the same submenu.
  *
  * The sandbox backend answers "which sandbox am I actually using" — it defaults
  * to wasmtime and is distinct from the Running Sandboxes list below, which is
@@ -388,7 +388,7 @@ export function VoiceAndSandboxSection({
 									(entry): LayerOption => ({
 										name: entry.engine,
 										label: entry.label,
-										detail: `${entry.model} · 484 MB`,
+										detail: speechModelDetail(entry.model),
 										select: installSpeechProcessing,
 									})
 								)

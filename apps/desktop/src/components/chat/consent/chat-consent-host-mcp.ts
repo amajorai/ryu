@@ -1,15 +1,16 @@
 import type { RequestConfirmationCode } from "@ryu/blocks/desktop/agent-elements/consent-host-context.tsx";
+import { translate as tl } from "@ryu/i18n/core";
 import type { McpOAuthFlow } from "@/src/lib/api/mcp-oauth.ts";
+import {
+	mcpOAuthErrorText,
+	mcpOAuthRefusalCode,
+} from "@/src/lib/mcp-oauth-error-text.ts";
 import { pollUntilConnected } from "./chat-consent-host-polling.ts";
 
 export interface McpOAuthFlowDriver {
 	/** Send the code the browser showed; resolves with the updated flow. */
 	confirm(code: string): Promise<McpOAuthFlow>;
 	fetchFlow(): Promise<McpOAuthFlow>;
-}
-
-function errorText(error: unknown, fallback: string): string {
-	return error instanceof Error && error.message ? error.message : fallback;
 }
 
 /**
@@ -29,7 +30,7 @@ export async function waitForMcpOAuthConnection(
 		async () => {
 			const flow = await driver.fetchFlow();
 			if (flow.status === "failed") {
-				throw new Error(flow.error ?? `Couldn't connect ${appName}.`);
+				throw new Error(mcpOAuthErrorText(flow.errorCode, appName));
 			}
 			awaitingCode = flow.status === "awaiting_confirmation";
 			return awaitingCode || flow.status === "connected";
@@ -42,10 +43,11 @@ export async function waitForMcpOAuthConnection(
 	}
 	if (!requestCode) {
 		throw new Error(
-			`Enter the code your browser shows to finish connecting ${appName}.`
+			tl("Enter the code your browser shows to finish connecting {appName}.", {
+				appName,
+			})
 		);
 	}
-	const connectFailed = new Error(`Couldn't connect ${appName}.`);
 	let previousError: string | null = null;
 	for (;;) {
 		const code = await requestCode(previousError, signal);
@@ -54,9 +56,9 @@ export async function waitForMcpOAuthConnection(
 			if (flow.status === "connected") {
 				return;
 			}
-			previousError = flow.error ?? connectFailed.message;
+			previousError = mcpOAuthErrorText(flow.errorCode, appName);
 		} catch (error) {
-			previousError = errorText(error, connectFailed.message);
+			previousError = mcpOAuthErrorText(mcpOAuthRefusalCode(error), appName);
 		}
 		// Too many wrong codes or an expired window fail the flow for good.
 		const latest = await driver.fetchFlow();
@@ -64,7 +66,11 @@ export async function waitForMcpOAuthConnection(
 			return;
 		}
 		if (latest.status !== "awaiting_confirmation") {
-			throw new Error(latest.error ?? previousError);
+			throw new Error(
+				latest.errorCode
+					? mcpOAuthErrorText(latest.errorCode, appName)
+					: previousError
+			);
 		}
 	}
 }

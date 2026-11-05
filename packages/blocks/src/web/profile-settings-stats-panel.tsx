@@ -36,6 +36,7 @@ import {
 	SettingsItem,
 	SettingsSection,
 } from "../desktop/settings-items.tsx";
+import { formatPeakDay } from "./profile-settings-peak-day.ts";
 import { RowHint } from "./profile-settings-row-hint.tsx";
 import {
 	ChartCard,
@@ -230,7 +231,11 @@ export function ProfileStatsPanel({
 				<StatCard
 					className={STAT_TILE_CLASS}
 					icon={<Trophy className="size-4" />}
-					sub={insights?.peakDay?.day ?? "none yet"}
+					sub={
+						insights?.peakDay?.day
+							? formatPeakDay(insights.peakDay.day, locale)
+							: tl("none yet")
+					}
 					title="Peak day"
 					value={formatCompact(insights?.peakDay?.tokens ?? 0)}
 				/>
@@ -246,7 +251,7 @@ export function ProfileStatsPanel({
 					icon={<Bot className="size-4" />}
 					sub="request count"
 					title="Favourite model"
-					value={insights?.favoriteModel ?? "Not enough data"}
+					value={insights?.favoriteModel ?? tl("Not enough data")}
 				/>
 				<StatCard
 					className={STAT_TILE_CLASS}

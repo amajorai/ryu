@@ -6,7 +6,7 @@
 
 import { Alert02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import {
 	Alert,
 	AlertDescription,
@@ -34,6 +34,7 @@ export default function DeprecationNotice({
 	replacement?: string | null;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	return (
 		<Alert
 			className={className}
@@ -51,11 +52,17 @@ export default function DeprecationNotice({
 				{replacement ? (
 					<>
 						{" "}
-						Use{" "}
-						<code className="rounded-lg bg-muted px-1 py-0.5 font-mono text-xs">
-							{replacement}
-						</code>{" "}
-						instead.
+						{tlRich(
+							"Use <code>{replacement}</code> instead.",
+							{ replacement },
+							{
+								code: (children) => (
+									<code className="rounded-lg bg-muted px-1 py-0.5 font-mono text-xs">
+										{children}
+									</code>
+								),
+							}
+						)}
 					</>
 				) : null}
 			</AlertDescription>

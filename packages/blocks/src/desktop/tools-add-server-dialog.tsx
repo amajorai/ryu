@@ -1,6 +1,7 @@
 "use client";
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Dialog,
@@ -22,6 +23,7 @@ export function AddServerDialog({
 }: {
 	onCreateServer?: (input: CreateServerInput) => Promise<CreateServerResult>;
 }) {
+	const tlRich = useRichLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [command, setCommand] = useState("");
@@ -101,9 +103,13 @@ export function AddServerDialog({
 				<DialogHeader>
 					<DialogTitle>Add MCP server</DialogTitle>
 					<DialogDescription>
-						Register a new MCP server. The entry is saved to{" "}
-						<code className="text-xs">~/.ryu/mcp.json</code> and takes effect
-						immediately, no restart required.
+						{tlRich(
+							"Register a new MCP server. The entry is saved to <code>{path}</code> and takes effect immediately, no restart required.",
+							{ path: "~/.ryu/mcp.json" },
+							{
+								code: (children) => <code className="text-xs">{children}</code>,
+							}
+						)}
 					</DialogDescription>
 				</DialogHeader>
 

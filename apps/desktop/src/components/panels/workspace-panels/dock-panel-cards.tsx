@@ -1,4 +1,5 @@
 import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { Dispatch, SetStateAction } from "react";
 import type { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
@@ -105,7 +106,8 @@ export function renderBottomDockCard(
 				onMoveToOtherPanel={moveTabToRight}
 				onTogglePin={onTogglePin}
 				otherPanelIcon={ArrowRight01Icon}
-				otherPanelLabel="right panel"
+				otherPanelIconClassName={DIRECTIONAL_ICON_CLASS}
+				otherPanelLabel="Move to side panel"
 				pinDisabledReason={pinDisabledReason}
 				tabs={bottomTabs}
 			/>
@@ -182,7 +184,7 @@ export function renderRightDockCard(
 				onMoveToOtherPanel={moveTabToBottom}
 				onTogglePin={onTogglePin}
 				otherPanelIcon={ArrowDown01Icon}
-				otherPanelLabel="bottom panel"
+				otherPanelLabel="Move to bottom panel"
 				pageTypes={PAGE_TAB_TYPES}
 				pinDisabledReason={pinDisabledReason}
 				tabs={rightTabs}

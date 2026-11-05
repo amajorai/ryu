@@ -141,10 +141,10 @@ test("pin, pinned tooltip, and Move to transfer the same tab between both dock c
 
 	menu = await openContextMenu(bottom, "Files");
 	await expect(
-		menu.getByRole("menuitem", { name: "Move to right panel", exact: true })
+		menu.getByRole("menuitem", { name: "Move to side panel", exact: true })
 	).toBeVisible();
 	await menu
-		.getByRole("menuitem", { name: "Move to right panel", exact: true })
+		.getByRole("menuitem", { name: "Move to side panel", exact: true })
 		.click();
 	let state = await readState(page);
 	expect(state.tabs.bottom.map((tab) => tab.uid)).toEqual([

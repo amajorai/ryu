@@ -91,7 +91,7 @@ export function OpenSourceLicensesSettings() {
 						size="sm"
 						variant="secondary"
 					>
-						View
+						View licenses
 					</Button>
 				</SettingsCard>
 			</div>

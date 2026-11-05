@@ -111,7 +111,7 @@ test("ChatPage shows refused command storage and successful explicit retries", a
 		await expect(reply).toBeVisible();
 		await page.mouse.move(12, 12);
 		const hideRightPanel = page
-			.getByRole("button", { name: "Hide right panel", exact: true })
+			.getByRole("button", { name: "Hide side panel", exact: true })
 			.first();
 		if (await hideRightPanel.isVisible()) {
 			await hideRightPanel.click();

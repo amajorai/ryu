@@ -1,5 +1,7 @@
 // Prompt Studio placeholder, variable, and score formatting helpers.
 
+import { activeLocale } from "@ryu/i18n/core";
+import { numberFormatter } from "@ryu/i18n/format-intl";
 import { formatPercent } from "@ryu/i18n/format-percent";
 import { isString } from "@/src/lib/prompt-studio.ts";
 import {
@@ -83,6 +85,18 @@ export function parseVariable(value: string): PromptfooValue {
 
 export function pct(value: number): string {
 	return formatPercent(value);
+}
+
+/** A ratio range as the locale writes it: "0% – 25%", "0–25 %". */
+export function pctRange(
+	from: number,
+	to: number,
+	locale: string = activeLocale()
+): string {
+	return numberFormatter(locale, {
+		maximumFractionDigits: 0,
+		style: "percent",
+	}).formatRange(from, to);
 }
 
 export function scoreTone(score: number): string {

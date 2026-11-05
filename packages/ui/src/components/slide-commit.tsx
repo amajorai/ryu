@@ -8,6 +8,7 @@
 
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { formatPercent } from "@ryu/i18n/format-percent";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	animate,
@@ -150,7 +151,7 @@ export function SlideCommit({
 		capsuleRef.current.setAttribute("aria-valuenow", String(percent));
 		capsuleRef.current.setAttribute(
 			"aria-valuetext",
-			`${labelText}, ${percent}%`
+			`${labelText}, ${formatPercent(percent / 100)}`
 		);
 	});
 

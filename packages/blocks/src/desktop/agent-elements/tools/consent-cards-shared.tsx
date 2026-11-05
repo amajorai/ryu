@@ -4,6 +4,7 @@ import {
 	StarIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { errorText } from "@ryu/i18n/error-text";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { VerificationPopover } from "@ryu/ui/components/verification-popover.tsx";
@@ -74,8 +75,9 @@ export function isHttpUrl(value: string | null): value is string {
 	return Boolean(value && /^https?:\/\//i.test(value));
 }
 
+/** The error's text; a browser network failure becomes the translated sentence. */
 export function errorMessage(error: unknown, fallback: string): string {
-	return error instanceof Error && error.message ? error.message : fallback;
+	return errorText(error, fallback);
 }
 
 export function isAbort(error: unknown): boolean {

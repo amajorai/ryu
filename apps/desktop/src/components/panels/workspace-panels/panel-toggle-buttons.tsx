@@ -83,7 +83,7 @@ export function PanelToggleButtons({
 				<TooltipTrigger
 					render={
 						<Button
-							aria-label={rightOpen ? "Hide right panel" : "Show right panel"}
+							aria-label={rightOpen ? "Hide side panel" : "Show side panel"}
 							aria-pressed={rightOpen}
 							className="shrink-0 aria-pressed:text-foreground"
 							onClick={onRightToggle}
@@ -99,7 +99,7 @@ export function PanelToggleButtons({
 					}
 				/>
 				<TooltipContent>
-					{rightOpen ? tl("Hide right panel") : tl("Show right panel")}
+					{rightOpen ? tl("Hide side panel") : tl("Show side panel")}
 				</TooltipContent>
 			</Tooltip>
 		</>

@@ -25,6 +25,10 @@ export {
 // a relayed reason (`Synthesis failed: {error}`): when the captured value is
 // itself catalog copy, an exact entry or (under depth and length caps) another
 // template, its translation is inserted, so the reason is not left in English.
+// A second, opt-in exception is a label argument named `…Label`
+// (`More about {titleLabel}`): its value is a catalog label, so an exact entry
+// replaces it. Plain `{title}`/`{name}` values stay verbatim: they may be user
+// content.
 
 /** Longest text tried against templates; dynamic UI sentences are short,
  * and the cap bounds lazy-capture backtracking. */
@@ -38,6 +42,15 @@ const RELAY_ARGUMENTS = new Set([
 	"reason",
 	"value",
 ]);
+/** Suffix of an argument whose value is a catalog label (`{titleLabel}`). */
+const LABEL_ARGUMENT_SUFFIX = "Label";
+
+function isLabelArgument(name: string): boolean {
+	return (
+		name.length > LABEL_ARGUMENT_SUFFIX.length &&
+		name.endsWith(LABEL_ARGUMENT_SUFFIX)
+	);
+}
 /** Nested relay levels translated below the outer sentence. */
 export const MAX_RELAY_DEPTH = 2;
 /** Longest relayed value looked up; longer text is raw output, not copy. */
@@ -237,18 +250,33 @@ export class LiteralTemplateIndex {
 		) {
 			return value;
 		}
+		return (
+			this.exactEntry(value) ?? this.find(value, locale, depth + 1) ?? value
+		);
+	}
+
+	/** The exact catalog translation of a plain (argument-free) value. */
+	private exactEntry(value: string): string | undefined {
 		const exact = Object.hasOwn(this.entries, value)
 			? this.entries[value]
 			: undefined;
-		if (
-			typeof exact === "string" &&
+		return typeof exact === "string" &&
 			!value.includes("{") &&
 			exact.trim() &&
 			exact.length <= MAX_MESSAGE_LENGTH
+			? exact
+			: undefined;
+	}
+
+	/** A `…Label` value's exact catalog entry, else the value unchanged. */
+	private labeled(name: string, value: string): string {
+		if (
+			!(isLabelArgument(name) && value) ||
+			value.length > MAX_RELAY_VALUE_LENGTH
 		) {
-			return exact;
+			return value;
 		}
-		return this.find(value, locale, depth + 1) ?? value;
+		return this.exactEntry(value) ?? value;
 	}
 
 	/** The best template's translation of collapsed `text`, or null. */
@@ -316,7 +344,7 @@ export class LiteralTemplateIndex {
 			for (const [name, value] of Object.entries(best.values)) {
 				values[name] = RELAY_ARGUMENTS.has(name)
 					? this.relayed(value, locale, depth)
-					: value;
+					: this.labeled(name, value);
 			}
 		}
 		return formatMessage(best.translation, values, locale);
@@ -340,7 +368,7 @@ export class LiteralTemplateIndex {
 		for (const [name, value] of Object.entries(values)) {
 			if (!RELAY_ARGUMENTS.has(name)) {
 				plain[name] = value;
-				output[name] = value;
+				output[name] = this.labeled(name, value);
 				continue;
 			}
 			const translated = this.relayed(value, locale, depth);

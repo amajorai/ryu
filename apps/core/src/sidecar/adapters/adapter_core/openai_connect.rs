@@ -86,7 +86,7 @@ pub(crate) async fn connect_openai(
     // be owned by the turn's author (`gateway_host_conversation_for_turn`).
     // Sent with its proof on the Gateway hop only.
     host_conversation_id: Option<&str>,
-) -> Result<reqwest::Response, String> {
+) -> Result<reqwest::Response, acp::AcpFailure> {
     let mut payload_map = serde_json::Map::new();
     payload_map.insert("model".to_owned(), Value::String(model.to_owned()));
     payload_map.insert("stream".to_owned(), Value::Bool(true));
@@ -147,7 +147,12 @@ pub(crate) async fn connect_openai(
                 .filter(|key| !key.is_empty())
                 .ok_or_else(|| "Gateway inference credential unavailable".to_owned())?;
             if let Some(proof) = crate::sidecar::gateway::gateway_inference_agent_proof(bearer, aid)
-                .map_err(|error| format!("Gateway agent proof unavailable: {error}"))?
+                .map_err(|error| {
+                    rejection_text(
+                        crate::i18n::messages::TURN_GATEWAY_AGENT_PROOF_UNAVAILABLE_MESSAGE,
+                        Some(&error.to_string()),
+                    )
+                })?
             {
                 builder = builder.header("x-ryu-agent-proof", proof);
             }
@@ -291,10 +296,8 @@ pub(crate) async fn connect_openai(
     if !trace_headers.is_empty() {
         builder = builder.headers(trace_headers);
     }
-    builder.send().await.map_err(|e| {
-        format!(
-            "Agent unreachable: {}",
-            describe_stream_error(&e, stream_hop.idle_read_timeout())
-        )
-    })
+    builder
+        .send()
+        .await
+        .map_err(|e| connect_failure(&e, stream_hop.idle_read_timeout()))
 }

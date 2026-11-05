@@ -243,11 +243,11 @@ export function cloudEnvironmentRuntimeIssue(
 }
 
 /** Box's per-command environment limit. */
-const MAX_BOX_VARIABLES = 64;
+export const MAX_BOX_VARIABLES = 64;
 const BOX_RESERVED_VARIABLES = new Set(["HOSTNAME", "PWD", "USER"]);
 
 /** Names the Box service reserves (case-sensitive) beyond Core's own list. */
-function isBoxReservedVariable(key: string): boolean {
+export function isBoxReservedVariable(key: string): boolean {
 	return (
 		BOX_RESERVED_VARIABLES.has(key) ||
 		key.startsWith("DOCKER_") ||

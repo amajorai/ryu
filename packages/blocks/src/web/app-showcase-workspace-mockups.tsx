@@ -1,6 +1,7 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { activeLocale } from "@ryu/i18n/lite";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	ChevronRight,
@@ -22,6 +23,7 @@ import {
 	MockupSidebar,
 	MockupWindow,
 } from "./app-showcase-primitives.tsx";
+import { mockupMonthGrid } from "./mockup-weekdays.ts";
 
 export function SpacesMockup() {
 	const tl = useLiteralMessages();
@@ -113,7 +115,10 @@ export function SpacesMockup() {
 }
 
 export function CalendarMockup() {
-	const days = Array.from({ length: 35 }, (_, index) => index - 1);
+	const locale = useOptionalI18n()?.formatLocale ?? activeLocale();
+	// September 2026, laid out from the reader's first weekday (Sunday in
+	// en-US, Monday in de, Saturday in ar) with their narrow weekday names.
+	const { cells, weekdays } = mockupMonthGrid(locale, 2026, 8);
 	const events = new Map<number, { label: string; className: string }>([
 		[3, { label: "Research", className: "bg-primary/15 text-foreground" }],
 		[9, { label: "Digest", className: "bg-success/15 text-foreground" }],
@@ -148,7 +153,7 @@ export function CalendarMockup() {
 					</div>
 					<div className="mt-3 overflow-hidden rounded-lg border border-border bg-card">
 						<div className="grid grid-cols-7 border-border border-b bg-muted/20">
-							{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
+							{weekdays.map((day, index) => (
 								<span
 									className="type-tiny py-1.5 text-center font-mono text-muted-foreground"
 									key={`${day}-${index}`}
@@ -158,24 +163,24 @@ export function CalendarMockup() {
 							))}
 						</div>
 						<div className="grid grid-cols-7">
-							{days.map((day, index) => {
-								const event = events.get(day);
+							{cells.map(({ day, inMonth, key }) => {
+								const event = inMonth ? events.get(day) : undefined;
 								return (
 									<div
 										className="min-h-[2.35rem] border-border border-e border-b p-1.5 last:border-e-0"
-										key={`day-${index}`}
+										key={key}
 									>
 										<span
 											className={cn(
 												"type-tiny font-mono",
-												day === 16
+												inMonth && day === 16
 													? "flex size-4 items-center justify-center rounded-full bg-foreground text-background"
-													: day < 1
-														? "text-muted-foreground/35"
-														: "text-muted-foreground"
+													: inMonth
+														? "text-muted-foreground"
+														: "text-muted-foreground/35"
 											)}
 										>
-											{day > 0 ? day : 30 + day}
+											{day}
 										</span>
 										{event ? (
 											<span

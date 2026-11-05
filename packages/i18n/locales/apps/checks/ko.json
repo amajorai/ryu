@@ -364,7 +364,7 @@
   "{count, plural, one {{countText} planned case} other {{countText} planned cases}} will produce evidence, a coverage score, and failure bundles.": "{count, plural, other {계획된 케이스 {countText}개}}에서 증거, 커버리지 점수, 실패 번들이 생성됩니다.",
   "{count, plural, one {{countText} run} other {{countText} runs}} kept for {name}; verdicts are never overwritten.": "{name}에 대해 {count, plural, other {실행 {countText}개}}가 보관되었습니다. 판정은 절대 덮어쓰지 않습니다.",
   "{count, plural, one {{length} context file attached} other {{length} context files attached}}": "{count, plural, other {컨텍스트 파일 {length}개 첨부됨}}",
-  "{coverage}% signal coverage": "신호 커버리지 {coverage}%",
+  "{coverage} signal coverage": "신호 커버리지 {coverage}",
   "{durationMs} ms · {evidenceLevel}": "{durationMs} ms · {evidenceLevel}",
   "{feature} · Updated {updated}": "{feature} · {updated} 업데이트됨",
   "{feature} · {length} steps": "{feature} · 단계 {length}개",

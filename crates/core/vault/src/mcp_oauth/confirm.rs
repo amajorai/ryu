@@ -69,10 +69,10 @@ fn check_can_connect(flow: &PendingFlow, binding: &BindingKey, expected: FlowSta
         || flow.view.status != expected
         || !flow.callback_claimed
     {
-        bail!("OAuth flow is no longer pending");
+        bail!(NO_LONGER_PENDING_MESSAGE);
     }
     if chrono::Utc::now().timestamp() >= flow.view.expires_at {
-        bail!("OAuth flow expired");
+        bail!(EXPIRED_MESSAGE);
     }
     Ok(())
 }
@@ -85,9 +85,7 @@ impl McpOAuthManager {
         binding: &BindingKey,
     ) -> Result<()> {
         let flows = self.flows.read().await;
-        let flow = flows
-            .get(flow_id)
-            .context("OAuth flow was cancelled before it could connect")?;
+        let flow = flows.get(flow_id).context(CANCELLED_MESSAGE)?;
         check_can_connect(flow, binding, FlowState::Pending)
     }
 
@@ -102,9 +100,7 @@ impl McpOAuthManager {
         let code = new_confirmation_code();
         let expires_at = {
             let mut flows = self.flows.write().await;
-            let flow = flows
-                .get_mut(flow_id)
-                .context("OAuth flow was cancelled before it could connect")?;
+            let flow = flows.get_mut(flow_id).context(CANCELLED_MESSAGE)?;
             check_can_connect(flow, binding, FlowState::Pending)?;
             flow.held = Some(HeldConnection {
                 code_digest: code_digest(&code),
@@ -113,6 +109,7 @@ impl McpOAuthManager {
             });
             flow.view.status = FlowState::AwaitingConfirmation;
             flow.view.error = None;
+            flow.view.error_code = None;
             flow.view.expires_at = chrono::Utc::now().timestamp() + CONFIRMATION_TTL_SECS;
             scrub_flow_secrets(flow);
             flow.view.expires_at
@@ -143,23 +140,22 @@ impl McpOAuthManager {
                 .filter(|flow| flow.owner_user_id == owner_user_id)
                 .context("OAuth flow not found")?;
             if flow.view.status != FlowState::AwaitingConfirmation {
-                bail!("OAuth flow is not awaiting confirmation");
+                bail!(NOT_AWAITING_MESSAGE);
             }
             if chrono::Utc::now().timestamp() >= flow.view.expires_at {
-                bail!("OAuth flow expired");
+                bail!(EXPIRED_MESSAGE);
             }
-            let held = flow
-                .held
-                .as_mut()
-                .context("OAuth flow is not awaiting confirmation")?;
+            let held = flow.held.as_mut().context(NOT_AWAITING_MESSAGE)?;
             if !digests_match(&held.code_digest, &code_digest(code)) {
                 held.attempts += 1;
                 if held.attempts >= MAX_CONFIRMATION_ATTEMPTS {
                     flow.held = None;
                     flow.view.status = FlowState::Failed;
-                    flow.view.error = Some("Too many incorrect confirmation codes".to_owned());
+                    flow.view.error = Some(TOO_MANY_ATTEMPTS_MESSAGE.to_owned());
+                    flow.view.error_code = Some(FlowErrorCode::TooManyAttempts);
+                    bail!(TOO_MANY_ATTEMPTS_MESSAGE);
                 }
-                bail!("OAuth confirmation code did not match");
+                bail!(CODE_MISMATCH_MESSAGE);
             }
             BindingKey::from_flow(flow)
         };
@@ -187,18 +183,11 @@ impl McpOAuthManager {
         let _lifecycle_guard = lifecycle_lock.lock().await;
         let (pending, material) = {
             let mut flows = self.flows.write().await;
-            let flow = flows
-                .get_mut(flow_id)
-                .context("OAuth flow was cancelled before it could connect")?;
+            let flow = flows.get_mut(flow_id).context(CANCELLED_MESSAGE)?;
             check_can_connect(flow, binding, expected)?;
             let material = match material {
                 Some(material) => material,
-                None => {
-                    flow.held
-                        .take()
-                        .context("OAuth flow is not awaiting confirmation")?
-                        .material
-                }
+                None => flow.held.take().context(NOT_AWAITING_MESSAGE)?.material,
             };
             (flow.clone(), material)
         };
@@ -230,11 +219,10 @@ impl McpOAuthManager {
             )
             .await?;
         let mut flows = self.flows.write().await;
-        let flow = flows
-            .get_mut(flow_id)
-            .context("OAuth flow was cancelled before it could connect")?;
+        let flow = flows.get_mut(flow_id).context(CANCELLED_MESSAGE)?;
         flow.view.status = FlowState::Connected;
         flow.view.error = None;
+        flow.view.error_code = None;
         flow.held = None;
         scrub_flow_secrets(flow);
         Ok(())

@@ -37,11 +37,11 @@ import { Fragment, useEffect, useState } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { type Split, useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { presetSummaryMessage } from "@/src/lib/split-preset-summary.ts";
 import {
 	BUILTIN_PRESETS,
 	presetFromSplit,
 	presetSlotCount,
-	presetSummary,
 	type SplitPreset,
 } from "@/src/lib/splitPresets.ts";
 import { isEqualized, leafOrder } from "@/src/lib/splitTree.ts";
@@ -245,7 +245,7 @@ function ApplyPresetSubmenu({ split }: { split: Split | null }) {
 													paneCount: paneIds.length,
 												})
 											: tl("Opens {presetSummary}", {
-													presetSummary: presetSummary(preset),
+													presetSummary: presetSummaryMessage(tl, preset),
 												})}
 									</span>
 								</span>

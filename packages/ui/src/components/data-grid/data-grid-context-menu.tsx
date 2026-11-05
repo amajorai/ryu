@@ -2,6 +2,11 @@
 
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
+	DataGridFillEndItem,
+	gridInlineDirection,
+} from "@ryu/ui/components/data-grid/data-grid-fill-end-item.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
+import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
@@ -15,7 +20,6 @@ import type { CellUpdate, ContextMenuState } from "@ryu/ui/types/data-grid.ts";
 import type { ColumnDef, TableMeta } from "@tanstack/react-table";
 import {
 	ArrowDownToLineIcon,
-	ArrowRightToLineIcon,
 	BetweenHorizontalEndIcon,
 	BetweenHorizontalStartIcon,
 	ClipboardPasteIcon,
@@ -126,6 +130,9 @@ function ContextMenuImpl<TData>({
 	onCellsCut,
 }: ContextMenuProps<TData>) {
 	const tl = useLiteralMessages();
+	const ambientDir = useDirection();
+	// The menu only renders while open, after the grid element has mounted.
+	const fillDir = gridInlineDirection(dataGridRef?.current, ambientDir);
 	const propsRef = useAsRef({
 		dataGridRef,
 		selectionState,
@@ -280,14 +287,12 @@ function ContextMenuImpl<TData>({
 							Fill down
 							<DropdownMenuShortcut>Ctrl+D</DropdownMenuShortcut>
 						</DropdownMenuItem>
-						<DropdownMenuItem
+						{/* "right" is the inline-end fill; under RTL it is labelled "Fill left". */}
+						<DataGridFillEndItem
+							dir={fillDir}
 							disabled={tableMeta.readOnly}
-							onClick={() => tableMeta.onFillSelection?.("right")}
-						>
-							<ArrowRightToLineIcon />
-							Fill right
-							<DropdownMenuShortcut>Ctrl+R</DropdownMenuShortcut>
-						</DropdownMenuItem>
+							onFill={() => tableMeta.onFillSelection?.("right")}
+						/>
 					</>
 				)}
 				{tableMeta?.onRowsInsert && (

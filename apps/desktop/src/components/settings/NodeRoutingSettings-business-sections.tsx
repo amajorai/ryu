@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	Select,
@@ -82,6 +82,7 @@ export function NodeRoutingBusinessSections({
 	updateAdvanced: (raw: string) => void;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	return (
 		<>
 			<SettingsSection
@@ -339,9 +340,11 @@ export function NodeRoutingBusinessSections({
 							Edit complete OpenRouter provider JSON
 						</summary>
 						<p className="my-3 text-muted-foreground text-xs">
-							All current and future fields from OpenRouter's{" "}
-							<code>provider</code> request object can be set here. Typed
-							controls stay in sync with this editor.
+							{tlRich(
+								"All current and future fields from OpenRouter's <code>{field}</code> request object can be set here. Typed controls stay in sync with this editor.",
+								{ field: "provider" },
+								{ code: (children) => <code>{children}</code> }
+							)}
 						</p>
 						<Textarea
 							aria-label="Advanced OpenRouter provider options JSON"

@@ -2,6 +2,7 @@
 
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Select,
@@ -21,6 +22,7 @@ import {
 /** The engine/model panel: its own tab, or inline under Behavior in the simple
  *  editor. */
 export function AgentModelPanel({ props }: { props: AgentSettingsFormProps }) {
+	const tlRich = useRichLiteralMessages();
 	const {
 		isLocked,
 		onAddMoreAgentProviders,
@@ -100,13 +102,15 @@ export function AgentModelPanel({ props }: { props: AgentSettingsFormProps }) {
 
 			{showAcpCommand ? (
 				<SettingsSection
-					caption={
-						<>
-							Type the command that launches your agent on this computer. For
-							example: <code>goose acp</code>, <code>opencode acp</code>, or{" "}
-							<code>npx -y my-agent --acp</code>.
-						</>
-					}
+					caption={tlRich(
+						"Type the command that launches your agent on this computer. For example: <code>{first}</code>, <code>{second}</code>, or <code>{third}</code>.",
+						{
+							first: "goose acp",
+							second: "opencode acp",
+							third: "npx -y my-agent --acp",
+						},
+						{ code: (children) => <code>{children}</code> }
+					)}
 					title="Command to start your agent"
 				>
 					<SettingsCard>

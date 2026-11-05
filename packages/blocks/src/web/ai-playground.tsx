@@ -1,5 +1,6 @@
 "use client";
 
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import { Send } from "lucide-react";
@@ -55,12 +56,15 @@ export default function AiPlayground({
 	messagesEndRef,
 	renderText = defaultRenderText,
 }: AiPlaygroundProps) {
+	const tlRich = useRichLiteralMessages();
 	return (
 		<div className="mx-auto grid w-full grid-rows-[auto_1fr_auto] overflow-hidden p-4">
 			<div className="mb-3 rounded-lg border border-muted-foreground/30 border-dashed bg-muted/30 px-3 py-2 text-muted-foreground text-xs">
-				Playground shell for lightweight chat demos. Production chat runs
-				through Ryu Core (<code>/api/chat/stream</code>) with agents, tools, and
-				memory.
+				{tlRich(
+					"Playground shell for lightweight chat demos. Production chat runs through Ryu Core (<code>{endpoint}</code>) with agents, tools, and memory.",
+					{ endpoint: "/api/chat/stream" },
+					{ code: (children) => <code>{children}</code> }
+				)}
 			</div>
 			<div className="space-y-4 overflow-y-auto pb-4">
 				{messages.length === 0 ? (
