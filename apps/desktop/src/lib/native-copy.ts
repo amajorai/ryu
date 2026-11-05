@@ -68,11 +68,20 @@ export type NativeShellTranslate = (
 	values?: Record<string, number | string>
 ) => string;
 
+/**
+ * Resolves a named catalog id (`nativeMenu.edit`), falling back to `source`.
+ * Menu titles whose platform term differs from the button verb use these.
+ */
+export type NativeShellTranslateId = (id: string, source: string) => string;
+
 const PLURAL_TABLE_SIZE = 200;
 const APP = { app: "{app}" };
 
 /** Plain labels by id. `{app}` is filled with the product name natively. */
-function plainLabels(tl: NativeShellTranslate): NativeShellLabels {
+function plainLabels(
+	tl: NativeShellTranslate,
+	tid: NativeShellTranslateId = (_id, source) => tl(source)
+): NativeShellLabels {
 	return {
 		"tray.show": tl("Show Ryu"),
 		"tray.companion": tl("Show/Hide Companion"),
@@ -100,7 +109,7 @@ function plainLabels(tl: NativeShellTranslate): NativeShellLabels {
 		"menu.quit": tl("Quit {app}", APP),
 		"menu.file": tl("File"),
 		"menu.closeWindow": tl("Close Window"),
-		"menu.edit": tl("Edit"),
+		"menu.edit": tid("nativeMenu.edit", "Edit"),
 		"menu.undo": tl("Undo"),
 		"menu.redo": tl("Redo"),
 		"menu.cut": tl("Cut"),
@@ -111,7 +120,7 @@ function plainLabels(tl: NativeShellTranslate): NativeShellLabels {
 		"menu.fullscreen": tl("Toggle Full Screen"),
 		"menu.window": tl("Window"),
 		"menu.minimize": tl("Minimize"),
-		"menu.zoom": tl("Zoom"),
+		"menu.zoom": tid("nativeMenu.zoom", "Zoom"),
 		"menu.help": tl("Help"),
 	};
 }
@@ -176,7 +185,8 @@ function pluralTemplates(
 /** Everything the native shell shows, in the active UI language. */
 export function buildNativeShellCopy(
 	tl: NativeShellTranslate,
-	locale: string
+	locale: string,
+	tid?: NativeShellTranslateId
 ): NativeShellCopy {
 	let rules: Intl.PluralRules;
 	try {
@@ -187,7 +197,7 @@ export function buildNativeShellCopy(
 	const pluralCategories = Array.from({ length: PLURAL_TABLE_SIZE }, (_, n) =>
 		rules.select(n)
 	);
-	const labels = plainLabels(tl);
+	const labels = plainLabels(tl, tid);
 	for (const [base, format] of Object.entries(countedLabels(tl))) {
 		Object.assign(
 			labels,

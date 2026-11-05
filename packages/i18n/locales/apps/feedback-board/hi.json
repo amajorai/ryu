@@ -62,6 +62,7 @@
   "Move requests through the same statuses your public board shows.": "अनुरोधों को उन्हीं स्थितियों से आगे बढ़ाएँ जो आपका सार्वजनिक बोर्ड दिखाता है।",
   "Needs review": "समीक्षा ज़रूरी",
   "New release": "नई रिलीज़",
+  "New request": "नया अनुरोध",
   "New requests and comments wait for review before appearing publicly.": "नए अनुरोध और टिप्पणियाँ सार्वजनिक रूप से दिखने से पहले समीक्षा की प्रतीक्षा करते हैं।",
   "Newest first": "नवीनतम पहले",
   "No Ryu run has been started for this request.": "इस अनुरोध के लिए अभी तक कोई Ryu रन शुरू नहीं हुआ है।",

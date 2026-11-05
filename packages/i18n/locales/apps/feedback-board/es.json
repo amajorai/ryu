@@ -62,6 +62,7 @@
   "Move requests through the same statuses your public board shows.": "Mueve las solicitudes por los mismos estados que muestra tu tablero público.",
   "Needs review": "Requiere revisión",
   "New release": "Nueva versión",
+  "New request": "Nueva solicitud",
   "New requests and comments wait for review before appearing publicly.": "Las nuevas solicitudes y comentarios se revisan antes de mostrarse públicamente.",
   "Newest first": "Más recientes primero",
   "No Ryu run has been started for this request.": "Aún no se ha iniciado ninguna ejecución de Ryu para esta solicitud.",

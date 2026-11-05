@@ -378,6 +378,7 @@
   "No subscription usage readers are available on this node.": "Aucun lecteur d’utilisation d’abonnement n’est disponible sur ce nœud.",
   "No supported provider usage readers are available on this node.": "Aucun lecteur d’utilisation de fournisseur pris en charge n’est disponible sur ce nœud.",
   "No usage has been recorded for the {label} window yet.": "Aucune utilisation n’a encore été enregistrée pour la période {label}.",
+  "No.": "N°",
   "None": "Aucun",
   "Normal": "Normal",
   "Note": "Note",

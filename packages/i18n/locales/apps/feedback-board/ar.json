@@ -62,6 +62,7 @@
   "Move requests through the same statuses your public board shows.": "انقل الطلبات عبر الحالات نفسها التي تعرضها لوحتك العامة.",
   "Needs review": "تحتاج إلى مراجعة",
   "New release": "إصدار جديد",
+  "New request": "طلب جديد",
   "New requests and comments wait for review before appearing publicly.": "تنتظر الطلبات والتعليقات الجديدة المراجعة قبل ظهورها للعامة.",
   "Newest first": "الأحدث أولًا",
   "No Ryu run has been started for this request.": "لم يبدأ أي تشغيل لـ Ryu لهذا الطلب.",

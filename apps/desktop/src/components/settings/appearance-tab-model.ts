@@ -30,7 +30,7 @@ export const COLOR_FIELDS: Array<{
 	{ key: "background", label: "Background" },
 	{ key: "foreground", label: "Foreground" },
 	{ key: "primary", label: "Primary" },
-	{ key: "muted", label: "Muted" },
+	{ key: "muted", label: "Muted surface" },
 	{ key: "mutedForeground", label: "Muted text" },
 	{ key: "border", label: "Border" },
 	{ key: "sidebar", label: "Sidebar" },

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { logicalArrowKey } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import { isEditable } from "./passport-interface-dom.ts";
 import type { PassportNavigation } from "./passport-navigation.ts";
@@ -97,8 +98,10 @@ export function usePassportKeys({
 				ArrowLeft: previous,
 				ArrowRight: next,
 			};
-			const action =
-				paging[event.key] ?? (onPages ? arrows[event.key] : undefined);
+			// Under dir="rtl" the Previous button sits on the right, so the
+			// arrows follow the reading direction like the buttons do.
+			const arrow = logicalArrowKey(event.key, element ?? rootRef.current);
+			const action = paging[event.key] ?? (onPages ? arrows[arrow] : undefined);
 			if (action) {
 				event.preventDefault();
 				action();

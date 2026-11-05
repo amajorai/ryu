@@ -1,5 +1,6 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import {
 	Tooltip,
@@ -94,7 +95,10 @@ export function ConversationHeader({
 								/>
 							}
 						>
-							<PanelRight aria-hidden="true" />
+							<PanelRight
+								aria-hidden="true"
+								className={DIRECTIONAL_ICON_CLASS}
+							/>
 						</TooltipTrigger>
 						<TooltipContent side="bottom">
 							{detailsOpen ? "Hide details" : "Show details"} <Kbd>I</Kbd>

@@ -378,6 +378,7 @@
   "No subscription usage readers are available on this node.": "No hay lectores de uso de suscripciones disponibles en este nodo.",
   "No supported provider usage readers are available on this node.": "No hay lectores de uso de proveedores compatibles disponibles en este nodo.",
   "No usage has been recorded for the {label} window yet.": "Aún no se ha registrado uso en el periodo de {label}.",
+  "No.": "N.º",
   "None": "Ninguno",
   "Normal": "Normal",
   "Note": "Nota",

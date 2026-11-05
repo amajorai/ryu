@@ -130,7 +130,10 @@ export function BankSpendChart({
 					</p>
 				) : null}
 			</div>
-			<div className="mt-4 flex min-h-36 flex-1">
+			{/* The plot, its scale gutter and the date axis keep one physical
+			    axis (oldest day on the left, as the Video Studio and Timeline time
+			    axes do), so "Today" stays under the newest bar under dir="rtl". */}
+			<div className="mt-4 flex min-h-36 flex-1" dir="ltr">
 				<div
 					aria-describedby={captionId}
 					aria-label="Daily spend. Use the arrow keys to read each day."
@@ -152,7 +155,11 @@ export function BankSpendChart({
 							className="absolute inset-x-0 top-0 border-border border-t border-dashed"
 						/>
 					) : (
-						<p className="absolute inset-0 grid place-items-center text-muted-foreground text-sm">
+						<p
+							className="absolute inset-0 grid place-items-center text-muted-foreground text-sm"
+							// Translated prose keeps its own direction inside the LTR plot.
+							dir="auto"
+						>
 							{tl("No spend in the last {dayCount} days", {
 								dayCount: days.length,
 							})}
@@ -205,7 +212,7 @@ export function BankSpendChart({
 					</span>
 				</div>
 			</div>
-			<div aria-hidden="true" className="mt-2 flex">
+			<div aria-hidden="true" className="mt-2 flex" dir="ltr">
 				<div className="relative h-4 min-w-0 flex-1 text-muted-foreground text-xs tabular-nums">
 					{first ? (
 						<span className="absolute left-0">{shortDay(first.date)}</span>
@@ -218,7 +225,9 @@ export function BankSpendChart({
 							{shortDay(middle.date)}
 						</span>
 					) : null}
-					<span className="absolute right-0">Today</span>
+					<span className="absolute right-0" data-testid="bank-chart-today">
+						{tl("Today")}
+					</span>
 				</div>
 				<div className="w-16 shrink-0" />
 			</div>

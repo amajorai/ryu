@@ -55,6 +55,7 @@ import {
 } from "@/src/lib/app-update-schedule.ts";
 import { verdictAppliesToApp } from "@/src/lib/app-version.ts";
 import { appDisplayName } from "@/src/lib/channel-brand.ts";
+import { desktopCommandErrorLine } from "@/src/lib/desktop-command-error-messages.ts";
 import {
 	formatUpdatesCutoff,
 	getUpdatesWindowEnd,
@@ -266,7 +267,7 @@ export function AppUpdatesSettings() {
 			// — that is the exact failure shape this whole feature exists to avoid.
 			sileo.error({
 				title: "Couldn't schedule the update",
-				description: err instanceof Error ? err.message : String(err),
+				description: desktopCommandErrorLine(err, tl),
 			});
 		}
 	};

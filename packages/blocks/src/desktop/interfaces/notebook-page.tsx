@@ -1,6 +1,7 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { sentenceLabel } from "@ryu/i18n/sentence-label";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -129,7 +130,7 @@ export function NotebookTopbar({
 					onClick={onShowSidebar}
 					shortcut="Control+\"
 				>
-					<PanelLeft />
+					<PanelLeft className={DIRECTIONAL_ICON_CLASS} />
 				</NotebookIconButton>
 			) : null}
 			<nav aria-label="Breadcrumb" className="min-w-0 flex-1">

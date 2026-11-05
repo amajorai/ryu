@@ -39,7 +39,7 @@ fn visible(sse: &str) -> String {
 #[test]
 fn a_junction_that_hides_a_key_does_not_release_the_head_raw() {
     let scanner = scanner();
-    let gho = "gho_16C7e42F292c6912E7710c838347Ae178B4a";
+    let gho = concat!("gho_", "16C7e42F292c6912E7710c838347Ae178B4a");
     let cases = [
         (
             "Key: AKIAIOSFODNN7EXAMPLE",

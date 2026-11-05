@@ -36,6 +36,9 @@
 
 use std::path::PathBuf;
 
+#[path = "update_schedule_error.rs"]
+mod update_schedule_error;
+
 use serde::{Deserialize, Serialize};
 
 /// Deliberately NOT `pending-update.json` — that is Core's, in a directory the
@@ -118,16 +121,10 @@ pub fn set_pending_app_update(
         || pending.version.trim().is_empty()
         || pending.time_zone.trim().is_empty()
     {
-        return Err("Invalid deferred update time, version, or time zone".into());
+        return Err(update_schedule_error::invalid_request());
     }
-    let path = state_path().ok_or_else(|| {
-		"could not resolve this machine's config directory, so a deferred update has nowhere to live"
-			.to_string()
-	})?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    ryu_runtime_install::handoff::write_json(&path, &pending).map_err(|e| e.to_string())?;
+    // No config dir is `no_config_dir`; an I/O failure is `write_failed:<os text>`.
+    update_schedule_error::write_record(state_path().as_deref(), &pending)?;
     Ok(pending)
 }
 

@@ -245,6 +245,10 @@ export function TickerPriceHistory({
 				data-direction={direction}
 				data-testid="ticker-price-chart"
 				data-unit={unit}
+				// The line, scrub marker, hover columns and axis share one physical
+				// axis (oldest on the left, as the Video Studio and Timeline time
+				// axes do), so they agree under dir="rtl".
+				dir="ltr"
 				onBlur={() => setScrub(null)}
 				onKeyDown={onKeyDown}
 				onPointerLeave={() => setScrub(null)}
@@ -334,7 +338,7 @@ export function TickerPriceHistory({
 					))}
 				</div>
 			</div>
-			<div aria-hidden="true" className="mt-2 pe-10">
+			<div aria-hidden="true" className="mt-2 pe-10" dir="ltr">
 				<div className="relative h-4 text-[13px] text-muted-foreground tabular-nums">
 					{buckets[0] && lastIndex > 1 ? (
 						<span className="absolute start-0">
@@ -349,8 +353,8 @@ export function TickerPriceHistory({
 							{axisLabel(middle, series, now)}
 						</span>
 					) : null}
-					<span className="absolute end-0">
-						{unit === "day" ? "Today" : "Now"}
+					<span className="absolute end-0" data-testid="ticker-chart-now">
+						{unit === "day" ? tl("Today") : tl("Now")}
 					</span>
 				</div>
 			</div>

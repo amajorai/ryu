@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AdaptiveStepper,
 	AdaptiveStepperDecrement,
@@ -30,6 +31,7 @@ import {
 	TEAMS_MAX_SEATS,
 	TEAMS_MIN_SEATS,
 } from "./pricing-seat-model.ts";
+import { organizationSeatValueText } from "./pricing-seat-value-text.ts";
 
 /**
  * Shared organization seat selection for the public Teams/Business shelf.
@@ -50,6 +52,7 @@ function OrganizationSeatSelector({
 	const seatLabel = (value: number) =>
 		value > TEAMS_MAX_SEATS ? `${TEAMS_MAX_SEATS + 1}+` : String(value);
 	const helperText = useHelperTextSize();
+	const tl = useLiteralMessages();
 
 	return (
 		<div
@@ -66,9 +69,9 @@ function OrganizationSeatSelector({
 			</div>
 			{/* The last step past 50 is the Enterprise handoff. */}
 			<AdaptiveStepper
-				aria-label="Organization seats"
+				aria-label={tl("Organization seats")}
 				className="shrink-0"
-				formatValueText={(value) => `${seatLabel(value)} seats`}
+				formatValueText={(value) => organizationSeatValueText(tl, value)}
 				max={HOSTED_AGENT_SLIDER_MAX}
 				min={TEAMS_MIN_SEATS}
 				onValueChange={(value) => onChange(normalizeTeamsSeatCount(value))}

@@ -8,6 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -81,7 +82,7 @@ export function AssistantHeaderActions({
 					title={isSidebar ? "Float" : "Dock to side"}
 					variant="ghost-muted"
 				>
-					<HugeiconsIcon className="size-4" icon={PanelRightIcon} />
+					<DirectionalIcon className="size-4" icon={PanelRightIcon} />
 				</Button>
 			)}
 			{bare || isBuilder ? null : (

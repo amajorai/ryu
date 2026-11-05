@@ -196,7 +196,7 @@ function Stat({
 }: {
 	hint?: string;
 	label: string;
-	/** Null renders as "New": no number to show yet. */
+	/** Null renders as "New freelancer": no number to show yet. */
 	value: string | null;
 }) {
 	return (
@@ -223,7 +223,7 @@ function Stat({
 				)}
 			</dt>
 			<dd className="font-semibold text-foreground text-xl tabular-nums leading-7 tracking-tight">
-				{value ?? "New"}
+				{value ?? "New freelancer"}
 			</dd>
 		</div>
 	);
@@ -319,7 +319,7 @@ export function FreelancerProfilePane({
 
 				<dl className="grid grid-cols-2 gap-x-4 border-border border-y sm:grid-cols-4">
 					<Stat
-						hint="Delivered jobs (in review or closed) out of every job that was delivered or went on hold. Reads New until two jobs have settled."
+						hint="Delivered jobs (in review or closed) out of every job that was delivered or went on hold. Shown once two jobs have settled."
 						label="Job success"
 						value={
 							profile.successRate === null

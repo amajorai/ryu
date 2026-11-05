@@ -268,7 +268,14 @@ function AgentState({ now, row }: { now: number; row: PanelsAgentRow }) {
 		<span className="flex w-14 shrink-0 items-center justify-end gap-2 text-muted-foreground text-xs tabular-nums">
 			{marked && row.status ? <BoardStatusDot status={row.status} /> : null}
 			<span className="w-7 text-end">
-				{row.thread ? compactAge(row.thread.updatedAt, now) : "New"}
+				{row.thread ? (
+					compactAge(row.thread.updatedAt, now)
+				) : (
+					<>
+						<span aria-hidden="true">—</span>
+						<span className="sr-only">{tr("No conversations yet")}</span>
+					</>
+				)}
 			</span>
 		</span>
 	);

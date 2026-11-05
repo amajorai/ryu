@@ -91,7 +91,7 @@ export function OpenInSidePanelItem({ tab }: { tab: Tab }) {
 				}
 			}}
 		>
-			<HugeiconsIcon className="size-4" icon={SidebarRightIcon} />
+			<DirectionalIcon className="size-4" icon={SidebarRightIcon} />
 			Open in side panel
 		</ContextMenuItem>
 	);

@@ -1,5 +1,6 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
 import { PanelRight, X } from "lucide-react";
@@ -266,7 +267,7 @@ export function PostPage({
 					>
 						<PanelRight
 							aria-hidden="true"
-							className="size-4"
+							className={cn("size-4", DIRECTIONAL_ICON_CLASS)}
 							strokeWidth={1.75}
 						/>
 					</button>

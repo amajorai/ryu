@@ -1,5 +1,6 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -89,7 +90,7 @@ export function CalendarHeader({
 				type="button"
 				variant="ghost-muted"
 			>
-				<PanelLeft aria-hidden="true" />
+				<PanelLeft aria-hidden="true" className={DIRECTIONAL_ICON_CLASS} />
 			</Button>
 			<h1 className="sr-only">Calendar</h1>
 			<Button

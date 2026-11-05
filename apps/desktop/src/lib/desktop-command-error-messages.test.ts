@@ -114,3 +114,42 @@ describe("desktopCommandErrorText under ja and ar", () => {
 		).toBe("/a.txt ليس مجلدًا.");
 	});
 });
+
+const GERMAN_SCHEDULE: Record<string, string> = {
+	"The time or version for this scheduled update is not valid.":
+		"Zeit oder Version dieses geplanten Updates sind ungültig.",
+	"Ryu could not find this computer's settings folder, so the update cannot be scheduled.":
+		"Ryu konnte den Einstellungsordner dieses Computers nicht finden, daher kann das Update nicht geplant werden.",
+	"Ryu could not save the scheduled update. Check that its settings folder can be written to, then try again.":
+		"Ryu konnte das geplante Update nicht speichern. Prüfe, ob in den Einstellungsordner geschrieben werden kann, und versuche es dann erneut.",
+};
+
+const deSchedule = ((source: string) =>
+	GERMAN_SCHEDULE[source] ?? source) as LiteralMessage;
+
+describe("set_pending_app_update rejections under de", () => {
+	test("each update-scheduling code is one whole German sentence", () => {
+		expect(desktopCommandErrorText("invalid_request", deSchedule)).toEqual({
+			message: "Zeit oder Version dieses geplanten Updates sind ungültig.",
+			detail: null,
+		});
+		expect(desktopCommandErrorLine("no_config_dir", deSchedule)).toBe(
+			"Ryu konnte den Einstellungsordner dieses Computers nicht finden, daher kann das Update nicht geplant werden."
+		);
+	});
+
+	test("the OS cause of a failed write stays a secondary detail", () => {
+		const coded = desktopCommandErrorText(
+			"write_failed:Permission denied (os error 13)",
+			deSchedule
+		);
+		expect(coded).toEqual({
+			message:
+				"Ryu konnte das geplante Update nicht speichern. Prüfe, ob in den Einstellungsordner geschrieben werden kann, und versuche es dann erneut.",
+			detail: "Permission denied (os error 13)",
+		});
+		expect(
+			desktopCommandErrorLine("write_failed:Permission denied", deSchedule)
+		).not.toContain("Permission denied");
+	});
+});

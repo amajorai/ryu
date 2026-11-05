@@ -1,5 +1,5 @@
 import { SidebarLeftIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import type { WorkbenchItem } from "@ryu/workbench/model";
 import { TabGlyph } from "@/src/components/layout/TitleBar.tsx";
 import { DockKindIcon } from "@/src/components/panels/WorkspacePanels.tsx";
@@ -31,7 +31,7 @@ export function WorkbenchItemIcon({ item }: { item: WorkbenchItem }) {
 		case "route":
 			return <RouteItemIcon item={item} path={item.source.path} />;
 		case "navigation":
-			return <HugeiconsIcon icon={SidebarLeftIcon} />;
+			return <DirectionalIcon icon={SidebarLeftIcon} />;
 		default: {
 			const kind = shellPanelKind(item);
 			return kind ? <DockKindIcon kind={kind} /> : null;

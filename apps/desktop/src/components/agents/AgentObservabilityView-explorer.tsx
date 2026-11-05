@@ -20,6 +20,7 @@ import {
 	type ObservabilityWindow,
 	promptCacheStatus,
 } from "./AgentObservabilityView-audit.ts";
+import { formatLatencyMs } from "./agent-latency-format.ts";
 import observabilityStyles from "./agent-observability.module.css";
 
 export interface ObservabilityTraceExplorerProps {
@@ -170,7 +171,7 @@ export function ObservabilityExplorerSection({
 										</span>
 									</span>
 									<span className="whitespace-nowrap text-end text-muted-foreground tabular-nums">
-										{entry.latency_ms === null ? "—" : `${entry.latency_ms}ms`}
+										{formatLatencyMs(entry.latency_ms)}
 									</span>
 									<span className="text-end tabular-nums">
 										{formatScore(entry.eval_score)}

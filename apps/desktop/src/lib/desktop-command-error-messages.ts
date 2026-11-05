@@ -1,5 +1,6 @@
-// Words the coded failures the file-resource and shell commands reject with
-// (`src-tauri/src/file_resource_error.rs`, `src-tauri/src/shell_exec_error.rs`).
+// Words the coded failures the file-resource, shell and update-scheduling
+// commands reject with (`src-tauri/src/file_resource_error.rs`,
+// `src-tauri/src/shell_exec_error.rs`, `src-tauri/src/update_schedule_error.rs`).
 // The native layer rejects with a plain `code[:detail]` string and never words
 // a sentence; each code maps to one whole translated sentence here. A folder
 // path is interpolated as a value; raw OS or decoder text stays a secondary
@@ -13,8 +14,11 @@ export type DesktopCommandErrorCode =
 	| "invalid_content"
 	| "invalid_cwd"
 	| "invalid_env_name"
+	| "invalid_request"
 	| "io"
-	| "spawn_failed";
+	| "no_config_dir"
+	| "spawn_failed"
+	| "write_failed";
 
 /** The code a size-bounded file read or write rejects with. */
 export const FILE_TOO_LARGE_CODE = "file_too_large";
@@ -25,8 +29,11 @@ const CODES: ReadonlySet<string> = new Set<DesktopCommandErrorCode>([
 	"invalid_content",
 	"invalid_cwd",
 	"invalid_env_name",
+	"invalid_request",
 	"io",
+	"no_config_dir",
 	"spawn_failed",
+	"write_failed",
 ]);
 
 export interface DesktopCommandError {
@@ -106,6 +113,27 @@ export function desktopCommandErrorText(
 		case "invalid_env_name":
 		case "spawn_failed":
 			return { message: tl("The command could not be run."), detail };
+		case "invalid_request":
+			return {
+				message: tl(
+					"The time or version for this scheduled update is not valid."
+				),
+				detail,
+			};
+		case "no_config_dir":
+			return {
+				message: tl(
+					"Ryu could not find this computer's settings folder, so the update cannot be scheduled."
+				),
+				detail,
+			};
+		case "write_failed":
+			return {
+				message: tl(
+					"Ryu could not save the scheduled update. Check that its settings folder can be written to, then try again."
+				),
+				detail,
+			};
 		default:
 			return null;
 	}

@@ -1,6 +1,7 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	ChevronDown,
 	ChevronUp,
@@ -151,9 +152,15 @@ export function TicketsPage({
 								variant="ghost-muted"
 							>
 								{detailsOpen ? (
-									<PanelRightClose aria-hidden="true" />
+									<PanelRightClose
+										aria-hidden="true"
+										className={DIRECTIONAL_ICON_CLASS}
+									/>
 								) : (
-									<PanelRight aria-hidden="true" />
+									<PanelRight
+										aria-hidden="true"
+										className={DIRECTIONAL_ICON_CLASS}
+									/>
 								)}
 							</Button>
 						) : null}

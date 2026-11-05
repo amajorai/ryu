@@ -19,6 +19,7 @@ import {
 	type SavedObservabilityView,
 	windowLabel,
 } from "./AgentObservabilityView-audit.ts";
+import { formatLatencyMs } from "./agent-latency-format.ts";
 import observabilityStyles from "./agent-observability.module.css";
 
 interface ObservabilityShareStyle extends CSSProperties {
@@ -162,10 +163,7 @@ export function ObservabilityDiscoverSection({
 											) : null}
 											<span>
 												{tl("avg {latency}", {
-													latency:
-														group.averageLatency === null
-															? "—"
-															: `${Math.round(group.averageLatency)}ms`,
+													latency: formatLatencyMs(group.averageLatency),
 												})}
 											</span>
 										</div>

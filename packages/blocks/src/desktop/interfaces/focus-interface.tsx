@@ -232,7 +232,7 @@ export function FocusInterface({
 					onNext={() => step(1)}
 					onPrevious={() => step(-1)}
 					onSelect={(target) => goTo(target, { open: true })}
-					position={frameItem ? focusPosition(frameIndex, total) : "New"}
+					position={frameItem ? focusPosition(frameIndex, total) : "Draft"}
 					queue={queue}
 					threadRef={threadRef}
 					threadView={threadView}

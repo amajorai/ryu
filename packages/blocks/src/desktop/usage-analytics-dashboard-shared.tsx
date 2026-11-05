@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDurationUnit } from "@ryu/i18n/format-intl";
 import { useLocalizedText } from "@ryu/i18n/react";
 import { formatCount, formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import type { ComponentProps, CSSProperties } from "react";
@@ -111,8 +112,22 @@ export function formatCompact(value: number): string {
 	return formatCount(value) ?? "—";
 }
 
-export function formatMilliseconds(value: number | null): string {
-	return value === null ? "—" : `${formatCompact(value)} ms`;
+/**
+ * A latency readout in the reader's unit and digits: whole milliseconds under
+ * a second ("420ms", "420 ms" in German), then seconds with one decimal
+ * ("12.3s", "12,3 Sek.") so long averages stay short.
+ */
+export function formatMilliseconds(
+	value: number | null,
+	locale?: string
+): string {
+	if (value === null || !Number.isFinite(value)) {
+		return "—";
+	}
+	const rounded = Math.round(value);
+	return Math.abs(rounded) < 1000
+		? formatDurationUnit(rounded, "millisecond", 0, locale)
+		: formatDurationUnit(value / 1000, "second", 1, locale);
 }
 
 export function formatSpend(value: number | null): string {

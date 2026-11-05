@@ -5008,6 +5008,12 @@
     ],
     "reason": "\"Halloween\" is the holiday name used in these languages"
   },
+  "Hallucination": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Same word in French"
+  },
   "Hand": {
     "locales": [
       "de"
@@ -8036,6 +8042,12 @@
       "zh-CN"
     ],
     "reason": "product API name"
+  },
+  "Passport · Type P": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Passport-page header text is the same in French"
   },
   "Password": {
     "locales": [
@@ -11128,6 +11140,12 @@
     ],
     "reason": "Product, app or model name, kept as written."
   },
+  "Spotlight": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Spotlight is used as-is in German"
+  },
   "Stability AI": {
     "locales": [
       "ar",
@@ -12336,6 +12354,12 @@
       "fr"
     ],
     "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Visas": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Same word in French"
   },
   "Visas · {code}": {
     "locales": [
@@ -15801,6 +15825,22 @@
     ],
     "reason": "Only placeholders and a separator."
   },
+  "{region} · {status}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholders and separator only"
+  },
   "{repository} #{number} · {age}": {
     "locales": [
       "ar",
@@ -16612,6 +16652,22 @@
       "zh-CN"
     ],
     "reason": "'fps' is the standard frame-rate unit abbreviation in these locales"
+  },
+  "~{latency}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholder and approximation sign only"
   },
   "· Actor": {
     "locales": [

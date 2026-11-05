@@ -1,5 +1,6 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -107,7 +108,7 @@ export function ChannelsComposer({
 			type="submit"
 			variant={trimmed ? "default" : "ghost-muted"}
 		>
-			<SendHorizontal aria-hidden="true" />
+			<SendHorizontal aria-hidden="true" className={DIRECTIONAL_ICON_CLASS} />
 		</Button>
 	);
 

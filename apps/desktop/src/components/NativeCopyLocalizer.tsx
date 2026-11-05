@@ -45,7 +45,8 @@ export function NativeCopyLocalizer({
 				? formatMessage(source, values, i18n.locale)
 				: translated;
 		};
-		void pushNativeShellCopy(buildNativeShellCopy(tl, i18n.locale));
+		const tid = (id: string, source: string) => i18n.t(id, {}, source);
+		void pushNativeShellCopy(buildNativeShellCopy(tl, i18n.locale, tid));
 	}, [i18n]);
 	return null;
 }

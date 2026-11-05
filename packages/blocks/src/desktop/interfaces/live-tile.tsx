@@ -96,7 +96,7 @@ export const LiveTile = memo(function LiveTileImpl({
 	const tl = useLiteralMessages();
 	const spec = liveArt(thread, agent, tl);
 	const tag = thread ? liveStatusTag(thread) : null;
-	const title = thread?.title ?? "No streams yet";
+	const title = thread?.title ?? tl("No streams yet");
 	return (
 		<article className="flex min-w-0 flex-col gap-3">
 			<Extrude>

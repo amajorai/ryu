@@ -108,7 +108,7 @@ export function BookTile({
 						{chapterCountLabel(book.chapters.length)}
 					</span>
 					<span className="shrink-0 tabular-nums">
-						{empty ? "New" : formatPercent(percent / 100)}
+						{empty ? "Not started" : formatPercent(percent / 100)}
 					</span>
 				</span>
 			</button>

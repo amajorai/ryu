@@ -62,6 +62,7 @@
   "Move requests through the same statuses your public board shows.": "공개 보드에 표시되는 것과 동일한 상태로 요청을 진행하세요.",
   "Needs review": "검토 필요",
   "New release": "새 릴리스",
+  "New request": "새 요청",
   "New requests and comments wait for review before appearing publicly.": "새 요청과 댓글은 검토 후 공개됩니다.",
   "Newest first": "최신순",
   "No Ryu run has been started for this request.": "이 요청에 대해 시작된 Ryu 실행이 없습니다.",

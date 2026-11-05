@@ -49,6 +49,7 @@ import {
 	runGatewayEvals,
 } from "@/src/lib/api/gateway.ts";
 import { formatTime } from "@/src/lib/timezone.ts";
+import { formatLatencyMs } from "./agent-latency-format.ts";
 
 export interface AgentEvalsViewProps {
 	/** Agent the evals are scoped to (forwarded for per-agent budget tracking). */
@@ -150,8 +151,8 @@ export function AgentEvalsView({
 	const customSet = useMemo(() => catalog.filter((e) => !e.builtin), [catalog]);
 	const allIds = useMemo(() => catalog.map((e) => e.id), [catalog]);
 	const nameById = useMemo(
-		() => new Map(catalog.map((e) => [e.id, e.name])),
-		[catalog]
+		() => new Map(catalogItems.map((item) => [item.id, item.name])),
+		[catalogItems]
 	);
 
 	const run = useCallback(async () => {
@@ -235,7 +236,7 @@ export function AgentEvalsView({
 					value:
 						agg.latency_available_cases === 0
 							? "N/A"
-							: `${Math.round(agg.mean_latency)} ms`,
+							: formatLatencyMs(agg.mean_latency),
 				},
 				{ label: "Cases", value: String(agg.total_cases) },
 			]
@@ -271,7 +272,7 @@ export function AgentEvalsView({
 		model: e.model ?? "—",
 		isError: Boolean(e.error),
 		tokens: (e.input_tokens ?? 0) + (e.output_tokens ?? 0),
-		latencyLabel: e.latency_ms == null ? "—" : `${e.latency_ms} ms`,
+		latencyLabel: formatLatencyMs(e.latency_ms),
 		scoreLabel: e.eval_score == null ? "—" : pct(e.eval_score),
 	}));
 

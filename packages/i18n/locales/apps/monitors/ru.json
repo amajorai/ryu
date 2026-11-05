@@ -378,6 +378,7 @@
   "No subscription usage readers are available on this node.": "На этом узле нет средств чтения использования подписок.",
   "No supported provider usage readers are available on this node.": "На этом узле нет поддерживаемых средств чтения использования провайдеров.",
   "No usage has been recorded for the {label} window yet.": "Для окна {label} использование пока не зафиксировано.",
+  "No.": "№",
   "None": "Нет",
   "Normal": "Обычный",
   "Note": "Заметка",

@@ -18,6 +18,7 @@ import {
 	windowLabel,
 } from "./AgentObservabilityView-audit.ts";
 import { SummaryCard } from "./AgentObservabilityView-cards.tsx";
+import { formatLatencyMs } from "./agent-latency-format.ts";
 
 export interface ObservabilityOverviewSectionProps {
 	error: string | null;
@@ -130,11 +131,7 @@ export function ObservabilityOverviewSection({
 						/>
 						<SummaryCard
 							label="Avg latency"
-							value={
-								summary.averageLatencyMs === null
-									? "—"
-									: `${Math.round(summary.averageLatencyMs)}ms`
-							}
+							value={formatLatencyMs(summary.averageLatencyMs)}
 						/>
 						<SummaryCard
 							label="Spend"

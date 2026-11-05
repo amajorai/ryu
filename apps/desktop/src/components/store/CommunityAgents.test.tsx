@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { formatMessage } from "@ryu/i18n/core";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -162,5 +163,24 @@ describe("community agent identity", () => {
 		});
 		expect(html).toContain("Set this up yourself");
 		expect(html).not.toContain("Choose account access");
+	});
+});
+
+describe("community agent rating", () => {
+	test("an unrated agent is not labelled with the create action New", () => {
+		const russian: Record<string, string> = JSON.parse(
+			readFileSync(
+				new URL(
+					"../../../../../packages/i18n/locales/ru.json",
+					import.meta.url
+				),
+				"utf8"
+			)
+		);
+		const html = render({ listingMode: null });
+		expect(html).toContain(">Not rated yet<");
+		expect(html).not.toContain(">New<");
+		// Russian translates the bare "New" key as "Создать" (Create).
+		expect(russian["Not rated yet"]).not.toBe(russian.New);
 	});
 });

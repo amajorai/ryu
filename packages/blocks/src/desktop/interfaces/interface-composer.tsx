@@ -1,4 +1,5 @@
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
@@ -99,7 +100,11 @@ export function InterfaceComposer({
 					</NativeSelect>
 				) : null}
 				<Button disabled={!trimmed} size="sm" type="submit">
-					<SendHorizontal aria-hidden="true" data-icon="inline-start" />
+					<SendHorizontal
+						aria-hidden="true"
+						className={DIRECTIONAL_ICON_CLASS}
+						data-icon="inline-start"
+					/>
 					{submitLabel}
 				</Button>
 			</div>

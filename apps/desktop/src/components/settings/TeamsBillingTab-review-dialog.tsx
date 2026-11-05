@@ -100,7 +100,7 @@ export function TeamsBillingReviewDialog({
 							"{seats} member seats · shared workspace · seat changes prorate and charge now",
 							{ seats: String(previewSeatCount) }
 						),
-						eyebrow: "New",
+						eyebrow: "New plan",
 						label: planLabel(organizationPlanId ?? "teams"),
 					}}
 				/>

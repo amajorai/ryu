@@ -62,6 +62,7 @@
   "Move requests through the same statuses your public board shows.": "Переводите запросы по тем же статусам, что показывает ваша публичная доска.",
   "Needs review": "Требует проверки",
   "New release": "Новый выпуск",
+  "New request": "Новый запрос",
   "New requests and comments wait for review before appearing publicly.": "Новые запросы и комментарии проходят проверку перед публикацией.",
   "Newest first": "Сначала новые",
   "No Ryu run has been started for this request.": "Для этого запроса ещё не запускался Ryu.",

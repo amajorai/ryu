@@ -236,6 +236,7 @@ export function IdentityFace({
 	/** The HUD's summary line ("3 need you · 2 working"), or the totals. */
 	summary: string;
 }) {
+	const tl = useLiteralMessages();
 	const [first, second] = mrzLines(passport);
 	const totals = [
 		{ label: "Countries", value: passport.totals.countries },
@@ -243,7 +244,7 @@ export function IdentityFace({
 		{ label: "Days", value: passport.totals.travelDays },
 	];
 	return (
-		<Face header="Passport · Type P" number={number}>
+		<Face header={tl("Passport · Type P")} number={number}>
 			<dl className="grid grid-cols-2 gap-x-4 gap-y-3">
 				<div className="col-span-2 flex flex-col">
 					<dt className={CAPTION}>Holder</dt>
@@ -363,8 +364,9 @@ export function BlankFace({
 	empty: boolean;
 	number: number;
 }) {
+	const tl = useLiteralMessages();
 	return (
-		<Face header="Visas" number={number}>
+		<Face header={tl("Visas")} number={number}>
 			{empty ? (
 				<div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
 					<p className="font-mono font-semibold text-[16px] uppercase tracking-[0.2em]">

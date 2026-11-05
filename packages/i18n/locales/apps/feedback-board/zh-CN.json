@@ -62,6 +62,7 @@
   "Move requests through the same statuses your public board shows.": "按照公开看板显示的相同状态推进请求。",
   "Needs review": "需要审核",
   "New release": "新版本",
+  "New request": "新请求",
   "New requests and comments wait for review before appearing publicly.": "新请求和评论需经审核后才会公开显示。",
   "Newest first": "最新优先",
   "No Ryu run has been started for this request.": "尚未为此请求启动 Ryu 运行。",

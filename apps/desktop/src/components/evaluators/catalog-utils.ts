@@ -5,13 +5,18 @@
 
 import type { EvaluatorCatalogItem } from "@ryu/blocks/desktop/evaluator-catalog.tsx";
 import type { CodeEvaluatorSpec, Evaluator } from "@/src/lib/api/gateway.ts";
+import { evaluatorDisplayCopy } from "./builtin-evaluator-copy.ts";
 
-/** Project a wire `Evaluator` onto the presentational catalog item. */
+/**
+ * Project a wire `Evaluator` onto the presentational catalog item. A built-in's
+ * name and description show in the UI language; a custom one's as written.
+ */
 export function toCatalogItem(e: Evaluator): EvaluatorCatalogItem {
+	const { name, description } = evaluatorDisplayCopy(e);
 	return {
 		id: e.id,
-		name: e.name,
-		description: e.description,
+		name,
+		description,
 		category: e.category,
 		target: e.target,
 		capInline: e.capabilities.inline,

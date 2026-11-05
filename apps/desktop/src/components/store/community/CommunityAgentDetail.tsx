@@ -193,7 +193,7 @@ export function CommunityAgentDetail({
 							value:
 								card.ratingCount > 0
 									? ratingAverageLabel(card.ratingAverage)
-									: "New",
+									: "Not rated yet",
 						},
 						{ label: "Price", value: priceLabel(card) },
 						{ label: "Kind", value: "Agent Template" },
