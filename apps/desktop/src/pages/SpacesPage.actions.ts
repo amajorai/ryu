@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { pluginHostInvoke } from "@/src/lib/api/plugins.ts";
@@ -6,6 +7,7 @@ import {
 	exportSpacePackage,
 	importSpacePackage,
 } from "@/src/lib/api/space-portable.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 import { WHITEBOARD_PLUGIN_ID } from "@/src/lib/whiteboard/app.ts";
 import type { useSpacesPageData } from "./SpacesPage.data.ts";
 import { docSegment } from "./SpacesPage.routes.ts";
@@ -55,6 +57,7 @@ export function useSpacesPageActions({
 	setSearchResults,
 	setSelectedId,
 }: SpacesPageActionsInput) {
+	const tl = useLiteralMessages();
 	const handleSearch = async () => {
 		if (!(selected && searchQuery.trim())) {
 			return;
@@ -86,19 +89,19 @@ export function useSpacesPageActions({
 		if (rawKind.startsWith("app:")) {
 			const pluginId = rawKind.slice("app:".length);
 			openTab(`/spaces/${selected.id}/app/${pluginId}/${docId}`, {
-				title: docTitle || "Untitled",
+				title: spaceDisplayTitle(docTitle, tl),
 			});
 			return;
 		}
 		if (rawKind === "file") {
 			openTab(`/spaces/${selected.id}/file/${docId}`, {
-				title: docTitle || "Untitled file",
+				title: docTitle || tl("Untitled file"),
 			});
 			return;
 		}
 		const kind = doc?.kind ?? "page";
 		openTab(`/spaces/${selected.id}/${docSegment(kind)}/${docId}`, {
-			title: docTitle || "Untitled",
+			title: spaceDisplayTitle(docTitle, tl),
 		});
 	};
 	// Open a freshly created document by kind (its row may not be in `documents`
@@ -112,7 +115,7 @@ export function useSpacesPageActions({
 			return;
 		}
 		openTab(`/spaces/${selected.id}/${docSegment(kind)}/${docId}`, {
-			title: docTitle || "Untitled",
+			title: spaceDisplayTitle(docTitle, tl),
 		});
 	};
 	const handleNewPage = async () => {
@@ -120,9 +123,9 @@ export function useSpacesPageActions({
 			return;
 		}
 		try {
-			const id = await createPage(selected.id, "Untitled");
+			const id = await createPage(selected.id, "");
 			await loadDocuments(selected.id);
-			openCreated(id, "page", "Untitled");
+			openCreated(id, "page", "");
 		} catch (e) {
 			console.error("Failed to create page", e);
 			setDocsError("We couldn't create a new page. Please try again.");
@@ -133,9 +136,9 @@ export function useSpacesPageActions({
 			return;
 		}
 		try {
-			const id = await createDatabase(selected.id, "Untitled");
+			const id = await createDatabase(selected.id, "");
 			await loadDocuments(selected.id);
-			openCreated(id, "database", "Untitled");
+			openCreated(id, "database", "");
 		} catch (e) {
 			console.error("Failed to create database", e);
 			setDocsError("We couldn't create a new database. Please try again.");
@@ -156,11 +159,11 @@ export function useSpacesPageActions({
 				toTarget(node),
 				WHITEBOARD_PLUGIN_ID,
 				"spaces.createDoc",
-				{ space_id: selected.id, title: "Untitled" }
+				{ space_id: selected.id, title: "" }
 			)) as string;
 			await loadDocuments(selected.id);
 			openTab(`/spaces/${selected.id}/app/${WHITEBOARD_PLUGIN_ID}/${docId}`, {
-				title: "Untitled",
+				title: tl("Untitled"),
 			});
 		} catch (e) {
 			console.error("Failed to create whiteboard", e);

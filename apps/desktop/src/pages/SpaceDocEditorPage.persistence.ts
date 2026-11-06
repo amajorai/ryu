@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { MarkdownCollab } from "@/src/components/editor/MarkdownEditor.tsx";
@@ -13,6 +14,7 @@ import {
 	listDocumentVersions,
 	restoreDocumentVersion,
 } from "@/src/lib/api/spaces.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 import type { useSpaceDocEditorDocument } from "./SpaceDocEditorPage.document.ts";
 import { SAVE_DEBOUNCE_MS } from "./SpaceDocEditorPage.model.ts";
 
@@ -65,6 +67,7 @@ export function useSpaceDocEditorPersistence({
 	titleRef,
 	updateTabTitle,
 }: SpaceDocEditorPersistenceInput) {
+	const tl = useLiteralMessages();
 	const collab = useMemo<MarkdownCollab | undefined>(() => {
 		if (!(collabReady && doc)) {
 			return;
@@ -139,11 +142,11 @@ export function useSpaceDocEditorPersistence({
 			setTitle(next);
 			titleRef.current = next;
 			if (tabId) {
-				updateTabTitle(tabId, next || "Untitled");
+				updateTabTitle(tabId, spaceDisplayTitle(next, tl));
 			}
 			scheduleSave();
 		},
-		[scheduleSave, tabId, updateTabTitle]
+		[scheduleSave, tabId, updateTabTitle, tl]
 	);
 	const handleMarkdownChange = useCallback(
 		(markdown: string) => {
@@ -160,6 +163,7 @@ export function useSpaceDocEditorPersistence({
 	// editor's own title (and persist it through the normal save path) so the
 	// page header and the server document follow the strip.
 	useTabTitleSync({
+		emptyTitleLabel: tl("Untitled"),
 		ready: doc !== null,
 		scheduleSave,
 		setTitle,

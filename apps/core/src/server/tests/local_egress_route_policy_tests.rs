@@ -52,13 +52,17 @@ fn desktop_setting_and_lookalike_paths_fall_to_owner_only() {
     }
 }
 
+fn delegation(client_id: &str) -> AuthorizationContext {
+    let mut context = context(CredentialKind::ManagedDelegation);
+    context.constraints.client_id = Some(client_id.into());
+    context
+}
+
 #[test]
-fn no_credential_specific_override_applies_to_local_egress() {
+fn member_sessions_keep_the_handler_owner_check_on_route_paths() {
     let contexts = [
         context(CredentialKind::ManagedUserJwt),
-        context(CredentialKind::PairedCapability {
-            grant_id: "pc_egress".into(),
-        }),
+        delegation(crate::authorization::delegation::NODE_LIST_CLIENT_ID),
     ];
     for context in &contexts {
         for (method, path) in ROUTE_CASES {
@@ -68,6 +72,39 @@ fn no_credential_specific_override_applies_to_local_egress() {
                 "{method} {path}"
             );
         }
+    }
+}
+
+#[test]
+fn scoped_credentials_cannot_attach_steer_or_detach_the_network_exit() {
+    let contexts = [
+        delegation("hosted-mcp-client"),
+        context(CredentialKind::ManagedDelegation),
+        context(CredentialKind::PairedCapability {
+            grant_id: "pc_egress".into(),
+        }),
+    ];
+    for context in &contexts {
+        for (method, path) in ROUTE_CASES {
+            assert_eq!(
+                credential_route_policy(&method, path, context, true),
+                RoutePolicy::OwnerOnly,
+                "{method} {path}"
+            );
+        }
+    }
+}
+
+#[test]
+fn desktop_setting_and_lookalike_paths_stay_owner_only_for_every_credential() {
+    let contexts = [
+        context(CredentialKind::ManagedUserJwt),
+        delegation("hosted-mcp-client"),
+        context(CredentialKind::PairedCapability {
+            grant_id: "pc_egress".into(),
+        }),
+    ];
+    for context in &contexts {
         for (method, path) in OWNER_ONLY_CASES {
             assert_eq!(
                 credential_route_policy(&method, path, context, true),

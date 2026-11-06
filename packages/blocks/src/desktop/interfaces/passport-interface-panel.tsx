@@ -1,7 +1,5 @@
 import { translate as tr } from "@ryu/i18n/lite";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
-import { GameIconButton } from "./game-hud.tsx";
 import { GameSheet } from "./game-shell.tsx";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import { Booklet, type BookTab } from "./passport-booklet.tsx";
@@ -13,6 +11,7 @@ import type {
 	PassportStamp,
 } from "./passport-model.ts";
 import type { PassportNavigation } from "./passport-navigation.ts";
+import { PassportPageNav } from "./passport-page-nav.tsx";
 import { ImmigrationRecord, VisaApplication } from "./passport-record.tsx";
 import { PassportArtProvider } from "./passport-stamp.tsx";
 
@@ -108,41 +107,13 @@ export function passportPanel({
 				data-testid="passport-booklet"
 				eyebrow={tr("No. {number}", { number: passport.number })}
 				footer={
-					<nav
-						aria-label="Pages"
-						className="flex items-center justify-between gap-2"
-					>
-						<GameIconButton
-							disabled={spread <= 0}
-							label="Previous page"
-							onClick={previous}
-							title="Previous page (←)"
-						>
-							<ChevronLeft
-								aria-hidden="true"
-								className="size-5 rtl:-scale-x-100"
-								strokeWidth={2.75}
-							/>
-						</GameIconButton>
-						<p
-							aria-live="polite"
-							className="gk-display min-w-36 text-center text-[16px] tabular-nums"
-						>
-							{caption}
-						</p>
-						<GameIconButton
-							disabled={spread >= spreads.length - 1}
-							label="Next page"
-							onClick={next}
-							title="Next page (→)"
-						>
-							<ChevronRight
-								aria-hidden="true"
-								className="size-5 rtl:-scale-x-100"
-								strokeWidth={2.75}
-							/>
-						</GameIconButton>
-					</nav>
+					<PassportPageNav
+						canNext={spread < spreads.length - 1}
+						canPrevious={spread > 0}
+						caption={caption}
+						next={next}
+						previous={previous}
+					/>
 				}
 				label="Passport"
 				onClose={() => toggleSheet("booklet")}

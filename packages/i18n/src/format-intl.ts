@@ -11,8 +11,10 @@
 // byte-size, per-period and week-start helpers at the end of this file.
 
 import { activeLocale, translate as tl } from "./active-locale.ts";
+import { hasIntl } from "./intl-guards.ts";
 import { relativeTimeFormatOrFallback } from "./intl-relative-fallback.ts";
 import { DEFAULT_LOCALE } from "./pack.ts";
+import { fallbackWeekStart } from "./week-start-fallback.ts";
 
 /** Most formatters one cache keeps before it starts over. */
 const FORMATTER_CACHE_LIMIT = 256;
@@ -454,7 +456,8 @@ export type WeekStart = 0 | 1 | 2 | 3 | 4 | 5 | 6;
  * The locale's first day of the week from Intl week data (`getWeekInfo()` in
  * current engines, the `weekInfo` getter in older ones): 1 for `de`, 6 for
  * `ar`, 0 for `en-US`. Undefined when the engine has no week data or the tag
- * is unusable, so callers keep their own default (date-fns' Sunday).
+ * is unusable, so callers keep their own default (date-fns' Sunday). Without
+ * `Intl.Locale` (Hermes) it reads CLDR tables in `week-start-fallback.ts`.
  */
 export function weekStartForLocale(
 	locale: string | null | undefined
@@ -471,7 +474,7 @@ export function weekStartForLocale(
 				? Reflect.apply(getWeekInfo, intlLocale, [])
 				: Reflect.get(intlLocale, "weekInfo");
 	} catch {
-		return;
+		return hasIntl("Locale") ? undefined : fallbackWeekStart(locale);
 	}
 	const firstDay: unknown =
 		typeof weekInfo === "object" && weekInfo !== null

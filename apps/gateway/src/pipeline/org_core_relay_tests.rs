@@ -415,3 +415,6 @@ async fn one_orgs_exec_rows_do_not_exhaust_another_orgs_exec_budget() {
     assert!(!allowed(SHARED_CORE_KEY.to_owned()).await);
     assert!(allowed(org_key("org-b")).await);
 }
+
+#[path = "org_core_relay_epoch_tests.rs"]
+mod retired_epoch;

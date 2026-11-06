@@ -3,12 +3,14 @@
 import { useLocalizedString } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
+import { defaultInputDir } from "./input-direction.ts";
 
 function Textarea({
 	className,
 	size = "default",
 	typography = "default",
 	variant = "default",
+	dir,
 	...props
 }: React.ComponentProps<"textarea"> & {
 	size?:
@@ -42,6 +44,7 @@ function Textarea({
 				className
 			)}
 			data-slot="textarea"
+			dir={dir ?? defaultInputDir({ variant })}
 			{...props}
 			aria-label={localizedAriaLabel}
 			placeholder={localizedPlaceholder}

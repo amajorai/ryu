@@ -288,7 +288,8 @@ describe("SpaceProjectFolder interactions", () => {
 				() => document.querySelector('[role="dialog"]') === null
 			)
 		).toBeTrue();
-		expect(createPage).toHaveBeenCalledWith("space-1", "Untitled");
+		// New pages store an empty title; "Untitled" is a display fallback only.
+		expect(createPage).toHaveBeenCalledWith("space-1", "");
 		expect(openTab).toHaveBeenCalledWith("/spaces/space-1/doc/created-page", {
 			title: "Untitled",
 		});

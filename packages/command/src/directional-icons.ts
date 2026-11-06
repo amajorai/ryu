@@ -19,6 +19,22 @@ import {
 	ArrowTurnForwardIcon,
 	ChevronLeftIcon,
 	ChevronRightIcon,
+	Login01Icon,
+	Login02Icon,
+	Login03Icon,
+	LoginCircle01Icon,
+	LoginCircle02Icon,
+	LoginSquare01Icon,
+	LoginSquare02Icon,
+	Logout01Icon,
+	Logout02Icon,
+	Logout03Icon,
+	Logout04Icon,
+	Logout05Icon,
+	LogoutCircle01Icon,
+	LogoutCircle02Icon,
+	LogoutSquare01Icon,
+	LogoutSquare02Icon,
 	MailReply01Icon,
 	MailReply02Icon,
 	MailReplyAll01Icon,
@@ -32,6 +48,10 @@ import {
 	RedoIcon,
 	ReplyAllIcon,
 	ReplyIcon,
+	SendHorizontalIcon,
+	SendIcon,
+	Sent02Icon,
+	SentIcon,
 	Undo02Icon,
 	Undo03Icon,
 	UndoDotIcon,
@@ -95,9 +115,41 @@ const TURN_ICONS: ReadonlySet<IconSvgElement> = new Set([
 ]);
 
 /**
- * Whether `icon` is a horizontal arrow or chevron, or a reply, undo/redo or
- * turn glyph, that should mirror in RTL.
+ * The paper-plane Send glyph flies toward the inline end, and the Log-in and
+ * Log-out glyphs draw an arrow through a door, so they mirror under
+ * `dir="rtl"` too (Material marks send and logout as auto-mirrored).
+ */
+const SEND_AND_SESSION_ICONS: ReadonlySet<IconSvgElement> = new Set([
+	Login01Icon,
+	Login02Icon,
+	Login03Icon,
+	LoginCircle01Icon,
+	LoginCircle02Icon,
+	LoginSquare01Icon,
+	LoginSquare02Icon,
+	Logout01Icon,
+	Logout02Icon,
+	Logout03Icon,
+	Logout04Icon,
+	Logout05Icon,
+	LogoutCircle01Icon,
+	LogoutCircle02Icon,
+	LogoutSquare01Icon,
+	LogoutSquare02Icon,
+	SendHorizontalIcon,
+	SendIcon,
+	Sent02Icon,
+	SentIcon,
+]);
+
+/**
+ * Whether `icon` is a horizontal arrow or chevron, a reply, undo/redo or turn
+ * glyph, or a send or log-in/log-out glyph, that should mirror in RTL.
  */
 export function isDirectionalIcon(icon: IconSvgElement): boolean {
-	return HORIZONTAL_ICONS.has(icon) || TURN_ICONS.has(icon);
+	return (
+		HORIZONTAL_ICONS.has(icon) ||
+		TURN_ICONS.has(icon) ||
+		SEND_AND_SESSION_ICONS.has(icon)
+	);
 }

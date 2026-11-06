@@ -343,3 +343,76 @@ async fn legacy_channel_turn_digest_only_matches_pre_upgrade_rows_inside_the_win
         ChannelTurnClaim::Completed(replay("fresh"))
     );
 }
+
+/// Regression: a caller with only delegated Write on a human conversation must
+/// not be able to stamp a `channel_id` onto it through `POST /api/channels/run`.
+/// The stamp would make `require_conversation_write_if_owned` admit every
+/// channel writer (any ChatWrite holder) to that thread, permanently.
+#[tokio::test]
+async fn channel_attach_never_converts_an_owned_human_conversation() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    store
+        .claim_tenancy("bob-chat", "bob", Some("org1"))
+        .await
+        .unwrap();
+    let before = store.get_access_meta("bob-chat").await.unwrap().unwrap();
+
+    let error = store
+        .ensure_channel_conversation("bob-chat", "x", None, Some("org1"))
+        .await
+        .expect_err("an owned non-channel row must not become a channel session");
+    assert!(error.downcast_ref::<ChannelAttachRefused>().is_some());
+    assert!(!store.is_channel_conversation("bob-chat").await.unwrap());
+    let after = store.get_access_meta("bob-chat").await.unwrap().unwrap();
+    assert_eq!(after.owner_user_id, before.owner_user_id);
+    assert_eq!(after.org_id, before.org_id);
+    assert_eq!(after.visibility, before.visibility);
+
+    // The follow-up caller with no grant stays denied by the per-resource ACL.
+    let mallory = crate::identity_verify::VerifiedCaller {
+        user_id: "mallory".to_owned(),
+        email: None,
+        email_verified: false,
+        org_id: Some("org1".to_owned()),
+        role: crate::identity_verify::OrgRole::Member,
+        teams: Vec::new(),
+    };
+    let denied = crate::server::require_resource_write_at(
+        store.get_access_meta("bob-chat").await,
+        Some(&mallory),
+        Some("org1"),
+        "conversation not found",
+    );
+    assert_eq!(
+        denied.err().map(|resp| resp.status()),
+        Some(axum::http::StatusCode::FORBIDDEN)
+    );
+}
+
+/// Legitimate channel flows keep working: a fresh channel row is created, a
+/// repeat delivery on it is idempotent, and an untenanted legacy row (which the
+/// machine-ingress gate already admits) can still be marked.
+#[tokio::test]
+async fn channel_attach_still_creates_and_reuses_channel_sessions() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    for _ in 0..2 {
+        store
+            .ensure_channel_conversation("channel:bot:1", "bot", Some("a"), Some("org1"))
+            .await
+            .unwrap();
+    }
+    assert!(store
+        .is_channel_conversation("channel:bot:1")
+        .await
+        .unwrap());
+
+    store
+        .ensure_conversation("legacy", None, None, Tenancy::Unattributed)
+        .await
+        .unwrap();
+    store
+        .ensure_channel_conversation("legacy", "bot", None, None)
+        .await
+        .unwrap();
+    assert!(store.is_channel_conversation("legacy").await.unwrap());
+}

@@ -1,9 +1,14 @@
 //! The OS's preferred UI languages, best first, as the OS spells them.
 //! `super::get_os_preferred_languages` normalises and deduplicates them.
 
-/// macOS: `NSLocale.preferredLanguages` (System Settings > Language & Region).
+/// macOS: the `AppleLanguages` defaults (System Settings > Language &
+/// Region), never the per-app value Ryu writes for an explicit UI language;
+/// `NSLocale.preferredLanguages` when the defaults hold no list.
 #[cfg(target_os = "macos")]
 pub(super) fn preferred_languages() -> Vec<String> {
+    if let Some(languages) = crate::webview_locale::macos::preferred_languages() {
+        return languages;
+    }
     use objc::runtime::Object;
     use objc::{class, msg_send, sel, sel_impl};
     use std::ffi::CStr;

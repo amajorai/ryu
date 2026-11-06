@@ -19,7 +19,10 @@ import type { ClientSession } from "mongoose";
  * billed to the org. It is now derived at the org's `boxProofKeyEpoch`
  * (`packages/api/src/lib/core-proof-key.ts`), which the Gateway checks on
  * every hosted `gwb1` against the org budget view. Bumping it refuses any key
- * signed at an older epoch, whichever member that key names.
+ * signed at an older epoch, whichever member that key names. The same epoch
+ * is the org's node-root epoch for its Core relay key
+ * (`packages/api/src/lib/core-relay-key.ts`), which the same root holder could
+ * read, so a bump also retires that trusted-forwarder key.
  *
  * Bumped only when the org has ever had a cloud-provisioned server (otherwise
  * the key never left the control plane) and the member could have held node

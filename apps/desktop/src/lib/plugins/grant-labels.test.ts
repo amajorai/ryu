@@ -1,13 +1,12 @@
 // apps/desktop/src/lib/plugins/grant-labels.test.ts
 //
-// Tests for the permission-grant humanizer shown in the app enable-consent
+// Tests for the permission-grant labels shown in the app enable-consent
 // dialog and the per-app permissions view. Load-bearing behaviours: known grants
 // map to their curated plain-English label/description (so a user approving
 // `hook:run-agent` reads "Run AI agents", not the raw id); lookup is
-// case-insensitive; and an UNKNOWN grant degrades gracefully — the label
-// humanizes the identifier (splitting on `._:-/`, capitalizing) rather than
-// leaking a raw token, while the description returns null so the caller can fall
-// back to the raw id as a tooltip. Pure module, no DOM.
+// case-insensitive; and an UNKNOWN grant reads "Permission: <id>" instead of a
+// guessed English name, while the description returns null so the caller can
+// fall back to the raw id as a tooltip. Pure module, no DOM.
 
 import { describe, expect, it } from "bun:test";
 import { grantDescription, grantLabel } from "./grant-labels.ts";
@@ -68,30 +67,39 @@ describe("grantLabel — known grants", () => {
 	});
 });
 
-describe("grantLabel — unknown grants humanize gracefully", () => {
-	it("humanizes identifiers that match inherited object properties", () => {
-		expect(grantLabel("constructor")).toBe("Constructor");
-		expect(grantLabel("__proto__")).toBe("Proto");
+describe("grantLabel — unknown grants show their raw id", () => {
+	// An unknown grant reads "Permission: <id>" with the id isolated
+	// left-to-right, never a humanized guess such as "Foo bar": a made-up
+	// English name told the user nothing and could not be translated.
+	const raw = (id: string) => `Permission: \u2066${id}\u2069`;
+
+	it("names identifiers that match inherited object properties by their id", () => {
+		expect(grantLabel("constructor")).toBe(raw("constructor"));
+		expect(grantLabel("__proto__")).toBe(raw("__proto__"));
 		expect(grantDescription("constructor")).toBeNull();
 		expect(grantDescription("__proto__")).toBeNull();
 	});
 
-	it("splits on separators and capitalizes the first word", () => {
-		expect(grantLabel("foo:bar")).toBe("Foo bar");
-		expect(grantLabel("some_new-grant/here")).toBe("Some new grant here");
+	it("keeps the identifier verbatim", () => {
+		expect(grantLabel("foo:bar")).toBe(raw("foo:bar"));
+		expect(grantLabel("some_new-grant/here")).toBe(raw("some_new-grant/here"));
+		expect(grantLabel("myGrant")).toBe(raw("myGrant"));
 	});
 
-	it("collapses runs of mixed separators into single spaces", () => {
-		expect(grantLabel("a.__:-/b")).toBe("A b");
-	});
-
-	it("returns the raw identifier when it is only separators (nothing to humanize)", () => {
+	it("returns the raw identifier when it is only separators", () => {
 		expect(grantLabel(":._-/")).toBe(":._-/");
 	});
+});
 
-	it("does not lowercase the remainder of a word (only the first char is forced up)", () => {
-		// "myGrant" has no separators → words === "myGrant"; charAt(0) upper + rest.
-		expect(grantLabel("myGrant")).toBe("MyGrant");
+describe("grantLabel — shared registry", () => {
+	it("labels the security-sensitive grants plainly", () => {
+		expect(grantLabel("tool:execute")).toBe("Run its own code");
+		expect(grantLabel("shell:integrate")).toBe("Integrate with the Ryu window");
+		expect(grantLabel("tool:http-egress:api.exa.ai")).toBe(
+			"Connect to api.exa.ai"
+		);
+		expect(grantLabel("tool:command:rg")).toBe("Run the rg command");
+		expect(grantLabel("mcp:places")).toBe("Use the places MCP server");
 	});
 });
 

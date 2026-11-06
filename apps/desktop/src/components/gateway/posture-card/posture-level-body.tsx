@@ -111,7 +111,7 @@ export function PostureLevelBody({
 						))}
 					</div>
 				</div>
-				<p className="text-muted-foreground text-xs">{shownOption.risk}</p>
+				<p className="text-muted-foreground text-xs">{tl(shownOption.risk)}</p>
 			</SettingsCard>
 			{pending ? (
 				<SettingsGroup>

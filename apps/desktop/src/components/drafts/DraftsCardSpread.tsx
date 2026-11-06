@@ -437,7 +437,10 @@ function CardTable({
 					size="sm"
 					variant="mono"
 				>
-					<HugeiconsIcon className="me-1 size-4" icon={SentIcon} />
+					<HugeiconsIcon
+						className="me-1 size-4 rtl:-scale-x-100"
+						icon={SentIcon}
+					/>
 					{pileCards.length > 1
 						? tl("Send {draftCount}", { draftCount: String(pileCards.length) })
 						: "Send"}

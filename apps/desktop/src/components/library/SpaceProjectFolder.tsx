@@ -22,6 +22,7 @@ import type {
 	SpaceDocument,
 	SpaceDocumentContent,
 } from "@/src/lib/api/spaces.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 
 const PagePreview = lazy(() =>
 	import("./SpaceDocumentPreview.tsx").then((module) => ({
@@ -184,9 +185,10 @@ function DatabasePreview({ source }: { source: string }) {
 }
 
 function FailedPreview({ document }: { document: SpaceDocument }) {
+	const tl = useLiteralMessages();
 	return (
 		<div className="flex min-h-32 flex-col justify-between bg-muted/30 p-4 text-sm">
-			<p className="font-medium">{document.title || "Untitled"}</p>
+			<p className="font-medium">{spaceDisplayTitle(document.title, tl)}</p>
 			<p className="text-muted-foreground text-xs">Preview unavailable</p>
 		</div>
 	);
@@ -197,7 +199,7 @@ function LoadingPreview({ document }: { document: SpaceDocument }) {
 	return (
 		<div
 			aria-label={tl("Loading preview for {title}", {
-				title: document.title || tl("Untitled"),
+				title: spaceDisplayTitle(document.title, tl),
 			})}
 			className="flex min-h-32 flex-col gap-3 bg-muted/30 p-4"
 		>
@@ -356,18 +358,17 @@ export function SpaceProjectFolder({
 		documentList.status === "ready" ? documentList.documents : [];
 
 	const createDocument = async (kind: "page" | "database") => {
-		const title = "Untitled";
 		const id =
 			kind === "page"
-				? await createPage(space.id, title)
-				: await createDatabase(space.id, title);
+				? await createPage(space.id, "")
+				: await createDatabase(space.id, "");
 		openTab(
 			spaceDocumentPath(space.id, {
 				id,
 				kind,
 				rawKind: kind,
 			}),
-			{ title }
+			{ title: tl("Untitled") }
 		);
 	};
 
@@ -381,10 +382,10 @@ export function SpaceProjectFolder({
 			</div>
 		),
 		id: document.id,
-		label: tl("Open {title}", { title: document.title || tl("Untitled") }),
+		label: tl("Open {title}", { title: spaceDisplayTitle(document.title, tl) }),
 		onClick: () =>
 			openTab(spaceDocumentPath(space.id, document), {
-				title: document.title,
+				title: spaceDisplayTitle(document.title, tl),
 			}),
 	}));
 

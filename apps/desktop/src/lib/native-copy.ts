@@ -56,6 +56,11 @@ export interface NativeShellCopy {
 	/** The locale's ten digits, or null when one is not a single character. */
 	digits: string | null;
 	labels: NativeShellLabels;
+	/**
+	 * `"fixed"` when the language was chosen explicitly (macOS then keeps it
+	 * as the app's `AppleLanguages`), `"auto"` when the OS language applies.
+	 */
+	languageMode?: "auto" | "fixed";
 	/** The locale shown, so WebView2 on Windows starts in it next launch. */
 	locale: string;
 	/** `Intl.PluralRules` category of every count from 0 to 199. */

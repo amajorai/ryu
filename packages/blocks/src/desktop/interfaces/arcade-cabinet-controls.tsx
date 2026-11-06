@@ -233,9 +233,10 @@ export function DeckButton({
 			aria-describedby={describedBy}
 			aria-label={label}
 			className={cn(
-				"h-7 rounded-[4px] border-b-2 font-bold font-mono tracking-[0.16em] transition-[filter,transform] duration-100 enabled:active:translate-y-px enabled:hover:brightness-110 disabled:cursor-default",
+				"h-7 rounded-[4px] border-b-2 font-bold font-mono uppercase tracking-[0.16em] transition-[filter,transform] duration-100 enabled:active:translate-y-px enabled:hover:brightness-110 disabled:cursor-default",
 				ARCADE_FOCUS,
-				wide ? "flex-1" : "w-[80px]"
+				// Grows past 80px only when a translation needs it (EINSAMMELN).
+				wide ? "flex-1" : "min-w-[80px] shrink-0 whitespace-nowrap px-2"
 			)}
 			data-arcade-stop={stop}
 			disabled={disabled}

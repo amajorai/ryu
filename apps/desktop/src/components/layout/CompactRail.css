@@ -10,8 +10,13 @@
 	--ryu-compact-rail-width: 4.5rem;
 }
 
-/* The native macOS traffic lights end about 82px in; the rail holds them. */
-:root[data-ryu-compact-rail="traffic-lights"] {
+/* The native window controls stay physical under a right-to-left language
+   (window-chrome-layout.ts), so these rules are keyed to `dir` as well.
+
+   The macOS traffic lights end about 82px in from the physical left; left to
+   right the rail holds them. Right to left the rail is on the other edge and
+   the title bar's actions clear the lights instead. */
+:root[data-ryu-compact-rail="traffic-lights"]:not([dir="rtl"]) {
 	--ryu-compact-rail-width: 5.5rem;
 }
 
@@ -26,6 +31,15 @@
    be dead space in an already narrow window. */
 :root[data-ryu-compact-rail] .ryu-nav-cluster-reserve {
 	display: none;
+}
+
+/* Right to left, the rail shares the top-right with the Windows/Linux caption
+   buttons (three 58px buttons pinned 12px in), which reach past it over the
+   title bar's inline start. Keep enough of the reserve there to clear them. */
+:root[data-ryu-compact-rail="caption-buttons"][dir="rtl"]
+	.ryu-nav-cluster-reserve {
+	display: block;
+	width: calc(12rem - var(--ryu-compact-rail-width));
 }
 
 /* Hover-to-peek grows from the inline-start edge, which is now the rail. The rail is

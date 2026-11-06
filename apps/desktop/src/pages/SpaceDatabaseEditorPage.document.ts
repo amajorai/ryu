@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,6 +23,7 @@ import {
 	newRowId,
 	parseDatabaseDoc,
 } from "@/src/lib/realtime/yjs-database.ts";
+import { editableSpaceTitle } from "@/src/lib/spaces/display-title.ts";
 import {
 	type ColumnEditorState,
 	SAVE_DEBOUNCE_MS,
@@ -39,6 +41,7 @@ export function useSpaceDatabaseDocument({
 	databaseId,
 	spaceId,
 }: SpaceDatabaseDocumentInput) {
+	const tl = useLiteralMessages();
 	const { getDocument, saveDocument } = useSpacesContext();
 	const updateTabTitle = useTabSelector((state) => state.updateTabTitle);
 	const openTab = useTabSelector((state) => state.openTab);
@@ -87,12 +90,12 @@ export function useSpaceDatabaseDocument({
 					parsed.views && parsed.views.length > 0
 						? parsed.views
 						: [defaultView()];
-				setTitle(doc.title);
+				setTitle(editableSpaceTitle(doc.title));
 				setColumns(parsed.columns);
 				setRows(seededRows);
 				setViews(seededViews);
 				setActiveViewId(seededViews[0]?.id ?? "");
-				titleRef.current = doc.title;
+				titleRef.current = editableSpaceTitle(doc.title);
 				columnsRef.current = parsed.columns;
 				rowsRef.current = seededRows;
 				viewsRef.current = seededViews;
@@ -200,6 +203,7 @@ export function useSpaceDatabaseDocument({
 	// editor's own title (and persist it through the normal save path) so the
 	// page header and the server document follow the strip.
 	useTabTitleSync({
+		emptyTitleLabel: tl("Untitled"),
 		ready: loaded,
 		scheduleSave,
 		setTitle,

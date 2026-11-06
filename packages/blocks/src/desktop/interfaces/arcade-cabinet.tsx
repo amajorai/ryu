@@ -169,7 +169,7 @@ export function SlotCabinet({
 							label={
 								newest
 									? tl("Collect: open {title}", { title: threadTitle(newest) })
-									: "Collect: no replies waiting"
+									: tl("Collect: no replies waiting")
 							}
 							lit={Boolean(newest)}
 							onClick={() => {
@@ -182,7 +182,7 @@ export function SlotCabinet({
 							stop="collect"
 							zoom={zoom}
 						>
-							COLLECT
+							{tl("Collect")}
 						</DeckButton>
 					)}
 					<DeckButton
@@ -196,7 +196,7 @@ export function SlotCabinet({
 						wide
 						zoom={zoom}
 					>
-						SPIN
+						{tl("Spin")}
 					</DeckButton>
 				</div>
 				<Tray

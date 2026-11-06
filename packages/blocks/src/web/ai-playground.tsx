@@ -123,7 +123,7 @@ export default function AiPlayground({
 					type="submit"
 					variant="mono"
 				>
-					<Send aria-hidden="true" size={18} />
+					<Send aria-hidden="true" className="rtl:-scale-x-100" size={18} />
 				</Button>
 			</form>
 		</div>

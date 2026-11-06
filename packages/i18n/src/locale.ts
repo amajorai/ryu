@@ -1,5 +1,6 @@
 import { BUILT_IN_LANGUAGE_PACK_INFO } from "./built-in-pack-info.ts";
 import { officialCatalogLocale } from "./catalog-locale.ts";
+import { likelyLanguageAndScript } from "./likely-script.ts";
 import {
 	DEFAULT_LOCALE,
 	type LanguageDirection,
@@ -22,7 +23,8 @@ export function localeLanguageAndScript(locale: string): string {
 		const maximized = new Intl.Locale(locale).maximize();
 		return `${maximized.language.toLowerCase()}-${(maximized.script ?? "").toLowerCase()}`;
 	} catch {
-		return `${locale.split("-")[0]?.toLowerCase() ?? locale.toLowerCase()}-`;
+		// Hermes has no `Intl.Locale`: expand the script from Core's tables.
+		return likelyLanguageAndScript(locale);
 	}
 }
 

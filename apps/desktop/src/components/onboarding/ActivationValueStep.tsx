@@ -2,7 +2,9 @@ import {
 	OnboardingActions,
 	OnboardingCta,
 } from "@ryu/blocks/desktop/onboarding-shell.tsx";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
+import { activationOfferCopy } from "./activation-offer-copy.ts";
 
 const HIRING_COSTS = [
 	"Recruiting and ramp-up",
@@ -18,17 +20,9 @@ export function ActivationValueStep({
 	organizationPlan?: boolean;
 	onContinue: () => void;
 }) {
-	const offer = organizationPlan
-		? {
-				amount: "$50",
-				cadence: "first month",
-				recurring: "$250/month from month two",
-			}
-		: {
-				amount: "$49",
-				cadence: "per month for one person",
-				recurring: "Choose Max later if you need more capacity",
-			};
+	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
+	const offer = activationOfferCopy(tl, organizationPlan, locale);
 	return (
 		<ActivationStepShell
 			subtitle="Ryu fits into the tools you already use, so the work can start without a new operating system."

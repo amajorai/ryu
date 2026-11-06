@@ -17,6 +17,10 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import { AgentPassportPanel } from "@/src/components/agents/AgentPassportPanel.tsx";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
+import {
+	agentLifecycleLabel,
+	agentSafetyProfileLabel,
+} from "@/src/lib/agents/agent-profile-labels.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type {
@@ -111,20 +115,18 @@ function connectionStatus(phase: ConnectionPhase) {
 	}
 }
 
-function safetyLabel(value: AgentSummary["safetyProfile"]): string {
-	return value
-		.split("_")
-		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-		.join(" ");
-}
-
 function IdentityView({ agent }: { agent: AgentSummary }) {
+	const tl = useLiteralMessages();
 	const facts = [
 		{ label: "Agent ID", value: agent.id, mono: true },
-		{ label: "Lifecycle", value: agent.lifecycleStatus, mono: false },
+		{
+			label: "Lifecycle",
+			value: agentLifecycleLabel(agent.lifecycleStatus, tl),
+			mono: false,
+		},
 		{
 			label: "Safety profile",
-			value: safetyLabel(agent.safetyProfile),
+			value: agentSafetyProfileLabel(agent.safetyProfile, tl),
 			mono: false,
 		},
 		{ label: "Runtime", value: agent.engine ?? "Not reported", mono: false },

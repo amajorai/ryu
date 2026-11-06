@@ -32,6 +32,24 @@
 	unicode-bidi: isolate;
 }
 
+/* Monospace spans show paths, commands, IDs and hashes. Each paragraph takes
+   the direction of its first strong character, so a Latin path stays left to
+   right in a right-to-left locale while Arabic in a mono span still reads
+   right to left. An explicit dir attribute wins. */
+:where(.font-mono):where(:not([dir])) {
+	unicode-bidi: plaintext;
+}
+
+/* A dir="auto" field with no value resolves left to right in engines that
+   predate the parent fallback, which would left-align an Arabic placeholder.
+   While the placeholder shows, follow the surrounding direction instead. */
+:where(
+	[data-slot="input"][dir="auto"]:placeholder-shown,
+	[data-slot="textarea"][dir="auto"]:placeholder-shown
+) {
+	direction: inherit;
+}
+
 /* Sileo's bundled title rule capitalizes every word. Toast titles are sentence
    copy, so the shared toaster opts into this more-specific rule to preserve the
    casing supplied by each caller across web and desktop. */

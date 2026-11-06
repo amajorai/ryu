@@ -2407,7 +2407,9 @@ pub fn capability_label(grant: &str) -> String {
                 .to_string()
         }
         "approvals:request" => "Asks for your approval before a proposed fix runs".to_string(),
-        "runs:rerun-agent" => "Re-runs failed agent runs".to_string(),
+        "runs:rerun-agent" => {
+            "Re-runs failed agent runs, possibly with a corrected instruction".to_string()
+        }
         "subscriptions:read" => "See your subscription accounts".to_string(),
         // Spaces + media capabilities (full-page companion apps).
         "spaces:docs" => "Spaces documents".to_string(),
@@ -2737,7 +2739,7 @@ mod tests {
         assert!(capability_label("approvals:request").contains("approval"));
         assert_eq!(
             capability_label("runs:rerun-agent"),
-            "Re-runs failed agent runs"
+            "Re-runs failed agent runs, possibly with a corrected instruction"
         );
         assert_eq!(
             capability_label("app:http:@ryu/recipes"),

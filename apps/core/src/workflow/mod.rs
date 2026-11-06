@@ -61,8 +61,9 @@ mod node_kind;
 mod persist;
 mod policies;
 mod references;
+mod run_guard;
 
-pub use self::{guardrails::*, node_kind::*, persist::*, policies::*, references::*};
+pub use self::{guardrails::*, node_kind::*, persist::*, policies::*, references::*, run_guard::*};
 
 /// A single node in a workflow definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]

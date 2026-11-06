@@ -508,6 +508,7 @@ async fn run_workflow_with_mode(
     run_id: String,
     mode: ExecutionMode,
 ) -> Result<WorkflowRun, String> {
+    crate::workflow::ensure_runnable_on_this_node(workflow)?;
     crate::workflow::ensure_agents_active(workflow).await?;
     if !mode.is_dry_run() {
         crate::plugin_host::fire_workflow_run_event(

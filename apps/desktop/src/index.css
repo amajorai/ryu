@@ -275,9 +275,13 @@ html:not([data-pointer-cursor="true"])
 	cursor: default;
 }
 
+/* The caption buttons stay physical under a right-to-left UI language (see
+   window-chrome-layout.ts): keep minimize, maximize, close in that order so the
+   close button stays the rightmost and the corner rules below still fit it. */
 div[data-tauri-decorum-tb] {
 	padding-top: 0 !important;
 	padding-right: 0 !important;
+	direction: ltr;
 }
 
 /* Windowed mode: round both right corners of the close button */

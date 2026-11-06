@@ -162,6 +162,14 @@ pub(in crate::server) async fn channel_run(
                     .release_channel_turn(idempotency_key)
                     .await;
             }
+            // An existing owned human conversation is never converted into a
+            // channel session: the stamp would open it to every channel writer.
+            if error
+                .downcast_ref::<crate::server::conversations::ChannelAttachRefused>()
+                .is_some()
+            {
+                return json_error(StatusCode::FORBIDDEN, error.to_string());
+            }
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": format!("could not create channel session: {error}") })),

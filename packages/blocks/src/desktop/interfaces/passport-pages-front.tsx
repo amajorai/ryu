@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
 	InterfaceAgent,
@@ -171,6 +172,7 @@ export function NotesPage({
  * print, so the frame carries only the engraved security rosette.
  */
 function HolderPhoto() {
+	const tl = useLiteralMessages();
 	const prefix = usePassportArtId();
 	return (
 		<svg
@@ -212,7 +214,7 @@ function HolderPhoto() {
 				strokeWidth="0.8"
 			/>
 			<text
-				className="font-mono"
+				className="font-mono uppercase"
 				fill="var(--pp-ink-muted)"
 				fontSize="7"
 				letterSpacing="1.6"
@@ -220,7 +222,7 @@ function HolderPhoto() {
 				x="53"
 				y="124"
 			>
-				HOLDER
+				{tl("Holder")}
 			</text>
 		</svg>
 	);

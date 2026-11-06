@@ -1,3 +1,4 @@
+import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import {
 	Tooltip,
@@ -84,7 +85,9 @@ function NavItem({
 				aria-hidden="true"
 				className={cn(
 					"size-4.5 shrink-0",
-					selected ? "text-foreground" : "text-foreground/70"
+					selected ? "text-foreground" : "text-foreground/70",
+					// The Sent paper plane flies toward the inline end.
+					Icon === Send && DIRECTIONAL_ICON_CLASS
 				)}
 				strokeWidth={selected ? 2.25 : 1.75}
 			/>

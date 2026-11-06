@@ -25,6 +25,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { type ReactNode, useLayoutEffect } from "react";
 import { useSession } from "@/lib/auth-client.ts";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
+import { compactRailNativeControls } from "@/src/lib/window-chrome-layout.ts";
 import { useAppStore } from "@/src/store/useAppStore.ts";
 import { useCreateAgentDialog } from "@/src/store/useCreateAgentDialog.ts";
 import "./CompactRail.css";
@@ -32,6 +33,14 @@ import { CompactRailMenuItem } from "./appearance-context-menu.tsx";
 import { CompactRailAgents, RailDivider } from "./compact-rail-agents.tsx";
 
 const COMPACT_RAIL_ATTRIBUTE = "data-ryu-compact-rail";
+
+/** The rail's top padding: below the traffic lights (top-left, so only left to
+ *  right) or below the caption buttons (top-right, so only right to left). */
+const RAIL_TOP_CLEARANCE = {
+	"caption-buttons": "pt-2 rtl:pt-12",
+	none: "pt-2",
+	"traffic-lights": "pt-11 rtl:pt-2",
+} as const;
 
 interface CompactRailProps {
 	isMac: boolean;
@@ -139,17 +148,20 @@ export function CompactRail({
 		(state) => state.openCreateAgent
 	);
 
-	// The native macOS window keeps its traffic lights at the top-left, which is
-	// now the rail; it widens just enough to hold them above the roster.
-	const clearsTrafficLights = nativeWindowChrome && isMac;
+	// The native window controls stay physical under a right-to-left language
+	// (see windowChromeLayout): the macOS traffic lights share the rail's corner
+	// only left to right, the Windows caption buttons only right to left. The
+	// rail drops below whichever it shares; CompactRail.css widens it for the
+	// lights and keeps the title bar's reserve for the caption buttons.
+	const nativeControls = compactRailNativeControls({
+		isMac,
+		nativeWindowChrome,
+	});
 	useLayoutEffect(() => {
 		const root = document.documentElement;
-		root.setAttribute(
-			COMPACT_RAIL_ATTRIBUTE,
-			clearsTrafficLights ? "traffic-lights" : ""
-		);
+		root.setAttribute(COMPACT_RAIL_ATTRIBUTE, nativeControls);
 		return () => root.removeAttribute(COMPACT_RAIL_ATTRIBUTE);
-	}, [clearsTrafficLights]);
+	}, [nativeControls]);
 
 	const searchLabel = t("shell.search", undefined, "Search");
 	const menuLabel = t("shell.open-menu", undefined, "Open menu");
@@ -162,7 +174,7 @@ export function CompactRail({
 						aria-label="Agents"
 						className={cn(
 							"fixed inset-y-0 start-0 z-40 flex w-[var(--ryu-compact-rail-width,4.5rem)] flex-col items-center pb-2",
-							clearsTrafficLights ? "pt-11" : "pt-2"
+							RAIL_TOP_CLEARANCE[nativeControls || "none"]
 						)}
 						data-tauri-drag-region
 						data-testid="compact-rail"

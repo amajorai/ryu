@@ -315,6 +315,9 @@ pub(in crate::server) async fn chat_stream(
                 ));
             }
         };
+        if let Err(error) = crate::workflow::ensure_runnable_on_this_node(&workflow) {
+            return json_error(StatusCode::FORBIDDEN, error);
+        }
         if !crate::workflow::accepts_chat_input(&workflow) {
             return crate::sidecar::adapters::error_stream(format!(
                 "Workflow '{}' doesn't accept a chat input — add an Input node at the entry to run it from chat.",

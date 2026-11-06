@@ -3158,6 +3158,19 @@
     ],
     "reason": "Debate is the Spanish and Portuguese word"
   },
+  "Debian, Ubuntu": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Linux distribution names"
+  },
   "Decimal (1, 2, 3)": {
     "locales": [
       "es",
@@ -3968,6 +3981,19 @@
       "it"
     ],
     "reason": "Standard ML loanword in Italian."
+  },
+  "Fedora, openSUSE": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Linux distribution names"
   },
   "Feed": {
     "locales": [
@@ -6330,6 +6356,38 @@
     ],
     "reason": "model name plus 'local', which is the same word in Spanish, French and Portuguese"
   },
+  "LoRA alpha": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "LoRA hyperparameter name"
+  },
+  "LoRA r": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "LoRA hyperparameter name"
+  },
   "Lobby": {
     "locales": [
       "de",
@@ -8193,6 +8251,12 @@
       "zh-CN"
     ],
     "reason": "stock media service brand"
+  },
+  "Photo": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Same word in French"
   },
   "Pierre Dark": {
     "locales": [
@@ -15238,6 +15302,20 @@
       "ru"
     ],
     "reason": "Only placeholders and punctuation; nothing to translate."
+  },
+  "{label}: {status} · {detail}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Placeholders and punctuation only"
   },
   "{latency} ms": {
     "locales": [

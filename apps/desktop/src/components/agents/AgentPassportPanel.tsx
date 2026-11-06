@@ -30,6 +30,10 @@ import {
 	passportRowFromOrganizationControl,
 } from "@/src/lib/agent-passport.ts";
 import {
+	agentLifecycleLabel,
+	agentSafetyProfileLabel,
+} from "@/src/lib/agents/agent-profile-labels.ts";
+import {
 	type Agent,
 	type AgentSummary,
 	fetchAgent,
@@ -79,13 +83,6 @@ function lifecycleBadgeVariant(
 		return null;
 	}
 	return status === "trial" ? "secondary" : "outline";
-}
-
-function humanizeSafetyProfile(value: AgentIdentity["safetyProfile"]): string {
-	return value
-		.split("_")
-		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-		.join(" ");
 }
 
 function PassportField({
@@ -339,7 +336,9 @@ export function AgentPassportPanel({
 						<div className="flex flex-wrap items-center gap-2">
 							<h3 className="font-medium text-sm">{agent.name}</h3>
 							{lifecycleBadge ? (
-								<Badge variant={lifecycleBadge}>{agent.lifecycleStatus}</Badge>
+								<Badge variant={lifecycleBadge}>
+									{agentLifecycleLabel(agent.lifecycleStatus, tl)}
+								</Badge>
 							) : null}
 							{agent.locked ? <Badge variant="secondary">Locked</Badge> : null}
 						</div>
@@ -354,7 +353,7 @@ export function AgentPassportPanel({
 						<PassportField label="Agent ID" mono value={agent.id} />
 						<PassportField
 							label="Safety profile"
-							value={humanizeSafetyProfile(agent.safetyProfile)}
+							value={agentSafetyProfileLabel(agent.safetyProfile, tl)}
 						/>
 						<PassportField label="Runtime" value={engine} />
 						<PassportField label="Model" value={model} />

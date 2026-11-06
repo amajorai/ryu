@@ -267,6 +267,15 @@ pub(in crate::server) fn credential_route_policy(
     if is_cloud_environment_mutation(method, path) && !is_owner_or_member_session(context) {
         return RoutePolicy::OwnerOnly;
     }
+    // Attaching as the node's network exit, steering provider traffic through
+    // it, or detaching the owner's desktop is a node-owner control no OAuth
+    // scope covers. The handler only compares the caller's user id with the
+    // node owner, which a hosted OAuth/MCP client delegation or a paired
+    // device also carries; only the owner token and a member's own signed-in
+    // session (the desktop's node-list delegation) may reach it.
+    if path_has_prefix(path, "/api/local-egress/route") && !is_owner_or_member_session(context) {
+        return RoutePolicy::OwnerOnly;
+    }
     route_policy(method, path)
 }
 

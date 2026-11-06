@@ -429,7 +429,7 @@ export function BoardInterface({
 							className={cn(
 								isList
 									? "@container scroll-fade min-w-0 flex-1 overflow-y-auto"
-									: "@container scroll-fade-x flex min-w-0 flex-1 snap-x scroll-pl-4 gap-3 overflow-x-auto p-4",
+									: "@container scroll-fade-x flex min-w-0 flex-1 snap-x scroll-ps-4 gap-3 overflow-x-auto p-4",
 								!isList && (panelOpen ? "snap-mandatory" : "snap-proximity")
 							)}
 							onFocus={onBoardFocus}

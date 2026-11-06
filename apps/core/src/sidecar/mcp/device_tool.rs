@@ -6,15 +6,13 @@
 //! (device, capability) pair and dispatches calls to the device through
 //! [`ryu_hardware::session::live::invoke`] (RHP v1.1 design §6.4).
 //!
-//! Registered as a reserved registry server (`device`) like `notify`, so the
-//! `<server>.<tool>` id scheme, per-agent allowlist and single `call_tool` entry
-//! all work, the `input_schema` survives (unlike `register_app_tool`), and no
-//! plugin can shadow the name.
+//! A reserved registry server (`device`) like `notify`: ids, the per-agent
+//! allowlist and `call_tool` work, `input_schema` survives, and no plugin can
+//! shadow it. A tool name two devices produce is neither listed nor dispatched.
 //!
 //! ## Gates
 //!
-//! Checked on every listing AND again on every dispatch (dispatch is the
-//! revocation point):
+//! Checked on every listing and again on every dispatch (the revocation point):
 //!
 //! - the node is personal (not managed, not shared): device tools act on the
 //!   owner's physical hardware;
@@ -23,8 +21,7 @@
 //!   `capabilities[name]`, else the default `!sensitive`;
 //! - the device is connected over a secure session.
 //!
-//! Results are device-provided data and are returned as such; arguments and
-//! results are never logged.
+//! Results are returned as device-provided data; args and results are never logged.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -40,6 +37,8 @@ use ryu_hardware::session::live::{self, LiveCapabilities};
 use ryu_hardware::DeviceStore;
 
 use super::RegistryTool;
+
+mod resolve;
 
 /// Reserved registry server name for device capability tools.
 pub const SERVER_NAME: &str = "device";
@@ -148,8 +147,10 @@ pub async fn tools_with(ctx: &DeviceToolCtx, personal: bool) -> Vec<RegistryTool
     if node_gates(ctx, personal).await.is_err() {
         return Vec::new();
     }
+    let lives = live::capabilities().await;
+    let ambiguous = resolve::ambiguous_names(&lives, capability::tool_name);
     let mut out = Vec::new();
-    for live in live::capabilities().await {
+    for live in lives {
         if !live.meta.secure {
             continue;
         }
@@ -161,27 +162,14 @@ pub async fn tools_with(ctx: &DeviceToolCtx, personal: bool) -> Vec<RegistryTool
         }
         let device_type = device_type_str(record.device_type);
         for cap in &live.caps {
-            if capability::capability_enabled(&record.prefs, &cap.name, cap.sensitive) {
+            if capability::capability_enabled(&record.prefs, &cap.name, cap.sensitive)
+                && !ambiguous.contains(&capability::tool_name(&live.device_id, &cap.name))
+            {
                 out.push(registry_tool(&live, &record.name, device_type, cap));
             }
         }
     }
     out
-}
-
-/// Find the live (device, capability) a tool name refers to.
-async fn resolve(tool: &str) -> Option<(LiveCapabilities, ValidCapability)> {
-    for live in live::capabilities().await {
-        if let Some(cap) = live
-            .caps
-            .iter()
-            .find(|cap| capability::tool_name(&live.device_id, &cap.name) == tool)
-            .cloned()
-        {
-            return Some((live, cap));
-        }
-    }
-    None
 }
 
 /// [`dispatch`] over an explicit context and node scope.
@@ -193,8 +181,7 @@ pub async fn dispatch_with(
     agent_id: Option<&str>,
 ) -> Result<Value> {
     node_gates(ctx, personal).await?;
-    let (live, cap) = resolve(tool)
-        .await
+    let (live, cap) = resolve::find(live::capabilities().await, tool, capability::tool_name)?
         .ok_or_else(|| anyhow!("unknown device tool '{tool}' (the device may be offline)"))?;
     if !live.meta.secure {
         bail!("not_secure: device tools need a secure session");

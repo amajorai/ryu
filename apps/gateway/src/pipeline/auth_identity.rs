@@ -163,8 +163,8 @@ pub(super) async fn authenticate_identity(
             // a caller presenting it is recognized as master (so the shared
             // control-plane admin gate — config/audit/budget-spend — honors it),
             // while everyone else remains anonymous exactly as before. Without a
-            // configured master key this is a no-op (P2 #2 — pairs with the
-            // `master_key_present` term in `admin_loopback_allowed`).
+            // configured master key this is a no-op (pairs with
+            // `master_key_present` in `admin_loopback_allowed`).
             if let (Some(master), Some(raw)) = (&auth.master_key, raw_api_key) {
                 let key = raw.strip_prefix("Bearer ").unwrap_or(raw);
                 if ct_eq(key, master.as_str()) {
@@ -285,11 +285,9 @@ pub(super) async fn authenticate_identity(
 
         let relay = org_core_relay::org_core_relay_entry(key);
         for cfg_key in auth.api_keys.iter().chain(&relay) {
-            // Constant-time compare (as the master-key branch above already does):
-            // a naive `==` short-circuits on the first differing byte, a timing
-            // oracle that leaks the key byte-by-byte to a network attacker (the
-            // default bind is 0.0.0.0). Keep first-match semantics — only the
-            // per-byte signal is removed.
+            // Constant-time compare (as the master-key branch does): a naive
+            // `==` short-circuits on the first differing byte, a timing oracle
+            // that leaks the key byte-by-byte. Keep first-match semantics.
             if ct_eq(key, cfg_key.key.as_str()) {
                 if !cfg_key.allows_operation(operation) {
                     return StaticOutcome::Reject(GatewayError::Unauthorized(
@@ -340,7 +338,9 @@ pub(super) async fn authenticate_identity(
     });
 
     match outcome {
-        StaticOutcome::Matched(ctx) => Ok(ctx),
+        StaticOutcome::Matched(ctx) => org_core_relay::check_relay_key_epoch(state, &ctx)
+            .await
+            .map(|()| ctx),
         StaticOutcome::Reject(err) => Err(err),
         StaticOutcome::TryBoxHosted(token) => {
             let (user, session) = (user_id.as_deref(), session_id.as_deref());

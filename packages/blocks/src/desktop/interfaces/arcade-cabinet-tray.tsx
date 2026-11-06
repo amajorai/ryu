@@ -63,14 +63,14 @@ export function Meter({
 		>
 			<span className="flex items-baseline gap-1.5">
 				<span
-					className="leading-none"
+					className="uppercase leading-none"
 					style={{
 						color: palette.ledLabel,
 						fontSize: labelSize,
 						letterSpacing: labelTracking,
 					}}
 				>
-					CREDIT
+					{tl("Credits")}
 				</span>
 				<span
 					className="font-semibold text-[16px] leading-none"
@@ -88,19 +88,20 @@ export function Meter({
 						textShadow: bulbGlow(palette.mode, palette.ledTilt),
 					}}
 				>
+					{/* Kept as written in every locale, like the marquee's "TILT · {title}". */}
 					TILT
 				</span>
 			) : (
 				<span className="flex items-baseline gap-1.5">
 					<span
-						className="leading-none"
+						className="uppercase leading-none"
 						style={{
 							color: palette.ledLabel,
 							fontSize: labelSize,
 							letterSpacing: labelTracking,
 						}}
 					>
-						WIN
+						{tl("Win")}
 					</span>
 					<span
 						className="font-semibold text-[16px] leading-none"
@@ -243,10 +244,10 @@ export function Tray({
 			>
 				<span
 					aria-hidden="true"
-					className="font-bold font-mono text-[11px] tracking-[0.32em]"
+					className="font-bold font-mono text-[11px] uppercase tracking-[0.32em]"
 					style={{ color: palette.trayText }}
 				>
-					PAYOUT
+					{tl("Payout")}
 				</span>
 			</div>
 		);

@@ -5,6 +5,10 @@ import { I18nProvider, useI18n } from "@ryu/i18n/react";
 import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
+	LANGUAGE_MODE_KEY,
+	setLanguageMode,
+} from "@/src/hooks/useLanguageMode.ts";
+import {
 	buildNativeShellCopy,
 	localizeNativeCopy,
 	type NativeShellCopy,
@@ -268,5 +272,34 @@ describe("native shell copy", () => {
 		expect(copy?.labels["update.messageActive.other"]).toStartWith(
 			"{count} local tasks are running."
 		);
+	});
+
+	it("tells the shell whether the language was chosen explicitly", async () => {
+		setLanguageMode("auto");
+		await act(async () => {
+			root.render(
+				<I18nProvider
+					autoLocalizeDom={false}
+					initialLocale="de"
+					initialPackId={null}
+					manageDocument={false}
+				>
+					<NativeCopyLocalizer botTerminology={false} />
+				</I18nProvider>
+			);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		});
+		expect(sent.at(-1)?.languageMode).toBe("auto");
+		await act(async () => {
+			setLanguageMode("fixed");
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		});
+		expect(sent.at(-1)?.languageMode).toBe("fixed");
+		expect(sent.at(-1)?.locale).toBe("de");
+		await act(async () => {
+			setLanguageMode("auto");
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		});
+		localStorage.removeItem(LANGUAGE_MODE_KEY);
 	});
 });

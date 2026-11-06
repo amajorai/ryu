@@ -9,9 +9,15 @@
 //! `hardware_acceleration::apply_before_webview` on the next launch. A language
 //! change therefore reaches these built-in controls after a restart.
 //!
-//! WKWebView and WebKitGTK take no such switch, so nothing is stored elsewhere.
+//! WKWebView and WebKitGTK take no such switch. On macOS the explicit UI
+//! language is instead written to the app's `AppleLanguages` default, so the
+//! chrome AppKit draws itself follows it on the next launch (`macos`).
+//! WebKitGTK stores nothing.
 
 use crate::profile;
+
+#[path = "webview_locale_macos.rs"]
+pub(crate) mod macos;
 
 const STATE_FILE: &str = "webview-ui-locale";
 const MAX_TAG_LENGTH: usize = 35;
@@ -43,9 +49,15 @@ pub fn launch_arg() -> Option<String> {
     normalize(&stored).map(|tag| format!("--lang={tag}"))
 }
 
-/// Keep the locale the webview shows for the next launch (Windows only). Best
-/// effort: a write failure only means WebView2 keeps the OS language.
-pub fn remember(locale: Option<&str>) {
+/// Keep the locale the webview shows for the next launch: WebView2's
+/// `--lang` on Windows, the app's `AppleLanguages` on macOS (only for an
+/// explicit `language_mode` of `"fixed"`; `"auto"` removes what Ryu wrote).
+/// Best effort: a write failure only means the OS language stays.
+pub fn remember(locale: Option<&str>, language_mode: Option<&str>) {
+    #[cfg(target_os = "macos")]
+    macos::remember(locale, language_mode);
+    #[cfg(not(target_os = "macos"))]
+    let _ = language_mode;
     if !cfg!(target_os = "windows") {
         return;
     }

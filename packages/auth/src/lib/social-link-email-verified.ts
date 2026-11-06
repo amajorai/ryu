@@ -14,6 +14,11 @@
  * provider-reported email is unverified unless the request is the signed-in
  * user's own explicit link flow: `linkSocial` stores `link.userId` in the
  * server-generated OAuth state, and the account is being linked to that user.
+ *
+ * The same rule covers social sign-up: a provider identity whose email the
+ * provider did not verify cannot create a Ryu account for that address. The
+ * account would otherwise stay linked to that identity after the real mailbox
+ * owner later verifies the address on it (pre-account takeover).
  */
 import type { GenericEndpointContext } from "@better-auth/core";
 import { getOAuthState } from "better-auth/api";
@@ -25,6 +30,9 @@ import {
 
 /** Rejection code surfaced to the OAuth error redirect. */
 export const SOCIAL_LINK_EMAIL_UNVERIFIED = "social_link_email_unverified";
+
+/** Rejection code for a social sign-up with a provider-unverified email. */
+export const SOCIAL_SIGNUP_EMAIL_UNVERIFIED = "social_signup_email_unverified";
 
 export interface SocialLinkValidationInput {
 	source: { action: string; method: string };
@@ -50,17 +58,25 @@ export async function readExplicitLinkUserId(): Promise<string | null> {
 }
 
 /**
- * Refuses an implicit social link of a provider identity whose email the
- * provider did not verify. Other actions and methods pass through.
+ * Refuses a social sign-up or an implicit social link of a provider identity
+ * whose email the provider did not verify. Other actions and methods pass
+ * through.
  */
 export async function validateSocialLinkEmailVerified(
 	data: SocialLinkValidationInput,
 	readLinkUserId: ExplicitLinkUserIdReader = readExplicitLinkUserId
 ): Promise<SsoIdentityRejection | undefined> {
-	if (data.source.method !== "oauth" || data.source.action !== "link-account") {
+	if (data.source.method !== "oauth" || data.user.emailVerified === true) {
 		return;
 	}
-	if (data.user.emailVerified === true) {
+	if (data.source.action === "create-user") {
+		return {
+			error: SOCIAL_SIGNUP_EMAIL_UNVERIFIED,
+			errorDescription:
+				"The provider has not verified this email address, so it cannot be used to create an account. Verify it with the provider, or sign up with email.",
+		};
+	}
+	if (data.source.action !== "link-account") {
 		return;
 	}
 	const explicitLinkUserId = await readLinkUserId();

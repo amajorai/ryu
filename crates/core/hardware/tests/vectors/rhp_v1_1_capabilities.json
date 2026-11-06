@@ -215,7 +215,7 @@
       "code": "invalid_args"
     }
   ],
-  "tool_name_rule": "device_key = device_id if it matches ^[a-z0-9]+(_[a-z0-9]+)*$ and len <= 22, else 'd' + first 12 lowercase hex of SHA-256(device_id); tool_name = device_key + '__' + capability name with '.' replaced by '-'; tool_id = 'device.' + tool_name",
+  "tool_name_rule": "device_key = device_id if it matches ^[a-z0-9]+(_[a-z0-9]+)*$, len <= 22 and it does not match ^d[0-9a-f]{12}$, else 'd' + first 12 lowercase hex of SHA-256(device_id); tool_name = device_key + '__' + capability name with '.' replaced by '-'; tool_id = 'device.' + tool_name",
   "tool_names": [
     {
       "device_id": "rhw_0123456789abcdef",
@@ -228,6 +228,12 @@
       "capability": "device.status",
       "tool_name": "de63e5a6ad859__device-status",
       "tool_id": "device.de63e5a6ad859__device-status"
+    },
+    {
+      "device_id": "de63e5a6ad859",
+      "capability": "device.status",
+      "tool_name": "d59deec180b5f__device-status",
+      "tool_id": "device.d59deec180b5f__device-status"
     }
   ]
 }

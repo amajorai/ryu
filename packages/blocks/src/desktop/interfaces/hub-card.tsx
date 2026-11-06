@@ -38,7 +38,7 @@ export function HubCardFrame({
 			aria-labelledby={titleId}
 			aria-roledescription="card"
 			className={cn(
-				"@container/hub-card flex h-(--hub-card-h) w-(--hub-card) shrink-0 snap-start scroll-ml-(--hub-gutter) flex-col rounded-[28px] bg-card px-6 pt-6 pb-4 text-card-foreground outline-none ring-1 ring-border/60 focus-visible:ring-2 focus-visible:ring-ring",
+				"@container/hub-card flex h-(--hub-card-h) w-(--hub-card) shrink-0 snap-start scroll-ms-(--hub-gutter) flex-col rounded-[28px] bg-card px-6 pt-6 pb-4 text-card-foreground outline-none ring-1 ring-border/60 focus-visible:ring-2 focus-visible:ring-ring",
 				className
 			)}
 			data-card={id}

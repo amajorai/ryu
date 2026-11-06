@@ -614,13 +614,8 @@ fn default_grant_allowlist() -> Vec<String> {
         // `approvals` namespace is protected, so only this exact entry allows it
         // for any app other than `@ryu/approvals`.
         "approvals:request",
-        // `runs:rerun-agent` re-runs a failed agent run (`runs.rerunAgent`
-        // kernel capability; an approved fix is executed by Core's own
-        // approval engine instead). Core mints the
-        // never-heal-a-heal run id itself, so a holder cannot choose or collide
-        // with a conversation. Workflow re-runs need no new word: they reuse the
-        // reviewed `workflows:runstate` above (the same power as `workflows.run`).
-        "runs:rerun-agent",
+        // `runs:rerun-agent` is owner-exclusive (see `OWNER_EXCLUSIVE_GRANTS`).
+        // Workflow re-runs reuse the reviewed `workflows:runstate` above.
         // Shell integration: a companion app that contributes a sidebar section /
         // navigation entry to the host shell declares this. Reaching into the host
         // shell is by definition outside the app's own namespace, so it stays a
@@ -914,6 +909,7 @@ struct OwnerExclusiveGrant {
 ///   sidecar to the user's own hardware security key.
 /// - `chat:project-guidance` — a project's standing goal and instructions, which
 ///   Core puts in the system prompt of every turn in that project.
+/// - `runs:rerun-agent` — an unattended agent turn on an app-supplied prompt.
 const OWNER_EXCLUSIVE_GRANTS: &[OwnerExclusiveGrant] = &[
     OwnerExclusiveGrant {
         owner_ids: &["@ryu/kill-switch", "com.ryu.kill-switch"],
@@ -973,6 +969,12 @@ const OWNER_EXCLUSIVE_GRANTS: &[OwnerExclusiveGrant] = &[
     OwnerExclusiveGrant {
         owner_ids: &["@ryu/projects", "com.ryu.projects"],
         grants: &["chat:project-guidance"],
+    },
+    // `runs.rerunAgent` starts an unattended turn of the named agent on the
+    // caller's prompt, with no approval. Only the reviewed Healing app may.
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/healing", "com.ryu.healing"],
+        grants: &["runs:rerun-agent"],
     },
 ];
 

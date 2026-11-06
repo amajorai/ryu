@@ -1,5 +1,6 @@
 import { LibraryIcon, WorkflowCircle06Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -36,6 +37,7 @@ export default function SpaceDocEditorPage({
 	spaceId: string;
 	documentId: string;
 }) {
+	const tl = useLiteralMessages();
 	const {
 		collabReady,
 		collaborative,
@@ -187,7 +189,7 @@ export default function SpaceDocEditorPage({
 			</div>
 			<BacklinksPanel documentId={documentId} spaceId={spaceId} />
 			<EntityIconDialog
-				description={title || "Untitled"}
+				description={title || tl("Untitled")}
 				onChange={(next: GlyphValue) => {
 					setDoc((prev) => (prev ? { ...prev, icon: next } : prev));
 					updateTabsIconWhere(

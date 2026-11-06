@@ -1,4 +1,5 @@
 import { useReactFlowAriaLabels } from "@ryu/blocks/desktop/react-flow-labels.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Background,
 	Controls,
@@ -9,6 +10,7 @@ import {
 import { useMemo } from "react";
 import type { DocGraph } from "@/src/lib/api/spaces.ts";
 import { layoutForceGraph } from "@/src/lib/force-directed-graph.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 
 const EDGE_COLOR = new Map<string, string>([
 	["wiki", "var(--primary)"],
@@ -51,6 +53,7 @@ export function KnowledgeGraph({
 	graph: DocGraph;
 	onOpenNode: (node: DocGraph["nodes"][number]) => void;
 }) {
+	const tl = useLiteralMessages();
 	const ariaLabels = useReactFlowAriaLabels();
 	const positions = useMemo(
 		() =>
@@ -68,11 +71,11 @@ export function KnowledgeGraph({
 				return {
 					id: node.id,
 					position: { x: point.x, y: point.y },
-					data: { label: node.title || "Untitled" },
+					data: { label: spaceDisplayTitle(node.title, tl) },
 					style: nodeStyle(node.kind, node.pending),
 				} satisfies Node;
 			}),
-		[graph.nodes, positions]
+		[graph.nodes, positions, tl]
 	);
 
 	const edges: Edge[] = useMemo(

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { fetchBacklinks, type SpaceDocLink } from "@/src/lib/api/spaces.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 
 /**
  * "Linked references" — the documents that link to this page (Obsidian/Notion
@@ -66,7 +67,7 @@ export function BacklinksPanel({
 							type="button"
 						>
 							<span className="block font-medium text-sm">
-								{link.srcTitle || "Untitled"}
+								{spaceDisplayTitle(link.srcTitle, tl)}
 							</span>
 							{link.snippet ? (
 								<span

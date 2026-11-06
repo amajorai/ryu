@@ -166,7 +166,7 @@ export function BotAppVisual() {
 							className="flex items-center gap-3 rounded-full bg-card px-4 py-3 text-foreground/40 ring-1 ring-border/60"
 						>
 							<span className="block h-1.5 w-1/3 rounded-full bg-foreground/10" />
-							<Send className="ms-auto size-4 shrink-0" />
+							<Send className="ms-auto size-4 shrink-0 rtl:-scale-x-100" />
 						</div>
 					</div>
 				</section>

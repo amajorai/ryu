@@ -88,6 +88,13 @@ impl ConversationStore {
     /// metadata. On an org-bound node the row is shared with the organization
     /// without assigning it to a human owner; on an unbound node it preserves
     /// the local single-user behavior.
+    ///
+    /// A `channel_id` marks the row as a machine-ingress channel session, which
+    /// `require_conversation_write_if_owned` admits for every channel writer. So
+    /// an EXISTING tenanted (owner- or org-scoped) row that is not already a
+    /// channel session is never converted: that would let anyone with Write on a
+    /// human conversation widen its ACL to every channel writer, permanently.
+    /// Such a call fails with [`ChannelAttachRefused`] and leaves the row as is.
     pub async fn ensure_channel_conversation(
         &self,
         conversation_id: &str,
@@ -99,6 +106,18 @@ impl ConversationStore {
             .map(Tenancy::shared_with_org)
             .unwrap_or(Tenancy::Unattributed);
         let conn = self.conn.lock().await;
+        let existing: Option<(Option<String>, bool)> = conn
+            .query_row(
+                "SELECT channel_id, owner_user_id IS NOT NULL OR org_id IS NOT NULL
+                 FROM conversations WHERE id = ?1",
+                params![conversation_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .context("checking existing conversation before channel attach")?;
+        if let Some((None, true)) = existing {
+            return Err(ChannelAttachRefused.into());
+        }
         upsert_conversation_row(
             &conn,
             conversation_id,
@@ -358,3 +377,16 @@ impl ConversationStore {
         Ok(id)
     }
 }
+
+/// Refusal to turn an existing owned, non-channel conversation into a channel
+/// session (see [`ConversationStore::ensure_channel_conversation`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelAttachRefused;
+
+impl std::fmt::Display for ChannelAttachRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("conversation is not a channel session")
+    }
+}
+
+impl std::error::Error for ChannelAttachRefused {}

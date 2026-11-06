@@ -5,6 +5,7 @@ import type { Tab } from "@/src/contexts/TabsContext.tsx";
 import {
 	commitTabRename,
 	isRenamableTab,
+	resolveTabTitleSync,
 	spaceDocumentRef,
 } from "./tab-rename.tsx";
 
@@ -151,5 +152,91 @@ describe("RegularTab inline rename structure", () => {
 		expect(REGULAR_TAB_SOURCE).toContain("{isEditing ? (");
 		expect(REGULAR_TAB_SOURCE).toContain("<TabRenameInput");
 		expect(EDITING_BRANCH).not.toContain("<button");
+	});
+});
+
+describe("resolveTabTitleSync", () => {
+	test("adopts a strip rename the editor has not applied", () => {
+		expect(
+			resolveTabTitleSync({
+				currentTitle: "Plan",
+				emptyTitleLabel: "Unbenannt",
+				tabTitle: "Roadmap",
+			})
+		).toBe("adopt");
+		expect(
+			resolveTabTitleSync({
+				currentTitle: "",
+				emptyTitleLabel: "Unbenannt",
+				tabTitle: "Roadmap",
+			})
+		).toBe("adopt");
+	});
+
+	test("does not store the localized Untitled label as an empty title", () => {
+		expect(
+			resolveTabTitleSync({
+				currentTitle: "",
+				emptyTitleLabel: "Unbenannt",
+				tabTitle: "Unbenannt",
+			})
+		).toBe("none");
+		expect(
+			resolveTabTitleSync({
+				currentTitle: "",
+				emptyTitleLabel: "無題",
+				tabTitle: "無題",
+			})
+		).toBe("none");
+	});
+
+	test("relabels a legacy English Untitled tab instead of storing it", () => {
+		expect(
+			resolveTabTitleSync({
+				currentTitle: "",
+				emptyTitleLabel: "بدون عنوان",
+				tabTitle: "Untitled",
+			})
+		).toBe("relabel");
+	});
+
+	test("relabels after a UI-language switch instead of storing the old fallback", () => {
+		expect(
+			resolveTabTitleSync({
+				currentTitle: "",
+				emptyTitleLabel: "無題",
+				previousEmptyLabels: ["Unbenannt"],
+				tabTitle: "Unbenannt",
+			})
+		).toBe("relabel");
+	});
+
+	test("relabels a restored tab's stale fallback when the editor first loads", () => {
+		expect(
+			resolveTabTitleSync({
+				currentTitle: "",
+				emptyTitleLabel: "無題",
+				initial: true,
+				tabTitle: "Unbenannt",
+			})
+		).toBe("relabel");
+	});
+
+	test("ignores an unchanged or missing tab title", () => {
+		expect(
+			resolveTabTitleSync({ currentTitle: "Plan", tabTitle: "Plan" })
+		).toBe("none");
+		expect(
+			resolveTabTitleSync({ currentTitle: "Plan", tabTitle: undefined })
+		).toBe("none");
+		expect(resolveTabTitleSync({ currentTitle: "Plan", tabTitle: "" })).toBe(
+			"none"
+		);
+	});
+
+	test("without a fallback label, a titled tab over an empty title still adopts", () => {
+		expect(
+			resolveTabTitleSync({ currentTitle: "", tabTitle: "Untitled" })
+		).toBe("adopt");
 	});
 });

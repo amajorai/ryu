@@ -10,6 +10,7 @@ import { useProviderCatalog } from "@/src/hooks/provider-query-scope.ts";
 
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Select,
@@ -101,6 +102,7 @@ export function ModelDefaultsFields({
 	target,
 	value,
 }: ModelDefaultsFieldsProps) {
+	const tl = useLiteralMessages();
 	const { data: catalog } = useProviderCatalog(target, {
 		staleTime: 5 * 60 * 1000,
 	});
@@ -126,7 +128,7 @@ export function ModelDefaultsFields({
 				return (
 					<div className="flex flex-col gap-3" key={row.role}>
 						<SettingRow
-							description={row.description.model}
+							description={tl(row.description.model)}
 							label={row.modelLabel}
 						>
 							<AgentModelPickerField
@@ -169,7 +171,7 @@ export function ModelDefaultsFields({
 							) : null}
 						</SettingRow>
 						<SettingRow
-							description={row.description.effort}
+							description={tl(row.description.effort)}
 							label={row.effortLabel}
 						>
 							<Select

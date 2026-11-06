@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n";
 import {
 	type CloudEnvironmentRuntime,
 	DEFAULT_CLOUD_ENVIRONMENT_RUNTIME,
@@ -28,9 +29,10 @@ export const paneErrorHeadline = (error: string) =>
 		? "Couldn’t read the saved cloud environment settings."
 		: error;
 
-export const createEnvironment = (): CloudEnvironment => ({
+// The name is user-editable, so it is written in the creator's UI language.
+export const createEnvironment = (tl: LiteralMessage): CloudEnvironment => ({
 	id: crypto.randomUUID(),
-	name: "New environment",
+	name: tl("New environment"),
 	repositories: [],
 	installScript: "",
 	startInstructions: "",

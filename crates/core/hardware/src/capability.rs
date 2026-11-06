@@ -671,8 +671,19 @@ pub fn validate_args(capability: &ValidCapability, args: &Value) -> Result<(), A
 // Tool naming
 // ---------------------------------------------------------------------------
 
+/// Whether `key` has the hashed form `^d[0-9a-f]{12}$`. Such ids never stay verbatim, so a
+/// device cannot pick an id equal to another device's hashed key.
+fn is_hashed_device_key_form(key: &str) -> bool {
+    key.len() == 13
+        && key.starts_with('d')
+        && key[1..]
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 fn is_verbatim_device_key(device_id: &str) -> bool {
-    device_id.len() <= MAX_VERBATIM_DEVICE_KEY
+    !is_hashed_device_key_form(device_id)
+        && device_id.len() <= MAX_VERBATIM_DEVICE_KEY
         && !device_id.is_empty()
         && device_id.split('_').all(|part| {
             !part.is_empty()
@@ -683,8 +694,8 @@ fn is_verbatim_device_key(device_id: &str) -> bool {
 }
 
 /// The device part of a tool name: the device_id itself when it matches
-/// `^[a-z0-9]+(_[a-z0-9]+)*$` and has at most 22 characters, otherwise `d` plus the
-/// first 12 hex characters of `SHA256(device_id)`.
+/// `^[a-z0-9]+(_[a-z0-9]+)*$`, has at most 22 characters and is not of the hashed form
+/// `^d[0-9a-f]{12}$`, otherwise `d` plus the first 12 hex characters of `SHA256(device_id)`.
 pub fn device_key(device_id: &str) -> String {
     if is_verbatim_device_key(device_id) {
         return device_id.to_string();

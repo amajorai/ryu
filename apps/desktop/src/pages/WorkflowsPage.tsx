@@ -19,6 +19,7 @@
 
 import { WorkflowCircle06Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -38,6 +39,7 @@ import {
 	useWorkflows,
 } from "@/src/hooks/useWorkflows.ts";
 import { fetchWorkflow, type Workflow } from "@/src/lib/api/workflows.ts";
+import { newWorkflowDraft, newWorkflowName } from "./workflow-draft.ts";
 
 /** Compact, model-readable summary of a workflow definition for the builder
  *  preamble AND the on-page snapshot. Mirrors the agent builder's `agentSnapshot`. */
@@ -63,6 +65,7 @@ export interface WorkflowsPageProps {
 export default function WorkflowsPage({
 	initialWorkflowId = null,
 }: WorkflowsPageProps) {
+	const tl = useLiteralMessages();
 	const { workflows, loading, error, create, reload } = useWorkflows();
 	const openTab = useTabSelector((state) => state.openTab);
 	const activeNode = useActiveNode();
@@ -112,20 +115,14 @@ export default function WorkflowsPage({
 			return selected.id;
 		}
 		try {
-			const draft = await create({
-				id: "",
-				name: "New workflow",
-				nodes: [],
-				edges: [],
-				triggers: [],
-			});
+			const draft = await create(newWorkflowDraft(tl));
 			adoptedDraftRef.current = draft.id;
 			setSelected(draft);
 			return draft.id;
 		} catch {
 			return null;
 		}
-	}, [selected, create]);
+	}, [selected, create, tl]);
 
 	// After a builder turn settles, re-read the persisted definition so the
 	// on-page snapshot + the sidebar list reflect the new graph.
@@ -152,7 +149,7 @@ export default function WorkflowsPage({
 		resolveId: resolveWorkflowId,
 		snapshot: builderSnapshot,
 		targetId: selected?.id ?? null,
-		targetName: selected?.name ?? "New workflow",
+		targetName: selected?.name ?? newWorkflowName(tl),
 	});
 
 	const titleBarTitle = useMemo(

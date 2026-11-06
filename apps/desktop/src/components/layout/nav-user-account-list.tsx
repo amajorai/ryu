@@ -264,7 +264,10 @@ export function AccountList({
 											onClick={(event) => handleSignOutAccount(event, account)}
 											type="button"
 										>
-											<HugeiconsIcon className="size-3.5" icon={Logout01Icon} />
+											<HugeiconsIcon
+												className="size-3.5 rtl:-scale-x-100"
+												icon={Logout01Icon}
+											/>
 										</button>
 									</span>
 								</DropdownMenuItem>
@@ -292,7 +295,10 @@ export function AccountList({
 					) : null}
 					<DropdownMenuSeparator />
 					<DropdownMenuItem onClick={onSignOutAll} variant="destructive">
-						<HugeiconsIcon className="size-4" icon={Logout01Icon} />
+						<HugeiconsIcon
+							className="size-4 rtl:-scale-x-100"
+							icon={Logout01Icon}
+						/>
 						Log out of all accounts
 					</DropdownMenuItem>
 				</DropdownMenuSubContent>

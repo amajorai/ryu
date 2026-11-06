@@ -138,6 +138,9 @@ pub struct NativeShellCopy {
     /// The locale the webview shows; kept for WebView2's next launch.
     #[serde(default)]
     locale: Option<String>,
+    /// `"fixed"` (explicit choice) or `"auto"`; macOS keeps a fixed one.
+    #[serde(default)]
+    language_mode: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -420,7 +423,7 @@ pub(crate) fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>>
 /// Store the webview's translated shell copy and relabel what is on screen.
 #[tauri::command]
 pub fn set_native_copy(app: AppHandle, copy: NativeShellCopy) -> Result<(), String> {
-    crate::webview_locale::remember(copy.locale.as_deref());
+    crate::webview_locale::remember(copy.locale.as_deref(), copy.language_mode.as_deref());
     replace_store(sanitize(copy)?);
     crate::tray::relabel_tray(&app);
     #[cfg(target_os = "macos")]

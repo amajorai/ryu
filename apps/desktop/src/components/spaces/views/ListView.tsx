@@ -1,5 +1,6 @@
 import { ArrowExpand01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { DbColumn, DbRow } from "@/src/lib/realtime/yjs-database.ts";
@@ -26,6 +27,7 @@ export function ListView({
 	onOpenRow: (row: DbRow) => void;
 	createRow: (values?: DbRow) => void;
 }) {
+	const tl = useLiteralMessages();
 	const [titleColumn, ...rest] = columns;
 	const chipColumns = rest
 		.filter((column) => column.cell.variant !== "long-text")
@@ -38,7 +40,7 @@ export function ListView({
 					const titleValue = titleColumn ? row[titleColumn.id] : undefined;
 					const title =
 						titleValue == null || titleValue === ""
-							? "Untitled"
+							? tl("Untitled")
 							: String(titleValue);
 					return (
 						<button

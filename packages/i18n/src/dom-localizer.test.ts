@@ -275,7 +275,7 @@ describe("satellite copy in a Companion frame", () => {
 		await settle();
 		await settle();
 		expect(query("small").textContent).toBe(
-			"Taktabweichung von 1.234 % nicht korrigiert; synchronisiere die Clips erneut."
+			"Taktabweichung von 1,234 % nicht korrigiert; synchronisiere die Clips erneut."
 		);
 		const paragraphs = document.querySelectorAll("p");
 		expect(paragraphs[0]?.textContent).toBe("Medien mit take-2.mov verknüpft.");

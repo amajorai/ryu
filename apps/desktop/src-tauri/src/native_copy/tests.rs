@@ -24,7 +24,17 @@ fn payload(labels: &[(&str, &str)], categories: &[&str], digits: Option<&str>) -
         plural_categories: categories.iter().map(|c| (*c).to_owned()).collect(),
         digits: digits.map(str::to_owned),
         locale: None,
+        language_mode: None,
     }
+}
+
+#[test]
+fn reads_the_language_mode_the_webview_sends() {
+    let copy: NativeShellCopy =
+        serde_json::from_str(r#"{"locale":"de","languageMode":"fixed"}"#).expect("payload");
+    assert_eq!(copy.language_mode.as_deref(), Some("fixed"));
+    let older: NativeShellCopy = serde_json::from_str(r#"{"locale":"de"}"#).expect("payload");
+    assert_eq!(older.language_mode, None);
 }
 
 #[test]

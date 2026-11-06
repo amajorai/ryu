@@ -161,7 +161,7 @@ export function MainPage({
 								<>
 									<WikiPortrait
 										agent={featured.agent}
-										className="float-left me-3 mt-1 mb-1 border border-border"
+										className="float-start me-3 mt-1 mb-1 border border-border"
 										size={96}
 									/>
 									<p className={PROSE}>

@@ -24,6 +24,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { type Tab, useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { isPlaceholderTitle } from "@/src/lib/spaces/display-title.ts";
 
 /** A Space page's document address, derived from the tab's path. */
 export interface SpaceDocumentRef {
@@ -187,6 +188,51 @@ export function useTabRename(tab: Tab) {
 	};
 }
 
+/** What `useTabTitleSync` should do with a tab label that differs. */
+export type TabTitleSyncAction = "adopt" | "none" | "relabel";
+
+/**
+ * Decide whether a tab's label carries a rename the editor has not applied.
+ *
+ * For a document with an empty title the tab shows `emptyTitleLabel` (the
+ * localized "Untitled" fallback), and adopting that label would store the
+ * fallback word as the document's real title. So for an empty title, a label
+ * that is the current fallback, a fallback this editor showed before (the UI
+ * language changed), the legacy English "Untitled", or any label seen when the
+ * editor first loads (a tab restored from an earlier session or language) is
+ * not a rename: the tab is relabelled with the current fallback instead.
+ */
+export function resolveTabTitleSync({
+	currentTitle,
+	emptyTitleLabel,
+	initial = false,
+	previousEmptyLabels = [],
+	tabTitle,
+}: {
+	currentTitle: string;
+	emptyTitleLabel?: string;
+	initial?: boolean;
+	previousEmptyLabels?: readonly string[];
+	tabTitle: string | undefined;
+}): TabTitleSyncAction {
+	if (!tabTitle) {
+		return "none";
+	}
+	if (currentTitle === "" && emptyTitleLabel !== undefined) {
+		if (tabTitle === emptyTitleLabel) {
+			return "none";
+		}
+		if (
+			initial ||
+			isPlaceholderTitle(tabTitle) ||
+			previousEmptyLabels.includes(tabTitle)
+		) {
+			return "relabel";
+		}
+	}
+	return tabTitle === currentTitle ? "none" : "adopt";
+}
+
 /**
  * Converge a page editor's local title when its TAB is renamed from the strip.
  *
@@ -200,22 +246,51 @@ export function useTabRename(tab: Tab) {
  * title ref is empty and a save would flush a blank body over the real content.
  */
 export function useTabTitleSync({
+	emptyTitleLabel,
 	ready,
 	scheduleSave,
 	setTitle,
 	tabId,
 	titleRef,
 }: {
+	/** The tab label shown for an empty title, which is not a rename. */
+	emptyTitleLabel?: string;
 	ready: boolean;
 	scheduleSave: () => void;
 	setTitle: (title: string) => void;
 	tabId: string | undefined;
 	titleRef: { current: string };
 }) {
-	const { tabs } = useTabsContext();
+	const { tabs, updateTabTitle } = useTabsContext();
 	const tabTitle = tabs.find((t) => t.id === tabId)?.title;
+	// Fallback labels this editor has shown, so a UI-language switch relabels
+	// the tab instead of storing the previous language's "Untitled".
+	const seenEmptyLabelsRef = useRef<string[]>([]);
+	const initialRef = useRef(true);
 	useEffect(() => {
-		if (!(ready && tabTitle) || tabTitle === titleRef.current) {
+		if (!(ready && tabTitle)) {
+			return;
+		}
+		const initial = initialRef.current;
+		initialRef.current = false;
+		const action = resolveTabTitleSync({
+			currentTitle: titleRef.current,
+			emptyTitleLabel,
+			initial,
+			previousEmptyLabels: seenEmptyLabelsRef.current,
+			tabTitle,
+		});
+		if (
+			emptyTitleLabel &&
+			!seenEmptyLabelsRef.current.includes(emptyTitleLabel)
+		) {
+			seenEmptyLabelsRef.current.push(emptyTitleLabel);
+		}
+		if (action === "relabel" && tabId && emptyTitleLabel) {
+			updateTabTitle(tabId, emptyTitleLabel);
+			return;
+		}
+		if (action !== "adopt") {
 			return;
 		}
 		setTitle(tabTitle);
@@ -223,5 +298,13 @@ export function useTabTitleSync({
 		scheduleSave();
 		// `titleRef` is a stable ref; `setTitle`/`scheduleSave` are stable setters
 		// in the editor pages, so none of these re-arm the sync once it settles.
-	}, [ready, setTitle, scheduleSave, tabTitle]);
+	}, [
+		ready,
+		setTitle,
+		scheduleSave,
+		tabTitle,
+		emptyTitleLabel,
+		tabId,
+		updateTabTitle,
+	]);
 }

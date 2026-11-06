@@ -1,6 +1,7 @@
 import { formatMessage, messageIdForLiteral } from "@ryu/i18n/core";
 import { useOptionalI18n } from "@ryu/i18n/react";
 import { useEffect } from "react";
+import { useLanguageMode } from "@/src/hooks/useLanguageMode.ts";
 import {
 	buildNativeShellCopy,
 	type NativeShellTranslate,
@@ -16,8 +17,9 @@ import { createNativeCopyTranslator } from "@/src/lib/native-copy-translator.ts"
  * literals are translated or swapped; runtime text passes through unchanged.
  *
  * It also hands the Tauri shell its tray labels, quit and update
- * confirmations and macOS app menu in the same language. Until that first
- * hand-off the shell shows English.
+ * confirmations and macOS app menu in the same language, with the language
+ * mode so macOS can keep an explicit choice for the chrome AppKit draws. Until
+ * that first hand-off the shell shows English.
  */
 export function NativeCopyLocalizer({
 	botTerminology,
@@ -25,6 +27,7 @@ export function NativeCopyLocalizer({
 	botTerminology: boolean;
 }) {
 	const i18n = useOptionalI18n();
+	const [languageMode] = useLanguageMode();
 	useEffect(() => {
 		if (!(i18n || botTerminology)) {
 			return;
@@ -46,7 +49,10 @@ export function NativeCopyLocalizer({
 				: translated;
 		};
 		const tid = (id: string, source: string) => i18n.t(id, {}, source);
-		void pushNativeShellCopy(buildNativeShellCopy(tl, i18n.locale, tid));
-	}, [i18n]);
+		void pushNativeShellCopy({
+			...buildNativeShellCopy(tl, i18n.locale, tid),
+			languageMode,
+		});
+	}, [i18n, languageMode]);
 	return null;
 }

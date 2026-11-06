@@ -303,7 +303,11 @@ function ActionRow({
 					onClick={() => actions.onNewThread(author.id)}
 					type="button"
 				>
-					<Send aria-hidden="true" className="size-5" strokeWidth={1.75} />
+					<Send
+						aria-hidden="true"
+						className="size-5 rtl:-scale-x-100"
+						strokeWidth={1.75}
+					/>
 				</button>
 			) : null}
 		</div>

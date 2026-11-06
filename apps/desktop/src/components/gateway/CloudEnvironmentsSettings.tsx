@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
@@ -91,6 +92,7 @@ function TargetCloudEnvironmentsSettings({
 	initialRepository?: string;
 	initialVaultKey?: string;
 }) {
+	const tl = useLiteralMessages();
 	const startedCreating = useRef(false);
 	const [snapshot, setSnapshot] = useState<CloudEnvironmentsSnapshot | null>(
 		null
@@ -110,17 +112,18 @@ function TargetCloudEnvironmentsSettings({
 		if (startCreate && snapshot && !startedCreating.current) {
 			startedCreating.current = true;
 			setEditing({
-				...createEnvironment(),
+				...createEnvironment(tl),
 				...(initialRepository
 					? {
-							name: initialRepository.split("/").at(-1) ?? "New environment",
+							name:
+								initialRepository.split("/").at(-1) || tl("New environment"),
 							repositories: [initialRepository],
 						}
 					: undefined),
 				vaultKeys: initialVaultKey ? [initialVaultKey] : [],
 			});
 		}
-	}, [snapshot, startCreate, initialRepository, initialVaultKey]);
+	}, [snapshot, startCreate, initialRepository, initialVaultKey, tl]);
 
 	const [vaultOpen, setVaultOpen] = useState(false);
 
@@ -271,7 +274,7 @@ function TargetCloudEnvironmentsSettings({
 							disabled={!snapshot || busy}
 							onClick={() => {
 								setError(null);
-								setEditing(createEnvironment());
+								setEditing(createEnvironment(tl));
 							}}
 							size="sm"
 							variant="outline"

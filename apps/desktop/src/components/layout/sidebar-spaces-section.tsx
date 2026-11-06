@@ -24,6 +24,7 @@ import {
 	type VisibilityChangeRequest,
 	type VisibilityDragPayload,
 } from "@/src/lib/resource-visibility.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 import { openEntityInNewWindow } from "@/src/lib/window-routing.ts";
 import { SectionLoadError } from "./sidebar-agents-section.tsx";
 import { useNestedSections } from "./sidebar-nested-sections.ts";
@@ -349,7 +350,7 @@ export function SpacesSection({
 	// data-grid route, pages the markdown route) — mirrors SpacesPage.openDoc.
 	const openDoc = (spaceId: string, doc: SpaceDocument, forceNew = false) => {
 		openTab(spaceDocPath(spaceId, doc), {
-			title: doc.title || "Untitled",
+			title: spaceDisplayTitle(doc.title, tl),
 			icon: doc.icon ?? null,
 			forceNew,
 		});
@@ -358,7 +359,7 @@ export function SpacesSection({
 	const openDocInNewWindow = (doc: SpaceDocument) => {
 		void openEntityInNewWindow({
 			path: spaceDocPath(doc.spaceId, doc),
-			title: doc.title || "Untitled",
+			title: spaceDisplayTitle(doc.title, tl),
 		});
 	};
 

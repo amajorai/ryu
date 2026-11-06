@@ -132,7 +132,8 @@ pub fn nested_workflow_ids(node: &WorkflowNode) -> Vec<&str> {
 ///
 /// Organization-bound nodes refuse to store such workflows until resource ACL
 /// propagation exists, because a run only checks `workflow.run` on the outer
-/// workflow. The predicate is derived from [`nested_workflow_ids`] and the
+/// workflow. Definitions stored before binding are refused again at run time
+/// by [`super::ensure_runnable_on_this_node`]. The predicate is derived from [`nested_workflow_ids`] and the
 /// explicit agent references so a node kind that gains a reference is covered
 /// automatically; the remaining kinds dispatch tools, agents or runnables
 /// chosen at run time (Script picks agent ids in its body, Plugin resolves a

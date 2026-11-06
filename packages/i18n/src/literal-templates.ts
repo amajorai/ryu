@@ -3,6 +3,7 @@ import {
 	collapseLiteralWhitespace,
 	type LiteralCatalog,
 } from "./literal-catalog.ts";
+import { formatCapturedNumeral } from "./literal-template-numerals.ts";
 import {
 	type CompiledTemplate,
 	capturesFitTemplate,
@@ -28,7 +29,8 @@ export {
 // A second, opt-in exception is a label argument named `…Label`
 // (`More about {titleLabel}`): its value is a catalog label, so an exact entry
 // replaces it. Plain `{title}`/`{name}` values stay verbatim: they may be user
-// content.
+// content, except a plain decimal quantity (`12.50`), which is reformatted for
+// the reader's locale (`literal-template-numerals.ts`).
 
 /** Longest text tried against templates; dynamic UI sentences are short,
  * and the cap bounds lazy-capture backtracking. */
@@ -322,7 +324,13 @@ export class LiteralTemplateIndex {
 			}
 			let relayed: Record<string, string> | null = null;
 			if (!capturesFitTemplate(compiled, values)) {
-				relayed = this.relayedFit(compiled, values, locale, depth);
+				relayed = this.relayedFit(
+					compiled,
+					values,
+					locale,
+					depth,
+					template.translation
+				);
 				if (relayed === null) {
 					continue;
 				}
@@ -344,7 +352,10 @@ export class LiteralTemplateIndex {
 			for (const [name, value] of Object.entries(best.values)) {
 				values[name] = RELAY_ARGUMENTS.has(name)
 					? this.relayed(value, locale, depth)
-					: this.labeled(name, value);
+					: this.labeled(
+							name,
+							formatCapturedNumeral(name, value, locale, best.translation)
+						);
 			}
 		}
 		return formatMessage(best.translation, values, locale);
@@ -360,7 +371,8 @@ export class LiteralTemplateIndex {
 		compiled: CompiledTemplate,
 		values: Record<string, string>,
 		locale: string,
-		depth: number
+		depth: number,
+		translation: string
 	): Record<string, string> | null {
 		const plain: Record<string, string> = {};
 		const output: Record<string, string> = {};
@@ -368,7 +380,10 @@ export class LiteralTemplateIndex {
 		for (const [name, value] of Object.entries(values)) {
 			if (!RELAY_ARGUMENTS.has(name)) {
 				plain[name] = value;
-				output[name] = this.labeled(name, value);
+				output[name] = this.labeled(
+					name,
+					formatCapturedNumeral(name, value, locale, translation)
+				);
 				continue;
 			}
 			const translated = this.relayed(value, locale, depth);

@@ -5,10 +5,10 @@
 use super::*;
 use crate::pipeline::auth_identity::box_governance::box_tenant_credit;
 
-#[path = "authenticate_box_member_tests.rs"]
-mod member;
 #[path = "authenticate_box_epoch_tests.rs"]
 mod epoch;
+#[path = "authenticate_box_member_tests.rs"]
+mod member;
 
 /// A fake control plane serving the org budget route. Records each
 /// request head; answers with `status` and `body`.

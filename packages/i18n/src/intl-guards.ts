@@ -6,11 +6,13 @@
 // including English, so the formatters ask `hasIntl()` first and use these
 // fallbacks instead: a small CLDR plural table, a plain list join, and (in
 // `intl-relative-fallback.ts`) an English compact age through `translate()`.
+// Hermes has no `Intl.Locale` either; `likely-script.ts` stands in for it.
 // When the constructor exists it is always used, so behavior there is unchanged.
 
 /** The `Intl` constructors this package may find missing. */
 export type OptionalIntlConstructor =
 	| "ListFormat"
+	| "Locale"
 	| "PluralRules"
 	| "RelativeTimeFormat";
 

@@ -256,7 +256,11 @@ export function EnvironmentDescription({
 							size="sm"
 							variant="mono"
 						>
-							<HugeiconsIcon aria-hidden className="size-4" icon={SentIcon} />
+							<HugeiconsIcon
+								aria-hidden
+								className="size-4 rtl:-scale-x-100"
+								icon={SentIcon}
+							/>
 							Commit or push
 						</Button>
 						{canCreatePullRequest && (

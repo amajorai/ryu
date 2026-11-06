@@ -1,6 +1,7 @@
 import { LibraryIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { jsonResponseValueSchema } from "@ryu/app-host/json-values";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 
 import {
@@ -39,6 +40,7 @@ import {
 	parseDatabaseDoc,
 	setRowPageId,
 } from "@/src/lib/realtime/yjs-database.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 import {
 	PropertyField,
 	SAVE_DEBOUNCE_MS,
@@ -61,6 +63,7 @@ export default function SpaceDatabaseRowPage({
 	databaseId: string;
 	rowId: string;
 }) {
+	const tl = useLiteralMessages();
 	const { getDocument, saveDocument, createPage } = useSpacesContext();
 	const openTab = useTabSelector((state) => state.openTab);
 	const updateTabTitle = useTabSelector((state) => state.updateTabTitle);
@@ -240,7 +243,7 @@ export default function SpaceDatabaseRowPage({
 					const named =
 						computeFormulaColumns([target], columnsRef.current)[0] ?? target;
 					const name = nameColumnId ? String(named[nameColumnId] ?? "") : "";
-					pageId = await createPage(spaceId, name || "Untitled", databaseId);
+					pageId = await createPage(spaceId, name, databaseId);
 					const doc = getCollabDoc();
 					if (doc) {
 						setRowPageId(doc, rowId, pageId);
@@ -278,7 +281,7 @@ export default function SpaceDatabaseRowPage({
 				saveDocument(
 					spaceId,
 					bodyDocId,
-					titleValue || "Untitled",
+					titleValue,
 					bodyMarkdownRef.current
 				).catch(() => {
 					// Non-fatal (embed engine may be down).
@@ -399,7 +402,7 @@ export default function SpaceDatabaseRowPage({
 							setCell(titleColumnId, e.target.value);
 						}
 						if (tabId) {
-							updateTabTitle(tabId, e.target.value || "Untitled");
+							updateTabTitle(tabId, spaceDisplayTitle(e.target.value, tl));
 						}
 					}}
 					placeholder="Untitled"

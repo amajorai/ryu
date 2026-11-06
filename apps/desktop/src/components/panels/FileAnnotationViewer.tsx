@@ -349,7 +349,7 @@ export function FileAnnotationViewer({
 					}
 					type="button"
 				>
-					<HugeiconsIcon data-icon="inline-start" icon={SentIcon} />
+					<DirectionalIcon data-icon="inline-start" icon={SentIcon} />
 					{notes.length > 0
 						? tl("Send {noteCount, plural, one {# note} other {# notes}}", {
 								noteCount: notes.length,

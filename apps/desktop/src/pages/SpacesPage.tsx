@@ -18,11 +18,11 @@ import { SpaceUploadPanel } from "@/src/components/spaces/SpaceUploadPanel.tsx";
 import { SpaceWallpaperCover } from "@/src/components/spaces/SpaceWallpaperCover.tsx";
 
 import { toTarget } from "@/src/lib/api/client.ts";
-
 import {
 	describeRetrievalModeChange,
 	type RetrievalMode,
 } from "@/src/lib/api/spaces.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 import { useSpacesPageActions } from "./SpacesPage.actions.ts";
 import { useSpacesPageData } from "./SpacesPage.data.ts";
 
@@ -200,7 +200,7 @@ export default function SpacesPage({
 				documents: documents.map((d) => ({
 					byteSize: d.byteSize,
 					id: d.id,
-					title: d.title,
+					title: spaceDisplayTitle(d.title, tl),
 					chunkCount: d.chunkCount,
 					kind: d.kind,
 					mime: d.mime,

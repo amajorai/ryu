@@ -9,6 +9,7 @@ import { useAssistantPageContext } from "@/src/hooks/useAssistantPageContext.ts"
 import { useRegisterDocLinks } from "@/src/hooks/useRegisterDocLinks.ts";
 import type { SpaceDocumentContent } from "@/src/lib/api/spaces.ts";
 import { getRealtimeJwt } from "@/src/lib/realtime/jwt.ts";
+import { editableSpaceTitle } from "@/src/lib/spaces/display-title.ts";
 import { useAppStore } from "@/src/store/useAppStore.ts";
 import {
 	ASSISTANT_CONTEXT_CAP,
@@ -70,8 +71,8 @@ export function useSpaceDocEditorDocument({
 					return;
 				}
 				setDoc(d);
-				setTitle(d.title);
-				titleRef.current = d.title;
+				setTitle(editableSpaceTitle(d.title));
+				titleRef.current = editableSpaceTitle(d.title);
 				markdownRef.current = d.source;
 				if (d.icon !== undefined) {
 					updateTabsIconWhere(
@@ -150,8 +151,8 @@ export function useSpaceDocEditorDocument({
 		}
 		const restored = await getDocument(spaceId, documentId);
 		setDoc(restored);
-		setTitle(restored.title);
-		titleRef.current = restored.title;
+		setTitle(editableSpaceTitle(restored.title));
+		titleRef.current = editableSpaceTitle(restored.title);
 		markdownRef.current = restored.source;
 		setReloadNonce((value) => value + 1);
 		setSaveState("saved");

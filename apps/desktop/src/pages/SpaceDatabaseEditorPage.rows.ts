@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { getEmptyCellValue } from "@ryu/ui/lib/data-grid.ts";
 import { renameColumnInFormulas } from "@ryu/ui/lib/data-grid-formula.ts";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
@@ -17,6 +18,7 @@ import {
 	removeRows as removeRowsY,
 	updateColumn as updateColumnY,
 } from "@/src/lib/realtime/yjs-database.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 import type { useSpaceDatabaseDocument } from "./SpaceDatabaseEditorPage.document.ts";
 import { withStoredFormulaValues } from "./SpaceDatabaseEditorPage.model.ts";
 
@@ -51,6 +53,7 @@ export function useSpaceDatabaseRowsAndColumns({
 	setRows,
 	spaceId,
 }: SpaceDatabaseRowsAndColumnsInput) {
+	const tl = useLiteralMessages();
 	// A grid data edit. Collaborative: write only the changed cells to the CRDT
 	// (addressed by stable __id). Otherwise: local state + debounced PUT.
 	// Formula values are computed for display only, so they are never written.
@@ -263,10 +266,10 @@ export function useSpaceDatabaseRowsAndColumns({
 			const nameColumnId = columnsRef.current[0]?.id;
 			const name = nameColumnId ? String(row[nameColumnId] ?? "") : "";
 			openTab(`/spaces/${spaceId}/db/${databaseId}/row/${rowId}`, {
-				title: name || "Untitled",
+				title: spaceDisplayTitle(name, tl),
 			});
 		},
-		[collaborative, readOnly, flush, openTab, spaceId, databaseId]
+		[collaborative, readOnly, flush, openTab, spaceId, databaseId, tl]
 	);
 	return {
 		addColumn,

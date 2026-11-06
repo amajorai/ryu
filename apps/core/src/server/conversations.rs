@@ -93,6 +93,7 @@ mod version_types;
 pub use channel_turns::*;
 pub use checkpoints::*;
 pub use clearing::*;
+pub use conversation_rows::ChannelAttachRefused;
 pub use harness_rows::*;
 pub use message_types::*;
 pub use model_change_types::*;

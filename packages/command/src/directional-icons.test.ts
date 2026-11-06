@@ -6,11 +6,17 @@ import {
 	ArrowTurnForwardIcon,
 	ArrowUpRight01Icon,
 	ChevronLeftIcon,
+	InboxIcon,
+	Login01Icon,
+	Logout01Icon,
+	LogoutSquare02Icon,
 	MailReply01Icon,
 	MailReplyAll01Icon,
 	Redo02Icon,
 	ReplyIcon,
 	Search01Icon,
+	SendToBackIcon,
+	SentIcon,
 	Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { isDirectionalIcon } from "./directional-icons.ts";
@@ -35,8 +41,21 @@ describe("isDirectionalIcon", () => {
 		}
 	});
 
+	test("matches the send paper plane and log-in/log-out glyphs", () => {
+		for (const icon of [
+			SentIcon,
+			Logout01Icon,
+			Login01Icon,
+			LogoutSquare02Icon,
+		]) {
+			expect(isDirectionalIcon(icon)).toBe(true);
+		}
+	});
+
 	test("leaves symmetric, diagonal and non-arrow glyphs alone", () => {
 		expect(isDirectionalIcon(ArrowLeftRightIcon)).toBe(false);
+		expect(isDirectionalIcon(SendToBackIcon)).toBe(false);
+		expect(isDirectionalIcon(InboxIcon)).toBe(false);
 		expect(isDirectionalIcon(ArrowUpRight01Icon)).toBe(false);
 		expect(isDirectionalIcon(Search01Icon)).toBe(false);
 	});

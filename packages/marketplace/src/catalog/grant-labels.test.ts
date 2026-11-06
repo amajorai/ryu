@@ -1,6 +1,6 @@
 // Unit tests for the plain-English permission-grant vocabulary. Known grants map
-// to a curated label/description; unknown grants humanize gracefully so the consent
-// UI never shows a raw identifier like `hook:run-agent`.
+// to a curated label/description; unknown grants read "Permission: <id>" rather
+// than a guessed English name like "Tool execute".
 
 import { describe, expect, test } from "bun:test";
 import { grantDescription, grantLabel } from "./grant-labels.ts";
@@ -26,9 +26,11 @@ describe("grantLabel", () => {
 		);
 	});
 
-	test("unknown grant is humanized from its separators", () => {
-		expect(grantLabel("foo:bar")).toBe("Foo bar");
-		expect(grantLabel("some_weird-grant/name")).toBe("Some weird grant name");
+	test("unknown grant shows its raw id, isolated left-to-right", () => {
+		expect(grantLabel("foo:bar")).toBe("Permission: \u2066foo:bar\u2069");
+		expect(grantLabel("some_weird-grant/name")).toBe(
+			"Permission: \u2066some_weird-grant/name\u2069"
+		);
 	});
 
 	test("empty string returns the raw value", () => {

@@ -94,10 +94,10 @@ export function AddToSpaceDialog({
 		try {
 			const id =
 				kind === "page"
-					? await createPage(targetId, "Untitled")
-					: await createDatabase(targetId, "Untitled");
+					? await createPage(targetId, "")
+					: await createDatabase(targetId, "");
 			openTab(`/spaces/${targetId}/${kind === "page" ? "doc" : "db"}/${id}`, {
-				title: "Untitled",
+				title: tl("Untitled"),
 			});
 			onClose();
 		} catch {

@@ -18,6 +18,7 @@ import {
 	OnboardingActions,
 	OnboardingCta,
 } from "@ryu/blocks/desktop/onboarding-shell.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
@@ -47,6 +48,7 @@ import {
 } from "@/src/lib/api/preferences.ts";
 import { setCrashReportingEnabled } from "@/src/lib/crash.ts";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
+import { privacySaveFailureToast } from "./privacy-save-failure-copy.ts";
 
 interface PrivacyStepProps {
 	/** Onboarding is finishing; the step locks so the user can't double-submit. */
@@ -56,6 +58,7 @@ interface PrivacyStepProps {
 
 export function PrivacyStep({ busy = false, onContinue }: PrivacyStepProps) {
 	const activeNode = useActiveNode();
+	const tl = useLiteralMessages();
 	// Memoize the target so it is stable across renders. A fresh object each
 	// render would make the load effect (and every write callback) refire every
 	// render, refetching all prefs and clobbering in-progress user input.
@@ -183,12 +186,6 @@ export function PrivacyStep({ busy = false, onContinue }: PrivacyStepProps) {
 				crashes: setCrashReportsEnabled,
 				export: setDiagnosticsExportEnabled,
 			};
-			const titles = {
-				analytics: "Couldn't save your analytics choice",
-				community: "Couldn't save your community-stats choice",
-				crashes: "Couldn't save your crash-report choice",
-				export: "Couldn't save your diagnostics-export choice",
-			};
 			const apply = (value: boolean) => {
 				setters[choice](value);
 				// Opt-out stops the live gate immediately, before Core acknowledges.
@@ -217,11 +214,7 @@ export function PrivacyStep({ busy = false, onContinue }: PrivacyStepProps) {
 				const receipt = { choice, next };
 				failed.current = receipt;
 				setFailedWrite(receipt);
-				toast.error({
-					title: titles[choice],
-					description:
-						"Your previous choice is restored. Check your connection and retry saving.",
-				});
+				toast.error(privacySaveFailureToast(tl, choice));
 			} finally {
 				if (current()) {
 					pending.current = null;
@@ -229,7 +222,7 @@ export function PrivacyStep({ busy = false, onContinue }: PrivacyStepProps) {
 				}
 			}
 		},
-		[target]
+		[target, tl]
 	);
 	const handleProductAnalytics = useCallback(
 		(next: boolean) => saveChoice("analytics", next),

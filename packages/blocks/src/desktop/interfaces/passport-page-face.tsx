@@ -167,8 +167,10 @@ export function VisaFace({
 							width: PHOTO_FRAME.width,
 						}}
 					>
-						<span className="absolute inset-x-0 bottom-1 text-center font-mono text-(--pp-ink-muted) text-[10px] tracking-[0.2em]">
-							PHOTO
+						<span className="absolute inset-x-0 bottom-1 text-center font-mono text-(--pp-ink-muted) text-[10px] uppercase tracking-[0.2em]">
+							{/* Uppercased in script, not only by CSS, so the drawn caption and
+							    its text content agree in every locale. */}
+							{tl("Photo").toLocaleUpperCase()}
 						</span>
 					</div>
 					<div className="flex min-w-0 flex-1 flex-col gap-1.5">

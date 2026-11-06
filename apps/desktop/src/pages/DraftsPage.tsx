@@ -294,7 +294,7 @@ export default function DraftsPage() {
 								key={draft.id}
 							>
 								<HugeiconsIcon
-									className="size-4 shrink-0 text-muted-foreground"
+									className="size-4 shrink-0 text-muted-foreground rtl:-scale-x-100"
 									icon={SentIcon}
 								/>
 								<span className="truncate text-sm" title={draft.preview}>

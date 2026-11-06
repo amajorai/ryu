@@ -456,6 +456,11 @@ fn healing_run_recovery_grants_are_reviewed_and_runs_is_reserved() {
     // CRUD for anyone but `@ryu/approvals`.
     let d = validate_grants_for(Some("@ryu/healing"), &scopes(&["approvals:crud"]));
     assert_eq!(d.denied, vec!["approvals:crud".to_string()]);
+    // `runs:rerun-agent` runs an agent on a caller prompt: Healing only.
+    for id in ["com.acme.helper", "@ryu/notes", "com.evil.runs"] {
+        let d = validate_grants_for(Some(id), &scopes(&["runs:rerun-agent"]));
+        assert_eq!(d.denied, vec!["runs:rerun-agent".to_string()], "{id}");
+    }
 }
 
 #[test]
@@ -609,6 +614,7 @@ fn every_pre_grammar_allowlist_entry_still_validates() {
         ("@ryu/browser", "vault:fill"),
         ("@ryu/browser", "security-key:relay"),
         ("@ryu/projects", "chat:project-guidance"),
+        ("@ryu/healing", "runs:rerun-agent"),
         // widget consent + companion host primitives
         ("sample-widget", "widget:render"),
         ("@ryu/canvas", "spaces:docs"),

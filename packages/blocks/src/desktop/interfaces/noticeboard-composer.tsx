@@ -171,7 +171,7 @@ export function NoticeboardComposer({
 			/>
 			{agents.length > 1 ? (
 				<fieldset className="flex flex-col gap-2 border-border border-t px-4 py-3">
-					<legend className="float-left mb-2 text-muted-foreground text-xs">
+					<legend className="float-start mb-2 text-muted-foreground text-xs">
 						For
 					</legend>
 					<div className="clear-both flex flex-wrap gap-1.5">

@@ -1,5 +1,6 @@
 import { ArrowExpand01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Card } from "@ryu/ui/components/card.tsx";
 import type { DragEvent } from "react";
@@ -32,10 +33,13 @@ export function RowCard({
 	onDragEnd?: (event: DragEvent) => void;
 	dragging?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const [titleColumn, ...rest] = columns;
 	const titleValue = titleColumn ? row[titleColumn.id] : undefined;
 	const title =
-		titleValue == null || titleValue === "" ? "Untitled" : String(titleValue);
+		titleValue == null || titleValue === ""
+			? tl("Untitled")
+			: String(titleValue);
 	const properties = rest
 		.filter((column) => column.cell.variant !== "long-text")
 		.map((column) => ({ column, value: row[column.id] }))

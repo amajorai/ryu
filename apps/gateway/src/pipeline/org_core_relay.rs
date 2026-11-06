@@ -6,7 +6,8 @@
 //! caller as a trusted Core forwarder bound to that org: it can relay its own
 //! org's identities, but never act as an unscoped, fleet-wide forwarder. The
 //! key is never a configured `local-core` entry, so it signs no `gws1`/`gwb1`
-//! credential either.
+//! credential either. A key derived at a retired node-root epoch is refused
+//! ([`check_relay_key_epoch`]).
 
 use crate::config::{ApiKeyConfig, ApiKeyOperation};
 
@@ -27,7 +28,7 @@ pub(crate) fn org_core_relay_entry(key: &str) -> Option<ApiKeyConfig> {
 
 /// The pure half of [`org_core_relay_entry`].
 pub(crate) fn org_core_relay_entry_from(master: Option<&str>, key: &str) -> Option<ApiKeyConfig> {
-    let org_id = ryu_gw_credentials::verify_org_core_relay_key(master?, key)?;
+    let (org_id, _epoch) = ryu_gw_credentials::verify_org_core_relay_key(master?, key)?;
     Some(ApiKeyConfig {
         key: key.to_owned(),
         name: ORG_CORE_RELAY_NAME.to_owned(),
@@ -108,6 +109,10 @@ pub(crate) fn require_forwarder_org(
         _ => Ok(()),
     }
 }
+
+#[path = "org_core_relay_epoch.rs"]
+mod epoch;
+pub(crate) use epoch::check_relay_key_epoch;
 
 #[cfg(test)]
 #[path = "org_core_relay_tests.rs"]

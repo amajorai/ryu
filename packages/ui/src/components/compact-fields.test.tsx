@@ -41,14 +41,14 @@ describe("compact field variants", () => {
 			renderComparableMarkup(<Textarea size="dense" variant="code" />)
 		).toBe(
 			renderComparableMarkup(
-				<Textarea className="min-h-16 font-mono text-xs" />
+				<Textarea className="min-h-16 font-mono text-xs" dir="ltr" />
 			)
 		);
 		expect(
 			renderComparableMarkup(<Textarea size="expanded" variant="code" />)
 		).toBe(
 			renderComparableMarkup(
-				<Textarea className="min-h-24 font-mono text-xs" />
+				<Textarea className="min-h-24 font-mono text-xs" dir="ltr" />
 			)
 		);
 	});
@@ -76,7 +76,9 @@ describe("compact editor controls", () => {
 			)
 		).toBe(
 			normalizeClasses(
-				renderComparableMarkup(<Input className="type-compact h-7 font-mono" />)
+				renderComparableMarkup(
+					<Input className="type-compact h-7 font-mono" dir="ltr" />
+				)
 			)
 		);
 		expect(

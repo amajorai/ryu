@@ -1,3 +1,6 @@
+import { hasIntl } from "./intl-guards.ts";
+import { matchByLikelyScript } from "./likely-script.ts";
+
 /** Locales with an official literal catalog in `packages/i18n/locales/`. */
 export const OFFICIAL_CATALOG_LOCALES: readonly string[] = [
 	"ar",
@@ -17,6 +20,10 @@ export const OFFICIAL_CATALOG_LOCALES: readonly string[] = [
 export function officialCatalogLocale(locale: string): string | null {
 	if (OFFICIAL_CATALOG_LOCALES.includes(locale)) {
 		return locale;
+	}
+	if (!hasIntl("Locale")) {
+		// Hermes: match by language and likely script from Core's tables.
+		return matchByLikelyScript(locale, OFFICIAL_CATALOG_LOCALES);
 	}
 	try {
 		const wanted = new Intl.Locale(locale).maximize();

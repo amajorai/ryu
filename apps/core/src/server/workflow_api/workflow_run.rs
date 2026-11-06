@@ -60,6 +60,12 @@ pub(in crate::server) async fn run_workflow(
             );
         }
     };
+    if let Err(error) = crate::workflow::ensure_runnable_on_this_node(&workflow) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "success": false, "error": error })),
+        );
+    }
 
     let run_id = if body.dry_run {
         // Dry runs are transient projections. Never accept a caller-provided

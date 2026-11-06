@@ -1,6 +1,7 @@
 import { FullScreenIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { jsonResponseValueSchema } from "@ryu/app-host/json-values";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useDataGrid } from "@ryu/ui/hooks/use-data-grid.ts";
 import { computeFormulaColumns } from "@ryu/ui/lib/data-grid-formula.ts";
@@ -20,6 +21,7 @@ import {
 	removeView as removeViewY,
 	updateView as updateViewY,
 } from "@/src/lib/realtime/yjs-database.ts";
+import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 import type { useSpaceDatabaseDocument } from "./SpaceDatabaseEditorPage.document.ts";
 import { defaultViewName } from "./SpaceDatabaseEditorPage.model.ts";
 import type { useSpaceDatabaseRowsAndColumns } from "./SpaceDatabaseEditorPage.rows.ts";
@@ -78,6 +80,7 @@ export function useSpaceDatabaseViews({
 	updateTabTitle,
 	viewsRef,
 }: SpaceDatabaseViewsInput) {
+	const tl = useLiteralMessages();
 	// Set a single cell by stable row + column id, in either persistence mode. Used
 	// by the board when a card is dragged to a new group lane.
 	const setCell = useCallback(
@@ -229,13 +232,13 @@ export function useSpaceDatabaseViews({
 			setTitle(next);
 			titleRef.current = next;
 			if (tabId) {
-				updateTabTitle(tabId, next || "Untitled");
+				updateTabTitle(tabId, spaceDisplayTitle(next, tl));
 			}
 			// Title lives outside the CRDT; persist it (with a CRDT-consistent source
 			// snapshot) in both modes.
 			scheduleSave();
 		},
-		[scheduleSave, tabId, updateTabTitle, readOnly]
+		[scheduleSave, tabId, updateTabTitle, readOnly, tl]
 	);
 	const gridColumns = useMemo<ColumnDef<DbRow>[]>(() => {
 		// Leading, non-navigable "open row as page" affordance. Using the reserved
