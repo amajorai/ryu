@@ -72,8 +72,10 @@ async fn forward_stamps_the_verified_caller_email_over_a_forged_copy() {
             caller_resource_ids: None,
             caller_rate_subject: None,
             caller_agent_id: None,
+            caller_agent_egress_allowlist: None,
             caller_agent_restricted: false,
             event_delivery: None,
+            trusted_first_party: false,
         })
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -239,8 +241,10 @@ async fn forward_stamps_an_agent_grant_bound_to_the_hop_plugin() {
             caller_resource_ids: None,
             caller_rate_subject: None,
             caller_agent_id: agent,
+            caller_agent_egress_allowlist: None,
             caller_agent_restricted: agent.is_some(),
             event_delivery: None,
+            trusted_first_party: false,
         })
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -310,8 +314,10 @@ async fn forward_marks_the_app_as_serving_an_agent_until_the_body_ends() {
             caller_resource_ids: None,
             caller_rate_subject: None,
             caller_agent_id: agent,
+            caller_agent_egress_allowlist: None,
             caller_agent_restricted: restricted,
             event_delivery: None,
+            trusted_first_party: false,
         })
         .await;
         assert_eq!(response.status(), StatusCode::OK);

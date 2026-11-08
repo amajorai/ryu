@@ -1,4 +1,5 @@
 import { placeholderNames } from "./icu-syntax.ts";
+import { capturesFitTypes } from "./literal-template-capture-types.ts";
 
 // Parsing, compiling and fit checks for literal-catalog templates; the index
 // that looks them up is `literal-templates.ts`.
@@ -41,6 +42,8 @@ export interface CompiledTemplate extends ParsedTemplate {
 	pattern: RegExp;
 	/** Literal characters; the longest matching template wins. */
 	specificity: number;
+	/** The translation, which may type an argument (`{count, plural, …}`). */
+	translation?: string;
 }
 
 /** A lowercase dictionary-like word, as running prose is made of; names,
@@ -299,7 +302,8 @@ export function capturesFitTemplate(
 			(value) =>
 				mixesScripts(value) || edgeConnector(value) || listSplitsPhrase(value)
 		) ||
-		proseFillsText(compiled, values)
+		proseFillsText(compiled, values) ||
+		!capturesFitTypes(values, compiled.translation)
 	) {
 		return false;
 	}
@@ -400,5 +404,6 @@ export function compileTemplate(template: Template): CompiledTemplate | null {
 		literalWords: letterWords(parsed.literals.join(" ")),
 		pattern: compilePattern(parsed),
 		specificity: parsed.literals.join("").length,
+		translation: template.translation,
 	};
 }

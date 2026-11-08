@@ -8,5 +8,6 @@ mod mcp_http;
 pub(in crate::server) use mcp_http::*;
 mod mcp_http_handler;
 pub(in crate::server) use mcp_http_handler::*;
+mod verified_dispatch;
 mod command_approval_scan;
 pub(in crate::server) use command_approval_scan::*;

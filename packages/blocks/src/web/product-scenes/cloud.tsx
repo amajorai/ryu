@@ -9,6 +9,7 @@ import {
 	SceneCanvas,
 	Wire,
 } from "./scene.tsx";
+import { SCENE_CHIP_LABELS } from "./scene-chip-labels.ts";
 
 /**
  * Ryu Cloud's homepage card: we host and run your agents, so they keep going
@@ -37,7 +38,7 @@ const RUNS = [
 
 const OUTSIDE = [
 	{ label: "models", y: 62 },
-	{ label: "tools", y: 122 },
+	{ label: SCENE_CHIP_LABELS.tools, y: 122 },
 ] as const;
 
 function Laptop() {

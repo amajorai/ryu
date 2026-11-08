@@ -1,4 +1,5 @@
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import {
 	Tooltip,
 	TooltipContent,
@@ -19,6 +20,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import layoutStyles from "../TrayPopover.module.css";
+import { sidebarTrayAnchor, trayPanelOrigin } from "./tray-anchor.ts";
 
 export interface TrayMorphStyle extends CSSProperties {
 	"--morph-open-h": string;
@@ -28,7 +30,7 @@ export interface TrayMorphStyle extends CSSProperties {
 export type TrayPlacement = "menubar" | "sidebar";
 
 export type TrayAnchor =
-	| { bottom: number; left: number; placement: "sidebar" }
+	| { bottom: number; inlineStart: number; placement: "sidebar" }
 	| { placement: "menubar"; right: number; top: number };
 
 export interface TrayTriggerRenderProps {
@@ -117,6 +119,7 @@ export function TrayMorph({
 	const [openH, setOpenH] = useState(TRAY_MORPH_INITIAL_H);
 	const [anchor, setAnchor] = useState<TrayAnchor | null>(null);
 	const [portalTarget, setPortalTarget] = useState<Element | null>(null);
+	const direction = useDirection();
 
 	// Close on outside pointerdown or Escape — the morph has no backdrop, and
 	// there is no Base UI popover here that would own this for us. The box is
@@ -169,7 +172,7 @@ export function TrayMorph({
 		return () => observer.disconnect();
 	}, [portalTarget]);
 
-	// Track the portaled box from the trigger: sidebar trays pin bottom-left and
+	// Track the portaled box from the trigger: sidebar trays pin bottom inline-start and
 	// menu-bar trays pin top-right, both with the 6px slot offset. Measure on mount,
 	// on every open, and on window resize. Layout effect, so
 	// the corrected anchor lands in the same commit as the open: the hover-peek
@@ -204,9 +207,14 @@ export function TrayMorph({
 				});
 				return;
 			}
+			// The sidebar sits at the inline start, so under RTL the box is pinned
+			// to the trigger's right edge and grows toward the left.
 			setAnchor({
-				bottom: window.innerHeight - r.bottom - MORPH_SLOT_OFFSET,
-				left: r.left - MORPH_SLOT_OFFSET,
+				...sidebarTrayAnchor(r, window, direction, {
+					gutter: TRAY_VIEWPORT_GUTTER,
+					maxPanelWidth: TRAY_MORPH_MAX_WIDTH,
+					slotOffset: MORPH_SLOT_OFFSET,
+				}),
 				placement,
 			});
 		};
@@ -225,7 +233,7 @@ export function TrayMorph({
 			window.removeEventListener("resize", measure);
 			window.removeEventListener("scroll", measure, true);
 		};
-	}, [open]);
+	}, [open, direction]);
 
 	// Keep the popover's focus behaviour: the panel takes focus when it opens,
 	// and returns it to the trigger when it closes.
@@ -258,14 +266,13 @@ export function TrayMorph({
 	};
 
 	const cssVariables1: LayoutCssVariables = {
-		"--desktop-inline3-transform-Origin":
-			placement === "menubar" ? "top right" : "top left",
+		"--desktop-inline3-transform-Origin": trayPanelOrigin(placement, direction),
 	};
 	const anchorVariables: CSSProperties & {
 		"--tray-right"?: string;
 		"--tray-top"?: string;
 		"--tray-bottom"?: string;
-		"--tray-left"?: string;
+		"--tray-start"?: string;
 	} = {
 		"--tray-right":
 			anchor?.placement === "menubar" ? `${anchor.right}px` : undefined,
@@ -273,10 +280,10 @@ export function TrayMorph({
 			anchor?.placement === "menubar" ? `${anchor.top}px` : undefined,
 		"--tray-bottom":
 			anchor?.placement === "menubar" ? undefined : `${anchor?.bottom ?? 0}px`,
-		"--tray-left":
+		"--tray-start":
 			anchor?.placement === "menubar"
 				? undefined
-				: `${anchor?.left ?? -9999}px`,
+				: `${anchor?.inlineStart ?? -9999}px`,
 	};
 	return (
 		<div
@@ -325,7 +332,7 @@ export function TrayMorph({
 			</div>
 			{portalTarget &&
 				createPortal(
-					// Sidebar trays grow up and right; menu-bar trays grow down and left.
+					// Sidebar trays grow up and toward the inline end; menu-bar trays grow down and left.
 					// `pointer-events` is
 					// off while closed: the 40px closed box covers the trigger it no longer
 					// contains, and would otherwise swallow the click that opens it.
@@ -341,6 +348,9 @@ export function TrayMorph({
 						// onto this tray — which now counts as leaving the peek panel —
 						// doesn't slide the sidebar away underneath it.
 						data-sidebar-overlay={open ? "open" : undefined}
+						// The sidebar's start corner and the panel's `start-0` pin both
+						// follow the UI language, not whatever the portal target inherits.
+						dir={direction}
 						ref={boxRef}
 						style={anchorVariables}
 					>
@@ -351,7 +361,7 @@ export function TrayMorph({
 							data-open={open}
 							style={morphVars}
 						>
-							{/* Pinned to the container's bottom-left at its open width. The
+							{/* Pinned to the container's bottom inline-start corner at its open width. The
 						    height is content-sized and always mounted so the closed tray is
 						    measurable. */}
 							<div
@@ -365,7 +375,7 @@ export function TrayMorph({
 										),
 										placement === "menubar"
 											? "top-0 right-0"
-											: "bottom-0 left-0"
+											: "start-0 bottom-0"
 									),
 									layoutStyles.inline3
 								)}

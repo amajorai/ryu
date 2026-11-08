@@ -1,5 +1,6 @@
 // Scheduled runs and the credits wallet as protocol events and account.
 
+import { localizeUsageTaskLabel } from "@ryu/blocks/desktop/usage-task-label.ts";
 import type {
 	InterfaceAccount,
 	InterfaceEvent,
@@ -9,7 +10,7 @@ import {
 	type WalletResponse,
 } from "@/src/lib/api/credits.ts";
 import type { CalendarEvent } from "@/src/lib/calendar/events.ts";
-import { toIso } from "./snapshot-util.ts";
+import { activeTranslate, toIso } from "./snapshot-util.ts";
 
 /** Most scheduled runs an interface receives (the calendar already collapses
  *  high-frequency schedules into one marker per day). */
@@ -95,7 +96,11 @@ export function toInterfaceAccount(
 			id: entry.id,
 			inputTokens: entry.inputTokens,
 			kind: entry.delta < 0 ? ("debit" as const) : ("credit" as const),
-			label: entry.taskLabel || ledgerReasonLabel(entry.reason) || entry.reason,
+			label:
+				(entry.taskLabel &&
+					localizeUsageTaskLabel(entry.taskLabel, activeTranslate)) ||
+				ledgerReasonLabel(entry.reason) ||
+				entry.reason,
 			model: entry.model,
 			outputTokens: entry.outputTokens,
 			provider: entry.upstreamProvider ?? entry.provider,

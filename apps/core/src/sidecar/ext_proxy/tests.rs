@@ -2,7 +2,9 @@
 
 use super::*;
 
+mod browser_lane;
 mod caller_headers;
+mod egress_allowlist;
 mod forward_stamps;
 mod forwarding;
 mod host_calls;
@@ -12,6 +14,7 @@ mod permissions;
 mod public_mount_policy;
 mod public_mounts;
 mod rate_subject;
+mod response_hardening;
 mod route_resolution;
 mod web_admission;
 mod web_delegation_facts;

@@ -203,24 +203,3 @@ export function groupCommunityMarketplaces(items: readonly AppCatalogItem[]) {
 	}
 	return { marketplaces: [...marketplaces.values()], standalone };
 }
-
-export const VARIANT_COPY = {
-	apps: {
-		noun: "app",
-		nounPlural: "apps",
-		searchPlaceholder: "Search apps…",
-	},
-	plugins: {
-		noun: "plugin",
-		nounPlural: "plugins",
-		searchPlaceholder: "Search plugins…",
-	},
-	all: {
-		noun: "plugin",
-		nounPlural: "plugins",
-		searchPlaceholder: "Search plugins…",
-	},
-} satisfies Record<
-	AppsCatalogVariant,
-	{ noun: string; nounPlural: string; searchPlaceholder: string }
->;

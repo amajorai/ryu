@@ -86,6 +86,9 @@ pub(super) fn copy_headers(
             || name.as_str().eq_ignore_ascii_case(HDR_CALLER_AGENT_PROOF)
             || name
                 .as_str()
+                .eq_ignore_ascii_case(HDR_CALLER_EGRESS_ALLOWLIST)
+            || name
+                .as_str()
                 .eq_ignore_ascii_case(crate::sidecar::deferred_authorization::AGENT_GRANT_HEADER)
             || name.as_str().eq_ignore_ascii_case(HDR_WEB_DELEGATION)
             || name.as_str().eq_ignore_ascii_case(HDR_APP_CALLER)

@@ -67,8 +67,8 @@
     {
       "id": "@ryu/ghost",
       "name": "Ghost",
-      "version": "0.1.14",
-      "description": "Desktop automation: 29 screen perception and input control tools. Cross-platform (Windows, macOS, Linux).",
+      "version": "0.1.15",
+      "description": "Desktop automation: 31 screen perception and input control tools. Cross-platform (Windows, macOS, Linux).",
       "source": "builtin",
       "kinds": [
         "tool"
@@ -153,7 +153,7 @@
     {
       "id": "@ryu/shadow",
       "name": "Shadow",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "description": "Search everything Shadow has captured (screen text, audio transcripts, input) and summarize recent activity. Exposed as declarative HTTP tools that reach the device-local Shadow sidecar through Core's authenticated `/api/shadow/*` proxy (which injects Shadow's bearer token).",
       "source": "builtin",
       "kinds": [

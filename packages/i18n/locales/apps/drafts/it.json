@@ -1,4 +1,7 @@
 {
+  "Failed to send": "Invio non riuscito",
+  "Send failed": "Invio non riuscito",
+  "Send was interrupted; review and resend": "Invio interrotto; controlla e invia di nuovo",
   "Sending at a set time": "Invio a un orario stabilito",
   "Sending at {when}": "Invio alle {when}",
   "Waiting for agents to start, then finish": "In attesa che gli agenti si avviino e terminino",

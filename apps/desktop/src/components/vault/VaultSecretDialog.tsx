@@ -40,11 +40,18 @@ import {
 	vaultCoordsOf,
 } from "@/src/lib/api/vault.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
+import { VaultValueTypeSelect } from "./VaultValueTypeSelect.tsx";
 import {
 	isStaleVersion,
 	readWithStepUp,
 	vaultErrorMessage,
 } from "./vault-errors.ts";
+import {
+	isRevealable,
+	VALUE_TYPE_COPY,
+	valueTypeOf,
+	withValueType,
+} from "./vault-value-type.ts";
 import {
 	fromDateTimeLocal,
 	parseTags,
@@ -113,6 +120,8 @@ function SecretDetail({
 	const canRead = secret.capabilities.includes("read");
 	const canWrite = secret.capabilities.includes("write");
 	const isDeleted = secret.status === "deleted";
+	const storedType = valueTypeOf(secret.metadata);
+	const sealed = !isRevealable(storedType);
 
 	const [description, setDescription] = useState(secret.metadata.description);
 	const [tagsText, setTagsText] = useState(secret.metadata.tags.join(", "));
@@ -125,6 +134,7 @@ function SecretDetail({
 	const [expandReferences, setExpandReferences] = useState(
 		secret.metadata.expandReferences
 	);
+	const [valueType, setValueType] = useState(storedType);
 	const [revealed, setRevealed] = useState<string | null>(null);
 	const [revealing, setRevealing] = useState(false);
 	const [revealError, setRevealError] = useState<string | null>(null);
@@ -151,13 +161,17 @@ function SecretDetail({
 			const result = await setVaultSecret(target, secret.name, {
 				...coords,
 				expectedVersion: secret.version,
-				metadata: {
-					description: description.trim(),
-					tags: parseTags(tagsText),
-					expiresAt: fromDateTimeLocal(expiresAt),
-					rotationPeriodSecs: rotationSecsFromDays(rotationDays),
-					expandReferences,
-				},
+				metadata: withValueType(
+					{
+						description: description.trim(),
+						tags: parseTags(tagsText),
+						expiresAt: fromDateTimeLocal(expiresAt),
+						rotationPeriodSecs: rotationSecsFromDays(rotationDays),
+						expandReferences,
+					},
+					storedType,
+					valueType
+				),
 			});
 			return result.kind;
 		},
@@ -242,6 +256,9 @@ function SecretDetail({
 					{statusCopy ? (
 						<Badge variant={statusCopy.variant}>{statusCopy.label}</Badge>
 					) : null}
+					{storedType === "secret" ? null : (
+						<Badge variant="outline">{VALUE_TYPE_COPY[storedType].label}</Badge>
+					)}
 					{secret.source === "control-plane" ? (
 						<Badge variant="outline">Shared</Badge>
 					) : null}
@@ -252,7 +269,12 @@ function SecretDetail({
 				<h3 className="font-medium text-sm" id="vault-detail-value">
 					Value
 				</h3>
-				{canRead ? (
+				{sealed ? (
+					<p className="text-muted-foreground text-xs">
+						Sealed. Apps and tools can use this value, but nobody can reveal or
+						export it.
+					</p>
+				) : canRead ? (
 					<div className="flex items-center gap-2">
 						<Input
 							aria-label={tl("{name} value", { name: secret.name })}
@@ -307,6 +329,13 @@ function SecretDetail({
 						value={description}
 					/>
 				</div>
+				<VaultValueTypeSelect
+					current={storedType}
+					disabled={!canWrite}
+					id="vault-detail-type"
+					onChange={setValueType}
+					value={valueType}
+				/>
 				<div className="space-y-1.5">
 					<Label htmlFor="vault-detail-tags">Tags</Label>
 					<Input

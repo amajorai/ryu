@@ -308,10 +308,10 @@ mod tests {
             display_model("anthropic-credits", "claude-opus-4-5"),
             "anthropic/claude-opus-4.5"
         );
-        // The delisted Claude 3.5 row is gone: its Ryu alias still hides the id.
+        // Bedrock is retired: no Ryu alias names its ids any more.
         assert_eq!(
-            display_model("bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
-            "ryu-frontier/max"
+            display_model("bedrock", "amazon.nova-pro-v1:0"),
+            "amazon.nova-pro-v1:0"
         );
         assert_eq!(
             display_model("cloudflare", "@cf/qwen/qwen1.5-14b-chat-awq"),
@@ -394,10 +394,7 @@ mod tests {
             served_display_id("anthropic-credits", "claude-sonnet-4-5").as_deref(),
             Some("anthropic/claude-sonnet-4.5")
         );
-        assert_eq!(
-            served_display_id("bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0").as_deref(),
-            Some("ryu-frontier/max")
-        );
+        assert_eq!(served_display_id("bedrock", "amazon.nova-pro-v1:0"), None);
         assert_eq!(
             served_display_id("vertex", "google/gemini-2.5-pro").as_deref(),
             Some("google/gemini-2.5-pro")

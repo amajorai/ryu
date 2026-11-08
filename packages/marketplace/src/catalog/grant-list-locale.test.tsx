@@ -26,6 +26,7 @@ const { CatalogHostProvider } = await import("./host.tsx");
 const { AppDetailPanel } = await import(
 	"./apps-catalog-section-detail-panel.tsx"
 );
+const { VARIANT_COPY } = await import("./apps-catalog-section-variant-copy.ts");
 
 const JA: Record<string, string> = {
 	"Run its own code": "独自のコードを実行",
@@ -106,11 +107,11 @@ async function renderGrantRows(
 						isInstalling={() => false}
 						item={ITEM as never}
 						lifecyclePending={false}
-						noun="app"
 						renderAffordance={() => null}
 						selectedId={ITEM.entry.id}
 						setEnabled={() => Promise.resolve()}
 						settingsOpener={() => null}
+						variantCopy={VARIANT_COPY.apps}
 					/>
 				</CatalogHostProvider>
 			</I18nProvider>
@@ -149,7 +150,7 @@ test("the Permissions list renders grant copy in Arabic with the raw id isolated
 	expect(grantRows).toHaveLength(GRANTS.length);
 	const copy = grantRows.join("\n");
 	expect(copy).toContain("تشغيل الكود الخاص به");
-	expect(copy).toContain("تشغيل الأمر rg");
+	expect(copy).toContain("تشغيل الأمر \u2068rg\u2069");
 	// The Latin id keeps its own reading order inside the right-to-left sentence.
 	expect(copy).toContain("إذن: \u2066example:unknown\u2069");
 	for (const english of ["Tool execute", "Run its own code", "Permission:"]) {

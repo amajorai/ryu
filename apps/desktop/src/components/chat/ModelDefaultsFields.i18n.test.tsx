@@ -45,8 +45,9 @@ afterEach(() => {
 });
 
 test("a Japanese UI reads every model-default description in Japanese", async () => {
-	registerLiteralCatalogLoader((locale) =>
-		locale.startsWith("ja") ? DESCRIPTIONS : {}
+	registerLiteralCatalogLoader(
+		(locale): Record<string, string> =>
+			locale.startsWith("ja") ? DESCRIPTIONS : {}
 	);
 	const container = document.createElement("div");
 	document.body.append(container);
@@ -73,6 +74,42 @@ test("a Japanese UI reads every model-default description in Japanese", async ()
 		expect(text).toContain(japanese);
 		expect(text).not.toContain(english);
 	}
+	await act(async () => {
+		root.unmount();
+	});
+});
+
+test("a Japanese UI names the inherited effort level in Japanese", async () => {
+	registerLiteralCatalogLoader(
+		(locale): Record<string, string> =>
+			locale.startsWith("ja")
+				? { "Default ({inherited})": "デフォルト ({inherited})", Medium: "中" }
+				: {}
+	);
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	const blank = { effort: "", model: "", provider: "" };
+	const inheritedMedium = { effort: "medium", model: "", provider: "" };
+	await act(async () => {
+		root.render(
+			<I18nProvider
+				autoLocalizeDom={false}
+				initialLocale="ja"
+				initialPackId={null}
+			>
+				<ModelDefaultsFields
+					inherited={{ coordinator: inheritedMedium, thread: inheritedMedium }}
+					onChange={() => undefined}
+					target={{ token: null, url: "http://core.test", userJwt: null }}
+					value={blank}
+				/>
+			</I18nProvider>
+		);
+	});
+	const text = container.textContent ?? "";
+	expect(text).toContain("デフォルト (中)");
+	expect(text).not.toContain("Medium");
 	await act(async () => {
 		root.unmount();
 	});

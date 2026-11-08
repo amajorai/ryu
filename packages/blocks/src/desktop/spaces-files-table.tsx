@@ -22,11 +22,12 @@ import {
 	formatDocumentSize,
 } from "./spaces-document-format.ts";
 import { DocumentRow } from "./spaces-document-rows.tsx";
+import { rowDetailLines } from "./spaces-file-failure-message.ts";
+import { FileRawDetail } from "./spaces-file-raw-detail.tsx";
 import {
 	docIcon,
 	indexBadgeLabel,
 	indexNotesFor,
-	rowDetail,
 } from "./spaces-index-state.ts";
 import type { SpaceDocumentRow } from "./spaces-types.ts";
 
@@ -138,9 +139,12 @@ export function FilesTableSection({
 						<TableBody>
 							{filteredDocuments.length > 0 ? (
 								filteredDocuments.map((document) => {
-									const detail = rowDetail(document);
+									const { message: detail, detail: rawDetail } = rowDetailLines(
+										document,
+										tl
+									);
 									const title = document.title || "Untitled";
-									const badge = indexBadgeLabel(document.indexState);
+									const badge = indexBadgeLabel(document.indexState, tl);
 									return (
 										<TableRow className="group" key={document.id}>
 											<TableCell className="min-w-[19rem]" inset="wide">
@@ -166,6 +170,9 @@ export function FilesTableSection({
 														<span className="truncate text-muted-foreground text-xs">
 															{detail ?? documentTypeLabel(document)}
 														</span>
+														{rawDetail ? (
+															<FileRawDetail text={rawDetail} />
+														) : null}
 													</span>
 												</button>
 											</TableCell>

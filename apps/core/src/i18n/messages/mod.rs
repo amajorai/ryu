@@ -5,7 +5,7 @@
 //! i18n extractor catalogs the ICU source (`"Unexpected HTTP {status}."`) that
 //! [`super::Message::new`] reproduces. `tools/generate-core-i18n.mjs --check`
 //! fails when a template breaks that shape or the extractor would skip it.
-//! Topic-specific templates live in the sibling modules (`approvals`, `acp`,
+//! Topic-specific templates live in the sibling modules (`agent_launch`, `approvals`, `acp`,
 //! `chat_turns`, `cloud_tasks`, `consent`, `notifications`, `context`, `gateway_failures`, `import`, `providers`, `routing`, `update`,
 //! `voice`) and are re-exported here.
 //! Every message is a whole sentence; never assemble one from fragments.
@@ -14,6 +14,7 @@
 use super::Template;
 
 mod acp;
+mod agent_launch;
 mod approvals;
 mod chat_turns;
 mod cloud_tasks;
@@ -21,6 +22,7 @@ mod consent;
 mod context;
 mod gateway_failures;
 mod import;
+mod import_outcomes;
 mod notifications;
 mod providers;
 mod routing;
@@ -30,6 +32,8 @@ mod voice;
 // A topic module may still be empty, so its glob re-export imports nothing.
 #[allow(unused_imports)]
 pub use acp::*;
+#[allow(unused_imports)]
+pub use agent_launch::*;
 #[allow(unused_imports)]
 pub use approvals::*;
 #[allow(unused_imports)]
@@ -44,6 +48,8 @@ pub use context::*;
 pub use gateway_failures::*;
 #[allow(unused_imports)]
 pub use import::*;
+#[allow(unused_imports)]
+pub use import_outcomes::*;
 #[allow(unused_imports)]
 pub use notifications::*;
 #[allow(unused_imports)]
@@ -314,6 +320,7 @@ pub(super) fn all() -> impl Iterator<Item = &'static Template> {
     [
         ALL,
         acp::ALL,
+        agent_launch::ALL,
         approvals::ALL,
         chat_turns::ALL,
         cloud_tasks::ALL,
@@ -321,6 +328,7 @@ pub(super) fn all() -> impl Iterator<Item = &'static Template> {
         context::ALL,
         gateway_failures::ALL,
         import::ALL,
+        import_outcomes::ALL,
         notifications::ALL,
         providers::ALL,
         routing::ALL,

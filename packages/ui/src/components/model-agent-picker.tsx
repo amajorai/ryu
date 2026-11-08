@@ -218,7 +218,7 @@ export function ModelAgentPicker({
 		} catch {
 			setDiscoveryErrors((current) => ({
 				...current,
-				[providerId]: "Model discovery failed. Try again.",
+				[providerId]: tl("Model discovery failed. Try again."),
 			}));
 		} finally {
 			setDiscoveringProvider(null);

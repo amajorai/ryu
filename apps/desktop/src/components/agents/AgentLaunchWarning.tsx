@@ -7,7 +7,10 @@
 // with, so nothing here re-derives the rules. Core's model warning (a limited
 // agent on Ryu's engine that would start on a local model that isn't
 // downloaded) is shown too; it does not stop the agent being saved.
+// Core's refusal is English on the wire; the catalog holds its templates
+// (`apps/core/src/i18n/messages/agent_launch.rs`), so it is shown translated.
 
+import { useLocalizedString } from "@ryu/i18n/react";
 import { Alert, AlertDescription } from "@ryu/ui/components/alert.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type {
@@ -111,6 +114,7 @@ export function AgentLaunchWarning({
 	onUseRyu?: () => void;
 }) {
 	const refused = check !== null && !check.launchable && check.reason;
+	const refusedText = useLocalizedString(refused || undefined);
 	const noSandbox = showsNoSandboxNote(check, modelsLimited);
 	const needsLimit = refusedForUnlimitedSandbox(check, modelsLimited);
 	const modelWarning = refused ? null : (check?.modelWarning ?? null);
@@ -122,7 +126,7 @@ export function AgentLaunchWarning({
 			{refused ? (
 				<Alert variant="destructive">
 					<AlertDescription className="flex flex-col items-start gap-2">
-						<span>{refused}</span>
+						<span>{refusedText}</span>
 						{onLimitAccounts && needsLimit ? (
 							<Button
 								disabled={disabled}

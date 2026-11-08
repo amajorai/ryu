@@ -44,10 +44,19 @@ export function useOpenedFilePush(
 			}
 		};
 		void refresh();
-		const timer = setInterval(() => void refresh(), 1000);
+		// Tauri keeps `visibilityState` "visible" behind other apps, so gate the
+		// poll on focus and catch up the moment the window regains it.
+		const timer = setInterval(() => {
+			if (document.hasFocus()) {
+				void refresh();
+			}
+		}, 1000);
+		const onFocus = () => void refresh();
+		window.addEventListener("focus", onFocus);
 		return () => {
 			stopped = true;
 			clearInterval(timer);
+			window.removeEventListener("focus", onFocus);
 		};
 	}, [fileAccess, connectedNonce, nonce]);
 	return filePushRef;

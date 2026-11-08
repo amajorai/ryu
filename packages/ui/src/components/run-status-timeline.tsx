@@ -1,4 +1,7 @@
+import { dateFormatter, numberFormatter } from "@ryu/i18n/lite";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { CSSProperties } from "react";
+import { useFormatLocale } from "../hooks/use-format-locale.ts";
 import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import { cn } from "../lib/utils.ts";
 
@@ -46,6 +49,56 @@ const LEGEND_STATUSES: RunStatusTimelineStatus[] = [
 ];
 const HOUR_TICKS = [0, 6, 12, 18, 24];
 const MINIMUM_POINT_WIDTH_PERCENT = 0.75;
+
+// A 24-hour axis in every locale, like chart axes: compact, and its two ends
+// stay distinct. The locale still picks the separator and the digits.
+const HOUR_LABEL_OPTIONS: Intl.DateTimeFormatOptions = {
+	hour: "2-digit",
+	hourCycle: "h23",
+	minute: "2-digit",
+	timeZone: "UTC",
+};
+
+/**
+ * The scale label for one hour tick in `locale`, with the locale's separator
+ * and digits. The closing tick reads "24:00" in those same digits.
+ */
+export function runStatusHourLabel(locale: string, hour: number): string {
+	const formatter = dateFormatter(locale, HOUR_LABEL_OPTIONS);
+	const parts = formatter.formatToParts(
+		new Date(Date.UTC(2000, 0, 1, hour % 24))
+	);
+	if (hour !== 24) {
+		return parts.map((part) => part.value).join("");
+	}
+	const digits = numberFormatter(locale, {
+		minimumIntegerDigits: 2,
+		numberingSystem: formatter.resolvedOptions().numberingSystem,
+		useGrouping: false,
+	});
+	return parts
+		.map((part) => (part.type === "hour" ? digits.format(24) : part.value))
+		.join("");
+}
+
+function RunStatusTimelineScale() {
+	const locale = useFormatLocale();
+	return (
+		<div
+			aria-hidden="true"
+			className="type-micro mt-1 flex justify-between font-mono text-muted-foreground tabular-nums"
+		>
+			{HOUR_TICKS.map((hour) => (
+				<span key={hour}>{runStatusHourLabel(locale, hour)}</span>
+			))}
+		</div>
+	);
+}
+
+function RunStatusTimelineEmptySummary() {
+	const tl = useLiteralMessages();
+	return <>{tl("No runs recorded in this 24-hour period.")}</>;
+}
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(Math.max(value, min), max);
@@ -175,7 +228,13 @@ export function RunStatusTimeline({
 		: undefined;
 
 	return (
-		<div className={cn("min-w-0", className)} data-slot="run-status-timeline">
+		// The time axis stays left-to-right in every language, like the timeline
+		// Companion lanes and chart axes, so the scale, bars and now-line agree.
+		<div
+			className={cn("min-w-0", className)}
+			data-slot="run-status-timeline"
+			dir="ltr"
+		>
 			<div
 				aria-label={ariaLabel}
 				className="relative h-3.5 overflow-hidden rounded-[3px] bg-muted/55 ring-1 ring-border/60"
@@ -225,22 +284,13 @@ export function RunStatusTimeline({
 					/>
 				) : null}
 			</div>
-			{showScale ? (
-				<div
-					aria-hidden="true"
-					className="type-micro mt-1 flex justify-between font-mono text-muted-foreground tabular-nums"
-				>
-					{HOUR_TICKS.map((hour) => (
-						<span key={hour}>
-							{hour === 24 ? "24:00" : `${String(hour).padStart(2, "0")}:00`}
-						</span>
-					))}
-				</div>
-			) : null}
+			{showScale ? <RunStatusTimelineScale /> : null}
 			<p className="sr-only">
-				{entries.length === 0
-					? "No runs recorded in this 24-hour period."
-					: entries.map((entry) => entry.label).join(". ")}
+				{entries.length === 0 ? (
+					<RunStatusTimelineEmptySummary />
+				) : (
+					entries.map((entry) => entry.label).join(". ")
+				)}
 			</p>
 		</div>
 	);

@@ -19,6 +19,7 @@ export const billingServerEnv = {
 	POLAR_METER_POOL_VERTEX: z.string().optional(),
 	POLAR_METER_POOL_OPENAI_CREDITS: z.string().optional(),
 	POLAR_METER_POOL_ANTHROPIC_CREDITS: z.string().optional(),
+	POLAR_METER_POOL_AZURE_CREDITS: z.string().optional(),
 	// Plan-catalog product/price ids. All optional: each falls back to the
 	// documented default in `@ryu/auth/lib/plans`.
 	POLAR_PRODUCT_DESKTOP_LICENSE: z.string().optional(),

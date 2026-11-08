@@ -29,6 +29,7 @@
 
 import { formatNumberValue } from "@ryu/i18n/format-intl";
 import type { LiteralMessage } from "@ryu/i18n/react";
+import { stageName } from "./stage-names.ts";
 
 export interface Stage {
 	/** One plain sentence, for the slider's value text. */
@@ -129,11 +130,11 @@ export function spokenOf(
 	locale?: string
 ): string {
 	const stage = stageAt(index);
-	return tl("Stage {position} of {stageCount}, {stageId}. {does}", {
+	return tl("Stage {position} of {stageCount}, {stageName}. {does}", {
 		does: stage.does(tl, locale),
 		position: index + 1,
 		stageCount: STAGE_COUNT,
-		stageId: stage.id,
+		stageName: stageName(stage.id, tl),
 	});
 }
 

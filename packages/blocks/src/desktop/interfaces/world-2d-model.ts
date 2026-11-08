@@ -1,4 +1,5 @@
 import { translate as tr } from "@ryu/i18n/lite";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
 	type InterfaceThread,
@@ -86,21 +87,33 @@ export function villagerStatusLabel(status: VillagerStatus): string {
 	return status === "idle" ? tr("Idle") : threadStatusLabel(status);
 }
 
-/**
- * The status as it is appended to an accessible name ("Visit Cipher (needs
- * attention)"), or empty when there is nothing to say.
- */
-export function villagerStatusSuffix(status: VillagerStatus): string {
+/** The ICU select key for a status in {@link visitVillagerLabel}. */
+function visitStatusKey(status: VillagerStatus): string {
 	switch (status) {
 		case "attention":
-			return " (needs attention)";
+			return "attention";
 		case "your-turn":
-			return " (your turn)";
+			return "yourTurn";
 		case "working":
-			return " (working)";
+			return "working";
 		default:
-			return "";
+			return "other";
 	}
+}
+
+/**
+ * A villager's accessible name as one sentence ("Visit Cipher (needs
+ * attention)"), so a translation places the status itself.
+ */
+export function visitVillagerLabel(
+	name: string,
+	status: VillagerStatus,
+	tl: LiteralMessage
+): string {
+	return tl(
+		"Visit {name}{status, select, attention { (needs attention)} yourTurn { (your turn)} working { (working)} other {}}",
+		{ name, status: visitStatusKey(status) }
+	);
 }
 
 /** How many villagers are waiting on the user. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import {
 	CORE_DREAM_CHAT_SOURCE,
@@ -81,12 +81,17 @@ describe("dreamReason", () => {
 
 describe("Core literal coupling", () => {
 	// The client matches Core's exact wording; fail here if Core rewords one.
-	const core = readFileSync(
-		new URL("../../../../core/src/server/memory_dream.rs", import.meta.url),
-		"utf8"
+	// Dream is split into submodules; the literals live in several of them.
+	const dreamDir = new URL(
+		"../../../../core/src/server/memory_dream/",
+		import.meta.url
 	);
+	const core = readdirSync(dreamDir)
+		.filter((name) => name.endsWith(".rs"))
+		.map((name) => readFileSync(new URL(name, dreamDir), "utf8"))
+		.join("\n");
 
-	it("finds every matched literal in memory_dream.rs", () => {
+	it("finds every matched literal in Core's Dream module", () => {
 		for (const literal of [
 			...CORE_DREAM_SUMMARY_FALLBACKS,
 			CORE_DREAM_CHAT_SOURCE,

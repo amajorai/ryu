@@ -148,7 +148,9 @@ export function stepUpWindowMs(scope: StepUpScope): number {
  * Which factors this user can actually prove right now.
  *
  * With 2FA enrolled it is the authenticator app plus the printed recovery
- * codes, and the emailed code as the fallback the sign-in flow already offers.
+ * codes, never the emailed code: org-control scopes (members, credentials,
+ * delete) can hand billing to an account whose authenticator an attacker
+ * holds, so mailbox possession must not satisfy them on an enrolled account.
  * WITHOUT 2FA enrolled the only thing we can ask for is the emailed code —
  * weaker than a real second factor (it falls to whoever holds the mailbox), but
  * still useful for non-financial account actions. Card-funded actions are a
@@ -158,7 +160,7 @@ export function stepUpWindowMs(scope: StepUpScope): number {
 export function stepUpMethods(user: {
 	twoFactorEnabled?: boolean | null;
 }): StepUpMethod[] {
-	return user.twoFactorEnabled ? ["totp", "otp", "backup"] : ["otp"];
+	return user.twoFactorEnabled ? ["totp", "backup"] : ["otp"];
 }
 
 /**
@@ -188,10 +190,12 @@ export function stepUpMethodsForScope(
 		return user.twoFactorEnabled ? ["totp", "backup"] : [];
 	}
 	if (scope === "account.security") {
-		// An enrolled authenticator remains the strongest proof. Do not silently
-		// weaken an account that has 2FA by offering its password alone.
+		// With 2FA enrolled only the second factor itself is accepted: neither the
+		// password nor the emailed code. This proof unlocks revealing, rotating or
+		// disabling the authenticator that billing relies on, so mailbox control
+		// must not be enough to obtain it.
 		if (user.twoFactorEnabled) {
-			return ["totp", "otp", "backup"];
+			return ["totp", "backup"];
 		}
 		return user.hasPassword ? ["password", "magic-link"] : ["magic-link"];
 	}

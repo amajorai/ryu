@@ -346,8 +346,14 @@ export const AgentMessagesMarker = memo(function AgentMessagesMarker({
 								<ul
 									aria-label={
 										sending
-											? tl("Messaging {count} agents", { count: peers.length })
-											: tl("Messaged {count} agents", { count: peers.length })
+											? tl(
+													"{count, plural, one {Messaging # agent} other {Messaging # agents}}",
+													{ count: peers.length }
+												)
+											: tl(
+													"{count, plural, one {Messaged # agent} other {Messaged # agents}}",
+													{ count: peers.length }
+												)
 									}
 									className="m-0 flex max-h-96 list-none flex-col gap-0.5 overflow-y-auto p-0"
 									data-testid="agent-messages-roster"

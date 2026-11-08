@@ -24,6 +24,7 @@ pub(super) const NATIVE_KEY_VARIABLES: &[(&str, &[&str])] = &[
     ("vertex", &["VERTEX_API_KEY"]),
     ("openai-credits", &["OPENAI_CREDITS_API_KEY"]),
     ("anthropic-credits", &["ANTHROPIC_CREDITS_API_KEY"]),
+    ("azure-credits", &["AZURE_CREDITS_API_KEY"]),
 ];
 
 pub(super) const PROVIDER_VARIABLES: &[&str] = &[
@@ -81,6 +82,10 @@ pub(super) const PROVIDER_VARIABLES: &[&str] = &[
     "ANTHROPIC_CREDITS_API_KEY",
     "ANTHROPIC_CREDITS_API_KEYS",
     "ANTHROPIC_CREDITS_BASE_URL",
+    "AZURE_CREDITS_API_KEY",
+    "AZURE_CREDITS_API_KEYS",
+    "AZURE_CREDITS_BASE_URL",
+    "AZURE_CREDITS_RESOURCE",
     "OPENROUTER_API_KEY",
     "OPENROUTER_API_KEYS",
     "OPENROUTER_BASE_URL",

@@ -140,35 +140,36 @@ export const FOOTER_START_LINKS: readonly FooterLink[] = [
 	{ href: "/login", label: "Sign in" },
 ];
 
-/* Whole literals, so the i18n extractor picks up each accessible name. */
-const PROFILE_ARIA_LABELS: Record<
-	Exclude<CompanyProfileId, "github">,
-	string
-> = {
+/*
+ * The official profiles the footer links, with each accessible name as a whole
+ * literal so the i18n extractor picks it up. A profile absent here stays off
+ * the footer: GitHub is linked by the build row with its star count, and
+ * Product Hunt is listed only on /press and /contact.
+ */
+const FOOTER_PROFILE_ARIA_LABELS: Partial<Record<CompanyProfileId, string>> = {
 	x: "Ryu on X",
-	producthunt: "Ryu on Product Hunt",
 };
 
 /**
- * Community and official profiles. GitHub is left out: the build row already
- * links it with its star count. Discord goes through /discord, which mints a
- * per-visitor invite.
+ * Community and official profiles. Discord goes through /discord, which mints
+ * a per-visitor invite.
  */
 export const FOOTER_COMMUNITY_LINKS: readonly FooterLink[] = [
 	{ href: "/community", label: "Community" },
 	{ ariaLabel: "Ryu on Discord", href: "/discord", label: "Discord" },
-	...COMPANY_PROFILES.flatMap((profile): FooterLink[] =>
-		profile.id === "github"
-			? []
-			: [
+	...COMPANY_PROFILES.flatMap((profile): FooterLink[] => {
+		const ariaLabel = FOOTER_PROFILE_ARIA_LABELS[profile.id];
+		return ariaLabel
+			? [
 					{
-						ariaLabel: PROFILE_ARIA_LABELS[profile.id],
+						ariaLabel,
 						href: profile.href,
 						kind: "external",
 						label: profile.label,
 					},
 				]
-	),
+			: [];
+	}),
 ];
 
 /** The only place for legal links; cookie settings render after them. */

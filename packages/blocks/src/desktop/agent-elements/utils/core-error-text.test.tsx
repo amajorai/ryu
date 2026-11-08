@@ -124,7 +124,7 @@ test("a two-sentence sandbox refusal renders in Arabic and Japanese", () => {
 			formatMessage(catalogs[locale]?.[source] ?? source, values, locale);
 	expect(localizeCoreError(sandbox, using("ar"), "ar")).toEqual({
 		message:
-			"تعذر على Ryu إعداد بيئة العزل (no bwrap). اضبط هوية الوكيل على يتصرف نيابةً عنك.",
+			"تعذر على Ryu إعداد بيئة العزل (\u2068no bwrap\u2069). اضبط هوية الوكيل على يتصرف نيابةً عنك.",
 		title: "لم يبدأ الوكيل",
 	});
 	expect(localizeCoreError(sandbox, using("ja"), "ja")).toEqual({

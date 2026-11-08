@@ -28,10 +28,11 @@ import {
 	searchRetrieval,
 } from "@/src/lib/api/retrieval.ts";
 import { formatFixedDecimals } from "@/src/lib/fixed-decimal-format.ts";
+import { spaceDisplayName } from "@/src/lib/spaces/system-space-label.ts";
 import { useMemoryOwner } from "./MemoryTab-owner.ts";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
-function sourceLabel(
+export function sourceLabel(
 	chunk: ScoredChunk,
 	spaces: SpaceSummary[],
 	tl: LiteralMessage
@@ -40,7 +41,9 @@ function sourceLabel(
 		return tl("Memory");
 	}
 	const space = spaces.find((s) => s.id === chunk.spaceId);
-	return space ? tl("Space · {name}", { name: space.name }) : tl("Space");
+	return space
+		? tl("Space · {name}", { name: spaceDisplayName(space, tl) })
+		: tl("Space");
 }
 
 export function MemorySearchSection({ target }: { target: ApiTarget }) {

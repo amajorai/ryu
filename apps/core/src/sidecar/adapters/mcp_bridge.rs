@@ -272,6 +272,8 @@ struct RyuMcpHandler {
 mod handler_catalog;
 mod handler_consent;
 mod handler_dispatch;
+mod hosted_broker;
+mod hosted_broker_catalog;
 mod jsonrpc;
 mod permissions;
 mod result_bound;

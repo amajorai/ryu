@@ -34,6 +34,7 @@ import { dialogEscapeScript } from "./dialog-escape-script.ts";
 import { HORIZONTAL_WHEEL_SCROLL_SCRIPT } from "./horizontal-wheel-scroll-script.ts";
 import { COMPANION_PRIVACY_STATE_SCRIPT } from "./notification-privacy.ts";
 import { handshakeAnnounceScript } from "./rpc.ts";
+import { livenessResponderScript } from "./sandbox-liveness-gate.ts";
 
 /** Encode host mount data to a JSON literal safe for an inline script. */
 export const companionScriptLiteralSchema = z
@@ -347,6 +348,7 @@ ${indentGeneratedScript(HOSTED_EXTERNAL_LINKS_SCRIPT, "    ")}
     function onPortMessage(ev) {
       var msg = ev.data;
       if (!msg) return;
+      ${livenessResponderScript()}
       if (msg.kind === "ryu-widget-set-globals" && msg.globals && msg.globals.openedFile) {
         window.dispatchEvent(new CustomEvent("ryu:file-changed", { detail: msg.globals.openedFile }));
         return;
@@ -1204,6 +1206,7 @@ ${indentGeneratedScript(HOSTED_EXTERNAL_LINKS_SCRIPT, "    ")}
     function onPortMessage(ev) {
       var msg = ev.data;
       if (!msg) return;
+      ${livenessResponderScript()}
       if (msg.kind === "ryu-widget-set-globals" && msg.globals && msg.globals.openedFile) {
         window.dispatchEvent(new CustomEvent("ryu:file-changed", { detail: msg.globals.openedFile }));
         return;

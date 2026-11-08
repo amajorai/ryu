@@ -56,11 +56,11 @@ describe("the modality editor is wired into the routing card", () => {
 		const registryOrder = rustBlock(
 			gatewayProvidersRs,
 			GATEWAY_PROVIDERS_RS,
-			"    fn every_configured_builtin_registers_in_deterministic_order"
+			"fn every_configured_builtin_registers_in_deterministic_order"
 		);
 		// Ids may carry a hyphen (`openai-credits`), so the pattern must not stop
 		// at `\w`: a hyphenated id the registry reports still needs a label.
-		const ids = [...registryOrder.matchAll(/^\s{16}"([\w-]+)",$/gm)].map(
+		const ids = [...registryOrder.matchAll(/^\s{12}"([\w-]+)",$/gm)].map(
 			(m) => m[1]
 		);
 		expect(ids).toContain("fal");

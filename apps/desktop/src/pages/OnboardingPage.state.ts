@@ -1,3 +1,4 @@
+import type { OnboardingLocalError } from "@ryu/blocks/desktop/onboarding-types.ts";
 import { useRef, useState } from "react";
 import type { AgentCatalogEntry } from "@/src/lib/api/agents.ts";
 import type {
@@ -40,7 +41,9 @@ export function useOnboardingFlowState({
 	// Why the local pick failed, in Core's own words ("HTTP 404" on a missing
 	// release asset, a write error, …). The card used to say only "something went
 	// wrong", which is unactionable for the one path that installs software.
-	const [localError, setLocalError] = useState<string | null>(null);
+	const [localError, setLocalError] = useState<OnboardingLocalError | null>(
+		null
+	);
 	// What the local bring-up is doing RIGHT NOW ("Installing the model gateway"),
 	// and the things it has already finished ("Ryu Core installed"). Refs, not
 	// state: installer events can arrive frequently and the rotation tick samples

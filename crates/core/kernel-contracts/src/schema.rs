@@ -2403,12 +2403,16 @@ pub fn capability_label(grant: &str) -> String {
         // Run recovery (the Self-Healing extraction): receive failed runs, queue a
         // proposed fix for the user's approval, and re-run a failed agent run.
         "runs:failures" => {
-            "Reads failed agent and workflow runs, including their instruction and error"
+            "Reads every member's failed agent and workflow runs on this node, including \
+             their instruction and error"
                 .to_string()
         }
         "approvals:request" => "Asks for your approval before a proposed fix runs".to_string(),
         "runs:rerun-agent" => {
             "Re-runs failed agent runs, possibly with a corrected instruction".to_string()
+        }
+        "warmup:crud" => {
+            "Schedules short keep-alive pings that your agents run unattended".to_string()
         }
         "subscriptions:read" => "See your subscription accounts".to_string(),
         // Spaces + media capabilities (full-page companion apps).
@@ -2736,11 +2740,13 @@ mod tests {
     #[test]
     fn capability_label_describes_run_recovery_grants() {
         assert!(capability_label("runs:failures").contains("failed"));
+        assert!(capability_label("runs:failures").contains("every member's"));
         assert!(capability_label("approvals:request").contains("approval"));
         assert_eq!(
             capability_label("runs:rerun-agent"),
             "Re-runs failed agent runs, possibly with a corrected instruction"
         );
+        assert!(capability_label("warmup:crud").contains("unattended"));
         assert_eq!(
             capability_label("app:http:@ryu/recipes"),
             "Calls the '@ryu/recipes' app on your behalf"

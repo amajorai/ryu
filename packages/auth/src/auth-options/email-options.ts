@@ -7,6 +7,10 @@ import {
 } from "@ryu/email";
 import type { BetterAuthOptions } from "better-auth";
 import { creditPendingReferral } from "../lib/referral-credit.ts";
+import {
+	revokeUnprovenSocialSignupAccessInAuthContext,
+	type UnprovenAccessUser,
+} from "../lib/unproven-social-signup-access.ts";
 import { authApi } from "./auth-instance.ts";
 import { retryAfterSeconds } from "./email-rate-limit.ts";
 import type { EmailUser } from "./login-activity.ts";
@@ -68,6 +72,15 @@ export const emailAuthOptions = {
 				// to close — including on a benign rate-limit hit.
 				console.error("Failed to send existing-account sign-up email:", error);
 			}
+		},
+		// A password reset proves the mailbox. An unverified account a social
+		// identity created must not keep that identity's link or sessions once
+		// the mailbox owner adopts it (lib/unproven-social-signup-access.ts).
+		// The new password is the owner's, so the credential stays.
+		onPasswordReset: async ({ user }: { user: UnprovenAccessUser }) => {
+			await revokeUnprovenSocialSignupAccessInAuthContext(user, {
+				keepCredential: true,
+			});
 		},
 		sendResetPassword: async ({
 			user,
@@ -144,6 +157,15 @@ export const emailAuthOptions = {
 				}
 				throw error;
 			}
+		},
+		// The verification link and the email-OTP verification flip
+		// emailVerified without Better Auth's unproven-link cleanup, so strip
+		// what an unverified social sign-up holds first. A failure throws and
+		// leaves the account unverified rather than adopted with that access.
+		beforeEmailVerification: async (user: UnprovenAccessUser) => {
+			await revokeUnprovenSocialSignupAccessInAuthContext(user, {
+				keepCredential: false,
+			});
 		},
 		// Better Auth owns the emailVerified boolean. Keep the timestamp in
 		// Ryu's read-compatible Mongoose mirror so public profiles can show

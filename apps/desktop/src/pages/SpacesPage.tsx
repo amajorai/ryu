@@ -218,6 +218,7 @@ export default function SpacesPage({
 					// whiteboards and app documents) and for an older node.
 					indexState: d.indexState ?? undefined,
 					indexMessage: d.indexMessage,
+					indexReasonCode: d.indexReasonCode,
 					indexWarnings: d.indexWarnings,
 				})),
 				documentsError: docsError,

@@ -20,10 +20,7 @@ import {
 	YAxis,
 } from "recharts";
 import { SettingsCard, SettingsSection } from "./settings-items.tsx";
-import {
-	GRANULARITY_LABELS,
-	type UsageAnalyticsData,
-} from "./usage-analytics.ts";
+import type { UsageAnalyticsData } from "./usage-analytics.ts";
 import {
 	FORECAST_COLOR,
 	ForecastSummary,
@@ -41,6 +38,11 @@ import {
 	trendMetricTotal,
 	UsageMarker,
 } from "./usage-analytics-dashboard-shared.tsx";
+import {
+	trendHorizonLabel,
+	trendMetricLabel,
+	usageTrendCaption,
+} from "./usage-analytics-trend-labels.ts";
 import {
 	buildUsageTrendChart,
 	type UsageTrendView,
@@ -60,10 +62,11 @@ export function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 				data,
 				forecast: showForecast,
 				metric: selectedMetric,
-				metricLabel: metricDefinition.label,
+				horizonLabel: trendHorizonLabel(data.granularity, tl),
+				metricLabel: trendMetricLabel(selectedMetric, tl),
 				view,
 			}),
-		[data, metricDefinition.label, selectedMetric, showForecast, view]
+		[data, selectedMetric, showForecast, tl, view]
 	);
 	const seriesColor = (index: number) =>
 		model.view === "total"
@@ -123,25 +126,14 @@ export function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 				caption={
 					// Name the forecast only when the chart draws one: a too-detailed
 					// resolution or an ended range shows a gap message instead.
-					model.forecastGap === null
-						? tl(
-								"{metric} at {resolution} resolution, with a trend forecast for the {horizon}.",
-								{
-									horizon: model.horizonLabel,
-									metric: metricDefinition.label,
-									resolution: sentenceLabel(
-										tl,
-										GRANULARITY_LABELS[data.granularity]
-									),
-								}
-							)
-						: tl("{metric} at {resolution} resolution.", {
-								metric: metricDefinition.label,
-								resolution: sentenceLabel(
-									tl,
-									GRANULARITY_LABELS[data.granularity]
-								),
-							})
+					usageTrendCaption(
+						{
+							forecast: model.forecastGap === null,
+							granularity: data.granularity,
+							metric: selectedMetric,
+						},
+						tl
+					)
 				}
 				headerAction={
 					<span className="flex items-baseline gap-1.5 text-xs">

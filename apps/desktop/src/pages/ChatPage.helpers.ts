@@ -182,6 +182,22 @@ export function messageAuthorId(message: UIMessage): string | null {
 	return isNativeText(id) && id.trim() ? id.trim() : null;
 }
 
+/**
+ * Index messages by id once so per-message lookups stay O(1). The first
+ * message with an id wins, matching `Array.prototype.find`.
+ */
+export function indexMessagesById<Message extends { id: string }>(
+	messages: readonly Message[]
+): Map<string, Message> {
+	const byId = new Map<string, Message>();
+	for (const message of messages) {
+		if (!byId.has(message.id)) {
+			byId.set(message.id, message);
+		}
+	}
+	return byId;
+}
+
 export function mergeContextHandoffs(
 	current: ConversationContextHandoff[],
 	incoming: ConversationContextHandoff[]

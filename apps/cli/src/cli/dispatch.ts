@@ -184,10 +184,12 @@ const defaultIo: CliIO = {
 	err: (s) => process.stderr.write(s),
 };
 
-interface RunOverrides {
+export interface RunOverrides {
 	api?: CoreApi;
 	/** Fake Docker/host seams for `ryu secrets run --isolation=container`. */
 	containerHost?: ContainerHost;
+	/** Working directory for `.ryu-vault.json` lookups in tests. */
+	cwd?: string;
 	/** Environment for credential lookups (`RYU_VAULT_TOKEN`). */
 	env?: Record<string, string | undefined>;
 	/** Fake HTTP for `ryu doctor agents` endpoint probes. */
@@ -259,6 +261,7 @@ export async function runCli(
 		api: overrides.api ?? realCoreApi,
 		args: parsed.args,
 		containerHost: overrides.containerHost,
+		cwd: overrides.cwd,
 		env: overrides.env ?? process.env,
 		fetch: overrides.fetch ?? ((input, init) => fetch(input, init)),
 		flags,

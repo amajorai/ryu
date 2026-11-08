@@ -199,12 +199,14 @@ export function collectionBooks(
 			makeBook({
 				agentId: null,
 				authors: [],
-				description: "Conversations that no agent, project, or team owns yet.",
+				description: tr(
+					"Conversations that no agent, project, or team owns yet."
+				),
 				groupId: null,
 				id: UNASSIGNED_BOOK_ID,
 				kind: "unassigned",
 				threads: loose,
-				title: "Unassigned",
+				title: tr("Unassigned"),
 			})
 		);
 	}
@@ -384,7 +386,7 @@ export function progressPercent(book: LibraryBook): number {
 
 export function chapterCountLabel(count: number): string {
 	if (count === 0) {
-		return "No chapters";
+		return tr("No chapters");
 	}
 	return tr("{count, plural, one {# chapter} other {# chapters}}", {
 		count,
@@ -393,7 +395,7 @@ export function chapterCountLabel(count: number): string {
 
 export function progressLabel(book: LibraryBook, tl: LiteralMessage): string {
 	if (book.chapters.length === 0) {
-		return "No chapters yet";
+		return tl("No chapters yet");
 	}
 	return tl("{finishedCount} of {chapterCount} chapters finished", {
 		chapterCount: book.chapters.length.toString(),
@@ -416,7 +418,7 @@ export function bookKindLabel(kind: LibraryBookKind): string {
 export function authorList(authors: InterfaceAgent[]): string {
 	const names = authors.map((author) => author.name);
 	if (names.length === 0) {
-		return "No agent yet";
+		return tr("No agent yet");
 	}
 	if (names.length === 1) {
 		return names[0] ?? "";

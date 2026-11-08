@@ -1,26 +1,30 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { Product } from "../../data/products.tsx";
-import {
-	FactSheet,
-	type FactSheetColumns,
-	type FactSheetFact,
+import type {
+	FactSheetColumns,
+	FactSheetFact,
 } from "../../page-sections/fact-sheet.tsx";
 import { productBaseFacts } from "../base-facts.ts";
 import type { ProductProfile } from "../profile-types.ts";
+import { LocalizedFactSheet } from "./localized-pricing-lead.tsx";
 import { ProductSection, sectionKickerClass } from "./section-shell.tsx";
 
 /**
  * Base facts (availability, category, pricing, docs) then the profile's own
  * facts. A label appears once: the first occurrence wins, so a profile cannot
- * restate a typed base fact with different words.
+ * restate a typed base fact with different words. `tl` and `locale` translate
+ * and format the pricing fact (English by default).
  */
 export function atAGlanceFacts(
 	product: Product,
-	profile: ProductProfile | undefined
+	profile: ProductProfile | undefined,
+	tl?: LiteralMessage,
+	locale?: string | null
 ): FactSheetFact[] {
 	const seen = new Set<string>();
 	const facts: FactSheetFact[] = [];
 	for (const fact of [
-		...productBaseFacts(product),
+		...productBaseFacts(product, tl, locale),
 		...(profile?.facts ?? []),
 	]) {
 		if (seen.has(fact.label)) {
@@ -72,17 +76,23 @@ export function ProductAtAGlance({
 							{product.tagline}
 						</p>
 					</header>
-					<FactSheet className="min-w-0" columns={2} facts={facts} />
+					<LocalizedFactSheet
+						className="min-w-0"
+						columns={2}
+						facts={facts}
+						slug={product.slug}
+					/>
 				</div>
 			</ProductSection>
 		);
 	}
 	return (
 		<ProductSection testId="product-at-a-glance">
-			<FactSheet
+			<LocalizedFactSheet
 				className="min-w-0"
 				columns={columns}
 				facts={facts}
+				slug={product.slug}
 				title="At a glance"
 			/>
 		</ProductSection>

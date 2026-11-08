@@ -29,7 +29,7 @@ fn a_relayed_template_keeps_its_dynamic_part_verbatim() {
     );
     assert_eq!(
         message.render("ar"),
-        "لم يتم العثور على مسار مجموعة البيانات: /tmp/rows.jsonl"
+        "لم يتم العثور على مسار مجموعة البيانات: \u{2068}/tmp/rows.jsonl\u{2069}"
     );
     assert_eq!(
         message.render("de"),

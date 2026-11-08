@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceEvent,
 	type InterfaceSnapshot,
@@ -13,7 +14,7 @@ import {
 	homeDistrict,
 	LOT,
 	OLD_TOWN_ID,
-	OLD_TOWN_NAME,
+	oldTownName,
 	ROAD,
 	SIDEWALK,
 	type Town,
@@ -126,13 +127,14 @@ export function buildTown(snapshot: InterfaceSnapshot, now: number): Town {
 	const seeds: DistrictSeed[] = groups.map((group) => ({
 		id: group.id,
 		kind: group.kind,
-		name: group.name.trim() || (group.kind === "team" ? "Team" : "Project"),
+		name:
+			group.name.trim() || (group.kind === "team" ? tr("Team") : tr("Project")),
 	}));
 	const needsOldTown =
 		[...homes.values()].includes(OLD_TOWN_ID) ||
 		threadsByDistrict.has(OLD_TOWN_ID);
 	if (needsOldTown) {
-		seeds.push({ id: OLD_TOWN_ID, kind: "old-town", name: OLD_TOWN_NAME });
+		seeds.push({ id: OLD_TOWN_ID, kind: "old-town", name: oldTownName() });
 	}
 	seeds.sort(
 		(a, b) =>
@@ -287,7 +289,7 @@ export function buildTown(snapshot: InterfaceSnapshot, now: number): Town {
 				? agents.find((agent) => agent.id === firstAgent)
 				: undefined,
 			districtId,
-			districtName: names.get(districtId) ?? OLD_TOWN_NAME,
+			districtName: names.get(districtId) ?? oldTownName(),
 			status,
 			thread,
 		});

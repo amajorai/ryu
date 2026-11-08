@@ -211,11 +211,12 @@ pub(in crate::server) async fn import_setup_item(
         crate::import::kind::CONVERSATIONS => {
             import_chat_export_item(state, caller, root, selection, None).await
         }
-        other => crate::import::ImportOutcome::failed(
+        other => crate::import::ImportOutcome::failed_msg(
             other,
             &selection.id,
             &selection.id,
-            &format!("unknown item kind {other:?}"),
+            crate::i18n::Message::new(crate::i18n::messages::IMPORT_OUTCOME_UNKNOWN_KIND_MESSAGE)
+                .text("kind", other),
         ),
     }
 }

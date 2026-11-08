@@ -428,12 +428,12 @@ export default function AppsCatalogSection({
 					isInstalling={isInstalling}
 					item={active ? active.selectedItem : selectedItem}
 					lifecyclePending={active ? active.lifecyclePending : lifecyclePending}
-					noun={copy.noun}
 					renderAffordance={host.renderAffordance}
 					selectedId={active ? active.selectedId : selectedId}
 					setEnabled={active ? active.setEnabled : setEnabled}
 					settingsOpener={settingsOpener}
 					switchChannel={active ? active.switchChannel : switchChannel}
+					variantCopy={copy}
 				/>
 			}
 			detailTitle={
@@ -465,7 +465,6 @@ export default function AppsCatalogSection({
 					loadedCount={items.length}
 					loading={loading}
 					loadingMore={loadingMore}
-					nounPlural={copy.nounPlural}
 					onClearSearch={() => setQuery("")}
 					onDisable={cardDisable}
 					onInstall={cardInstall}
@@ -477,6 +476,7 @@ export default function AppsCatalogSection({
 					selectedId={communitySelected ? null : selectedId}
 					settingsOpener={settingsOpener}
 					stabilityFiltered={stabilityFiltered}
+					variantCopy={copy}
 				/>
 			}
 			onCloseDetail={closeDetail}

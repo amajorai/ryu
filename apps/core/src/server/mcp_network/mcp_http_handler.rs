@@ -191,7 +191,9 @@ pub(in crate::server) async fn mcp_http_inner(
     // answered with nothing at all, which on HTTP is `202 Accepted` and an empty
     // body. A request is answered with a single JSON object — never a 1-element
     // array, which is what a host that sent an object expects back.
-    let response = crate::sidecar::adapters::mcp_bridge::serve_http_jsonrpc_versioned_with_headers(
+    // Bind the verified member around the dispatch so the org tool policy
+    // applies their member layer and guardrails, as `/api/mcp/tools/call` does.
+    let dispatch = crate::sidecar::adapters::mcp_bridge::serve_http_jsonrpc_versioned_with_headers(
         Arc::clone(&state.mcp),
         agent_id,
         allowlist,
@@ -199,8 +201,10 @@ pub(in crate::server) async fn mcp_http_inner(
         &parsed,
         modern,
         &headers,
-    )
-    .await;
+    );
+    let response =
+        super::verified_dispatch::dispatch_as_verified_caller(resolved.caller.as_ref(), dispatch)
+            .await;
     let mut output = match response {
         Some(response)
             if response

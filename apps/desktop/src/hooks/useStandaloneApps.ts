@@ -5,12 +5,14 @@ import {
 	serializeStandaloneAppRegistry,
 	upsertStandaloneAppInstallation,
 } from "@ryu/app-host/standalone";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo } from "react";
 import {
 	closeCurrentWindow,
 	openStandaloneAppWindow,
 } from "@/lib/tauri-bridge.ts";
+import { translatedAppName } from "@/src/pages/hosted-standalone-window-title.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
 /** Local host state, intentionally not Core app data or a second lifecycle row. */
@@ -139,15 +141,22 @@ export function useStandaloneApps() {
 		[update]
 	);
 
-	const open = useCallback((target: StandaloneAppTarget) => {
-		if (!validAppId(target.appId)) {
-			return Promise.reject(new Error("This app cannot be opened standalone."));
-		}
-		return openStandaloneAppWindow({
-			appId: target.appId,
-			title: target.name,
-		});
-	}, []);
+	const tl = useLiteralMessages();
+	const open = useCallback(
+		(target: StandaloneAppTarget) => {
+			if (!validAppId(target.appId)) {
+				return Promise.reject(
+					new Error("This app cannot be opened standalone.")
+				);
+			}
+			// Localize the first frame; brand names are not catalog keys.
+			return openStandaloneAppWindow({
+				appId: target.appId,
+				title: translatedAppName(tl, target.name),
+			});
+		},
+		[tl]
+	);
 
 	const installedAppIds = useMemo(
 		() => new Set((query.data ?? []).map((app) => app.appId)),

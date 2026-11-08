@@ -52,7 +52,10 @@ export {
  */
 
 export const OLD_TOWN_ID = "old-town";
-export const OLD_TOWN_NAME = "Old Town";
+/** The display name of the district for agents in no project or team. */
+export function oldTownName(): string {
+	return tr("Old Town");
+}
 
 /** World units: one lot, the sidewalk ring around a block, the road. */
 export const LOT = 2.3;

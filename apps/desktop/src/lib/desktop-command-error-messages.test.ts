@@ -111,7 +111,7 @@ describe("desktopCommandErrorText under ja and ar", () => {
 		).toBe("作業ディレクトリ C:\\work は存在しません。");
 		expect(
 			desktopCommandErrorText("cwd_not_dir:/a.txt", catalogTl("ar"))?.message
-		).toBe("/a.txt ليس مجلدًا.");
+		).toBe("\u2068/a.txt\u2069 ليس مجلدًا.");
 	});
 });
 
@@ -151,5 +151,62 @@ describe("set_pending_app_update rejections under de", () => {
 		expect(
 			desktopCommandErrorLine("write_failed:Permission denied", deSchedule)
 		).not.toContain("Permission denied");
+	});
+});
+
+const GERMAN_CORE: Record<string, string> = {
+	"Ryu is installing an app update. The local runtime will start after Ryu restarts.":
+		"Ryu installiert ein App-Update. Die lokale Laufzeit startet nach dem Neustart von Ryu.",
+	"Ryu could not install its local runtime. Check your internet connection and free disk space, then try again.":
+		"Ryu konnte seine lokale Laufzeit nicht installieren. Prüfe deine Internetverbindung und den freien Speicherplatz und versuche es dann erneut.",
+	"The downloaded runtime did not match its published release, so Ryu did not run it.":
+		"Die heruntergeladene Laufzeit stimmte nicht mit ihrer veröffentlichten Version überein, daher hat Ryu sie nicht ausgeführt.",
+};
+
+const deCore = ((source: string) =>
+	GERMAN_CORE[source] ?? source) as LiteralMessage;
+
+describe("Core lifecycle rejections under de", () => {
+	test("the update-in-progress code is one whole German sentence", () => {
+		expect(desktopCommandErrorText("update_in_progress", deCore)).toEqual({
+			message:
+				"Ryu installiert ein App-Update. Die lokale Laufzeit startet nach dem Neustart von Ryu.",
+			detail: null,
+		});
+	});
+
+	test("installer text stays the raw detail, never the sentence", () => {
+		const coded = desktopCommandErrorText(
+			"installer_failed:No space left on device (os error 28)",
+			deCore
+		);
+		expect(coded?.message).toBe(
+			"Ryu konnte seine lokale Laufzeit nicht installieren. Prüfe deine Internetverbindung und den freien Speicherplatz und versuche es dann erneut."
+		);
+		expect(coded?.detail).toBe("No space left on device (os error 28)");
+		expect(
+			desktopCommandErrorText(
+				"release_validation_failed:ryu-core does not match the SHA-256 digest published for v1.2.3; refusing to run it",
+				deCore
+			)
+		).toEqual({
+			message:
+				"Die heruntergeladene Laufzeit stimmte nicht mit ihrer veröffentlichten Version überein, daher hat Ryu sie nicht ausgeführt.",
+			detail:
+				"ryu-core does not match the SHA-256 digest published for v1.2.3; refusing to run it",
+		});
+	});
+
+	test("every Core lifecycle code is recognised", () => {
+		for (const code of [
+			"core_binary_missing",
+			"core_spawn_failed",
+			"installer_failed",
+			"release_metadata_unavailable",
+			"release_validation_failed",
+			"update_in_progress",
+		]) {
+			expect(desktopCommandErrorText(code, deCore)).not.toBeNull();
+		}
 	});
 });

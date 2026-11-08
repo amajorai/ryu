@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	languageSelectionKey,
 	parseSelectedPackId,
+	parseSystemLanguages,
 	parseUiLanguageSelection,
 	selectionFromLanguagePacks,
 } from "./language-selection.ts";
@@ -55,5 +56,19 @@ describe("UI language selection", () => {
 		expect(parseSelectedPackId("")).toBeUndefined();
 		expect(parseSelectedPackId(42)).toBeUndefined();
 		expect(parseSelectedPackId("x".repeat(129))).toBeUndefined();
+	});
+
+	test("accepts only a bounded, non-empty OS language list", () => {
+		expect(parseSystemLanguages(["nl-NL", "de-DE"])).toEqual([
+			"nl-NL",
+			"de-DE",
+		]);
+		expect(parseSystemLanguages([])).toBeNull();
+		expect(parseSystemLanguages([42])).toBeNull();
+		expect(parseSystemLanguages(["x".repeat(65)])).toBeNull();
+		expect(
+			parseSystemLanguages(Array.from({ length: 33 }, () => "de"))
+		).toBeNull();
+		expect(parseSystemLanguages("de")).toBeNull();
 	});
 });

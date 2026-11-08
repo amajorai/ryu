@@ -23,6 +23,10 @@ import type {
 	SpaceDocumentContent,
 } from "@/src/lib/api/spaces.ts";
 import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
+import {
+	spaceDisplayDescription,
+	spaceDisplayName,
+} from "@/src/lib/spaces/system-space-label.ts";
 
 const PagePreview = lazy(() =>
 	import("./SpaceDocumentPreview.tsx").then((module) => ({
@@ -393,7 +397,10 @@ export function SpaceProjectFolder({
 		<div className="group relative w-fit" ref={folderRef}>
 			<ProjectFolder
 				count={documents.length}
-				description={space.description ?? "Pages and databases in this Space."}
+				description={
+					spaceDisplayDescription(space, tl) ??
+					tl("Pages and databases in this Space.")
+				}
 				emptyContent={(closeBeforeNavigation) => {
 					if (documentList.status === "loading") {
 						return (
@@ -456,7 +463,7 @@ export function SpaceProjectFolder({
 					}
 				}}
 				previews={previews}
-				title={space.name}
+				title={spaceDisplayName(space, tl)}
 			/>
 			<FavoriteStar
 				className="absolute end-2 top-2"

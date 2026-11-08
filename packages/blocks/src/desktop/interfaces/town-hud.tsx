@@ -321,8 +321,13 @@ const VIEW_LABELS: Record<TownDataView, string> = {
 };
 
 const VIEW_SCALE: Record<Exclude<TownDataView, "none">, [string, string]> = {
-	activity: ["Idle", "Busy now"],
-	needs: ["Settled", "Waiting on you"],
+	get activity(): [string, string] {
+		return [tr("Idle"), tr("Busy now")];
+	},
+	// "All quiet", not "Settled": that key carries the payouts sense.
+	get needs(): [string, string] {
+		return [tr("All quiet"), tr("Waiting on you")];
+	},
 };
 
 /** With acts the "Needs you" view counts asks and stopped runs. */

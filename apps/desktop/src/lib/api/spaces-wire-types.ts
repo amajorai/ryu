@@ -92,6 +92,7 @@ export interface MatchWire {
 
 export interface FileIndexWire {
 	message?: string | null;
+	reason_code?: string | null;
 	state?: string | null;
 	warnings?: string[] | null;
 }

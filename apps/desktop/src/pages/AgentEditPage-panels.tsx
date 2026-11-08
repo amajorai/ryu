@@ -1,13 +1,16 @@
 import { AcpAgentSettingsPanel } from "@/src/components/agents/AcpAgentSettingsPanel.tsx";
 import { AcpSessionControls } from "@/src/components/agents/AcpSessionControls.tsx";
 import { AgentAccountAccessPanel } from "@/src/components/agents/AgentAccountAccessPanel.tsx";
+import { AgentAccountLoginUrlsPanel } from "@/src/components/agents/AgentAccountLoginUrlsPanel.tsx";
 import { AgentBudgetPanel } from "@/src/components/agents/AgentBudgetPanel.tsx";
 import { AgentCalendarView } from "@/src/components/agents/AgentCalendarView.tsx";
 import { AgentCapabilitiesPanel } from "@/src/components/agents/AgentCapabilitiesPanel.tsx";
 import { AgentChannelsSection } from "@/src/components/agents/AgentChannelsSection.tsx";
+import { AgentEgressAllowlistPanel } from "@/src/components/agents/AgentEgressAllowlistPanel.tsx";
 import { AgentEmailAliasSection } from "@/src/components/agents/AgentEmailAliasSection.tsx";
 import { AgentEvalsView } from "@/src/components/agents/AgentEvalsView.tsx";
 import { AgentExecutionPolicyPanel } from "@/src/components/agents/AgentExecutionPolicyPanel.tsx";
+import { AgentFillSetPanel } from "@/src/components/agents/AgentFillSetPanel.tsx";
 import { AgentGoalPanel } from "@/src/components/agents/AgentGoalPanel.tsx";
 import { AgentImageField } from "@/src/components/agents/AgentImageField.tsx";
 import { AgentLanyardCard } from "@/src/components/agents/AgentLanyardCard.tsx";
@@ -138,6 +141,21 @@ export function buildAgentEditPanels(ctx: AgentEditContext) {
 			<>
 				{effectiveAgentId ? (
 					<AgentCapabilitiesPanel
+						agentId={effectiveAgentId}
+						disabled={isLocked}
+					/>
+				) : null}
+				{!isNew && effectiveAgentId ? (
+					<AgentEgressAllowlistPanel
+						agentId={effectiveAgentId}
+						disabled={isLocked}
+					/>
+				) : null}
+				{!isNew && effectiveAgentId ? (
+					<AgentFillSetPanel agentId={effectiveAgentId} disabled={isLocked} />
+				) : null}
+				{!isNew && effectiveAgentId ? (
+					<AgentAccountLoginUrlsPanel
 						agentId={effectiveAgentId}
 						disabled={isLocked}
 					/>

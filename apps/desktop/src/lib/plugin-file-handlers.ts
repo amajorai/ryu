@@ -97,9 +97,11 @@ export function createOpenedFileAccess(
 	const read = async (): Promise<OpenedFileSnapshot> => {
 		if (io.readBinary) {
 			const blob = await io.readBinary(path);
-			const bytes = Uint8Array.from(atob(blob), (character) =>
-				character.charCodeAt(0)
-			);
+			const binary = atob(blob);
+			const bytes = new Uint8Array(binary.length);
+			for (let index = 0; index < binary.length; index++) {
+				bytes[index] = binary.charCodeAt(index);
+			}
 			const hash = await crypto.subtle.digest("SHA-256", bytes);
 			const revision = Array.from(new Uint8Array(hash), (byte) =>
 				byte.toString(16).padStart(2, "0")

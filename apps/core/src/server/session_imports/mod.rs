@@ -14,3 +14,5 @@ mod import_export;
 pub(in crate::server) use import_export::*;
 mod import_agents_commands;
 pub(in crate::server) use import_agents_commands::*;
+#[cfg(test)]
+mod import_provenance_tests;

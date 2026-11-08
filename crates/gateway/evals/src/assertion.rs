@@ -1,5 +1,7 @@
 //! Assertion wire types and their per-assertion result.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -237,7 +239,7 @@ pub enum Assertion {
 }
 
 /// Result of evaluating a single assertion against a response.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct AssertionResult {
     /// The assertion kind as the snake_case wire tag ("contains", "llm_judge", …).
     pub kind: String,
@@ -253,6 +255,13 @@ pub struct AssertionResult {
     /// a passing score.
     #[serde(default)]
     pub executed: bool,
+    /// Stable detail code (`"contains.found"`, `"regex.invalid"`, …) a client
+    /// renders as a localized message; `detail` stays the English fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// Arguments for `code`'s message (`value`, `pattern`, `score`, …).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub values: BTreeMap<String, Value>,
 }
 
 #[cfg(test)]

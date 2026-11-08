@@ -72,6 +72,7 @@ pub(crate) const SERVER_SOURCES: &[(&str, &str)] = server_sources![
     "chat_controls/chat_retry.rs",
     "channel_runs/mod.rs",
     "channel_runs/assistant_first_opening.rs",
+    "channel_runs/opening_agent_gate.rs",
     "channel_runs/channel_bot_run.rs",
     "channel_runs/channel_run.rs",
     "channel_runs/channel_command_registry.rs",

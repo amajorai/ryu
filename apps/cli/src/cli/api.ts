@@ -140,7 +140,7 @@ const runScaffold: ScaffoldRunner = async (
 /** Run a child with inherited stdio and an explicit environment (`ryu secrets
  *  run`). The argv is passed without a shell, so values in the environment are
  *  never interpolated into a command line, and nothing here prints them. */
-export const runProcess: ProcessRunner = async (cmd, env) => {
+export const runProcess: ProcessRunner = async (cmd, env, options = {}) => {
 	let proc: Bun.Subprocess<"inherit", "inherit", "inherit">;
 	try {
 		proc = Bun.spawn({
@@ -158,8 +158,37 @@ export const runProcess: ProcessRunner = async (cmd, env) => {
 			})
 		);
 	}
-	return await proc.exited;
+	const { signal } = options;
+	if (!signal) {
+		return await proc.exited;
+	}
+	return await stopOnAbort(proc, signal);
 };
+
+/** Grace period between SIGTERM and SIGKILL for a child stopped by abort. */
+const STOP_GRACE_MS = 10_000;
+
+async function stopOnAbort(
+	proc: Pick<Bun.Subprocess, "exited" | "kill">,
+	signal: AbortSignal
+): Promise<number> {
+	let forceKill: ReturnType<typeof setTimeout> | undefined;
+	const stop = () => {
+		proc.kill("SIGTERM");
+		forceKill = setTimeout(() => proc.kill("SIGKILL"), STOP_GRACE_MS);
+	};
+	if (signal.aborted) {
+		stop();
+	} else {
+		signal.addEventListener("abort", stop, { once: true });
+	}
+	try {
+		return await proc.exited;
+	} finally {
+		signal.removeEventListener("abort", stop);
+		clearTimeout(forceKill);
+	}
+}
 
 /** Read piped stdin as text; null when stdin is an interactive terminal. */
 export async function readStdin(): Promise<string | null> {

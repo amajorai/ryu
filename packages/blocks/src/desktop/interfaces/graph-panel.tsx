@@ -29,6 +29,10 @@ import {
 } from "./graph-parts.tsx";
 import { InterfaceComposer } from "./interface-composer.tsx";
 import { agentById, compactAge } from "./interface-renderer.ts";
+import {
+	newConversationLabel,
+	threadDisplayTitle,
+} from "./thread-display-title.ts";
 
 /**
  * The shared Kbd inverts its colors inside tooltips, which reads as dark on
@@ -152,7 +156,7 @@ function ThreadRow({
 	snapshot: InterfaceSnapshot;
 	thread: InterfaceThread;
 }) {
-	const title = thread.title.trim() || "Untitled thread";
+	const title = threadDisplayTitle(thread);
 	const status = threadStatus(thread);
 	const people = showPeople ? threadPeople(snapshot, thread) : null;
 	const detail = [people, thread.lastMessage?.trim()]
@@ -453,7 +457,7 @@ export function GraphThreadPanel({
 						{title}
 					</h2>
 					<p className={cn("truncate text-muted-foreground", TEXT_META)}>
-						{thread ? threadPeople(snapshot, thread) : "New conversation"}
+						{thread ? threadPeople(snapshot, thread) : newConversationLabel(tl)}
 					</p>
 				</div>
 				{thread ? (

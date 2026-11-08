@@ -1,6 +1,6 @@
 import type { LiteralMessage } from "@ryu/i18n/react";
 
-// Core's Dream review (`apps/core/src/server/memory_dream.rs`) still sends a
+// Core's Dream review (`apps/core/src/server/memory_dream/`) still sends a
 // few fixed English sentences as data: the review summary, the proposal
 // source badge and the rationale used when the model gave none. Rows persisted
 // before any Core change keep them too. Recognise those exact literals here and

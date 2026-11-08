@@ -292,7 +292,9 @@ export function FileEditsCard({
 			undoComplete={undoComplete}
 			undoUnavailable={
 				onUndo && !card.undoPlan
-					? "Undo is available only when every change in the turn is an exact text replacement."
+					? tl(
+							"Undo is available only when every change in the turn is an exact text replacement."
+						)
 					: undefined
 			}
 		/>

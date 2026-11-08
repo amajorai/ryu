@@ -68,6 +68,7 @@ use crate::plugin_manifest::schema::{HttpProxySpec, RouteAuth, SidecarSpec};
 use crate::server::ServerState;
 use crate::sidecar::manager::{ForwardDenied, ForwardTarget};
 
+pub(crate) mod egress_policy;
 mod forward;
 mod header_policy;
 mod host_api;
@@ -75,10 +76,12 @@ mod host_capability;
 mod host_events;
 mod kernel_caps;
 mod kernel_dispatch;
+mod lane;
 mod mounts;
 mod plugin_proxy;
 mod provider_route;
 mod response_cookies;
+mod response_hardening;
 mod route_match;
 mod web_delegation;
 mod ws_bridge;
@@ -91,6 +94,8 @@ use host_capability::*;
 pub(crate) use host_events::*;
 use kernel_caps::*;
 use kernel_dispatch::*;
+pub(crate) use lane::sign_agent_lane;
+use lane::*;
 pub use mounts::*;
 use plugin_proxy::*;
 pub(crate) use provider_route::*;
@@ -131,6 +136,13 @@ const HDR_CALLER_RESOURCE_IDS: &str = "x-ryu-caller-resource-ids";
 const HDR_CALLER_RATE_SUBJECT: &str = "x-ryu-caller-rate-subject";
 pub(crate) const HDR_CALLER_AGENT_ID: &str = "x-ryu-caller-agent-id";
 pub(crate) const HDR_CALLER_AGENT_PROOF: &str = "x-ryu-caller-agent-proof";
+/// The verified calling agent's egress allowlist (comma-separated hosts and
+/// `*.` domains; empty allows none), stamped by Core from
+/// [`crate::sidecar::ext_proxy::egress_policy`] beside [`HDR_CALLER_AGENT_ID`] and nowhere
+/// else. A request that carries its own copy is refused, and the header is
+/// stripped from every other hop. Apps that run network sessions for an agent
+/// enforce it in their egress path.
+pub(crate) const HDR_CALLER_EGRESS_ALLOWLIST: &str = "x-ryu-caller-egress-allowlist";
 /// Opt-in marker the web app's server tier stamps on every ext request it forwards
 /// for a browser. Its PRESENCE (any value) routes the request through
 /// [`web_delegated_admission`]. It is deliberately separate from `x-ryu-surface`,
@@ -149,42 +161,6 @@ const HDR_APP_CALLER: &str = "x-ryu-app-caller";
 /// The own-app `app.request` grant; its reviewed per-target form is
 /// `app:http:<scoped target id>`. Both are existing reviewed grants.
 const APP_HTTP_GRANT: &str = "app:http";
-const AGENT_LANE_PROOF_DOMAIN: &str = "ryu-agent-lane-v1";
-
-type AgentLaneMac = Hmac<Sha256>;
-
-fn agent_lane_payload(agent_id: &str, method: &str, path_and_query: &str) -> String {
-    format!("{AGENT_LANE_PROOF_DOMAIN}\n{method}\n{path_and_query}\n{agent_id}")
-}
-
-/// Stamp a Core-generated agent-lane request. The proof is tied to the active
-/// node bearer and the exact method/path/query, so a sidecar never trusts a
-/// caller-supplied lane query on its own.
-pub(crate) fn sign_agent_lane(
-    agent_id: &str,
-    method: &str,
-    path_and_query: &str,
-) -> Option<String> {
-    let token = crate::node_token::active_token()?;
-    let mut mac = AgentLaneMac::new_from_slice(token.trim().as_bytes()).ok()?;
-    mac.update(agent_lane_payload(agent_id, method, path_and_query).as_bytes());
-    Some(hex::encode(mac.finalize().into_bytes()))
-}
-
-fn verify_agent_lane(agent_id: &str, method: &str, path_and_query: &str, proof: &str) -> bool {
-    let Some(token) = crate::node_token::active_token() else {
-        return false;
-    };
-    let Ok(bytes) = hex::decode(proof.trim()) else {
-        return false;
-    };
-    let Ok(mut mac) = AgentLaneMac::new_from_slice(token.trim().as_bytes()) else {
-        return false;
-    };
-    mac.update(agent_lane_payload(agent_id, method, path_and_query).as_bytes());
-    mac.verify_slice(&bytes).is_ok()
-}
-
 /// Default max request body Core buffers + forwards when a sidecar's
 /// [`HttpProxySpec::max_body_bytes`] is unset (10 MiB).
 const DEFAULT_MAX_PROXY_BYTES: usize = 10 * 1024 * 1024;

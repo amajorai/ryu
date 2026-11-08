@@ -4521,8 +4521,8 @@ pub struct KernelEventSpec {
 ///
 /// - `core#run.failed` (the Healing extraction, plan step 4) carries the failed
 ///   run's instruction and failure text, which is user data, so a subscriber must
-///   hold the reviewed `runs:failures` grant (Gateway allowlist; the `runs`
-///   namespace is reserved there, so no app can owner-scope its way into it).
+///   hold the reviewed `runs:failures` grant (Gateway owner-exclusive to
+///   Healing; the `runs` namespace is reserved, so no app can owner-scope into it).
 ///
 /// Reviewed and held back: `core#activity.recorded` is not needed, because the
 /// Meetings and Quests activity loops flow app → Core, not Core → app.

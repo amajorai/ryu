@@ -7,9 +7,16 @@
 //! `http_server_span`. Requests without a `traceparent`, and every request while
 //! export consent is off, pass straight through: the UI's polling traffic never
 //! produces spans and the off path costs one atomic load.
+//!
+//! The same route layer records the connection's peer address for the request
+//! ([`request_peer`]). Handlers that re-enter another route's pipeline in
+//! process (the hosted MCP broker tools dispatch through the vault request
+//! layer) read it there, so client-address checks see the real caller.
 
 use axum::body::Body;
-use axum::extract::MatchedPath;
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, MatchedPath};
 use axum::http::{Request, Response};
 use axum::middleware::Next;
 use tracing::Instrument as _;
@@ -44,8 +51,28 @@ fn http_server_span<B>(request: &Request<B>) -> tracing::Span {
     span
 }
 
-/// Route-layer middleware: wrap a traced inbound request in a server span.
+tokio::task_local! {
+    /// The connection peer of the HTTP request currently being served.
+    static REQUEST_PEER: Option<SocketAddr>;
+}
+
+/// The connection peer of the HTTP request currently being served, or `None`
+/// outside a request or on a listener without connect info.
+pub(crate) fn request_peer() -> Option<SocketAddr> {
+    REQUEST_PEER.try_with(|peer| *peer).ok().flatten()
+}
+
+/// Route-layer middleware: record the request's peer and wrap a traced
+/// inbound request in a server span.
 pub(crate) async fn server_span(request: Request<Body>, next: Next) -> Response<Body> {
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0);
+    REQUEST_PEER.scope(peer, traced(request, next)).await
+}
+
+async fn traced(request: Request<Body>, next: Next) -> Response<Body> {
     if !crate::telemetry::is_export_consented() || !request.headers().contains_key(TRACEPARENT) {
         return next.run(request).await;
     }
@@ -71,5 +98,38 @@ mod tests {
             "POST /api/mcp/tools/call"
         );
         assert_eq!(server_span_name("GET", None), "GET");
+    }
+
+    #[tokio::test]
+    async fn the_route_layer_exposes_the_connection_peer_to_the_handler() {
+        use tower::ServiceExt as _;
+        let router = axum::Router::new()
+            .route(
+                "/peer",
+                axum::routing::get(|| async {
+                    request_peer().map_or_else(|| "none".to_owned(), |peer| peer.to_string())
+                }),
+            )
+            .route_layer(axum::middleware::from_fn(server_span));
+        let read = |peer: Option<SocketAddr>| {
+            let mut request = Request::builder().uri("/peer").body(Body::empty()).unwrap();
+            if let Some(peer) = peer {
+                request.extensions_mut().insert(ConnectInfo(peer));
+            }
+            let router = router.clone();
+            async move {
+                let response = router.oneshot(request).await.unwrap();
+                let body = axum::body::to_bytes(response.into_body(), 1024)
+                    .await
+                    .unwrap();
+                String::from_utf8(body.to_vec()).unwrap()
+            }
+        };
+        assert_eq!(
+            read(Some("203.0.113.9:4100".parse().unwrap())).await,
+            "203.0.113.9:4100"
+        );
+        assert_eq!(read(None).await, "none");
+        assert_eq!(request_peer(), None, "no peer outside a request");
     }
 }

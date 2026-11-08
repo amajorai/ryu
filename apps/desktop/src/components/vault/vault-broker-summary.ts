@@ -4,7 +4,7 @@
 // connective word is left around a localized value.
 
 import type { LiteralMessage } from "@ryu/i18n/react";
-import type { VaultCardApproval } from "@/src/lib/api/vault.ts";
+import type { VaultCardApproval } from "@/src/lib/api/vault-cards.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
 
 const SEPARATOR = " · ";

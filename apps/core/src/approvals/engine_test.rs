@@ -316,6 +316,11 @@ fn approval_push_is_rendered_in_the_device_locale() {
     assert_eq!(full["body"], req.title);
     let unknown = approval_push_message("tok", &req, false, "tlh");
     assert_eq!(unknown["title"], "Approval needed");
+    // Arabic: a raw title gets no RTL mark; the localized body does.
+    let raw = approval_push_message("tok", &req, true, "ar");
+    assert_eq!(raw["body"], req.title);
+    let bare = approval_push_message("tok", &req, false, "ar");
+    assert!(bare["body"].as_str().unwrap().starts_with('\u{200f}'));
 }
 
 #[tokio::test]

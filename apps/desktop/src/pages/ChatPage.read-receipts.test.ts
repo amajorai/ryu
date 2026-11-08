@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { reuseUnchangedReadReceipts } from "./ChatPage.helpers.ts";
+import {
+	indexMessagesById,
+	reuseUnchangedReadReceipts,
+} from "./ChatPage.helpers.ts";
 
 const reader = { avatar: "a.png", id: "u1", name: "Ada" };
 
@@ -20,4 +23,17 @@ test("a new reader produces a new receipt object", () => {
 	};
 	const next = reuseUnchangedReadReceipts(previous, new Map([["m1", fresh]]));
 	expect(next.get("m1")).toBe(fresh);
+});
+
+test("indexing messages by id finds each message and keeps the first duplicate", () => {
+	const first = { id: "m1", role: "user" };
+	const index = indexMessagesById([
+		first,
+		{ id: "m2", role: "assistant" },
+		{ id: "m1", role: "assistant" },
+	]);
+	expect(index.get("m1")).toBe(first);
+	expect(index.get("m2")?.role).toBe("assistant");
+	expect(index.get("missing")).toBeUndefined();
+	expect(index.size).toBe(2);
 });

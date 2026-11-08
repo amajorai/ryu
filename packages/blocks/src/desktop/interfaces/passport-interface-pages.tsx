@@ -26,7 +26,10 @@ export function spreadCaption(
 	tl: LiteralMessage = englishLiteral
 ): string {
 	if (!spread || spread.right === 0) {
-		return "Cover";
+		// The booklet's cover takes its own key: the catalog's bare "Cover" is the
+		// image-fit sense (de "Füllen"). English keeps the short caption.
+		const cover = tl("Passport cover");
+		return cover === "Passport cover" ? "Cover" : cover;
 	}
 	const last = pageCount - 1;
 	const pages = [spread.left, spread.right].filter(

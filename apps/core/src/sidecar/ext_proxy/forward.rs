@@ -73,10 +73,13 @@ pub(super) struct ForwardArgs<'a> {
     /// Pseudonymous per-client rate subject ([`rate_subject_for`]), for a
     /// sidecar that opted in. Replaces any inbound header with the same name.
     pub(super) caller_rate_subject: Option<&'a str>,
-    /// Core-verified calling agent (see [`verified_agent_lane`]). Caller-controlled
+    /// Core-verified calling agent (see [`verified_agent`]). Caller-controlled
     /// lane and grant headers are stripped before this value and its agent grant
     /// are stamped.
     pub(super) caller_agent_id: Option<&'a str>,
+    /// The verified agent's egress allowlist ([`HDR_CALLER_EGRESS_ALLOWLIST`]),
+    /// stamped only beside `caller_agent_id`. `None` when the agent has none.
+    pub(super) caller_agent_egress_allowlist: Option<&'a str>,
     /// Whether `caller_agent_id`'s account access is restricted (or could not
     /// be read). Only then does the forward open the agent-request context in
     /// which the app's grant-less `providers.call`s are refused.
@@ -84,6 +87,9 @@ pub(super) struct ForwardArgs<'a> {
     /// The delivery id of a Core event delivery, stamped as [`HDR_EVENT_DELIVERY`]
     /// (any caller-supplied copy is stripped first). `None` on every other hop.
     pub(super) event_delivery: Option<&'a str>,
+    /// Whether the hop plugin is an exact compiled first-party manifest. Only such an
+    /// app's documents keep Core's shared origin; see [`super::response_hardening`].
+    pub(super) trusted_first_party: bool,
 }
 
 /// Reuse connection pools across proxy hops; credentials stay on each request.
@@ -118,8 +124,10 @@ pub(super) async fn forward_to_sidecar(args: ForwardArgs<'_>) -> Response {
         caller_resource_ids,
         caller_rate_subject,
         caller_agent_id,
+        caller_agent_egress_allowlist,
         caller_agent_restricted,
         event_delivery,
+        trusted_first_party,
     } = args;
 
     let hop_token = ext_token(node_token().as_deref(), hop_plugin_id);
@@ -190,6 +198,22 @@ pub(super) async fn forward_to_sidecar(args: ForwardArgs<'_>) -> Response {
         if let Ok(value) = reqwest::header::HeaderValue::from_str(agent_id) {
             headers.insert(HDR_CALLER_AGENT_ID, value);
         }
+        // The agent's egress allowlist rides only with the agent it belongs to.
+        // An empty list is a real value (no host allowed), so it is stamped too.
+        if let Some(allowlist) = caller_agent_egress_allowlist {
+            match reqwest::header::HeaderValue::from_str(allowlist) {
+                Ok(value) => {
+                    headers.insert(HDR_CALLER_EGRESS_ALLOWLIST, value);
+                }
+                Err(_) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "the calling agent's egress allowlist cannot be sent",
+                    )
+                        .into_response();
+                }
+            }
+        }
         // The app hands this back on `providers.call` (also for work it defers),
         // so Core can apply the agent's account access there.
         if let Some(value) =
@@ -234,6 +258,7 @@ pub(super) async fn forward_to_sidecar(args: ForwardArgs<'_>) -> Response {
     let mut out = HeaderMap::new();
     for (name, value) in resp.headers().iter() {
         if is_hop_by_hop(name.as_str())
+            || super::response_hardening::is_stripped_response_header(name.as_str())
             || name
                 .as_str()
                 .eq_ignore_ascii_case(HDR_FORWARDED_AUTHORIZATION)
@@ -253,6 +278,7 @@ pub(super) async fn forward_to_sidecar(args: ForwardArgs<'_>) -> Response {
             out.append(n, v);
         }
     }
+    super::response_hardening::harden_response_headers(&mut out, trusted_first_party);
     // Stream the upstream body straight through rather than buffering it. An SSE
     // endpoint's body never ends, so the old `resp.bytes().await` held back ALL response
     // headers until the whole body arrived — i.e. forever — which is why the SSE feeds

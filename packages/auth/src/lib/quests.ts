@@ -30,7 +30,7 @@
  * the API layer owns the DB writes and the idempotency keys.
  */
 
-import type { CreditPoolId } from "./credit-pools.ts";
+import { type CreditPoolId, DEFAULT_FREE_CREDIT_POOL } from "./credit-pools.ts";
 
 /** How a quest's window is defined. `periodKey` derives from this. */
 export const QUEST_CADENCES = [
@@ -190,7 +190,11 @@ export const QUESTS: readonly QuestDef[] = [
 		cadence: "weekly",
 		target: 1,
 		verification: "submit",
-		reward: { kind: "credit", creditMicroUsd: usd(2), pool: "cloudflare" },
+		reward: {
+			kind: "credit",
+			creditMicroUsd: usd(2),
+			pool: DEFAULT_FREE_CREDIT_POOL,
+		},
 	},
 
 	/* ---- monthly: inherits the referral campaign's month window ---- */
@@ -203,7 +207,11 @@ export const QUESTS: readonly QuestDef[] = [
 		cadence: "monthly",
 		target: 3,
 		verification: "auto",
-		reward: { kind: "credit", creditMicroUsd: usd(5), pool: "cloudflare" },
+		reward: {
+			kind: "credit",
+			creditMicroUsd: usd(5),
+			pool: DEFAULT_FREE_CREDIT_POOL,
+		},
 	},
 	{
 		key: "refer-5-monthly",
@@ -214,7 +222,11 @@ export const QUESTS: readonly QuestDef[] = [
 		cadence: "monthly",
 		target: 5,
 		verification: "auto",
-		reward: { kind: "credit", creditMicroUsd: usd(10), pool: "cloudflare" },
+		reward: {
+			kind: "credit",
+			creditMicroUsd: usd(10),
+			pool: DEFAULT_FREE_CREDIT_POOL,
+		},
 	},
 
 	/* ---- permanent: repeatable, claim-as-you-meet-it ---- */

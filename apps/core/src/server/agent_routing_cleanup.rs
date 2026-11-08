@@ -6,6 +6,10 @@
 //! [`clear_deleted_agent_routing`] once the agent store row is gone. Doing it
 //! here (not in a client) covers REST, MCP, CLI, core-client and package
 //! removals alike, and runs even when a later delete step (schedules) fails.
+//!
+//! The same hook drops the agent's node-local egress allowlist
+//! ([`crate::sidecar::ext_proxy::egress_policy`]), keyed by agent id the same
+//! way, so a reused id never inherits another agent's list either.
 
 use std::future::Future;
 
@@ -18,6 +22,8 @@ const CLEAR_ATTEMPTS: usize = 3;
 /// remote without admin access, or not serving `smart_routing` only leaves a
 /// warning behind instead of failing the delete.
 pub(crate) async fn clear_deleted_agent_routing(client: &reqwest::Client, agent_id: &str) {
+    // Local and synchronous, so it runs first and does not wait on the gateway.
+    crate::sidecar::ext_proxy::egress_policy::forget_deleted_agent(agent_id);
     let result = clear_agent_routing_with(
         agent_id,
         || crate::sidecar::gateway::fetch_config(client),

@@ -187,3 +187,30 @@ describe("pane focus order", () => {
 		expect(adjacentGroupId(state, DESKTOP_SHELL_REGIONS, 1)).toBeUndefined();
 	});
 });
+
+describe("bottom alignment titles", () => {
+	test("each title is one whole translated message with no English label", () => {
+		const catalog: Record<string, string> = {
+			"Align Bottom Pane: Center": "下部ペインを揃える: 中央",
+			"Align Bottom Pane: Full width": "下部ペインを揃える: 全幅",
+			"Align Bottom Pane: Left": "下部ペインを揃える: 左",
+			"Align Bottom Pane: Right": "下部ペインを揃える: 右",
+		};
+		const japanese: LiteralMessage = (source, values) =>
+			formatMessage(catalog[source] ?? source, values);
+		const titles = workbenchLayoutCommands({
+			dispatch: () => undefined,
+			movableRegions: DESKTOP_SHELL_REGIONS,
+			state: fixture(),
+			tl: japanese,
+		})
+			.filter((command) => command.id.startsWith("workbench-align-bottom-"))
+			.map((command) => [command.id, command.title]);
+		expect(Object.fromEntries(titles)).toEqual({
+			"workbench-align-bottom-center": "下部ペインを揃える: 中央",
+			"workbench-align-bottom-full": "下部ペインを揃える: 全幅",
+			"workbench-align-bottom-left": "下部ペインを揃える: 左",
+			"workbench-align-bottom-right": "下部ペインを揃える: 右",
+		});
+	});
+});

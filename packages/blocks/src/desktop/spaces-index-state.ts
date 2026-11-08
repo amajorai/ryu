@@ -3,6 +3,7 @@ import {
 	DatabaseIcon,
 	File01Icon,
 } from "@hugeicons/core-free-icons";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { SpaceDocumentRow } from "./spaces-types.ts";
 
 /**
@@ -104,14 +105,15 @@ export const FILE_INDEX_NOTES = {
  * {@link FILE_CONTENTS_NOT_INDEXED_BADGE}) and differ only in their note.
  */
 export function indexBadgeLabel(
-	state: SpaceFileIndexState | undefined
+	state: SpaceFileIndexState | undefined,
+	tl: LiteralMessage = (source) => source
 ): string | null {
 	if (state === undefined || state === "indexed") {
 		return null;
 	}
-	return state === "pending"
-		? FILE_CONTENTS_PENDING_BADGE
-		: FILE_CONTENTS_NOT_INDEXED_BADGE;
+	// The same words as the two constants above, spelled out so the catalog
+	// extractor reads them (`spaces-index-badge.test.ts` pins the match).
+	return state === "pending" ? tl("Reading…") : tl("Name only");
 }
 
 /**

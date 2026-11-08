@@ -23,6 +23,7 @@ export const RESOURCE_ACTIVE_PREFIXES: readonly string[] = [
 	"/blog",
 	"/changelog",
 	"/stories",
+	"/wallpapers",
 	"/challenges",
 	"/compare",
 	"/community",

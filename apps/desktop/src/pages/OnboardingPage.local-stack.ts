@@ -1,3 +1,4 @@
+import type { OnboardingLocalError } from "@ryu/blocks/desktop/onboarding-types.ts";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	ensureCoreInstalled,
@@ -12,6 +13,7 @@ import {
 	type Node,
 	useNodeStore,
 } from "@/src/store/useNodeStore.ts";
+import { localCoreErrorText } from "./OnboardingPage.local-core-error.ts";
 
 // How long the managed path polls the control plane for an already-provisioned
 // node before falling back to the web servers page. Kept short: onboarding must
@@ -229,7 +231,7 @@ export async function startLocalCore(
 	isCancelled: () => boolean,
 	report: LocalStatusReporter,
 	tl: LiteralMessage
-): Promise<{ error?: string; ok: boolean }> {
+): Promise<{ error?: OnboardingLocalError; ok: boolean }> {
 	const onStatus = report.status;
 	if ((await getRyuStatus().catch(() => "stopped")) === "running") {
 		onStatus(null, null);
@@ -243,14 +245,14 @@ export async function startLocalCore(
 	// and then a generic "couldn't start" card that named nothing.
 	const installError = await ensureCoreInstalled().then(
 		() => null,
-		(err) => (err instanceof Error ? err.message : String(err))
+		(err: unknown) => localCoreErrorText(err, tl)
 	);
 	if (isCancelled()) {
 		return { ok: false };
 	}
 	const startError = await startRyuCore().then(
 		() => null,
-		(err) => (err instanceof Error ? err.message : String(err))
+		(err: unknown) => localCoreErrorText(err, tl)
 	);
 	// Nothing to wait for: the install failed AND the spawn found no binary to
 	// run. Report the install error (the useful one) immediately instead of
@@ -286,12 +288,13 @@ export async function startLocalCore(
 	// failure (the spawn succeeded, Core died or hung on boot), so say what we
 	// actually observed rather than handing the card an empty detail line.
 	return {
-		error:
-			startError ??
-			tl(
+		error: startError ?? {
+			message: tl(
 				"Ryu Core was started but never answered its health check within {minutes} minutes.",
 				{ minutes: Math.round(CORE_BOOT_MAX_MS / 60_000) }
 			),
+			detail: null,
+		},
 		ok: false,
 	};
 }

@@ -43,6 +43,11 @@ pub struct DesktopNotification {
     /// toast's source; `None` for Core-internal producers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_app_id: Option<String>,
+    /// A desktop route the surface opens when the toast is tapped (for
+    /// example `/vault?tab=broker&proposal=<id>`). Surfaces open only routes
+    /// they allowlist; `None` keeps the default (the Inbox for an inbox row).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
 
 static EVENTS: OnceLock<broadcast::Sender<DesktopNotification>> = OnceLock::new();
@@ -89,6 +94,7 @@ fn publish_system(title: String, body: String, level: String, target_user_id: Op
         target_user_id: target_user_id.clone(),
         notification_id: None,
         source_app_id: None,
+        link: None,
     };
     // The locale is a preference read, so rendering needs the runtime; outside
     // one (or for text that is not a known sentence) the English goes out.

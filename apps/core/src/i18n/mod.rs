@@ -16,6 +16,7 @@
 //! each app backend's `fanout_messages.rs`); the i18n extractor catalogs them
 //! from there, so they reach the translators like any other server copy.
 
+pub mod bidi;
 #[path = "catalog.generated.rs"]
 #[rustfmt::skip]
 mod catalog;

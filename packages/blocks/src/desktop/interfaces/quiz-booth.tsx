@@ -35,7 +35,7 @@ export function QuizAnswerBooth({
 	tile: QuizTile | undefined;
 }) {
 	const tl = useLiteralMessages();
-	const title = thread ? threadTitle(thread) : "New conversation";
+	const title = thread ? threadTitle(thread) : tl("New conversation");
 	const agent = agentById(snapshot, thread?.agentIds[0]);
 	const category = tile?.categoryName;
 	const lockup =

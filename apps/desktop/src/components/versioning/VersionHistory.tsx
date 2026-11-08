@@ -9,7 +9,6 @@
 
 import { Clock01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Popover,
@@ -19,6 +18,7 @@ import {
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTime } from "@/src/lib/timezone.ts";
+import { VersionLabelBadge } from "./VersionLabelBadge.tsx";
 
 /** Metadata for one saved version (no diffable body — fetched lazily). */
 export interface VersionMeta {
@@ -439,9 +439,7 @@ export function VersionHistory<TRestoreResult, TSnapshotResult>({
 												) : null}
 												<div className="flex flex-wrap items-center gap-2">
 													{v.label ? (
-														<Badge size="compact" variant="secondary">
-															{v.label}
-														</Badge>
+														<VersionLabelBadge label={v.label} />
 													) : null}
 													<span className="text-muted-foreground text-xs">
 														{formatDateTime(v.createdAt)}

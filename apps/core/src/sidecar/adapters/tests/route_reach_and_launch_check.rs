@@ -376,3 +376,47 @@ fn launch_check_warns_when_a_limited_agent_has_no_usable_model() {
         assert_eq!(own_pi.model_warning, None);
     });
 }
+
+#[test]
+fn launch_refusals_are_the_catalogued_agent_launch_messages() {
+    use crate::agent_access::{self_called_provider_permitted, ProviderReach};
+    use crate::i18n::messages::{
+        agent_launch_refusal, AGENT_LAUNCH_ROUTING_OFF_REFUSAL_MESSAGE,
+        AGENT_LAUNCH_SELF_CALLED_REFUSAL_MESSAGE, AGENT_LAUNCH_VENDOR_REFUSAL_MESSAGE,
+    };
+    let registry = acp_reg();
+    // The generic engine labels are catalog messages too, so a client can
+    // translate the `{engineLabel}` a refusal starts with.
+    let (_, custom) = launched_engine("acp-exec:goose acp", &registry).expect("custom agent");
+    assert_eq!(custom, "This custom agent");
+    let limited: &[String] = &[];
+    let refuse = |reach| self_called_provider_permitted(Some(limited), reach, &custom);
+    assert_eq!(
+        refuse(ProviderReach::Vendor("openai")),
+        Err(agent_launch_refusal(
+            AGENT_LAUNCH_VENDOR_REFUSAL_MESSAGE,
+            &custom,
+            "OpenAI"
+        ))
+    );
+    assert_eq!(
+        refuse(ProviderReach::SelfCalled { routable: true }),
+        Err(agent_launch_refusal(
+            AGENT_LAUNCH_ROUTING_OFF_REFUSAL_MESSAGE,
+            &custom,
+            ""
+        ))
+    );
+    assert_eq!(
+        refuse(ProviderReach::SelfCalled { routable: false }),
+        Err(agent_launch_refusal(
+            AGENT_LAUNCH_SELF_CALLED_REFUSAL_MESSAGE,
+            &custom,
+            ""
+        ))
+    );
+    assert_eq!(refuse(ProviderReach::Gateway), Ok(()));
+    assert!(refuse(ProviderReach::Vendor("openai"))
+        .unwrap_err()
+        .starts_with("This custom agent calls OpenAI itself, using your own sign-in or key"));
+}

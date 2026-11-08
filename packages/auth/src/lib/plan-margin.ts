@@ -1,8 +1,6 @@
 import {
 	baseNodeCountForPlanAtLocation,
 	baseNodeTypeForPlanAtLocation,
-	legacyBaseNodeCountForPlanAtLocation,
-	legacyBaseNodeTypeForPlanAtLocation,
 	stockFallbackNodeTypeForPlanAtLocation,
 } from "./base-node.ts";
 import { DEFAULT_MARKETPLACE_MEMBERSHIP_PUBLISHER_SHARE_BPS } from "./marketplace-membership.ts";
@@ -49,13 +47,14 @@ import { SELF_SERVE_MAX_SEATS } from "./seat-tiers.ts";
  * pool, and costs the node at the DEARER of the plan's base server and its
  * stock fallback, because which one a buyer gets depends on stock at purchase.
  *
- * LEGACY NODES. A subscriber whose server was created by the old per-plan
- * ladder keeps it (Max `cx33`, Teams `cx43`, Business `cx53`, Business `cpx32`
- * in Singapore): servers are never resized up or down by renewals, seat
- * changes or upgrades. A grandfathered row is therefore costed on the dearer
- * of today's node and that legacy node. A current row is held to the floor on
- * today's node (new buyers get it) but reports a LOSS when a legacy node would
- * make it lose money, so a provider price rise on a legacy type is seen.
+ * ONE NODE MODEL. Every row, current or grandfathered, is costed on today's
+ * base server (and its stock fallback). The old per-plan ladder (Max `cx33`,
+ * Teams `cx43`, Business `cx53`, Business `cpx32` in Singapore) is FROZEN in
+ * `base-node.ts`: it can never create a server again, and no server it could
+ * have created is in service (there were no subscribers before the 2026-10-19
+ * one-base-server decision). Costing rows on it reported losses no customer
+ * could cause: Business v1 at -19.57% in Singapore came from a $1,056/yr
+ * `cpx32` reserve nobody holds.
  */
 
 /** The yearly contribution floor every CURRENT row must clear. */
@@ -117,8 +116,6 @@ export type MarginTerm = "monthly" | "yearly";
 
 export interface MarginInput {
 	readonly cell: PlanVariantCell;
-	/** Also cost the node the legacy ladder gave this plan (see the header). */
-	readonly legacyNode?: boolean;
 	readonly nodeReserveUsd: NodeReserveFn;
 	readonly plan: PlanId;
 	readonly row: PlanVersion;
@@ -141,8 +138,7 @@ export interface MarginBreakdown {
 
 /**
  * The included node(s) a plan is costed on in a region: the dearer of the base
- * server and its stock fallback, times the count. With `legacyNode`, the
- * dearer (in total) of that and the node(s) the legacy ladder provisioned.
+ * server and its stock fallback, times the count.
  * Throws on an unpriced type (via `nodeReserveUsd`): silently costing a band
  * $0 is how an unprofitable tier would slip through.
  */
@@ -150,8 +146,7 @@ export const marginNodeFor = (
 	plan: PlanId,
 	cell: PlanVariantCell,
 	seats: number,
-	nodeReserveUsd: NodeReserveFn,
-	options: { legacyNode?: boolean } = {}
+	nodeReserveUsd: NodeReserveFn
 ): { count: number; type: string | null; unitUsd: number } => {
 	const location = representativeLocationForRegion(cell.region);
 	const base = baseNodeTypeForPlanAtLocation(plan, location, seats);
@@ -172,29 +167,8 @@ export const marginNodeFor = (
 			unitUsd: Math.max(baseUsd, fallbackUsd),
 		};
 	}
-	const legacy = options.legacyNode
-		? legacyBaseNodeTypeForPlanAtLocation(plan, location)
-		: null;
-	if (!legacy) {
-		return node;
-	}
-	const legacyUnitUsd = nodeReserveUsd(cell.provider, cell.region, legacy);
-	const legacyCount = legacyBaseNodeCountForPlanAtLocation(
-		plan,
-		location,
-		seats
-	);
-	return legacyUnitUsd * legacyCount > node.unitUsd * node.count
-		? { count: legacyCount, type: legacy, unitUsd: legacyUnitUsd }
-		: node;
+	return node;
 };
-
-/** Whether the plan's legacy ladder provisioned a node in the cell's region. */
-export const hasLegacyNode = (plan: PlanId, cell: PlanVariantCell): boolean =>
-	legacyBaseNodeTypeForPlanAtLocation(
-		plan,
-		representativeLocationForRegion(cell.region)
-	) !== null;
 
 /** Margin on one billing period, with every real cost subtracted. */
 export const planMargin = (input: MarginInput): MarginBreakdown => {
@@ -223,8 +197,7 @@ export const planMargin = (input: MarginInput): MarginBreakdown => {
 		input.plan,
 		input.cell,
 		input.seats,
-		input.nodeReserveUsd,
-		{ legacyNode: input.legacyNode }
+		input.nodeReserveUsd
 	);
 	const nodeUsd = node.unitUsd * node.count * monthsServed;
 	const mailAndStorageUsd =
@@ -296,15 +269,6 @@ export type RowMarginStatus =
 
 export interface RowMarginResult {
 	readonly current: boolean;
-	/**
-	 * The worst yearly margin with the legacy ladder's node, when the plan had
-	 * one in this region (null otherwise). For a grandfathered row it is folded
-	 * into `worstYearly`; for a current row it only decides `loss`.
-	 */
-	readonly legacyNodeWorstYearly: {
-		readonly ratio: number;
-		readonly seats: number;
-	} | null;
 	readonly plan: PlanId;
 	readonly region: PlanRegion;
 	readonly status: RowMarginStatus;
@@ -395,36 +359,21 @@ export const evaluateRowMargins = (
 			const cell: PlanVariantCell = { ...variant, region };
 			let worstYearly = { ratio: Number.POSITIVE_INFINITY, seats: 0 };
 			let worstMonthly = { ratio: Number.POSITIVE_INFINITY, seats: 0 };
-			let legacyWorst: { ratio: number; seats: number } | null = null;
 			let anyLoss = false;
 			let uncoveredFloor = false;
 			let coveredFloor = false;
-			const legacy = hasLegacyNode(plan, cell);
 			for (const seats of seatBandsFor(plan)) {
-				const at = (term: MarginTerm, legacyNode: boolean) =>
+				const at = (term: MarginTerm) =>
 					planMargin({
 						cell,
-						legacyNode,
 						nodeReserveUsd,
 						plan,
 						row,
 						seats,
 						term,
 					});
-				// A grandfathered row is costed on the legacy node throughout; a
-				// current row is held to the floor on today's node only.
-				const yearly = at("yearly", legacy && !current);
-				const monthly = at("monthly", legacy && !current);
-				if (legacy) {
-					const legacyYearly = current ? at("yearly", true) : yearly;
-					const legacyMonthly = current ? at("monthly", true) : monthly;
-					if (!legacyWorst || legacyYearly.marginRatio < legacyWorst.ratio) {
-						legacyWorst = { ratio: legacyYearly.marginRatio, seats };
-					}
-					if (legacyYearly.marginUsd < 0 || legacyMonthly.marginUsd < 0) {
-						anyLoss = true;
-					}
-				}
+				const yearly = at("yearly");
+				const monthly = at("monthly");
 				if (yearly.marginRatio < worstYearly.ratio) {
 					worstYearly = { ratio: yearly.marginRatio, seats };
 				}
@@ -459,7 +408,6 @@ export const evaluateRowMargins = (
 			}
 			results.push({
 				current,
-				legacyNodeWorstYearly: legacyWorst,
 				plan,
 				region,
 				status,

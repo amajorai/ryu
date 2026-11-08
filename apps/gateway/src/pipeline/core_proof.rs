@@ -2,6 +2,13 @@ use super::*;
 
 #[path = "box_key_epoch.rs"]
 pub(super) mod box_key_epoch;
+#[path = "core_proof_epoch.rs"]
+pub(super) mod core_proof_epoch;
+pub(super) use core_proof_epoch::agent_route_proof_keys;
+#[cfg(test)]
+#[path = "core_proof_cache_tests.rs"]
+mod core_proof_cache_tests;
+pub use core_proof_epoch::has_core_proof_key;
 
 /// Constant-time string equality — no early return on the first differing byte, so
 /// comparing a caller-supplied key against the configured master key leaks no timing
@@ -63,33 +70,6 @@ pub(super) fn verify_agent_route_proof(
 /// Env holding the fleet master the per-org Core proof keys derive from.
 pub(super) const ENV_CORE_PROOF_MASTER_KEY: &str = "GATEWAY_CORE_PROOF_MASTER_KEY";
 
-/// Core proof keys accepted for an organization: the directly configured
-/// `GATEWAY_CORE_PROOF_KEY` (single-org gateways and nodes provisioned before
-/// per-org keys), and the key derived for `org_id` from
-/// `GATEWAY_CORE_PROOF_MASTER_KEY`. Removing the direct key from a hosted
-/// gateway leaves only per-org keys, so one node's key cannot prove Core
-/// identity for another organization.
-pub(super) fn core_proof_keys_for_org(org_id: Option<&str>) -> Vec<String> {
-    let configured = |name: &str| {
-        std::env::var(name)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-    };
-    let mut keys = Vec::new();
-    if let Some(direct) = configured("GATEWAY_CORE_PROOF_KEY") {
-        keys.push(direct);
-    }
-    if let (Some(master), Some(org_id)) = (
-        configured(ENV_CORE_PROOF_MASTER_KEY),
-        org_id.filter(|org| !org.is_empty()),
-    ) {
-        if let Ok(derived) = ryu_gw_credentials::derive_org_core_proof_key(&master, org_id) {
-            keys.push(derived);
-        }
-    }
-    keys
-}
-
 /// Env naming the one organization the direct `GATEWAY_CORE_PROOF_KEY` may
 /// sign hosted `gwb1` credentials for (a single-org Gateway). Unset on a
 /// multi-org fleet Gateway, where the direct key is shared by every legacy
@@ -98,7 +78,7 @@ pub(super) const ENV_CORE_PROOF_KEY_ORG_ID: &str = "GATEWAY_CORE_PROOF_KEY_ORG_I
 
 /// Core proof keys a hosted `gwb1` naming `org_id` must verify under.
 ///
-/// Unlike [`core_proof_keys_for_org`] (where the proof key only attributes an
+/// Unlike the `rgw_` Core proof keys (where the proof key only attributes an
 /// agent id next to an `rgw_` bearer that already fixed the org), a `gwb1`
 /// is a complete credential that itself chooses the org to bill, and its org
 /// id comes from the token being verified. So it verifies only under the key
@@ -306,6 +286,25 @@ pub(super) enum BoxBudgetError {
     Unavailable,
 }
 
+/// Entry count at which an insert first drops expired org-budget entries, so
+/// the process-global cache stays bounded by the live org x member set.
+pub(super) const BOX_BUDGET_CACHE_MAX: usize = 4096;
+
+type BoxBudgetCache = dashmap::DashMap<String, (Instant, Arc<BoxOrgBudget>)>;
+
+/// Insert a fetched org budget. At [`BOX_BUDGET_CACHE_MAX`] entries, first
+/// drop every entry older than [`BOX_ORG_BUDGET_TTL`]; those are never served.
+pub(super) fn insert_box_budget(
+    cache: &BoxBudgetCache,
+    key: String,
+    entry: (Instant, Arc<BoxOrgBudget>),
+) {
+    if cache.len() >= BOX_BUDGET_CACHE_MAX {
+        cache.retain(|_, (fetched_at, _)| fetched_at.elapsed() < BOX_ORG_BUDGET_TTL);
+    }
+    cache.insert(key, entry);
+}
+
 pub(super) fn box_budget_cache() -> &'static dashmap::DashMap<String, (Instant, Arc<BoxOrgBudget>)>
 {
     static CACHE: std::sync::OnceLock<dashmap::DashMap<String, (Instant, Arc<BoxOrgBudget>)>> =
@@ -373,7 +372,11 @@ pub(super) async fn box_org_budget(
         serde_json::from_slice(&body).map_err(|_| BoxBudgetError::Unavailable)?;
     let fetched_at = Instant::now();
     let budget = Arc::new(budget);
-    box_budget_cache().insert(cache_key, (fetched_at, Arc::clone(&budget)));
+    insert_box_budget(
+        box_budget_cache(),
+        cache_key,
+        (fetched_at, Arc::clone(&budget)),
+    );
     Ok((budget, fetched_at))
 }
 
@@ -459,22 +462,6 @@ pub(super) fn bind_dynamic_caller(
         bound_user_id: owner_user_id.map(str::to_owned),
         team_ids,
     }
-}
-
-/// Whether a dynamically resolved organization bearer is accompanied by Core's
-/// separate trusted relay credential for that organization. The caller must
-/// keep organization and resource scope from the resolved bearer; this header
-/// alone is never an auth credential or a source of tenant identity.
-pub fn has_core_proof_key(headers: &axum::http::HeaderMap, org_id: Option<&str>) -> bool {
-    let Some(presented) = headers
-        .get("x-ryu-core-key")
-        .and_then(|value| value.to_str().ok())
-    else {
-        return false;
-    };
-    core_proof_keys_for_org(org_id)
-        .iter()
-        .any(|expected| core_proof_header_matches(presented, expected))
 }
 
 pub(super) fn core_proof_header_matches(presented: &str, expected: &str) -> bool {

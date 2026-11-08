@@ -132,7 +132,7 @@ describe("formatNativeCaptureError in other locales", () => {
 		],
 		[
 			"ar",
-			"رفض Ryu Core الالتقاط (HTTP 503). التفاصيل: bad gateway",
+			"رفض Ryu Core الالتقاط (HTTP 503). التفاصيل: \u2068bad gateway\u2069",
 			"تطبيق Quests متوقف. فعّله من المتجر ثم حاول مرة أخرى.",
 		],
 	])("%s renders each code as one translated sentence", (locale, rejected, questsOff) => {

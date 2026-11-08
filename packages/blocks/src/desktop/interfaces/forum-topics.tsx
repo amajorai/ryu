@@ -3,11 +3,11 @@ import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { Pin } from "lucide-react";
 import type { ReactNode } from "react";
+import { ForumFooterActions } from "./forum-footer-message.tsx";
 import { type ForumTopic, fullDate } from "./forum-model.ts";
 import {
 	CategoryBadge,
 	PosterList,
-	TEXT_BUTTON,
 	TopicStatusNote,
 	UnreadDot,
 } from "./forum-parts.tsx";
@@ -88,7 +88,7 @@ function TopicRow({
 						tabIndex={tabStop ? 0 : -1}
 						type="button"
 					>
-						{thread.title || "Untitled topic"}
+						{thread.title.trim() || tl("Untitled topic")}
 					</button>
 					{unread ? <UnreadDot className="shrink-0" /> : null}
 				</div>
@@ -203,21 +203,8 @@ export function ListFooter({
 	return (
 		<p className="px-3 py-6 text-muted-foreground text-sm">
 			{message}
-			{actions.map((action, index) => (
-				<span key={action.label}>
-					{index === 0 ? " " : " or "}
-					<button
-						className={cn(TEXT_BUTTON, "text-primary")}
-						onClick={action.onClick}
-						type="button"
-					>
-						{index === 0
-							? action.label
-							: action.label.charAt(0).toLowerCase() + action.label.slice(1)}
-					</button>
-				</span>
-			))}
-			{actions.length > 0 ? "." : null}
+			{actions.length > 0 ? " " : null}
+			<ForumFooterActions actions={actions} />
 		</p>
 	);
 }

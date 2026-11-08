@@ -5,6 +5,7 @@ import { type Machine, machineSummary, threadTitle } from "./arcade-model.ts";
 import { BoardStatusDot } from "./board-status.tsx";
 import { GameSheet } from "./game-shell.tsx";
 import { relativeAge, threadStatusLabel } from "./interface-renderer.ts";
+import { newConversationLabel } from "./thread-display-title.ts";
 
 /**
  * The redemption counter: the host's own conversation surface in the game
@@ -30,7 +31,7 @@ export function ArcadePanel({
 	thread: InterfaceThread | undefined;
 	threadView: ReactNode;
 }) {
-	const title = thread ? threadTitle(thread) : "New conversation";
+	const title = thread ? threadTitle(thread) : newConversationLabel();
 	const status = thread ? threadStatus(thread) : null;
 	const age = thread && showAge ? relativeAge(thread.updatedAt) : "";
 	const tl = useLiteralMessages();

@@ -6,6 +6,7 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { formatNameList } from "./interface-renderer.ts";
 
 // ---------------------------------------------------------------------------
 // Categories: projects, then teams, then agents, then Uncategorized
@@ -51,13 +52,9 @@ export function byRecency(a: InterfaceThread, b: InterfaceThread): number {
 	return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
 }
 
-/** "Atlas", "Atlas and Echo", "Atlas, Echo and Forge". */
+/** Names as the UI locale lists them: "Atlas, Echo, and Forge", "Atlas、Echo、Forge". */
 export function joinNames(names: readonly string[]): string {
-	if (names.length <= 1) {
-		return names[0] ?? "";
-	}
-	const head = names.slice(0, -1).join(", ");
-	return tr("{names} and {last}", { last: names.at(-1), names: head });
+	return formatNameList(names);
 }
 
 function groupDescription(
@@ -128,12 +125,12 @@ export function forumCategories(snapshot: InterfaceSnapshot): ForumCategory[] {
 	}
 	const uncategorized: ForumCategory = {
 		agent: null,
-		description: "Topics without a project, team, or agent.",
+		description: tr("Topics without a project, team, or agent."),
 		id: UNCATEGORIZED_ID,
 		kind: "uncategorized",
 		latest: null,
 		memberIds: [],
-		name: "Uncategorized",
+		name: tr("Uncategorized"),
 		swatch: 0,
 		topicIds: [],
 	};
@@ -236,7 +233,7 @@ function uncategorizedFallback(): ForumCategory {
 		kind: "uncategorized",
 		latest: null,
 		memberIds: [],
-		name: "Uncategorized",
+		name: tr("Uncategorized"),
 		swatch: 0,
 		topicIds: [],
 	};
@@ -465,7 +462,7 @@ export function composerCategories(
 		...categories,
 		{
 			...uncategorizedFallback(),
-			description: "Topics without a project, team, or agent.",
+			description: tr("Topics without a project, team, or agent."),
 			swatch: categories.length,
 		},
 	];

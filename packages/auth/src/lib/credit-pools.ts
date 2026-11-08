@@ -8,7 +8,8 @@
  * WHICH SUPPLY a granted dollar may be spent against.
  *
  * WHY POOLS EXIST AT ALL (the invariant everything below serves): Ryu is
- * running on provider credit Ryu holds directly — a $10,000 AWS Bedrock
+ * running on provider credit Ryu holds directly — $100,000 of Microsoft Azure
+ * startup credit (the default free pool), a $10,000 AWS Bedrock
  * allowance for frontier models, a $10,000 Cloudflare Workers AI allowance for
  * open models, $2,500 of Google Cloud Vertex AI, $1,000 of OpenAI, and $3,000
  * on Ryu's own Anthropic account. A dollar of Cloudflare buys
@@ -20,11 +21,11 @@
  * silently converting cheap supply into expensive supply. So a grant carries
  * the pool that issued it and a debit carries the pool that SERVED it.
  *
- * What a grant may PAY for is broader than its pool: free credit pays for any
- * request served from Ryu's own supply ({@link isOwnSupplyPool}), never for the
- * retail pass-through or BYOK (see `debitWallet` in `@ryu/api/lib/credits`).
- * Issuance stays capped by the per-pool ceilings AND the combined own-supply
- * allowance (`reservePoolBudget` in `@ryu/api/lib/campaigns`).
+ * SEPARATE POOLS: a grant pays only for requests served from its own pool
+ * ({@link grantPoolsForServingPool}), never for the retail pass-through or BYOK
+ * (see `debitWallet` in `@ryu/api/lib/credits`). A campaign therefore chooses
+ * which supplier funds it, and issuance is capped by that pool's own ceiling
+ * (`reservePoolBudget`). Users still see one "Ryu Credits" balance.
  *
  * USERS NEVER SEE A PROVIDER. The wallet is denominated in one Ryu-native unit
  * ("Ryu Credits"); {@link CreditPool.label} is the only name a user reads, and
@@ -42,6 +43,11 @@
  * edit here.
  */
 export const CREDIT_POOL_IDS = [
+	// FIRST ON PURPOSE: catalog order is the tie-break when the gateway picks a
+	// pool for `openrouter/auto`, and the first visible pool is the admin
+	// default. Ryu's Azure startup credit is the default free pool. Suffixed like
+	// `openai-credits` so a future BYOK `azure` gateway slot stays untagged.
+	"azure-credits",
 	"cloudflare",
 	"bedrock",
 	"openrouter",
@@ -63,9 +69,11 @@ export type CreditPoolId = (typeof CREDIT_POOL_IDS)[number];
  * How a pool is positioned in the funnel. `free` is the cheap open-model supply
  * we can afford to give away (reach); `frontier` is the expensive supply we
  * spend to convert; `default` is the residual pass-through with no donated
- * allowance behind it.
+ * allowance behind it; `retired` is a pool Ryu no longer serves or issues free
+ * credit from, kept only because its id is stored on existing grants and
+ * ledger rows (see {@link isFreeCreditPool}).
  */
-export type CreditPoolTier = "free" | "frontier" | "default";
+export type CreditPoolTier = "free" | "frontier" | "default" | "retired";
 
 /** One segregated supply of inference credit. */
 export interface CreditPool {
@@ -119,11 +127,21 @@ const usd = (dollars: number): number =>
  * (`PUT /api/campaigns/admin/pools/:pool`), no deploy needed.
  */
 export const CREDIT_POOLS = {
+	"azure-credits": {
+		id: "azure-credits",
+		label: "Ryu Standard",
+		description:
+			"Microsoft Azure (Azure OpenAI / AI Foundry) — Ryu's $100,000 Azure for Startups credit, served through the `azure-credits` gateway slot (Azure's OpenAI-compatible v1 endpoint). The credit covers ONLY models Azure sells and bills itself (Foundry’s Direct from Azure collection: OpenAI, DeepSeek, Llama, Grok, Kimi, Microsoft MAI and Azure-sold Cohere/Mistral); partner models such as Claude bill to the card, so they must never be linked to this slot. The DEFAULT free pool: sign-up, onboarding, quest, reward-store and referral grants land here.",
+		gatewayProviders: ["azure-credits"],
+		budgetCeilingMicroUsd: usd(100_000),
+		tier: "free",
+		visible: true,
+	},
 	cloudflare: {
 		id: "cloudflare",
 		label: "Ryu Fast",
 		description:
-			"Cloudflare Workers AI — open models (Llama, Mistral, …). Roughly 10–20× cheaper per token than the frontier pool, which is what makes it affordable to hand out for free: business-card and referral grants land here.",
+			"Cloudflare Workers AI — open models (Llama, Mistral, …). Roughly 10–20× cheaper per token than the frontier pool, which is what makes it affordable to hand out for free.",
 		gatewayProviders: ["cloudflare"],
 		budgetCeilingMicroUsd: usd(10_000),
 		tier: "free",
@@ -133,11 +151,11 @@ export const CREDIT_POOLS = {
 		id: "bedrock",
 		label: "Ryu Frontier",
 		description:
-			"AWS Bedrock — frontier models (Claude, …). The expensive, scarce supply spent deliberately on conversion: the seat-limited campaign ladder (Founding / Early / Launch) grants against this pool and nothing else.",
-		gatewayProviders: ["bedrock"],
+			"RETIRED. AWS Bedrock is no longer a free-credit pool: Ryu's AWS credit pays for its own VMs (the future self-hosted router service), not for free inference. The id stays because existing grants and ledger rows carry it; those grants still pay for Ryu's own supply (`isFreeCreditPool`). No gateway slot is attributed to it and no new grant may be issued against it.",
+		gatewayProviders: [],
 		budgetCeilingMicroUsd: usd(10_000),
-		tier: "frontier",
-		visible: true,
+		tier: "retired",
+		visible: false,
 	},
 	openrouter: {
 		id: "openrouter",
@@ -180,6 +198,13 @@ export const CREDIT_POOLS = {
 		visible: true,
 	},
 } satisfies Record<CreditPoolId, CreditPool>;
+
+/**
+ * The pool free-credit grants land in unless a campaign says otherwise: Ryu's
+ * Azure startup credit. Rewards, quests, onboarding and seeded campaigns read
+ * this instead of naming a pool, so moving the default is a one-line change.
+ */
+export const DEFAULT_FREE_CREDIT_POOL: CreditPoolId = "azure-credits";
 
 /** The catalog as a list, in {@link CREDIT_POOL_IDS} order. */
 export const ALL_CREDIT_POOLS: readonly CreditPool[] = CREDIT_POOL_IDS.map(
@@ -235,21 +260,58 @@ export const isCreditPoolId = (value: string): value is CreditPoolId =>
 	Object.hasOwn(CREDIT_POOLS, value);
 
 /**
- * Whether a pool is Ryu's OWN supply — every pool whose tier is not `default`
- * (i.e. everything but the retail OpenRouter pass-through).
- *
- * THE FREE-CREDIT RULE: a user's free credit (active grants of ANY pool) pays
- * for any request Ryu serves from its own supply, earliest-expiring grant
- * first, before the plan pool and top-ups. It never pays for OpenRouter-served
- * traffic and never for BYOK (a BYOK provider has no pool at all). A debit
- * still records the pool that SERVED it, so per-supplier burn-down stays exact;
- * the grant's own pool now only says which campaign/allowance issued it.
- * Mirrored by `is_own_supply_pool` in `apps/gateway/src/credit_pools.rs`.
+ * Whether a pool is Ryu's OWN supply — a `free` or `frontier` pool (not the
+ * retail OpenRouter pass-through, and not a `retired` pool). Mirrored by
+ * `is_own_supply_pool` in `apps/gateway/src/credit_pools.rs`.
  */
 export const isOwnSupplyPool = (pool: string | null | undefined): boolean =>
 	typeof pool === "string" &&
 	isCreditPoolId(pool) &&
-	CREDIT_POOLS[pool].tier !== "default";
+	(CREDIT_POOLS[pool].tier === "free" ||
+		CREDIT_POOLS[pool].tier === "frontier");
+
+/**
+ * Whether a grant of `pool` is free credit: an own-supply pool, or a `retired`
+ * one whose already-issued grants still pay for Ryu's own supply. A retired
+ * pool is never served from and never issues new grants.
+ */
+export const isFreeCreditPool = (pool: string | null | undefined): boolean =>
+	isOwnSupplyPool(pool) ||
+	(typeof pool === "string" &&
+		isCreditPoolId(pool) &&
+		CREDIT_POOLS[pool].tier === "retired");
+
+/** The retired pools, whose already-issued grants still pay as free credit. */
+export const RETIRED_POOL_IDS: readonly CreditPoolId[] = CREDIT_POOL_IDS.filter(
+	(id) => CREDIT_POOLS[id].tier === "retired"
+);
+
+/**
+ * SEPARATE POOLS: the grant pools a debit served from `servingPool` may draw.
+ *
+ * A grant pays only for traffic served from its OWN pool, because every supplier
+ * covers different models on different terms (Azure's startup credit, for
+ * one, pays only for models Azure bills directly). So own-supply traffic
+ * served from pool P draws P's grants, plus the grants of a `retired` pool,
+ * whose holders were promised free credit before their supplier was retired.
+ * The retail pass-through draws only its own pool, and an unpooled debit (BYOK)
+ * draws no grant at all. Mirrored by `grant_money_reachable_from` in
+ * `apps/gateway/src/pipeline/credit_reserve.rs`.
+ */
+export const grantPoolsForServingPool = (
+	servingPool: string | null | undefined
+): readonly string[] => {
+	if (!servingPool) {
+		return [];
+	}
+	return isOwnSupplyPool(servingPool)
+		? [servingPool, ...RETIRED_POOL_IDS]
+		: [servingPool];
+};
+
+/** Whether new grants may be issued against `pool`. */
+export const isIssuablePool = (pool: string): boolean =>
+	isCreditPoolId(pool) && CREDIT_POOLS[pool].tier !== "retired";
 
 /** The own-supply pools, in catalog order. */
 export const OWN_SUPPLY_POOLS: readonly CreditPool[] = ALL_CREDIT_POOLS.filter(

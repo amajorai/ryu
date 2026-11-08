@@ -1,6 +1,10 @@
-// Credential broker: the services agents may reach through the broker proxy
-// and the agent proposals waiting for a decision. Approving a proposal creates
-// its services; credentials it asks for are added as ordinary secrets. A
+// Credential broker console. Requests holds card spend approvals, the agent
+// proposals waiting for a decision, and the services agents may reach through
+// the broker proxy (added from the catalog, edited and deleted here). Sessions,
+// Activity (discovered hosts and the request log) and Settings (unmatched-host
+// policy and agent skills) live in `VaultBrokerConsole.tsx`. Approving a
+// proposal creates its services; credentials it asks for are added as
+// ordinary secrets. A
 // password-manager request (the first use of an `op://` or `bws://` reference
 // by one agent or person) is approved once or for a chosen lifetime. Listing
 // needs `list` on `sys/broker`, deciding needs `admin`. Card spend approvals
@@ -12,14 +16,11 @@ import {
 	CheckmarkCircle02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@ryu/ui/components/native-select.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { sileo } from "sileo";
@@ -28,230 +29,32 @@ import {
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { listVaultBrokerProposals } from "@/src/lib/api/vault-broker.ts";
 import {
-	decideVaultBrokerProposal,
 	decideVaultCardApproval,
-	listVaultBrokerProposals,
-	listVaultBrokerServices,
 	listVaultCardApprovals,
-	type VaultBrokerProposal,
-	type VaultBrokerService,
 	type VaultCardDecision,
-	type VaultPasswordManagerGrantMode,
-} from "@/src/lib/api/vault.ts";
+} from "@/src/lib/api/vault-cards.ts";
 import {
-	cardApprovalSummary,
-	proposalDetail,
-	whenLabel,
-} from "./vault-broker-summary.ts";
+	BrokerConsole,
+	type BrokerConsoleView,
+} from "./VaultBrokerConsole.tsx";
+import { BrokerProposals } from "./VaultBrokerProposals.tsx";
+import { BrokerServices } from "./VaultBrokerServices.tsx";
+import { cardApprovalSummary } from "./vault-broker-summary.ts";
 import { isForbidden, vaultErrorMessage } from "./vault-errors.ts";
 
-type Decision = "approve" | "reject";
+type BrokerView = "requests" | BrokerConsoleView;
 
-const DECISION_TOAST = {
-	approve: "Proposal approved",
-	reject: "Proposal rejected",
-} satisfies Record<Decision, string>;
+const VIEWS = [
+	{ label: "Requests", value: "requests" },
+	{ label: "Sessions", value: "sessions" },
+	{ label: "Activity", value: "activity" },
+	{ label: "Settings", value: "settings" },
+] satisfies { label: string; value: BrokerView }[];
 
-function upstream(service: VaultBrokerService): string {
-	const port = service.port ? `:${service.port}` : "";
-	const prefix = service.pathPrefix === "/" ? "" : service.pathPrefix;
-	return `${service.host}${port}${prefix}`;
-}
-
-const GRANT_OPTIONS = [
-	{ label: "Once", value: "once" },
-	{ label: "1 hour", value: "1h" },
-	{ label: "24 hours", value: "24h" },
-	{ label: "30 days", value: "30d" },
-] satisfies { label: string; value: VaultPasswordManagerGrantMode }[];
-
-function isGrantMode(value: string): value is VaultPasswordManagerGrantMode {
-	return GRANT_OPTIONS.some((option) => option.value === value);
-}
-
-function proposalSummary(
-	proposal: VaultBrokerProposal,
-	tl: LiteralMessage
-): string {
-	if (proposal.credentialUse) {
-		const { account, ref, subject } = proposal.credentialUse;
-		return tl("Password manager: {ref} for {subject} (account {account})", {
-			account,
-			ref,
-			subject,
-		});
-	}
-	const parts: string[] = [];
-	const services = proposal.services
-		.map((service) => service.name ?? service.host)
-		.filter(Boolean);
-	if (services.length > 0) {
-		parts.push(tl("Services: {services}", { services: services.join(", ") }));
-	}
-	if (proposal.credentials.length > 0) {
-		const credentials = proposal.credentials.map(
-			(credential) => credential.ref
-		);
-		parts.push(
-			tl("Credentials: {credentials}", { credentials: credentials.join(", ") })
-		);
-	}
-	return parts.join(" · ");
-}
-
-function BrokerProposals({ target }: { target: ApiTarget }) {
-	const tl = useLiteralMessages();
-	const queryClient = useQueryClient();
-	const proposalsQuery = useQuery({
-		queryKey: ["vault", "broker", "proposals", target.url],
-		queryFn: () => listVaultBrokerProposals(target),
-	});
-	const [grants, setGrants] = useState<
-		Record<string, VaultPasswordManagerGrantMode>
-	>({});
-	const decideMutation = useMutation({
-		mutationFn: ({
-			decision,
-			grant,
-			id,
-		}: {
-			decision: Decision;
-			grant?: VaultPasswordManagerGrantMode;
-			id: string;
-		}) => decideVaultBrokerProposal(target, id, decision, grant),
-		onSuccess: async (_, { decision }) => {
-			await queryClient.invalidateQueries({ queryKey: ["vault", "broker"] });
-			sileo.success({ title: DECISION_TOAST[decision] });
-		},
-		onError: (error) => {
-			sileo.error({
-				title: "Could not update the proposal",
-				description: vaultErrorMessage(error, "Try again.", tl),
-			});
-		},
-	});
-	const proposals = proposalsQuery.data ?? [];
-
-	return (
-		<SettingsSection
-			caption="Agents propose new services or credentials here, and ask before their first use of a password-manager reference. Nothing is brokered until someone approves."
-			title="Pending proposals"
-		>
-			<SettingsCard className="divide-y p-0">
-				{proposalsQuery.isLoading ? (
-					<SkeletonRows inset="panel" rows={2} />
-				) : proposalsQuery.error ? (
-					<p className="p-4 text-sm text-status-destructive">
-						{vaultErrorMessage(
-							proposalsQuery.error,
-							"Could not load proposals.",
-							tl
-						)}
-					</p>
-				) : proposals.length === 0 ? (
-					<p className="p-6 text-center text-muted-foreground text-sm">
-						No pending proposals.
-					</p>
-				) : (
-					proposals.map((proposal) => {
-						const busy =
-							decideMutation.isPending &&
-							decideMutation.variables?.id === proposal.id;
-						const grant = grants[proposal.id] ?? "30d";
-						return (
-							<div
-								className="flex items-center justify-between gap-4 px-4 py-3"
-								key={proposal.id}
-							>
-								<div className="min-w-0">
-									<div className="flex flex-wrap items-center gap-2">
-										<span className="font-medium text-sm">
-											{proposal.message || tl("Broker proposal")}
-										</span>
-										<Badge variant="outline">{proposal.environment}</Badge>
-										{proposal.credentialUse ? (
-											<Badge variant="secondary">
-												{proposal.credentialUse.provider}
-											</Badge>
-										) : null}
-									</div>
-									<p className="mt-1 truncate text-muted-foreground text-xs">
-										{proposalDetail(
-											proposalSummary(proposal, tl),
-											proposal.requestedBy,
-											proposal.expiresAt,
-											tl
-										)}
-									</p>
-								</div>
-								<div className="flex shrink-0 items-center gap-1">
-									{proposal.credentialUse ? (
-										<NativeSelect
-											aria-label="Approval lasts"
-											disabled={busy}
-											onChange={(event) => {
-												const value = event.target.value;
-												if (isGrantMode(value)) {
-													setGrants((current) => ({
-														...current,
-														[proposal.id]: value,
-													}));
-												}
-											}}
-											size="sm"
-											value={grant}
-										>
-											{GRANT_OPTIONS.map((option) => (
-												<NativeSelectOption
-													key={option.value}
-													value={option.value}
-												>
-													{option.label}
-												</NativeSelectOption>
-											))}
-										</NativeSelect>
-									) : null}
-									<Button
-										disabled={busy}
-										onClick={() =>
-											decideMutation.mutate({
-												decision: "reject",
-												id: proposal.id,
-											})
-										}
-										size="sm"
-										variant="ghost"
-									>
-										<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
-										Reject
-									</Button>
-									<Button
-										disabled={busy}
-										onClick={() =>
-											decideMutation.mutate({
-												decision: "approve",
-												grant: proposal.credentialUse ? grant : undefined,
-												id: proposal.id,
-											})
-										}
-										size="sm"
-										variant="outline"
-									>
-										<HugeiconsIcon
-											className="size-4"
-											icon={CheckmarkCircle02Icon}
-										/>
-										Approve
-									</Button>
-								</div>
-							</div>
-						);
-					})
-				)}
-			</SettingsCard>
-		</SettingsSection>
-	);
+function brokerView(value: string): BrokerView {
+	return VIEWS.find((view) => view.value === value)?.value ?? "requests";
 }
 
 const CARD_DECISION_TOAST = {
@@ -376,70 +179,16 @@ function CardApprovals({ target }: { target: ApiTarget }) {
 	);
 }
 
-function BrokerServices({ target }: { target: ApiTarget }) {
-	const tl = useLiteralMessages();
-	const servicesQuery = useQuery({
-		queryKey: ["vault", "broker", "services", target.url],
-		queryFn: () => listVaultBrokerServices(target),
-	});
-	const services = servicesQuery.data ?? [];
-
-	return (
-		<SettingsSection
-			caption="Agents started with the broker reach these hosts through a local proxy that adds the credential, so the agent never sees it."
-			title="Services"
-		>
-			<SettingsCard className="divide-y p-0">
-				{servicesQuery.isLoading ? (
-					<SkeletonRows inset="panel" rows={3} />
-				) : servicesQuery.error ? (
-					<p className="p-4 text-sm text-status-destructive">
-						{vaultErrorMessage(
-							servicesQuery.error,
-							"Could not load broker services.",
-							tl
-						)}
-					</p>
-				) : services.length === 0 ? (
-					<p className="p-6 text-center text-muted-foreground text-sm">
-						No broker services yet.
-					</p>
-				) : (
-					<ul className="divide-y">
-						{services.map((service) => (
-							<li
-								className="flex items-start justify-between gap-4 px-4 py-3"
-								key={`${service.environment}/${service.name}`}
-							>
-								<div className="min-w-0">
-									<p className="flex flex-wrap items-center gap-2 text-sm">
-										<code className="font-medium font-mono">
-											{service.name}
-										</code>
-										<Badge variant="outline">{service.environment}</Badge>
-										{service.enabled ? null : (
-											<Badge variant="secondary">Disabled</Badge>
-										)}
-									</p>
-									<p className="mt-0.5 truncate text-muted-foreground text-xs">
-										{[upstream(service), service.description]
-											.filter(Boolean)
-											.join(" · ")}
-									</p>
-								</div>
-								<span className="shrink-0 text-muted-foreground text-xs">
-									{whenLabel(service.updatedAt)}
-								</span>
-							</li>
-						))}
-					</ul>
-				)}
-			</SettingsCard>
-		</SettingsSection>
-	);
-}
-
-export function VaultBrokerPanel({ target }: { target: ApiTarget }) {
+export function VaultBrokerPanel({
+	environment: initialEnvironment = "default",
+	target,
+}: {
+	/** The environment the console starts in (the Vault page's active one). */
+	environment?: string;
+	target: ApiTarget;
+}) {
+	const [view, setView] = useState<BrokerView>("requests");
+	const [environment, setEnvironment] = useState(initialEnvironment);
 	const accessQuery = useQuery({
 		queryKey: ["vault", "broker", "proposals", target.url],
 		queryFn: () => listVaultBrokerProposals(target),
@@ -460,9 +209,32 @@ export function VaultBrokerPanel({ target }: { target: ApiTarget }) {
 	}
 	return (
 		<div className="space-y-6">
-			<CardApprovals target={target} />
-			<BrokerProposals target={target} />
-			<BrokerServices target={target} />
+			<Tabs
+				onValueChange={(next: string) => setView(brokerView(next))}
+				value={view}
+			>
+				<TabsList variant="text">
+					{VIEWS.map((item) => (
+						<TabsTrigger key={item.value} value={item.value}>
+							{item.label}
+						</TabsTrigger>
+					))}
+				</TabsList>
+			</Tabs>
+			{view === "requests" ? (
+				<>
+					<CardApprovals target={target} />
+					<BrokerProposals target={target} />
+					<BrokerServices environment={environment} target={target} />
+				</>
+			) : (
+				<BrokerConsole
+					environment={environment}
+					onEnvironmentChange={setEnvironment}
+					target={target}
+					view={view}
+				/>
+			)}
 		</div>
 	);
 }

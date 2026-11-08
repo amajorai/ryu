@@ -307,6 +307,11 @@ impl BoxSessionClient {
         }
     }
 
+    /// The Box API base this client calls (with `/v1`, no credential).
+    pub fn endpoint(&self) -> &str {
+        &self.base
+    }
+
     /// Who meters this client's Box time.
     pub fn billing_owner(&self) -> BillingOwner {
         self.billing_owner
@@ -366,10 +371,27 @@ impl BoxSessionClient {
     }
 }
 
+mod broker_relay;
+mod browser_fill;
+mod browser_fill_types;
 mod commands;
 mod desktop;
 mod lifecycle;
+mod network_secrets;
 mod wire;
+
+pub use self::broker_relay::{BoxBrokerRelay, BOX_BROKER_RELAY_FEATURE, MAX_BOX_RELAY_HOSTS};
+pub use self::browser_fill::{
+    is_browser_fill_id, BROWSER_FILL_ECHOED, BROWSER_FILL_FEATURE, BROWSER_FILL_UNSUPPORTED,
+    DEFAULT_FILL_TTL_SECONDS, MAX_FILL_TTL_SECONDS,
+};
+pub use self::browser_fill_types::{
+    BrowserFillCommitted, BrowserFillEchoed, BrowserFillError, BrowserFillField,
+    BrowserFillPrepared, BrowserFillState, BrowserFillStatus, BrowserFillTarget, BrowserFillValue,
+};
+pub use self::network_secrets::{
+    is_network_secret_placeholder, BoxNetworkSecret, MAX_BOX_NETWORK_SECRETS,
+};
 
 use self::wire::*;
 

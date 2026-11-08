@@ -105,7 +105,7 @@ describe("browserDownloadHint", () => {
 			expect(mac.pointsTopRight).toBe(true);
 			expect(mac.shortcut).toBe("⌥⌘L");
 			expect(mac.name).toBe(GUIDE_BROWSER_NAMES[browser]);
-			expect(mac.where).toContain("top-right");
+			expect(mac.where).toContain("browser toolbar");
 			expect(browserDownloadHint(browser, "windows").shortcut).toBe("Ctrl+J");
 			expect(browserDownloadHint(browser, "linux").shortcut).toBe("Ctrl+J");
 		}

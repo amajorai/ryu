@@ -27,8 +27,8 @@ mock.module("@/lib/auth-client.ts", () => ({
 	useSession: () => ({ data: { user: { id: "user-1" } } }),
 }));
 mock.module("@ryu/auth/lib/login-approval-client", () => ({
-	approveLoginApproval: (_base: string, id: string) => {
-		resolved.push(id);
+	approveLoginApproval: (_base: string, id: string, code: string) => {
+		resolved.push(`${id}:${code}`);
 		return Promise.resolve();
 	},
 	denyLoginApproval: (_base: string, id: string) => {
@@ -52,12 +52,12 @@ mock.module("@ryu/auth/lib/login-approval-client", () => ({
 }));
 mock.module("@ryu/blocks/web/login-approval.tsx", () => ({
 	LoginApprovalPrompt: (props: {
-		onApprove: () => void;
+		onApprove: (code: string) => void;
 		onOpenChange: (open: boolean) => void;
 		request: LoginApprovalRequest;
 	}) => (
 		<div data-request={props.request.id}>
-			<button onClick={props.onApprove} type="button">
+			<button onClick={() => props.onApprove("ABCD1234")} type="button">
 				approve
 			</button>
 			<button onClick={() => props.onOpenChange(false)} type="button">
@@ -84,7 +84,6 @@ function request(id: string): LoginApprovalRequest {
 		status: "pending",
 		surface: "desktop",
 		userAgent: null,
-		userCode: "ABCD1234",
 	};
 }
 
@@ -125,7 +124,8 @@ it("shows a request created while another is on screen once that one is handled"
 	await act(async () => emit({ request: request("b"), type: "created" }));
 	expect(shown()).toBe("a");
 	await click("approve");
-	expect(resolved).toEqual(["a"]);
+	// The typed matching code reaches the approval call.
+	expect(resolved).toEqual(["a:ABCD1234"]);
 	expect(shown()).toBe("b");
 });
 

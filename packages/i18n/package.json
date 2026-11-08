@@ -9,6 +9,7 @@
     "./catalog-locale": "./src/catalog-locale.ts",
     "./core": "./src/core.ts",
     "./error-text": "./src/error-text.ts",
+    "./format-bidi": "./src/format-bidi.ts",
     "./format-intl": "./src/format-intl.ts",
     "./format-percent": "./src/format-percent.ts",
     "./lite": "./src/lite.ts",
@@ -24,7 +25,8 @@
     "./parse-number": "./src/parse-number.ts",
     "./react": "./src/react.tsx",
     "./react-lite": "./src/react-lite.tsx",
-    "./sentence-label": "./src/sentence-label.ts"
+    "./sentence-label": "./src/sentence-label.ts",
+    "./system-version-labels": "./src/system-version-labels.ts"
   },
   "sideEffects": [
     "./src/official-catalog.ts",

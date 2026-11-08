@@ -224,6 +224,8 @@ mod stream_opening;
 use stream_opening::*;
 mod tool_debit;
 use tool_debit::*;
+mod tool_receipt_ref;
+pub(crate) use tool_receipt_ref::ledger_transaction_id;
 mod tool_loop_select;
 use tool_loop_select::*;
 

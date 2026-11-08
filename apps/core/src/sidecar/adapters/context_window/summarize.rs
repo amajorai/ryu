@@ -74,6 +74,20 @@ pub(super) fn summary_cache() -> &'static Mutex<HashMap<u64, String>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Upper bound on memoized summaries. Every new compaction checkpoint adds a
+/// key, so the memo is cleared when full (like `MAX_HELD_CUTS`); a miss only
+/// costs one more summarization call.
+const MAX_CACHED_SUMMARIES: usize = 256;
+
+/// Insert `block` under `key`, clearing the memo first when it is full and
+/// `key` is new so it never grows past [`MAX_CACHED_SUMMARIES`].
+fn remember_summary(cache: &mut HashMap<u64, String>, key: u64, block: String) {
+    if cache.len() >= MAX_CACHED_SUMMARIES && !cache.contains_key(&key) {
+        cache.clear();
+    }
+    cache.insert(key, block);
+}
+
 /// A reused HTTP client for the side-model summarization call.
 fn http() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -139,7 +153,7 @@ async fn summarize_as(
             }
         };
     let block = format!("{}\n{}", kind.label(), summary.trim());
-    summary_cache().lock().await.insert(key, block.clone());
+    remember_summary(&mut *summary_cache().lock().await, key, block.clone());
     Some(block)
 }
 

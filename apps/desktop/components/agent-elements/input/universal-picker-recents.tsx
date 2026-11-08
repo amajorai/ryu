@@ -9,6 +9,7 @@ import type { ComposerSettingItem } from "@/components/agent-elements/input/comp
 import { useProviderCommandNavigation } from "@/components/agent-elements/input/provider-command-dialog.tsx";
 import { AgentAvatar, AgentLogo } from "@/src/lib/agent-logos.tsx";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import { effortLevelLabel } from "@/src/lib/effort-level-label.ts";
 import type { PickerRef } from "@/src/lib/picker-favorites.ts";
 import pickerStyles from "./universal-picker-body.module.css";
 import type { ProviderEntry } from "./universal-picker-types.ts";
@@ -87,7 +88,7 @@ function RecentEffortMeter({ effort }: { effort?: string }) {
 	}
 	const levels = ["off", "low", "medium", "high", "max"];
 	const activeIndex = Math.max(0, levels.indexOf(effort.toLowerCase()));
-	const label = effort.charAt(0).toUpperCase() + effort.slice(1);
+	const label = effortLevelLabel(effort, tl);
 	return (
 		<span
 			aria-label={tl("Effort: {label}", { label })}

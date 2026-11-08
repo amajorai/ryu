@@ -24,6 +24,7 @@ import { LINK_INK, MAX_THREAD_FACES } from "./channels-messages-constants.ts";
 import { Highlighted } from "./channels-messages-search.tsx";
 import { clockTime, lastReplyPhrase } from "./channels-time.ts";
 import { agentById } from "./interface-renderer.ts";
+import { untitledDisplayTitle } from "./thread-display-title.ts";
 
 /** How long the Copy action shows its confirmation. */
 const COPIED_RESET_MS = 1600;
@@ -68,7 +69,7 @@ export function MessageRow({
 		.map((agentId) => agentById(snapshot, agentId))
 		.filter((agent): agent is InterfaceAgent => agent !== undefined)
 		.slice(0, MAX_THREAD_FACES);
-	const title = thread.title || "Untitled";
+	const title = untitledDisplayTitle(thread.title);
 	const body =
 		thread.lastMessage && thread.lastMessage.trim() !== title.trim()
 			? thread.lastMessage

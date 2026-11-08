@@ -16,6 +16,9 @@
 //! A reveal of a value gated by a control group (see
 //! [`crate::vault::policy_ext`]) answers `202` with the pending request and its
 //! token instead of the value; [`open_control_group`] does that.
+//!
+//! Access requests (`/api/vault/access-policies`, `/api/vault/access-requests`)
+//! live in [`access_requests`] and merge into this router.
 
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -24,6 +27,8 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
+
+pub(super) mod access_requests;
 
 use super::vault_api::{
     ctx, invalid_request, respond, rfc3339_fields, vault_error, Ctx, MAX_REQUEST_BODY_BYTES,
@@ -55,6 +60,7 @@ pub fn routes() -> Router<ServerState> {
             "/api/vault/control-groups/:id/redeem",
             post(redeem_control_group).layer(body()),
         )
+        .merge(access_requests::routes())
 }
 
 /// The requester/approver identity of a verified caller.

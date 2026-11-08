@@ -34,6 +34,6 @@
 	right: var(--tray-right);
 }
 .anchor[data-placement="sidebar"] {
+	inset-inline-start: var(--tray-start);
 	bottom: var(--tray-bottom);
-	left: var(--tray-left);
 }

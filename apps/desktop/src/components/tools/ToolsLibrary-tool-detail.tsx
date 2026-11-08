@@ -1,5 +1,6 @@
 import { Wrench01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ListingAsideCard,
 	ListingDetailShell,
@@ -33,6 +34,7 @@ export function ToolDetail({
 	agents: { id: string; name: string }[];
 	onCallTool: ReturnType<typeof useMcp>["callTool"];
 }) {
+	const tl = useLiteralMessages();
 	const [argsText, setArgsText] = useState("{}");
 	const [agentId, setAgentId] = useState<string>(() => agents[0]?.id ?? "");
 	const [running, setRunning] = useState(false);
@@ -44,12 +46,12 @@ export function ToolDetail({
 			return null;
 		}
 		if (!result.ok) {
-			return result.error ?? "Tool call failed";
+			return result.error ?? tl("Tool call failed");
 		}
 		return isNativeText(result.output)
 			? result.output
 			: JSON.stringify(result.output, null, 2);
-	}, [result]);
+	}, [result, tl]);
 
 	const runCall = async () => {
 		setParseError(null);
@@ -72,7 +74,7 @@ export function ToolDetail({
 		} catch (e) {
 			setResult({
 				ok: false,
-				error: e instanceof Error ? e.message : "Tool call failed",
+				error: e instanceof Error ? e.message : tl("Tool call failed"),
 			});
 		} finally {
 			setRunning(false);

@@ -22,7 +22,7 @@ import { Logo as OrbLogo } from "@ryu/ui/components/logo.tsx";
 import { PageHeader } from "@ryu/ui/components/page-header.tsx";
 import { SidebarInset, SidebarProvider } from "@ryu/ui/components/sidebar.tsx";
 import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { closeCurrentWindow } from "@/lib/tauri-bridge.ts";
 import {
 	type StandaloneAppNavigation,
@@ -37,6 +37,10 @@ import {
 import { useStandaloneApps } from "@/src/hooks/useStandaloneApps.ts";
 import { isNavigablePluginCompanion } from "@/src/lib/plugin-companion-navigation.ts";
 import PluginCompanionPage from "@/src/pages/PluginCompanionPage.tsx";
+import {
+	standaloneWindowTitle,
+	useStandaloneWindowTitle,
+} from "./hosted-standalone-window-title.ts";
 
 function StartupState({
 	title,
@@ -219,11 +223,9 @@ export default function HostedStandaloneAppEntry({ appId }: { appId: string }) {
 			candidate.pluginId === appId && isNavigablePluginCompanion(candidate)
 	);
 
-	useEffect(() => {
-		if (companion?.label || companion?.name) {
-			document.title = companion.label || companion.name;
-		}
-	}, [companion]);
+	const tl = useLiteralMessages();
+	const windowTitle = standaloneWindowTitle(tl, companion);
+	useStandaloneWindowTitle(windowTitle);
 
 	if (isLoading) {
 		return (
@@ -249,7 +251,7 @@ export default function HostedStandaloneAppEntry({ appId }: { appId: string }) {
 	return (
 		<HostedStandaloneSurface
 			appId={appId}
-			appName={companion.label || companion.name}
+			appName={windowTitle ?? companion.name}
 			companionId={companion.id}
 		/>
 	);

@@ -14,6 +14,10 @@ import type {
 	EffectiveDefaults,
 	ScopeDefault,
 } from "./api/hierarchy.ts";
+import {
+	type EffortLabelTranslate,
+	effortLevelLabel,
+} from "./effort-level-label.ts";
 
 /** One role's view of a scope: what that role's pickers read and write. */
 export interface RoleDefault {
@@ -182,7 +186,10 @@ export function defaultLabel(inherited: string): string {
 	return inherited ? tl("Default ({inherited})", { inherited }) : tl("Default");
 }
 
-/** "medium" → "Medium". */
-export function effortLabel(effort: string): string {
-	return effort ? effort.charAt(0).toUpperCase() + effort.slice(1) : effort;
+/** "medium" → "Medium" in the UI language ("" stays ""). */
+export function effortLabel(
+	effort: string,
+	translateLabel: EffortLabelTranslate = tl
+): string {
+	return effort ? effortLevelLabel(effort, translateLabel) : effort;
 }

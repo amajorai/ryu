@@ -107,10 +107,10 @@ export function SkillDetailPanel({
 					<EmptyDescription>
 						{canAuthor
 							? tl(
-									"Pick a skill on the left to read what it does and add it to your agents — or author your own."
+									"Pick a skill from the list to read what it does and add it to your agents — or author your own."
 								)
 							: tl(
-									"Pick a skill on the left to read what it does and add it to your agents."
+									"Pick a skill from the list to read what it does and add it to your agents."
 								)}
 					</EmptyDescription>
 				</EmptyHeader>

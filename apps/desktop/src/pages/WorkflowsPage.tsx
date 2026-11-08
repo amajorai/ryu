@@ -39,10 +39,12 @@ import {
 	useWorkflows,
 } from "@/src/hooks/useWorkflows.ts";
 import { fetchWorkflow, type Workflow } from "@/src/lib/api/workflows.ts";
+import { WorkflowSnapshotView } from "./WorkflowsPage-snapshot-view.tsx";
 import { newWorkflowDraft, newWorkflowName } from "./workflow-draft.ts";
 
 /** Compact, model-readable summary of a workflow definition for the builder
- *  preamble AND the on-page snapshot. Mirrors the agent builder's `agentSnapshot`. */
+ *  preamble (kept English: the model reads it). The on-page card renders the
+ *  localized `WorkflowSnapshotView` instead. Mirrors the agent builder's `agentSnapshot`. */
 function workflowSnapshot(wf: Workflow | null): string {
 	if (!wf) {
 		return "(empty — no nodes yet)";
@@ -227,7 +229,7 @@ export default function WorkflowsPage({
 						/>
 					) : workflows.length === 0 ? (
 						<p className="px-2 py-3 text-muted-foreground text-xs">
-							No workflows yet. Describe one to Ryu on the right to build your
+							No workflows yet. Describe one to Ryu in the chat to build your
 							first.
 						</p>
 					) : (
@@ -278,12 +280,7 @@ export default function WorkflowsPage({
 
 					<div className="rounded-lg border bg-card p-4 text-card-foreground">
 						<p className="mb-2 font-medium text-sm">Current workflow</p>
-						<pre
-							className="overflow-x-auto whitespace-pre-wrap text-muted-foreground text-xs leading-relaxed"
-							dir="auto"
-						>
-							{builderSnapshot}
-						</pre>
+						<WorkflowSnapshotView workflow={selected} />
 					</div>
 				</div>
 			</div>

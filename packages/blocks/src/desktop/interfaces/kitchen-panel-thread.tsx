@@ -37,7 +37,9 @@ export function ThreadPane({
 			closeLabel="Close order"
 			data-kitchen-panel=""
 			headingRef={headingRef}
-			label={tl("Order: {title}", { title: thread?.title ?? "Conversation" })}
+			label={tl("Order: {title}", {
+				title: thread?.title.trim() || tl("New order"),
+			})}
 			leading={
 				station && !onBack ? (
 					<ChefLeading agentId={station.agent.id} />
@@ -53,7 +55,7 @@ export function ThreadPane({
 					{station ? <span>· {station.agent.name}</span> : null}
 				</>
 			}
-			title={thread?.title.trim() || "New order"}
+			title={thread?.title.trim() || tl("New order")}
 		>
 			<div className="min-h-0 flex-1">{threadView}</div>
 		</GameSheet>

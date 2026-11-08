@@ -1,13 +1,11 @@
-//! Destinations (push) and the scheduler tick.
+//! Destinations: one-way pushes of a folder.
 //!
-//! Split out of [`super`], which re-exports the public items at their
-//! original paths.
+//! Exercised end to end by `external/tests.rs` and `external/targets/tests.rs`;
+//! `destinations_tests.rs` covers which values a push sends.
 
 use super::*;
 
 impl PluginSecretStore {
-    // ── Destinations ──────────────────────────────────────────────────────
-
     /// Push a node folder one-way to a remote path.
     pub async fn external_destination_create(
         &self,
@@ -26,7 +24,10 @@ impl PluginSecretStore {
         )?;
         let conn = self.conn.lock().await;
         let store = store_locked(&conn, &input.store_id)?;
-        if store.kind != StoreKind::Infisical
+        if store.kind.is_sync_target() {
+            targets::check_remote_path(&store, &remote_path)
+                .map_err(|error| invalid(error.to_string()))?;
+        } else if store.kind != StoreKind::Infisical
             && remote_path.is_empty()
             && store.path_prefix.is_empty()
         {
@@ -167,40 +168,11 @@ impl PluginSecretStore {
     }
 
     pub(super) async fn push_inner(&self, destination: &DestinationRecord) -> Result<usize> {
-        let now = now_millis();
-        // A push runs unattended for no single caller, so a value that a
-        // control group gates for anyone stays local (like exports).
-        let policies = {
-            let conn = self.conn.lock().await;
-            crate::vault::policy::list_policies(&conn)?
-        };
-        let values: BTreeMap<String, String> = self
-            .current_values(&ListFilter {
-                environment: Some(destination.environment.clone()),
-                path: Some(destination.path.clone()),
-                recursive: false,
-                include_deleted: false,
-            })
-            .await?
-            .into_iter()
-            .filter(|(info, _)| {
-                info.scope == SecretScope::Node
-                    && info.scope_id == destination.scope_id
-                    && info.binding.is_none()
-                    && info.environment == destination.environment
-                    && info.path == destination.path
-                    && matches!(
-                        info.status(now),
-                        SecretStatus::Active | SecretStatus::RotationDue
-                    )
-                    && !crate::vault::policy_ext::read_gated_for_anyone(
-                        &policies,
-                        &info.coords().policy_key(),
-                    )
-            })
-            .map(|(info, value)| (info.name, value))
-            .collect();
+        let values = self.push_values(destination).await?;
         let (record, credentials) = self.external_connection(&destination.store_id).await?;
+        if record.kind.is_sync_target() {
+            return targets::push(&record, &credentials, &destination.remote_path, &values).await;
+        }
         let session = Session::connect(&record, &credentials).await?;
         // A KV write replaces the whole secret (v1 keeps no history): never let
         // an empty folder (a typo'd path, a cleared folder) wipe remote data.
@@ -218,52 +190,50 @@ impl PluginSecretStore {
         Ok(values.len())
     }
 
-    // ── Scheduler ─────────────────────────────────────────────────────────
-
-    /// One loop pass: run due sync sources and dirty or due destinations.
-    pub async fn external_tick(&self) -> TickReport {
-        let mut report = TickReport::default();
-        if self.keyring.is_sealed() {
-            return report;
-        }
+    /// The plaintext a push of `destination` sends: the folder's own live node
+    /// values, never a sealed or control-group-gated one.
+    pub(super) async fn push_values(
+        &self,
+        destination: &DestinationRecord,
+    ) -> Result<BTreeMap<String, String>> {
         let now = now_millis();
-        let (sources, destinations) = {
+        // A push runs unattended for no single caller, so a value that a
+        // control group gates for anyone stays local (like exports).
+        let policies = {
             let conn = self.conn.lock().await;
-            let sources = collect(
-                &conn,
-                &format!("SELECT {SOURCE_COLUMNS} FROM vault_external_sources WHERE mode = 'sync'"),
-                source_from_row,
-            );
-            let destinations = collect(
-                &conn,
-                &format!("SELECT {DESTINATION_COLUMNS} FROM vault_external_destinations"),
-                destination_from_row,
-            );
-            (
-                sources.unwrap_or_default(),
-                destinations.unwrap_or_default(),
-            )
+            crate::vault::policy::list_policies(&conn)?
         };
-        let actor = AuditActor::new("system", Some("external-store"));
-        for source in sources.iter().filter(|source| {
-            source
-                .last_sync_at
-                .is_none_or(|at| now - at >= source.sync_interval_secs * 1000)
-        }) {
-            match self.external_sync_source(&source.id, &actor).await {
-                Ok(_) => report.synced += 1,
-                Err(_) => report.failed += 1,
-            }
-        }
-        for destination in destinations
-            .iter()
-            .filter(|destination| destination_due(destination, now))
-        {
-            match self.external_push(&destination.id, &actor).await {
-                Ok(_) => report.pushed += 1,
-                Err(_) => report.failed += 1,
-            }
-        }
-        report
+        Ok(self
+            .current_values(&ListFilter {
+                environment: Some(destination.environment.clone()),
+                path: Some(destination.path.clone()),
+                recursive: false,
+                include_deleted: false,
+            })
+            .await?
+            .into_iter()
+            .filter(|(info, _)| {
+                info.scope == SecretScope::Node
+                    && info.scope_id == destination.scope_id
+                    && info.binding.is_none()
+                    && info.environment == destination.environment
+                    && info.path == destination.path
+                    // Sealed is use-only: a sync target could read it back.
+                    && info.metadata.value_type.is_revealable()
+                    && matches!(
+                        info.status(now),
+                        SecretStatus::Active | SecretStatus::RotationDue
+                    )
+                    && !crate::vault::policy_ext::read_gated_for_anyone(
+                        &policies,
+                        &info.coords().policy_key(),
+                    )
+            })
+            .map(|(info, value)| (info.name, value))
+            .collect())
     }
 }
+
+#[cfg(test)]
+#[path = "destinations_tests.rs"]
+mod destinations_tests;

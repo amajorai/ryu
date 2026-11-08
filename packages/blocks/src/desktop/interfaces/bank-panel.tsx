@@ -21,6 +21,7 @@ import { BoardStatusDot } from "./board-status.tsx";
 import { useInlineSign } from "./inline-direction.ts";
 import { threadStatusLabel } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
+import { untitledConversationTitle } from "./thread-display-title.ts";
 
 const PANEL_CLASS =
 	"absolute inset-y-0 end-0 z-30 flex min-h-0 w-full flex-col border-border bg-background xl:static xl:shrink-0 xl:border-s xl:shadow-none";
@@ -209,8 +210,11 @@ export function BankTransactionPanel({
 							<span className="text-muted-foreground text-xs">
 								Conversation
 							</span>
-							<span className="truncate font-medium text-foreground text-sm">
-								{context.thread.title.trim() || "Untitled conversation"}
+							<span
+								className="truncate font-medium text-foreground text-sm"
+								data-ryu-i18n="off"
+							>
+								{untitledConversationTitle(context.thread.title, tl)}
 							</span>
 							<span className="truncate text-muted-foreground text-xs">
 								{agentNames(context.agents)}

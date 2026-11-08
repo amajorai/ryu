@@ -22,10 +22,7 @@ import {
 import { z } from "zod";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
-import {
-	listChatBroadcastConversations,
-	sendChatBroadcastTurn,
-} from "@/src/lib/api/chat-broadcast.ts";
+import { listChatBroadcastConversations } from "@/src/lib/api/chat-broadcast.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { resolveNodeShareOrigins } from "@/src/lib/api/node-share.ts";
 import {
@@ -242,10 +239,16 @@ export function buildPluginHostCoreServices({
 			listChatBroadcastConversations(toTarget(node)).then(
 				z.array(chatConversationSummarySchema).parse
 			),
+		// App-authored turns go through Core's host bridge, which applies the
+		// app-send firewall and the ask-before-send approval queue under the
+		// host-owned plugin id. Never post them to /api/chat/stream as the user.
 		chatSend: (input) =>
-			sendChatBroadcastTurn(toTarget(node), input).then(
-				chatSendResultSchema.parse
-			),
+			pluginHostInvoke(
+				toTarget(node),
+				companion.pluginId,
+				"chat.send",
+				input
+			).then(chatSendResultSchema.parse),
 		runAgent: (input) =>
 			pluginHostInvoke(
 				toTarget(node),

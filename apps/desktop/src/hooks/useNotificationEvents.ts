@@ -11,6 +11,10 @@ import {
 	streamUserNotifications,
 	type UserNotificationEvent,
 } from "@/src/lib/api/notifications.ts";
+import {
+	openNotificationLink,
+	parseNotificationLink,
+} from "@/src/lib/notifications/notification-link.ts";
 import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
 import { playSound } from "@/src/lib/sounds/play-sound.ts";
 import { getUserAvailabilitySnapshot } from "@/src/lib/user-availability.ts";
@@ -18,21 +22,21 @@ import { useActiveNode } from "./useActiveNode.ts";
 
 const RECONNECT_DELAY_MS = 2000;
 
-/** Raise an OS notification (no-op when the user turned them off). When
- *  the ping carries a notification id, tapping it deep-links to the Inbox — but only
- *  if `onOpen` decides, at CLICK time, that some enabled app still owns that path;
- *  otherwise the click only focuses the window rather than opening a tab that can
- *  only say "App not enabled". Deciding at click time rather than at notify time
- *  matters in both directions: a ping that arrives before the contributions feed has
- *  loaded is still clickable once it lands, and a notification left on screen across
- *  an uninstall stops leading anywhere. */
+/** Raise an OS notification (no-op when the user turned them off). Tapping it
+ *  runs `onOpen`, which decides at CLICK time where to go: an allowlisted `link`
+ *  the ping carries, else the Inbox — but only if some enabled app still owns
+ *  that path; otherwise the click only focuses the window rather than opening a
+ *  tab that can only say "App not enabled". Deciding at click time rather than at
+ *  notify time matters in both directions: a ping that arrives before the
+ *  contributions feed has loaded is still clickable once it lands, and a
+ *  notification left on screen across an uninstall stops leading anywhere. */
 function osNotify(event: UserNotificationEvent, onOpen: () => void): void {
 	showOsNotification({
 		title: event.title,
 		body: event.body,
 		tag: event.notification_id,
 		onClick: () => {
-			if (event.notification_id) {
+			if (event.notification_id || event.link) {
 				onOpen();
 			}
 		},
@@ -89,13 +93,27 @@ export function useNotificationEvents(): void {
 			const isAlert =
 				visibleEvent.level === "error" || visibleEvent.level === "warning";
 			const notify = isAlert ? toast.error : toast.info;
+			const linked = parseNotificationLink(visibleEvent.link);
 			notify({
 				title: visibleEvent.title,
 				description: visibleEvent.body ?? undefined,
+				...(linked
+					? {
+							button: {
+								title: "Open",
+								onClick: () => {
+									openNotificationLink(visibleEvent.link, openTab);
+								},
+							},
+						}
+					: {}),
 			});
 			playSound(isAlert ? "alert" : "message", { source: "stream" });
 			osNotify(visibleEvent, () => {
-				if (inboxOwnerRef.current) {
+				if (openNotificationLink(visibleEvent.link, openTab)) {
+					return;
+				}
+				if (visibleEvent.notification_id && inboxOwnerRef.current) {
 					openTab("/inbox");
 				}
 			});

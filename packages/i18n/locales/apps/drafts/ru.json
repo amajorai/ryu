@@ -1,4 +1,7 @@
 {
+  "Failed to send": "Не удалось отправить",
+  "Send failed": "Ошибка отправки",
+  "Send was interrupted; review and resend": "Отправка прервана; проверьте и отправьте снова",
   "Sending at a set time": "Отправка в заданное время",
   "Sending at {when}": "Отправка в {when}",
   "Waiting for agents to start, then finish": "Ожидание запуска и завершения агентов",

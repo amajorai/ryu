@@ -333,13 +333,14 @@ export const SESSION_STRONG_FACTOR_FIELD = "strongFactor";
 
 /**
  * `delegated` marks a device-flow session (the desktop app and CLI, or a
- * cross-device website sign-in) issued to a staff account. Approving the device (`/device/approve`) is refused to a
- * staff session that has not proved a strong factor, so the device session
- * inherits that proof. Any other account's device session is stamped only
- * when the session that approved it had proved a strong factor (a single-use
- * proof recorded at `/device/approve`), so a device approved by an email- or
- * social-signed-in session is not grandfathered in after a promotion, and does
- * not satisfy an organization that requires two-factor.
+ * cross-device website sign-in) whose approval came from a session that had
+ * proved a strong factor: a single-use proof recorded at `/device/approve` and
+ * consumed at redemption. This holds for every account, staff or not; the
+ * role at redemption never stands in for the proof, so a device approved by an
+ * email- or social-signed-in session is not grandfathered in after a
+ * promotion, and does not satisfy an organization that requires two-factor.
+ * (`/device/approve` is also refused to a staff session without a strong
+ * factor.)
  */
 export type StrongSessionFactor = "backup" | "delegated" | "passkey" | "totp";
 

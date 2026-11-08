@@ -32,6 +32,11 @@ import {
 	useTableResizeCommits,
 	useTableResizeIndicators,
 } from "./table-node-resize-helpers.ts";
+import {
+	getTableInlineSign,
+	type TableInlineSign,
+	toInlineResizeDelta,
+} from "./table-node-resize-rtl.ts";
 
 export function useTableResizeController({
 	deferColumnResize,
@@ -67,6 +72,8 @@ export function useTableResizeController({
 	const cleanupListenersRef = useRef<(() => void) | null>(null);
 	const marginLeftRef = useRef(marginLeft);
 	const dragStateRef = useRef<TableResizeDragState | null>(null);
+	// Direction of the table's inline axis, read when a resize starts.
+	const inlineSignRef = useRef<TableInlineSign>(1);
 	const previewHandleKeyRef = useRef<string | null>(null);
 	const overrideColSize = useOverrideColSize();
 	const overrideMarginLeft = useOverrideMarginLeft();
@@ -148,7 +155,11 @@ export function useTableResizeController({
 
 			const currentPosition =
 				dragState.direction === "bottom" ? event.clientY : event.clientX;
-			const delta = currentPosition - dragState.initialPosition;
+			const delta = toInlineResizeDelta(
+				currentPosition - dragState.initialPosition,
+				dragState.direction,
+				inlineSignRef.current
+			);
 
 			if (dragState.direction === "bottom") {
 				const newHeight = roundCellSizeToStep(
@@ -278,6 +289,7 @@ export function useTableResizeController({
 				tableRef.current?.rows.item(rowIndex)?.getBoundingClientRect().height ??
 				0;
 
+			inlineSignRef.current = getTableInlineSign(tableRef.current);
 			dragStateRef.current = {
 				colIndex,
 				direction,
@@ -380,6 +392,9 @@ export function useTableResizeController({
 				tableRef.current?.rows.item(rowIndex)?.getBoundingClientRect().height ??
 				0;
 
+			// Arrow keys are physical: under RTL ArrowLeft moves the inline-end
+			// edge outward, so applyResize flips the sign like a pointer drag.
+			inlineSignRef.current = getTableInlineSign(tableRef.current);
 			dragStateRef.current = {
 				colIndex,
 				direction,

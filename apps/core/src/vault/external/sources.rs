@@ -1,13 +1,11 @@
-//! Sources (pull): create, live lookup, and sync.
+//! Sources: folders bound to a remote path (live or sync).
 //!
-//! Split out of [`super`], which re-exports the public items at their
-//! original paths.
+//! test-exempt: split out of `external/mod.rs` unchanged in shape; exercised
+//! end to end by `external/tests.rs` and `external/targets/tests.rs`.
 
 use super::*;
 
 impl PluginSecretStore {
-    // ── Sources ───────────────────────────────────────────────────────────
-
     /// Bind a folder to a remote path at node scope `scope_id`.
     pub async fn external_source_create(
         &self,
@@ -40,6 +38,12 @@ impl PluginSecretStore {
         )?;
         let conn = self.conn.lock().await;
         let store = store_locked(&conn, &input.store_id)?;
+        if store.kind.is_sync_target() {
+            return Err(invalid(format!(
+                "{} stores are push-only; add a destination instead",
+                store.kind.as_str()
+            )));
+        }
         let clash: Option<String> = conn
             .query_row(
                 "SELECT 'folder' FROM vault_external_sources

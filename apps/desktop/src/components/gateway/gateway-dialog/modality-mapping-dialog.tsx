@@ -69,6 +69,7 @@ const MODALITY_PROVIDER_LABELS = new Map<string, string>(
 		// The donated OpenAI allowance is its own id so its spend is never mixed
 		// with the operator's own `openai` key; its label keeps the two apart too.
 		"openai-credits": "OpenAI (donated credits)",
+		"azure-credits": "Azure OpenAI (Ryu credits)",
 		voyage: "Voyage AI",
 		jina: "Jina AI",
 		cohere: "Cohere",

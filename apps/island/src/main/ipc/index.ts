@@ -4,6 +4,7 @@ import {
 	isMaterialAppearance,
 } from "../../shared/appearance.ts";
 import { registerScreenSurfaceIpc } from "../screen-surface.ts";
+import { registerSystemLanguagesIpc } from "../system-languages-ipc.ts";
 import { registerAgentsIpc } from "./agents.ts";
 import { registerAppearanceIpc } from "./appearance.ts";
 import { registerCatalogIpc } from "./catalog.ts";
@@ -74,6 +75,7 @@ export function registerIpc(
 	registerAgentsIpc(() => activeWindow);
 	registerKeybindingsIpc(() => activeWindow);
 	registerLanguagePacksIpc(() => activeWindow);
+	registerSystemLanguagesIpc();
 	registerTtsIpc(() => activeWindow);
 	registerWindowIpc();
 }

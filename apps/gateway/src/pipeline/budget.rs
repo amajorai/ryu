@@ -439,10 +439,7 @@ pub(super) fn keep_own_supply_in_its_lane(
     primary: &ProviderId,
     chain: Vec<ProviderId>,
 ) -> Vec<ProviderId> {
-    let own = |provider: &ProviderId| {
-        crate::credit_pools::pool_for_gateway_provider(provider.as_str())
-            .is_some_and(crate::credit_pools::is_own_supply_pool)
-    };
+    let own = |provider: &ProviderId| crate::credit_pools::is_ryu_held_slot(provider.as_str());
     if own(primary) {
         return chain.into_iter().filter(|p| p == primary).collect();
     }

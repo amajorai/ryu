@@ -12,11 +12,14 @@ use serde_json::Value;
 
 const CASES: &str = include_str!("../fixtures/capability-taxonomy-cases-v1.json");
 
-/// Core's facade verb table, read as text so this suite runs without building
-/// Core. The verb-to-capability check below fails when a verb is added there
-/// without a taxonomy row here.
-const CAPABILITY_TOOLS: &str =
-    include_str!("../../../../apps/core/src/sidecar/mcp/capability_tools.rs");
+/// Core's facade constants and verb table, read as text so this suite runs
+/// without building Core. The verb-to-capability check below fails when a verb
+/// is added there without a taxonomy row here. The table (`verbs()`) comes
+/// last, so its body runs to the end of the text.
+const CAPABILITY_TOOLS: &str = concat!(
+    include_str!("../../../../apps/core/src/sidecar/mcp/capability_tools.rs"),
+    include_str!("../../../../apps/core/src/sidecar/mcp/capability_tools/table.rs"),
+);
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

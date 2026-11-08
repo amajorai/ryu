@@ -416,7 +416,7 @@ describe("forum model", () => {
 		expect(swatchColor(0)).toContain("var(--primary)");
 		expect(swatchColor(3)).toContain("var(--primary)");
 		expect(swatchColor(0)).not.toBe(swatchColor(1));
-		expect(joinNames(["A", "B", "C"])).toBe("A, B and C");
+		expect(joinNames(["A", "B", "C"])).toBe("A, B, and C");
 	});
 });
 

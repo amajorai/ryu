@@ -24,6 +24,9 @@ export interface SpaceDocumentRow {
 	 * they will make twice. Core guarantees this is never the document's contents.
 	 */
 	indexMessage?: string | null;
+	/** Core's stable `reason_code` behind {@link indexMessage}; the row words a
+	 *  `failed` file from it (see `spaces-file-failure-message.ts`). */
+	indexReasonCode?: string | null;
 	/**
 	 * What happened to this document's **contents**.
 	 *

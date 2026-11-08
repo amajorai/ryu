@@ -144,10 +144,18 @@ pub(super) fn approval_push_message(
 ) -> serde_json::Value {
     let title = Message::new(messages::APPROVAL_NEEDED_TITLE_MESSAGE).render(locale);
     if show_content {
+        // Only a title rendered from the request's messages gets the RTL mark;
+        // a raw (often English) title would have its end punctuation flipped.
+        let body = req.localized_title(locale);
+        let body = if body == req.title {
+            body
+        } else {
+            crate::i18n::bidi::rtl_body(body, locale)
+        };
         serde_json::json!({
             "to": token,
             "title": title,
-            "body": req.localized_title(locale),
+            "body": body,
             "sound": "default",
             "data": { "approval_id": req.id, "kind": req.kind },
         })
@@ -155,7 +163,10 @@ pub(super) fn approval_push_message(
         serde_json::json!({
             "to": token,
             "title": title,
-            "body": Message::new(messages::APPROVAL_WAITING_BODY_MESSAGE).render(locale),
+            "body": crate::i18n::bidi::rtl_body(
+                Message::new(messages::APPROVAL_WAITING_BODY_MESSAGE).render(locale),
+                locale,
+            ),
             "sound": "default",
             "data": { "approval_id": req.id },
         })

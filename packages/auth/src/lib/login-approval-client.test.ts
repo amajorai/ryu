@@ -34,7 +34,6 @@ const request = {
 	status: "pending" as const,
 	surface: "desktop" as const,
 	userAgent: "Ryu Desktop Test",
-	userCode: "ABCD2345",
 };
 
 describe("login approval client", () => {
@@ -82,8 +81,30 @@ describe("login approval client", () => {
 		await expect(
 			listLoginApprovals("https://api.example", { token: "session-token" })
 		).resolves.toEqual([request]);
+		// A legacy row that still carries the user code is parsed without it.
+		let narrowedUrl = "";
+		globalThis.fetch = fetchFixture(async (input) => {
+			narrowedUrl = String(input);
+			return Response.json({
+				requests: [{ ...request, userCode: "ABCD2345" }],
+			});
+		});
+		const [legacy] = await listLoginApprovals(
+			"https://api.example",
+			{},
+			undefined,
+			"ABCD-2345"
+		);
+		expect(legacy).not.toHaveProperty("userCode");
+		expect(narrowedUrl).toBe(
+			"https://api.example/api/login-approvals/pending?code=ABCD-2345"
+		);
+		globalThis.fetch = fetchFixture(async (input, init) => {
+			calls.push(new Request(input, init));
+			return Response.json({ ok: true, status: "approved" });
+		});
 		await expect(
-			approveLoginApproval("https://api.example", "request-1", {
+			approveLoginApproval("https://api.example", "request-1", "ABCD2345", {
 				token: "session-token",
 			})
 		).resolves.toBeUndefined();
@@ -92,6 +113,8 @@ describe("login approval client", () => {
 		expect(calls[1]?.url).toBe(
 			"https://api.example/api/login-approvals/pending/request-1/approve"
 		);
+		// Number matching: the approver sends back the code the device shows.
+		expect(await calls[1]?.json()).toEqual({ code: "ABCD2345" });
 	});
 
 	it("rejects refused and failed reads with their HTTP status and unchanged message", async () => {

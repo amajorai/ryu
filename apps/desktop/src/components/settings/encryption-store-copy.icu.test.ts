@@ -170,7 +170,10 @@ describe("encryption store copy through the ICU formatter", () => {
 				row("source-history", { reason: "ENOSPC", status: "plaintext" }),
 				tl
 			);
-			expect(history.detail).toContain("(ENOSPC)");
+			// Arabic isolates the Latin reason (FSI ... PDI); strip the marks here.
+			expect(history.detail.replace(/[\u2066-\u2069]/gu, "")).toContain(
+				"(ENOSPC)"
+			);
 			for (const text of [...agents.notes, ...spaces.notes, history.detail]) {
 				expect(text).not.toMatch(/did not open|uploaded files|\{/);
 			}

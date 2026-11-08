@@ -76,12 +76,13 @@ test("footer keeps GitHub and its star count in the build row", () => {
 	expect(html).toContain("1,234");
 });
 
-test("footer community row names X, Product Hunt and Discord", () => {
+test("footer community row names X and Discord, not Product Hunt", () => {
 	const html = renderToStaticMarkup(<Footer />);
 	const community = html.slice(html.indexOf('aria-label="Community"'));
 
 	expect(community).toContain('aria-label="Ryu on X"');
-	expect(community).toContain('aria-label="Ryu on Product Hunt"');
+	expect(html).not.toContain("Product Hunt");
+	expect(html).not.toContain("producthunt.com");
 	expect(community).toContain('aria-label="Ryu on Discord"');
 	expect(community).toContain('href="/community"');
 	expect(community).toContain('href="https://x.com/ryuhq"');

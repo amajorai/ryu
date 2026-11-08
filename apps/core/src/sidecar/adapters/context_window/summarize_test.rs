@@ -93,3 +93,28 @@ fn both_prompts_mark_the_excerpt_as_data() {
         assert!(prompt.contains("standing permissions"), "{prompt}");
     }
 }
+
+#[test]
+fn the_summary_memo_stays_bounded_and_keeps_the_newest_entry() {
+    let mut cache = HashMap::new();
+    let total = MAX_CACHED_SUMMARIES as u64 + 10;
+    for key in 0..total {
+        remember_summary(&mut cache, key, format!("summary {key}"));
+        assert!(cache.len() <= MAX_CACHED_SUMMARIES);
+    }
+    let newest = total - 1;
+    assert_eq!(cache.get(&newest).map(String::as_str), Some("summary 265"));
+}
+
+#[test]
+fn re_remembering_a_cached_key_at_capacity_does_not_clear_the_memo() {
+    let mut cache = HashMap::new();
+    for key in 0..MAX_CACHED_SUMMARIES as u64 {
+        remember_summary(&mut cache, key, format!("summary {key}"));
+    }
+    assert_eq!(cache.len(), MAX_CACHED_SUMMARIES);
+    remember_summary(&mut cache, 3, "updated".to_owned());
+    assert_eq!(cache.len(), MAX_CACHED_SUMMARIES);
+    assert_eq!(cache.get(&3).map(String::as_str), Some("updated"));
+    assert!(cache.contains_key(&0));
+}

@@ -143,6 +143,7 @@
   "Starting workflow…": "جارٍ بدء سير العمل…",
   "Submission moderation": "الإشراف على المشاركات",
   "Tell us more": "أخبرنا المزيد",
+  "The Feedback Board bridge is unavailable in this Ryu host.": "جسر Feedback Board غير متاح في مضيف Ryu هذا.",
   "The Ryu host bridge did not return a workspace.": "لم يُرجع جسر مضيف Ryu أي مساحة عمل.",
   "The Ryu host bridge is unavailable.": "جسر مضيف Ryu غير متاح.",
   "The inbox is clear.": "صندوق الوارد فارغ.",

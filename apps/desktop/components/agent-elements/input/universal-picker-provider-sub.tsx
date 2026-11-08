@@ -23,6 +23,7 @@ import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { useSubscriptions } from "@/src/hooks/useSubscriptions.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { discoverModels, isPiModelEnabled } from "@/src/lib/api/pi-config.ts";
+import { effortLevelLabel } from "@/src/lib/effort-level-label.ts";
 import {
 	showsComposerTuning,
 	showsModelPicker,
@@ -235,7 +236,7 @@ export function ProviderSubBody({
 		ariaLabel: "Thinking",
 		items: thinkingLevels.map((level) => ({
 			id: level,
-			name: level.charAt(0).toUpperCase() + level.slice(1),
+			name: effortLevelLabel(level, tl),
 		})),
 		value: provider.currentThinking ?? undefined,
 		onChange: onThinking,

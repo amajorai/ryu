@@ -123,7 +123,7 @@ export function FilePlaceholder({ artifact }: { artifact: ArtifactView }) {
 			/>
 			<span className="max-w-xs text-center text-muted-foreground text-xs">
 				{tl("{title} — open it in the side panel or as a tab to view it.", {
-					title: artifact.title || "File",
+					title: artifact.title || tl("File"),
 				})}
 			</span>
 		</div>

@@ -152,6 +152,7 @@ pub(crate) async fn route_chat_stream_inner(
         &binding.effective_agent_id,
         &scope.memory_project_id,
         &user_text,
+        persisted_user_message_id.as_deref(),
     )
     .await;
     let TurnRoute {

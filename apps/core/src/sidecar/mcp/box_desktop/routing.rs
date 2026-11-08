@@ -30,15 +30,20 @@ pub(crate) async fn route(
         return unattributed(store, conversation_id).await.map(Err);
     };
     // Refuse arguments outside the canonical schema before any Box is acquired.
-    if let Err(error) = plan(tool_id, arguments) {
-        return Some(Err(error));
-    }
+    let planned = match plan(tool_id, arguments) {
+        Ok(planned) => planned,
+        Err(error) => return Some(Err(error)),
+    };
     let target = match target_for(&resolved, conversation_id).await {
         Ok(Some(target)) => target,
         Ok(None) => return None,
         Err(error) => return Some(Err(error)),
     };
-    let result = call(&target, tool_id, arguments.clone()).await;
+    let result = match planned {
+        Planned::Fill(args) => fill::run(store, conversation_id, &target, args).await,
+        Planned::ListCredentials => fill::list(store, conversation_id, &target).await,
+        _ => call(&target, tool_id, arguments.clone()).await,
+    };
     session_box::touch(&resolved.key).await;
     Some(result)
 }
@@ -138,6 +143,10 @@ pub(in crate::sidecar::mcp::box_desktop) enum Planned {
     Desktop(Value),
     /// A browser verb and its body for `/browser/:verb`.
     Browser { verb: &'static str, body: Value },
+    /// `browser.fill_credential`, served by [`fill::run`], never `/browser/:verb`.
+    Fill(fill::FillArgs),
+    /// `browser.list_credentials`, served by [`fill::list`] from Core's vault.
+    ListCredentials,
 }
 
 /// Check `arguments` against the verb's canonical schema and build the Box
@@ -156,6 +165,11 @@ pub(in crate::sidecar::mcp::box_desktop) fn plan(
         _ => bail!("{} arguments must be an object", verb.id),
     };
     check_against_schema(verb.id, &(verb.schema)(), &arguments)?;
+    match verb.id {
+        "browser.fill_credential" => return Ok(Planned::Fill(fill::FillArgs::parse(&arguments)?)),
+        "browser.list_credentials" => return Ok(Planned::ListCredentials),
+        _ => {}
+    }
     if verb.capability == CAP_BROWSER {
         return Ok(Planned::Browser {
             verb: verb.name,
@@ -257,6 +271,10 @@ pub(in crate::sidecar::mcp::box_desktop) async fn execute(
                 "verb": verb,
                 "result": raw.get("result").cloned().unwrap_or(Value::Null),
             }))
+        }
+        // A credential fill needs the conversation's agent (`route`).
+        Planned::Fill(_) | Planned::ListCredentials => {
+            Err(anyhow!("Credential fills need a conversation."))
         }
     }
 }

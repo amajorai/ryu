@@ -49,11 +49,13 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::ServerState;
-use crate::approvals::{ApprovalRequest, PendingAction};
 
 /// The content gate (Gateway firewall secret and prompt-injection check) for
 /// app sends and widget follow-ups (`server::widgets`); see the module docs.
 pub(crate) mod ingress;
+
+/// The gate sequence shared by `chat.startTurn` and the Companion `chat.send`.
+pub(crate) mod submit;
 
 /// Preference key: ask before an app posts a turn on the user's behalf.
 ///
@@ -133,16 +135,8 @@ pub async fn host_chat_start_turn(
     // conversation proof plus verified caller binding, allowing this capability
     // on a shared node would let an app choose another user's destination.
     // Personal/unbound nodes retain the local single-user behavior.
-    if crate::sidecar::control_plane::registered_org().is_some()
-        || crate::sidecar::control_plane::is_managed_node()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "chat.startTurn is unavailable on managed nodes until the host caller is bound to the destination conversation and agent"
-            })),
-        )
-            .into_response();
+    if let Err(refusal) = submit::refuse_shared_node() {
+        return refusal.into_capability_response();
     }
     // The authenticated calling app is the only trustworthy source for this
     // app-run signal. Core keeps it local until the existing anonymous beacon
@@ -166,118 +160,33 @@ pub async fn host_chat_start_turn(
     }
 
     // A new conversation gets a fresh id here rather than inside the runner, so the
-    // id is known BEFORE the send — it has to be, because an approval-gated send
-    // answers the caller long before the turn runs, and the caller still needs to
-    // know where the message will land.
+    // id is known BEFORE the send — an approval-gated send answers the caller long
+    // before the turn runs, and the caller still needs to know where it will land.
     let conversation_id = body
         .conversation_id
         .clone()
         .filter(|id| !id.trim().is_empty())
         .unwrap_or_else(|| format!("appsend_{}", uuid::Uuid::new_v4().simple()));
 
-    // Command-risk gate (the exec scan: hardline commands, deletion, supply
-    // chain), mirroring the widget follow-up path. An app's prompt is no more
-    // trusted than a widget's. The content gate (secrets, prompt injection)
-    // follows it.
-    let scan = crate::sidecar::gateway::check_exec_scan(
-        "app-send",
-        text,
-        Some(&conversation_id),
-        body.agent_id.as_deref(),
-    )
-    .await;
-    if let crate::sidecar::gateway::ExecScanOutcome::Deny(reason) = scan {
-        crate::sidecar::gateway::report_exec_audit_with_attribution(
-            "app-send",
-            "start_turn",
-            0,
-            1,
-            Some(conversation_id.clone()),
-            Some(reason.clone()),
-            crate::sidecar::gateway::ExecAuditAttribution {
-                agent_id: body.agent_id.clone(),
-                feature: Some("agent".to_owned()),
-                ..Default::default()
-            },
-        )
-        .await;
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": reason }))).into_response();
-    }
-
-    // Content gate: the Gateway firewall's secret and prompt-injection
-    // guardrails, fail-closed (a block, an error or an unreachable Gateway all
-    // refuse). Runs before the approval is queued, so a refused send never
-    // reaches the inbox or a turn.
-    if let Err(reason) = ingress::govern_ingress("app-send", text).await {
-        crate::sidecar::gateway::report_exec_audit_with_attribution(
-            "app-send",
-            "start_turn",
-            0,
-            1,
-            Some(conversation_id.clone()),
-            Some(reason.clone()),
-            crate::sidecar::gateway::ExecAuditAttribution {
-                agent_id: body.agent_id.clone(),
-                feature: Some("agent".to_owned()),
-                ..Default::default()
-            },
-        )
-        .await;
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": reason }))).into_response();
-    }
-
-    let action = PendingAction::AppSendTurn {
-        plugin_id: plugin_id.clone(),
-        agent_id: body.agent_id.clone(),
+    // Exec scan, firewall ingress, then the approval gate (or the run itself):
+    // the same sequence the Companion `chat.send` bridge verb goes through.
+    let request = submit::AppSendRequest {
+        plugin_id,
+        agent_id: body.agent_id,
         conversation_id: conversation_id.clone(),
-        cwd: body.cwd.clone(),
+        cwd: body.cwd,
         text: text.to_owned(),
-        model: body.model.clone(),
+        model: body.model,
     };
-
-    if ask_before_send(&state).await {
-        let Some(engine) = crate::approvals::global_engine() else {
-            // Fail CLOSED. The gate is ON and there is no inbox to raise it in, so
-            // the send does not happen — an unapprovable send must never fall
-            // through to an unapproved one.
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({
-                    "error": "approval is required for app sends, but the approvals engine is unavailable"
-                })),
-            )
-                .into_response();
-        };
-        let req = ApprovalRequest::for_app_send(&plugin_id, text, action);
-        return match engine.request(req).await {
-            Ok(created) => (
-                StatusCode::ACCEPTED,
-                Json(json!({
-                    "status": "pending_approval",
-                    "approval_id": created.id,
-                    "conversation_id": conversation_id,
-                })),
-            )
-                .into_response(),
-            Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("could not queue the approval: {e}") })),
-            )
-                .into_response(),
-        };
-    }
-
-    // Gate off: run it now, through the SAME executor an approved send uses, so the
-    // two paths cannot drift into behaving differently.
-    match crate::approvals::execute_app_send_turn(&action).await {
-        Ok(()) => {
-            Json(json!({ "status": "sent", "conversation_id": conversation_id })).into_response()
+    match submit::submit_app_send(&state, request, submit::Execution::Await).await {
+        Ok(outcome) => {
+            let status = match outcome {
+                submit::AppSendOutcome::PendingApproval { .. } => StatusCode::ACCEPTED,
+                _ => StatusCode::OK,
+            };
+            (status, Json(outcome.to_json(&conversation_id))).into_response()
         }
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(refusal) => refusal.into_capability_response(),
     }
 }
 

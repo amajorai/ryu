@@ -1,4 +1,7 @@
 {
+  "Failed to send": "전송 실패",
+  "Send failed": "전송 실패",
+  "Send was interrupted; review and resend": "전송이 중단되었습니다. 검토 후 다시 보내세요",
   "Sending at a set time": "지정한 시간에 전송",
   "Sending at {when}": "{when}에 전송",
   "Waiting for agents to start, then finish": "에이전트가 시작하고 완료되기를 기다리는 중",

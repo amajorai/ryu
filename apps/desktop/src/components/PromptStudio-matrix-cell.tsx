@@ -3,7 +3,7 @@
 import { Copy01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Markdown } from "@ryu/blocks/desktop/agent-elements/markdown.tsx";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -32,7 +32,10 @@ import {
 } from "@/src/lib/api/prompt-suites.ts";
 import type { TestCaseRow } from "@/src/lib/prompt-studio.ts";
 import { parsePromptfooValue } from "@/src/lib/promptfoo.ts";
+import { assertionDetailText } from "./PromptStudio-assertion-detail.ts";
+import { assertionLabel } from "./PromptStudio-assertion-label.ts";
 import { pct, scoreTone } from "./PromptStudio-format.ts";
+import { scoreDetailLines } from "./PromptStudio-score-details.ts";
 
 export function CaseLabel({
 	row,
@@ -209,7 +212,7 @@ export function MatrixCell({
 					{pct(score.overall)}
 				</span>
 			</div>
-			<AssertionChips assertions={score.assertions} />
+			<AssertionChips assertions={score.assertions} tl={tl} />
 			{score.evaluators && score.evaluators.length > 0 ? (
 				<div className="flex flex-wrap gap-1">
 					{score.evaluators.map((evaluator) => (
@@ -292,29 +295,9 @@ export function MatrixCell({
 						</pre>
 					)}
 					<div className="grid grid-cols-2 gap-1 text-muted-foreground">
-						<span>
-							{tl("Latency score: {score}", {
-								score:
-									score.latency_available === false
-										? "N/A"
-										: pct(score.latency_score),
-							})}
-						</span>
-						<span>
-							{tl("Tokens: {tokens}", {
-								tokens: String(score.total_tokens ?? "—"),
-							})}
-						</span>
-						<span>
-							{tl("Cost: {cost}µUSD", {
-								cost: String(score.cost_micro_usd ?? "unknown"),
-							})}
-						</span>
-						<span>
-							{tl("Cache: {state}", {
-								state: score.cache_hit ? "hit" : "miss",
-							})}
-						</span>
+						{scoreDetailLines(score, tl).map((line) => (
+							<span key={line}>{line}</span>
+						))}
 					</div>
 					{score.error ? (
 						<p className="text-status-destructive">{score.error}</p>
@@ -402,7 +385,13 @@ export function MatrixCell({
 	);
 }
 
-function AssertionChips({ assertions }: { assertions: AssertionResult[] }) {
+function AssertionChips({
+	assertions,
+	tl,
+}: {
+	assertions: AssertionResult[];
+	tl: LiteralMessage;
+}) {
 	if (assertions.length === 0) {
 		return null;
 	}
@@ -410,15 +399,24 @@ function AssertionChips({ assertions }: { assertions: AssertionResult[] }) {
 		<div className="flex flex-wrap gap-1">
 			{assertions.map((a, i) => {
 				const className = `rounded px-1 py-0.5 type-compact ${a.pass ? "bg-success/15 text-status-success dark:text-status-success" : "bg-destructive/15 text-status-destructive"}`;
-				return a.detail ? (
+				const label = assertionLabel(a.kind, tl);
+				const detail = assertionDetailText(a, tl);
+				return detail ? (
 					<Tooltip
 						// assertion results are positional and have no stable id
 						key={`${a.kind}-${i}`}
 					>
 						<TooltipTrigger
-							render={<span className={className}>{a.kind}</span>}
+							render={<span className={className}>{label}</span>}
 						/>
-						<TooltipContent>{a.detail}</TooltipContent>
+						<TooltipContent>
+							{detail.message}
+							{detail.raw ? (
+								<bdi className="block font-mono" dir="ltr">
+									{detail.raw}
+								</bdi>
+							) : null}
+						</TooltipContent>
 					</Tooltip>
 				) : (
 					<span
@@ -426,7 +424,7 @@ function AssertionChips({ assertions }: { assertions: AssertionResult[] }) {
 						// assertion results are positional and have no stable id
 						key={`${a.kind}-${i}`}
 					>
-						{a.kind}
+						{label}
 					</span>
 				);
 			})}

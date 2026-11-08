@@ -44,7 +44,7 @@
     "@ryu/config": "workspace:*",
     "@types/react": "^19.2.10",
     "@types/react-dom": "catalog:",
-    "next": "16.4.1",
+    "next": "16.4.5",
     "react-router-dom": "^7",
     "typescript": "^5.9.3"
   }

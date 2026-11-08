@@ -99,6 +99,12 @@ pub(in crate::server) async fn proactive_opening(
         .filter(|id| !id.is_empty())
         .unwrap_or("ryu")
         .to_owned();
+    // The collection-level `agent.run` above is not enough: the named agent's own
+    // resource ACL and fleet policy must admit this caller before a claim is taken
+    // or the agent runs with this conversation's history.
+    if let Err(resp) = enforce_opening_agent_runnable(&state, &caller, &agent_id).await {
+        return resp;
+    }
     let idempotency_key = req
         .idempotency_key
         .as_deref()
@@ -178,6 +184,7 @@ pub(in crate::server) async fn proactive_opening(
     let result = run_proactive_opening_text(
         conversation_id.clone(),
         Some(agent_id),
+        opening_agent_authorization(&state, &caller),
         Arc::clone(&state.agents),
         state.conversations.clone(),
         state.agent_store.clone(),

@@ -33,6 +33,7 @@ import {
 	memoryScopeLabels,
 } from "@/src/lib/api/memory.ts";
 import { fetchSpaces, type Space } from "@/src/lib/api/spaces.ts";
+import { spaceDisplayName } from "@/src/lib/spaces/system-space-label.ts";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -361,7 +362,7 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 											onCheckedChange={() => toggleSpace(space.id)}
 										/>
 										<Label htmlFor={checkId} variant="agent-choice">
-											{space.name}
+											{spaceDisplayName(space, tl)}
 										</Label>
 									</div>
 								);

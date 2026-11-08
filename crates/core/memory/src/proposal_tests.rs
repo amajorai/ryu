@@ -3,7 +3,10 @@
 //! listing. A child module of the crate root so it can tamper with a stored
 //! proposal payload to reach the approval-time re-validation.
 
+use rusqlite::params;
+
 use super::*;
+use crate::proposals::MemoryProposalPayload;
 
 fn draft(content: &str) -> MemoryProposalDraft {
     MemoryProposalDraft {
@@ -16,6 +19,7 @@ fn draft(content: &str) -> MemoryProposalDraft {
         tags: vec!["dream".to_owned()],
         author_agent_id: Some("agent-a".to_owned()),
         metadata: MemoryMetadata::default(),
+        sources: Vec::new(),
     }
 }
 

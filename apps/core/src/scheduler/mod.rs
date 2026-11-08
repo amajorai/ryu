@@ -20,6 +20,7 @@ pub mod cron;
 pub(crate) mod legacy_quest_jobs;
 pub(crate) mod legacy_targets;
 pub mod store;
+pub(crate) mod workflow_run_access;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -742,6 +743,15 @@ async fn run_target_with_job(
 ) -> Result<Option<String>, String> {
     match target {
         JobTarget::Workflow { workflow_id, input } => {
+            // Like agent routines, the owner's `workflow.run` is re-read at
+            // every firing, so revoking it stops the routine.
+            if let Some(job) = job {
+                workflow_run_access::require_owner_may_run_workflow(
+                    job.owner_user_id.as_deref(),
+                    workflow_id,
+                )
+                .await?;
+            }
             let workflow = crate::workflow::store::load_workflow(workflow_id)
                 .map_err(|_| format!("workflow '{workflow_id}' not found"))?;
             let run_id = format!("run_{}", uuid::Uuid::new_v4().simple());

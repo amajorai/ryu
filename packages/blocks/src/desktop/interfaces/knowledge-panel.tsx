@@ -91,7 +91,7 @@ export function KnowledgePanel({
 	const tl = useLiteralMessages();
 	if (view.kind === "thread") {
 		const { origin, thread } = view;
-		const title = thread?.title ?? "New conversation";
+		const title = thread?.title.trim() || tl("New conversation");
 		const agents = (thread?.agentIds ?? [])
 			.map((agentId) => agentById(snapshot, agentId))
 			.filter((agent) => agent !== undefined);
@@ -231,7 +231,7 @@ export function KnowledgePanel({
 						variant="outline"
 					>
 						<SquarePen aria-hidden="true" data-icon="inline-start" />
-						New conversation
+						{tl("New conversation")}
 					</Button>
 				) : null}
 			</header>

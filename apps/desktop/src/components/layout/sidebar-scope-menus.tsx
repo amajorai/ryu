@@ -39,6 +39,7 @@ import {
 	type VisibilityChangeRequest,
 } from "@/src/lib/resource-visibility.ts";
 import { toEpoch } from "@/src/lib/sidebar/date-buckets.ts";
+import { spaceDisplayName } from "@/src/lib/spaces/system-space-label.ts";
 import { isExplicitChatGrouping } from "./sidebar-chat-grouping.tsx";
 import { SidebarChatList } from "./sidebar-chat-list.tsx";
 import type { ChatGroupBy } from "./sidebar-chat-view.ts";
@@ -200,7 +201,11 @@ export function SpaceScopeMenu({
 	const [renameOpen, setRenameOpen] = useState(false);
 	return (
 		<>
-			<ScopeMenu label={tl("{name} options", { name: space.name })}>
+			<ScopeMenu
+				label={tl("{name} options", {
+					name: spaceDisplayName(space, tl),
+				})}
+			>
 				<DropdownMenuItem onClick={onAdd}>
 					<HugeiconsIcon className="size-4" icon={Add01Icon} />
 					Add files to this space…
@@ -234,7 +239,7 @@ export function SpaceScopeMenu({
 							onRequestVisibilityChange({
 								from: resourceVisibilityGroup(space.visibility),
 								id: space.id,
-								name: space.name,
+								name: spaceDisplayName(space, tl),
 								resourceType: "space",
 								to:
 									resourceVisibilityGroup(space.visibility) === "team"
@@ -289,7 +294,7 @@ export function SpaceScopeMenu({
 				)}
 			</ScopeMenu>
 			<EntityIconDialog
-				description={space.name}
+				description={spaceDisplayName(space, tl)}
 				onChange={(next) => {
 					updateTabsIconWhere((t) => t.path === `/spaces/${space.id}`, next);
 					void setSpaceIcon(space.id, next).catch(() => {

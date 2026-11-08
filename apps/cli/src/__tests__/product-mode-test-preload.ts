@@ -9,6 +9,19 @@ import { dirname, join } from "node:path";
 // copy tests assert on.
 // Static imports are hoisted above this assignment, so CLI modules load below.
 process.env.RYU_LOCALE = "en";
+// A coding agent running the suite exports markers (CLAUDECODE, CODEX_*, …)
+// that switch on the `ryu secrets` agent guard. Tests that exercise the guard
+// pass those markers through their own `env`, so strip the ambient ones.
+for (const name of Object.keys(process.env)) {
+	if (
+		name === "CLAUDECODE" ||
+		name === "CURSOR_AGENT" ||
+		name === "AGENT" ||
+		name.startsWith("CODEX_")
+	) {
+		delete process.env[name];
+	}
+}
 const { productModePreferencePath } = await import("../core/productMode.ts");
 
 const originalHome = process.env.HOME;

@@ -230,17 +230,13 @@ async fn confine_for_untrusted_workspace(
              of through the Ryu Gateway.",
         )
     } else {
-        let mut ports = Vec::new();
-        ports.extend(loopback_port(
-            &crate::sidecar::gateway::configured_gateway_url(),
-        ));
-        if is_managed_pi || stdio_targets_inference_proxy(&stdio) {
-            ports.extend(loopback_port(&crate::sidecar::gateway::core_self_url()));
-        }
-        ports.sort_unstable();
-        ports.dedup();
         (
-            Some(ports),
+            Some(untrusted_loopback_ports(
+                loopback_port(&crate::sidecar::gateway::configured_gateway_url()),
+                (is_managed_pi || stdio_targets_inference_proxy(&stdio))
+                    .then(|| loopback_port(&crate::sidecar::gateway::core_self_url()))
+                    .flatten(),
+            )),
             " It can only reach the network through the Ryu Gateway, so web fetches and \
              sign-in refreshes from the agent itself will fail.",
         )
@@ -296,4 +292,15 @@ async fn confine_for_untrusted_workspace(
             unconfined(stdio, format!("{error:#}"), notice)
         }
     }
+}
+
+/// The loopback ports an untrusted workspace's cut network relays: the
+/// Gateway, and Core for the managed Pi or the inference proxy. The
+/// credential broker is never relayed: an untrusted run is not brokered
+/// ([`crate::vault::broker::runtime::decide`]).
+pub(super) fn untrusted_loopback_ports(gateway: Option<u16>, core: Option<u16>) -> Vec<u16> {
+    let mut ports: Vec<u16> = [gateway, core].into_iter().flatten().collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
 }

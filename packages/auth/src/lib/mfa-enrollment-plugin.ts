@@ -7,6 +7,7 @@ import {
 	sessionMiddleware,
 } from "better-auth/api";
 import { z } from "zod";
+import { isLoginApprovalPushApproval } from "./login-approval-push-marker.ts";
 import {
 	forgetMfaEnrollment,
 	hasStrongSecondFactor,
@@ -241,6 +242,7 @@ async function recordDeviceApprovalProof(
 		if (
 			!session ||
 			session.session.impersonatedBy ||
+			isLoginApprovalPushApproval(ctx) ||
 			!(await sessionHasStrongFactor(ctx, session))
 		) {
 			return;
@@ -437,37 +439,21 @@ export function mfaEnrollmentPlugin(
 									context: { body?: unknown; path?: string } | null
 								) => {
 									let factor = strongFactorForLoginPath(context?.path);
+									// A device approved from a session that proved a strong
+									// factor inherits it (see `recordDeviceApprovalProof`). No
+									// proof leaves the session unstamped, whatever the account's
+									// role is now (see `StrongSessionFactor`).
 									if (
 										!factor &&
 										isDeviceSessionPath(context?.path) &&
-										typeof session.userId === "string"
+										typeof session.userId === "string" &&
+										(await consumeDeviceApprovalProof(
+											authContext,
+											context?.body,
+											session.userId
+										))
 									) {
-										// A device approved from a session that proved a strong
-										// factor inherits it (see `recordDeviceApprovalProof`).
-										if (
-											await consumeDeviceApprovalProof(
-												authContext,
-												context?.body,
-												session.userId
-											)
-										) {
-											factor = "delegated";
-										} else {
-											// See `StrongSessionFactor`: the approval was already
-											// refused to a weak staff session. A lookup failure
-											// leaves the session unstamped (refused for staff).
-											const user = await authContext.internalAdapter
-												.findUserById(session.userId)
-												.catch(() => null);
-											if (
-												user &&
-												isPlatformStaff(
-													user as { email?: string; role?: string }
-												)
-											) {
-												factor = "delegated";
-											}
-										}
+										factor = "delegated";
 									}
 									if (!factor) {
 										return;

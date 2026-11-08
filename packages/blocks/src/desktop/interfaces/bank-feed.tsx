@@ -26,6 +26,7 @@ import {
 	transactionMonth,
 	transactionSubtitle,
 } from "./bank-model.ts";
+import { untitledConversationTitle } from "./thread-display-title.ts";
 
 /** A statement month the feed is narrowed to. */
 export interface BankMonthFilter {
@@ -103,8 +104,9 @@ function TransactionRow({
 	selected: boolean;
 	transaction: InterfaceAccountTransaction;
 }) {
+	const tl = useLiteralMessages();
 	const conversation = context
-		? context.thread.title.trim() || "Untitled conversation"
+		? untitledConversationTitle(context.thread.title, tl)
 		: null;
 	return (
 		<li>
@@ -150,7 +152,10 @@ function TransactionRow({
 					<span className="@2xl:flex hidden min-w-0 flex-1 flex-col gap-0.5">
 						{conversation && context ? (
 							<>
-								<span className="truncate text-foreground/80 text-sm">
+								<span
+									className="truncate text-foreground/80 text-sm"
+									data-ryu-i18n="off"
+								>
 									{conversation}
 								</span>
 								<span className="truncate text-muted-foreground text-xs">

@@ -82,7 +82,7 @@ export function ModelDetailPanel({
 					</EmptyMedia>
 					<EmptyTitle>No model selected</EmptyTitle>
 					<EmptyDescription>
-						Pick a model on the left to read what it does and see whether it
+						Pick a model from the list to read what it does and see whether it
 						runs on your device.
 					</EmptyDescription>
 				</EmptyHeader>

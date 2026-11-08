@@ -10,7 +10,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { visualBlock } from "./blocks.ts";
+import { blockHtml, visualBlock } from "./blocks-localized.ts";
 import {
 	CANVAS_SANDBOX,
 	canvasDocument,
@@ -49,6 +49,7 @@ import {
 } from "./visual-editor-config.ts";
 import { VisualEditorInspector } from "./visual-editor-inspector.tsx";
 import { VisualEditorSidebar } from "./visual-editor-sidebar.tsx";
+import { viewportLabel } from "./visual-editor-viewport-labels.ts";
 
 export type {
 	VisualEditorComplete,
@@ -172,10 +173,10 @@ export function VisualEditor({
 			}
 			const block = dragged.block ? visualBlock(dragged.block) : undefined;
 			return block
-				? [{ kind: "insertHtml", ...target, html: block.html }]
+				? [{ kind: "insertHtml", ...target, html: blockHtml(block, tl) }]
 				: null;
 		},
-		[documentModel]
+		[documentModel, tl]
 	);
 
 	// The canvas listeners live in this realm; keep them pointed at fresh state.
@@ -337,7 +338,7 @@ export function VisualEditor({
 				? resolveDrop(documentModel, null, selectedId, "after")
 				: resolveDrop(documentModel, null, ROOT_NODE_ID, "inside");
 		if (target) {
-			apply([{ kind: "insertHtml", ...target, html: block.html }]);
+			apply([{ kind: "insertHtml", ...target, html: blockHtml(block, tl) }]);
 		}
 	};
 
@@ -402,7 +403,7 @@ export function VisualEditor({
 								size="sm"
 								variant={viewport === item ? "secondary" : "ghost"}
 							>
-								{item.charAt(0).toUpperCase() + item.slice(1)}
+								{viewportLabel(item, tl)}
 							</Button>
 						))}
 					</div>

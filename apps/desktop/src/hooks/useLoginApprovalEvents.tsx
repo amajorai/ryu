@@ -177,18 +177,19 @@ export function LoginApprovalEvents() {
 		setPending((current) => withoutRequest(current, requestId));
 	};
 
-	const resolve = async (action: "approve" | "deny") => {
+	const resolve = async (action: "approve" | "deny", code = "") => {
 		if (!activeRequest || approving) {
 			return;
 		}
 		setApproving(true);
 		setError(null);
 		try {
-			const resolveRequest =
-				action === "approve" ? approveLoginApproval : denyLoginApproval;
-			await resolveRequest(BACKEND_URL, activeRequest.id, {
-				token: activeToken(),
-			});
+			const auth = { token: activeToken() };
+			if (action === "approve") {
+				await approveLoginApproval(BACKEND_URL, activeRequest.id, code, auth);
+			} else {
+				await denyLoginApproval(BACKEND_URL, activeRequest.id, auth);
+			}
 			dismiss(activeRequest.id);
 		} catch (resolveError) {
 			setError(
@@ -209,7 +210,7 @@ export function LoginApprovalEvents() {
 			<LoginApprovalPrompt
 				approving={approving}
 				error={error}
-				onApprove={() => resolve("approve")}
+				onApprove={(code) => resolve("approve", code)}
 				onDeny={() => resolve("deny")}
 				onOpenChange={(open) => {
 					if (!(open || approving)) {

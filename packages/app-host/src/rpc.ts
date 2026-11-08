@@ -892,12 +892,16 @@ export type ChatConversationSummary = z.output<
 	typeof chatConversationSummarySchema
 >;
 
-/** Result returned after the host has detached an accepted chat stream. */
+/** Result of an app send: started in Core, or queued for the user's approval. */
 export const chatSendResultSchema = preserveHostResponse(
-	z.object({
-		conversation_id: z.string(),
-		status: z.literal("accepted"),
-	})
+	z.union([
+		z.object({ conversation_id: z.string(), status: z.literal("accepted") }),
+		z.object({
+			approval_id: z.string(),
+			conversation_id: z.string(),
+			status: z.literal("pending_approval"),
+		}),
+	])
 );
 export type ChatSendResult = z.output<typeof chatSendResultSchema>;
 
@@ -1847,9 +1851,9 @@ export interface HostServices {
 	/** Read the shared, secret-free provider/model/agent/app/hook catalog. */
 	catalogSnapshot?(): Promise<RyuCatalogSnapshot>;
 	// --- Chat Broadcast (grant `chat.sendFollowUp`). The companion can list only
-	// conversations visible to the current verified caller. `chatSend` loads the
-	// transcript in the trusted host, posts one real user turn, and returns after
-	// Core accepts the detached stream; the sandbox never receives a node token or
+	// conversations visible to the current verified caller. `chatSend` goes
+	// through Core's host bridge, which applies the app-send firewall and the
+	// ask-before-send approval queue; the sandbox never receives a node token or
 	// transcript contents. --
 	/** List visible conversation summaries, including idle chats. */
 	chatListConversations?(): Promise<ChatConversationSummary[]>;
@@ -8541,11 +8545,19 @@ const warmupScheduleSchema = z.union([
 	warmupCronScheduleSchema,
 	z.object({ kind: z.literal("every"), interval: z.string() }),
 ]);
+// A keep-alive ping, not a task: Core refuses a prompt over 280 UTF-8 bytes or
+// with a newline or other control character (`app_warmup/ping_prompt.rs`).
+const warmupPingPromptSchema = z
+	.string()
+	.refine(
+		(prompt) =>
+			new TextEncoder().encode(prompt).length <= 280 && !/\p{Cc}/u.test(prompt)
+	);
 const warmupAgentTargetSchema = z
 	.object({
 		type: z.literal("agent"),
 		agentId: z.string().min(1),
-		prompt: z.string(),
+		prompt: warmupPingPromptSchema,
 		model: z.string().min(1).optional().catch(undefined),
 	})
 	.transform(({ type, agentId, prompt, model }) =>
@@ -8560,7 +8572,7 @@ const warmupProviderAccountTargetSchema = z
 		type: z.literal("provider_account"),
 		providerId: z.string().min(1),
 		accountId: z.string().min(1),
-		prompt: z.string(),
+		prompt: warmupPingPromptSchema,
 		model: z.string().min(1),
 	})
 	.transform(({ type, providerId, accountId, prompt, model }) => ({
@@ -8587,9 +8599,10 @@ export const asWarmupJobsArg = nullableRpcParser(warmupJobsArgSchema);
  * Narrow the one-off `warmup.runNow` payload.
  *
  * It names an existing job rather than describing a turn, so what the button
- * proves is what the schedule will actually do — and so the capability cannot be
- * used to run an arbitrary prompt on an arbitrary agent. The host additionally
- * refuses a job this app does not own.
+ * proves is what the schedule will actually do. It still runs that job's agent
+ * on the prompt `warmup.apply` stored, unattended: the grant is limited to the
+ * reviewed Warmup app and Core bounds the prompt to a short one-line ping. The
+ * host additionally refuses a job this app does not own.
  */
 const warmupRunNowArgSchema = z.object({ jobId: z.string().min(1) });
 export const asWarmupRunNowArg = nullableRpcParser(warmupRunNowArgSchema);

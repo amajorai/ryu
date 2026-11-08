@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { formatMessage, type MessageValuesInput } from "@ryu/i18n/core";
-import type { VaultCardApproval } from "@/src/lib/api/vault.ts";
+import type { VaultCardApproval } from "@/src/lib/api/vault-cards.ts";
 import { cardApprovalSummary, proposalDetail } from "./vault-broker-summary.ts";
 
 // A German stub catalog: each fragment is its own whole message, so the

@@ -21,67 +21,82 @@ import {
 import { createPortal } from "react-dom";
 import styles from "./download-guide.module.css";
 import type { BrowserDownloadHint } from "./download-guide.ts";
+import type { ChromeDirection } from "./download-guide-direction.ts";
 import type { DownloadOS } from "./download-platform.ts";
 
 // Kept importable from here for the guide panel.
 export { ShortcutKeys, shortcutKeys } from "./download-guide-shortcut.tsx";
 
 /**
- * Pinned to the viewport's top-right corner, over the backdrop: the browser's
- * download control sits just above it. Decorative; the dialog says the same
- * thing in words. Portalled to the body, because a header with a backdrop
+ * Pinned to the viewport's top corner on the browser chrome's inline end, over
+ * the backdrop: the browser's download control sits just above it (top-right,
+ * or top-left when the browser's own UI is RTL, see
+ * download-guide-direction.ts). `dir` is the browser's direction, not Ryu's.
+ * Decorative; the dialog says the same thing in words. Portalled to the body, because a header with a backdrop
  * filter would otherwise become its containing block. Shown only from `xl`
  * up, where it clears the dialog (`sm:max-w-5xl`, centred) instead of
  * covering its header.
  */
-export function DownloadCornerPointer({ name }: { name: string }) {
+export function DownloadCornerPointer({
+	dir = "ltr",
+	name,
+}: {
+	dir?: ChromeDirection;
+	name: string;
+}) {
 	const tl = useLiteralMessages();
 	if (typeof document === "undefined") {
 		return null;
 	}
 	return createPortal(
+		// A full-width strip that ends at the inline end of its own `dir`: an
+		// inset (`end-8`) on a fixed box can resolve against the viewport's
+		// direction, which is Ryu's, not the browser's.
 		<div
 			aria-hidden="true"
-			className="pointer-events-none fixed top-2 right-8 z-[51] hidden flex-col items-end gap-1 text-foreground xl:flex 2xl:right-24"
+			className="pointer-events-none fixed inset-x-0 top-2 z-[51] hidden justify-end pe-8 xl:flex 2xl:pe-24"
 			data-testid="download-guide-pointer"
+			dir={dir}
 		>
-			<div className="relative size-16">
-				<span
-					className={cn(
-						"absolute top-0 right-0 size-6 rounded-full bg-foreground/50",
-						styles.ring
-					)}
-				/>
-				<svg
-					aria-hidden="true"
-					className={cn(
-						"absolute inset-0 size-16 drop-shadow-lg",
-						styles.nudge
-					)}
-					fill="none"
-					viewBox="0 0 64 64"
-				>
-					<path
-						d="M10 58 C 16 36, 30 20, 54 10"
-						stroke="currentColor"
-						strokeLinecap="round"
-						strokeWidth="4"
+			<div className="flex flex-col items-end gap-1 text-foreground">
+				<div className="relative size-16">
+					<span
+						className={cn(
+							"absolute end-0 top-0 size-6 rounded-full bg-foreground/50",
+							styles.ring
+						)}
 					/>
-					<path
-						d="M40 8 L 56 9 L 50 24"
-						stroke="currentColor"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						strokeWidth="4"
-					/>
-				</svg>
+					<svg
+						aria-hidden="true"
+						className={cn(
+							"absolute inset-0 size-16 drop-shadow-lg rtl:[&:dir(rtl)]:-scale-x-100",
+							styles.nudge
+						)}
+						fill="none"
+						viewBox="0 0 64 64"
+					>
+						<path
+							d="M10 58 C 16 36, 30 20, 54 10"
+							stroke="currentColor"
+							strokeLinecap="round"
+							strokeWidth="4"
+						/>
+						<path
+							d="M40 8 L 56 9 L 50 24"
+							stroke="currentColor"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							strokeWidth="4"
+						/>
+					</svg>
+				</div>
+				<p className="max-w-56 rounded-2xl border border-border/70 bg-popover px-3 py-2 text-end text-popover-foreground text-sm leading-snug shadow-lg">
+					<span className="block font-medium">Your download is up here</span>
+					<span className="block text-muted-foreground text-xs">
+						{tl("In the {browser} toolbar", { browser: name })}
+					</span>
+				</p>
 			</div>
-			<p className="max-w-56 rounded-2xl border border-border/70 bg-popover px-3 py-2 text-right text-popover-foreground text-sm leading-snug shadow-lg">
-				<span className="block font-medium">Your download is up here</span>
-				<span className="block text-muted-foreground text-xs">
-					{tl("In the {browser} toolbar", { browser: name })}
-				</span>
-			</p>
 		</div>,
 		document.body
 	);
@@ -112,10 +127,12 @@ function WindowControls({ os }: { os: DownloadOS }) {
  * Downloads folder instead, since there is no toolbar to point at.
  */
 export function BrowserToolbarMock({
+	dir = "ltr",
 	fileName,
 	hint,
 	os,
 }: {
+	dir?: ChromeDirection;
 	fileName: string;
 	hint: BrowserDownloadHint;
 	os: DownloadOS;
@@ -130,9 +147,11 @@ export function BrowserToolbarMock({
 			className="relative w-full select-none overflow-hidden rounded-2xl border border-border/70 bg-muted/40 shadow-sm"
 			data-browser={hint.browser}
 			data-testid="download-guide-toolbar"
-			// A picture of browser chrome, kept left to right like the browser
-			// itself: the download control stays at the top-right corner.
-			dir="ltr"
+			// A picture of browser chrome, laid out in the browser's own direction
+			// (not Ryu's): the download control sits at its top inline-end corner.
+			// Its glyphs flip on `:dir(rtl)`, which reads this `dir`; a bare
+			// `rtl:` also matches any descendant of an RTL <html>.
+			dir={dir}
 		>
 			<div className="flex h-8 items-center gap-3 border-border/60 border-b bg-muted/60 px-3">
 				{os === "macos" ? <WindowControls os={os} /> : null}
@@ -144,8 +163,8 @@ export function BrowserToolbarMock({
 				{os === "macos" ? null : <WindowControls os={os} />}
 			</div>
 			<div className="flex h-10 items-center gap-2 bg-background px-3 text-muted-foreground/70">
-				<ArrowLeft className="size-3.5" />
-				<ArrowRight className="size-3.5" />
+				<ArrowLeft className="size-3.5 rtl:[&:dir(rtl)]:-scale-x-100" />
+				<ArrowRight className="size-3.5 rtl:[&:dir(rtl)]:-scale-x-100" />
 				<RotateCw className="size-3.5" />
 				<div className="mx-1 flex h-6 flex-1 items-center rounded-full bg-muted px-3">
 					<span className="h-1.5 w-24 rounded-full bg-muted-foreground/25" />

@@ -192,6 +192,7 @@ pub async fn dispatch(alert: PolicyAlert, http: reqwest::Client, store: NotifySt
         target_user_id: None,
         notification_id: None,
         source_app_id: None,
+        link: None,
     });
 
     let targets = match store.get_alert_delivery().await {

@@ -3,12 +3,23 @@
 // module. Every call goes through `ctx.target`, so a test injects a fake
 // `target.fetch` (plus `ctx.spawn` / `ctx.readStdin`) and never touches a node.
 //
-// Values are printed only by the explicit `get` and `export` subcommands. `run`
-// merges them into a child's environment and prints nothing about them.
+// Values are printed only by the explicit `get`, `export`, and `dynamic issue`
+// subcommands (`snapshot` prints them sealed under a passphrase). `run`
+// (`secrets-run.ts`) merges them into a child's environment and prints nothing
+// about them. A `.ryu-vault.json` from `ryu secrets init` in the working
+// directory or a parent supplies the default environment, folder, and tag
+// filter (`secrets-project.ts`).
 // `run --broker` mints a credential-broker session instead and gives the child
 // only the proxy environment, so the child never receives a value. With
 // `--isolation=container` the child runs in a Docker container whose only
 // egress is the broker (see `vaultIsolation.ts`).
+//
+// AI agent sessions (`secrets-agent-guard.ts`): when a coding agent's marker
+// is set, `get` and `export` show `config` values only and the other
+// value-printing subcommands refuse (`secrets-agent-redaction.ts`), `set`
+// refuses a metadata-only change to `config`, `rollback` refuses, `run`
+// defaults to the broker, and `run` refuses environment dumps, unless a
+// person confirms `--human`.
 //
 // Machine-token mode: when `RYU_VAULT_TOKEN` is set, `get`, `export`, and `run`
 // use the token-only `/api/vault/agent/*` routes (node-scoped values the token's
@@ -16,17 +27,11 @@
 // AppRole or OIDC/JWT credential for such a token and prints it.
 
 import {
-	createVaultBrokerSession,
 	deleteVaultItem,
 	type PutVaultItemInput,
-	parseVaultJsonExport,
 	putVaultItem,
 	revealVaultCardField,
-	revokeVaultBrokerSession,
-	type VaultBrokerProxy,
-	type VaultBrokerSessionInput,
 	type VaultItemFieldInput,
-	vaultAgentBrokerSession,
 } from "@ryuhq/core-client/vault";
 import { tf } from "../i18n/translate.ts";
 import {
@@ -39,24 +44,22 @@ import {
 	sealCommand,
 } from "./secrets-admin.ts";
 import {
+	guardedAgentSession,
+	prepareAgentRun,
+	printsSecretValues,
+	refuseValueOutput,
+} from "./secrets-agent-guard.ts";
+import { agentExport, agentGet } from "./secrets-agent-redaction.ts";
+import {
 	arg,
 	flag,
-	parseDuration,
 	parseSecretsArgs,
 	type SecretsArgs,
 } from "./secrets-args.ts";
-import {
-	brokerCaPem,
-	brokerProxyReachable,
-	brokerServices,
-	childRuntimeEnvironment,
-	dockerCliEnvironment,
-	isolationMode,
-	localBrokerCa,
-	spawnUntilStopped,
-} from "./secrets-broker.ts";
 import { broker } from "./secrets-broker-admin.ts";
 import { cards } from "./secrets-cards.ts";
+import { dynamic, leases } from "./secrets-dynamic.ts";
+import { external } from "./secrets-external.ts";
 import { SUBCOMMAND_HELP } from "./secrets-help.ts";
 import {
 	itemLocation,
@@ -66,12 +69,15 @@ import {
 	parseItemField,
 	totp,
 } from "./secrets-items.ts";
-import { agentTarget, exportResult, printJson } from "./secrets-output.ts";
+import { printJson } from "./secrets-output.ts";
 import { passwordManagers } from "./secrets-pm.ts";
+import { applyProjectDefaults, init } from "./secrets-project.ts";
+import { runWithSecrets } from "./secrets-run.ts";
 import { scan } from "./secrets-scan.ts";
 import { tokenCommand, unwrap, wrap } from "./secrets-tokens.ts";
 import {
 	deleteSecret,
+	destroySecret,
 	exportSecrets,
 	getSecret,
 	importSecrets,
@@ -80,15 +86,9 @@ import {
 	restore,
 	rollback,
 	setSecret,
+	snapshot,
 } from "./secrets-values.ts";
 import { type CliContext, type Command, UsageError } from "./types.ts";
-import {
-	defaultContainerHost,
-	guardSignals,
-	IsolationCancelledError,
-	prepareContainer,
-	runPrepared,
-} from "./vaultIsolation.ts";
 import { confirmIdentity } from "./vaultStepUp.ts";
 
 export {
@@ -105,204 +105,6 @@ export { PM_PENDING_EXIT } from "./secrets-pm.ts";
 export { collectScanFiles, scanBatches } from "./secrets-scan.ts";
 
 const USAGE = "ryu-cli secrets <subcommand> …";
-
-async function runWithSecrets(
-	ctx: CliContext,
-	args: SecretsArgs
-): Promise<number> {
-	const command = args.passthrough ?? [];
-	if (command.length === 0) {
-		throw new UsageError(
-			"Usage: ryu-cli secrets run [--env E] [--path P] [--broker SVC,…] -- CMD ARGS…"
-		);
-	}
-	const container = isolationMode(args) === "container";
-	if (
-		!container &&
-		(args.values.has("--image") || args.values.has("--mount"))
-	) {
-		throw new UsageError("--image and --mount need --isolation=container.");
-	}
-	if (args.values.has("--broker")) {
-		if (brokerServices(args).length === 0) {
-			throw new UsageError("--broker needs at least one service name.");
-		}
-		// Container mode hands this environment to the host `docker` CLI (which
-		// needs DOCKER_* configuration), never to the isolated command. A host
-		// child gets only the reviewed runtime allowlist plus the proxy env.
-		const baseEnv = container
-			? dockerCliEnvironment(ctx.env)
-			: childRuntimeEnvironment(ctx.env);
-		return await runWithBroker(ctx, args, command, baseEnv, container);
-	}
-	if (container) {
-		throw new UsageError(
-			"--isolation=container needs --broker: the container reaches the network only through the credential broker."
-		);
-	}
-	if (flag(args, "--ttl") !== undefined) {
-		throw new UsageError("--ttl applies to 'run --broker' only.");
-	}
-	const values = parseVaultJsonExport(await exportResult(ctx, args, "json"));
-	return await ctx.spawn(command, {
-		...childRuntimeEnvironment(ctx.env),
-		...values,
-	});
-}
-
-type BrokerGrant = Awaited<ReturnType<typeof createVaultBrokerSession>>;
-
-/** Mints the broker session, checks that its proxy is usable from here, runs
- *  `body`, and always revokes a human-minted session afterwards. */
-async function withBrokerSession(
-	ctx: CliContext,
-	args: SecretsArgs,
-	command: string[],
-	body: (grant: BrokerGrant, proxy: VaultBrokerProxy) => Promise<number>
-): Promise<number> {
-	const input: VaultBrokerSessionInput = {
-		services: brokerServices(args),
-		label: `ryu secrets run ${command[0] ?? ""}`.trim(),
-	};
-	const environment = flag(args, "--env");
-	const ttl = flag(args, "--ttl");
-	if (environment) {
-		input.environment = environment;
-	}
-	if (ttl !== undefined) {
-		input.ttlSecs = parseDuration(ttl);
-	}
-	const agent = agentTarget(ctx);
-	const grant = agent
-		? await vaultAgentBrokerSession(agent, input)
-		: await createVaultBrokerSession(ctx.target, input);
-	try {
-		const { proxy } = grant;
-		if (!proxy) {
-			ctx.io.err(
-				"The credential broker is not listening on this node, so no proxy environment is available.\n"
-			);
-			return 1;
-		}
-		if (!brokerProxyReachable(ctx, proxy)) {
-			ctx.io.err(
-				"The broker proxy listens only on the node's loopback interface, so it is not reachable from this host.\n" +
-					"Run this command on the node, or tunnel the proxy port (for example `ssh -L`) and target the node through that tunnel.\n"
-			);
-			return 1;
-		}
-		return await body(grant, proxy);
-	} finally {
-		// The revoke route is human-only; a machine-minted session ends with
-		// its TTL or its token.
-		if (!agent) {
-			try {
-				await revokeVaultBrokerSession(ctx.target, grant.session.id);
-			} catch {
-				ctx.io.err(
-					`${tf("Could not revoke broker session {id}; it expires at {expiresAt}.", { id: grant.session.id, expiresAt: String(grant.session.expiresAt) })}\n`
-				);
-			}
-		}
-	}
-}
-
-/** `run --broker`: the child reaches the named services through the broker
- *  proxy and never receives a credential value or the session token in
- *  anything but the proxy URL Core rendered for it. */
-async function runWithBroker(
-	ctx: CliContext,
-	args: SecretsArgs,
-	command: string[],
-	baseEnv: Record<string, string>,
-	container: boolean
-): Promise<number> {
-	if (container) {
-		return await runWithBrokerInContainer(ctx, args, command, baseEnv);
-	}
-	// Installed before minting, so a signal at any point unwinds through the
-	// `finally` blocks below (CA cleanup, session revoke) instead of the
-	// default action killing the CLI with the session still live.
-	const guard = guardSignals(ctx.containerHost ?? defaultContainerHost());
-	try {
-		return await withBrokerSession(
-			ctx,
-			args,
-			command,
-			async (_grant, proxy) => {
-				guard.throwIfCancelled();
-				const ca = await localBrokerCa(ctx, proxy);
-				const env = { ...baseEnv };
-				for (const [key, value] of Object.entries(proxy.env)) {
-					env[key] = ca.replacements.get(value) ?? value;
-				}
-				try {
-					guard.throwIfCancelled();
-					return await spawnUntilStopped(ctx, guard, command, env);
-				} finally {
-					await ca.cleanup();
-				}
-			}
-		);
-	} catch (error) {
-		if (error instanceof IsolationCancelledError) {
-			ctx.io.err(
-				`${tf("ryu: stopped by {signal}.", { signal: error.signal })}\n`
-			);
-			return error.exitCode;
-		}
-		throw error;
-	} finally {
-		guard.dispose();
-	}
-}
-
-/** `run --broker --isolation=container`. Docker checks, path validation, and
- *  images come first, so a run that cannot start mints no session. A signal
- *  at any point before the command starts cancels setup, tears down what was
- *  created, revokes the session, and exits 128 + the signal number. */
-async function runWithBrokerInContainer(
-	ctx: CliContext,
-	args: SecretsArgs,
-	command: string[],
-	baseEnv: Record<string, string>
-): Promise<number> {
-	const host = ctx.containerHost ?? defaultContainerHost();
-	const guard = guardSignals(host);
-	const containerCtx = { err: ctx.io.err, guard, host };
-	try {
-		const prepared = await prepareContainer(containerCtx, {
-			env: ctx.env,
-			image: flag(args, "--image"),
-			mounts: args.values.get("--mount") ?? [],
-		});
-		return await withBrokerSession(ctx, args, command, async (grant, proxy) => {
-			guard.throwIfCancelled();
-			return await runPrepared(
-				{ ...containerCtx, spawn: ctx.spawn },
-				prepared,
-				{
-					brokerPort: proxy.port,
-					caPem: await brokerCaPem(ctx, proxy),
-					command,
-					dockerEnv: baseEnv,
-					expiresAt: grant.session.expiresAt,
-					token: grant.token,
-				}
-			);
-		});
-	} catch (error) {
-		if (error instanceof IsolationCancelledError) {
-			ctx.io.err(
-				`${tf("ryu: {message}; the container setup was removed.", { message: error.message })}\n`
-			);
-			return error.exitCode;
-		}
-		throw error;
-	} finally {
-		guard.dispose();
-	}
-}
 
 async function itemsPut(ctx: CliContext, args: SecretsArgs): Promise<number> {
 	const key = arg(args, 2, "items put KEY --type T --field name=value[:plain]");
@@ -411,11 +213,17 @@ const SUBCOMMANDS = new Map<string, SecretsHandler>([
 	["cards", cards],
 	["confirm", confirmIdentity],
 	["delete", deleteSecret],
+	["destroy", destroySecret],
+	["dynamic", dynamic],
 	["env", environments],
 	["export", exportSecrets],
+	["external", external],
 	["get", getSecret],
 	["import", importSecrets],
+	["init", init],
 	["items", items],
+	["lease", leases],
+	["leases", leases],
 	["list", listSecrets],
 	["login", login],
 	["logout", (ctx) => logout(ctx)],
@@ -429,6 +237,7 @@ const SUBCOMMANDS = new Map<string, SecretsHandler>([
 	["scan", scan],
 	["seal", sealCommand],
 	["set", setSecret],
+	["snapshot", snapshot],
 	["status", sealCommand],
 	["token", tokenCommand],
 	["totp", totp],
@@ -456,6 +265,34 @@ export const secretsCommand: Command = {
 			throw new UsageError(
 				`Unknown subcommand '${subcommand}'. Usage: ${USAGE} (see 'ryu-cli secrets help').`
 			);
+		}
+		await applyProjectDefaults(ctx, args);
+		const agentSession = await guardedAgentSession(ctx, args);
+		if (agentSession && printsSecretValues(args)) {
+			if (subcommand === "get") {
+				return await agentGet(ctx, args, agentSession);
+			}
+			if (subcommand === "export") {
+				return await agentExport(ctx, args, agentSession);
+			}
+			return refuseValueOutput(ctx, agentSession);
+		}
+		if (agentSession && subcommand === "set") {
+			return await setSecret(ctx, args, agentSession);
+		}
+		// Rollback makes an earlier version current under today's type, so a
+		// version written as a secret would become readable as config.
+		if (agentSession && subcommand === "rollback") {
+			ctx.io.err(
+				`${tf("Refusing to roll back a value in an AI agent session ({marker} is set): an earlier version may have been written as a secret. A person at a terminal can add --human.", { marker: agentSession })}\n`
+			);
+			return 1;
+		}
+		if (agentSession && subcommand === "run") {
+			const refused = await prepareAgentRun(ctx, args, agentSession);
+			if (refused !== null) {
+				return refused;
+			}
 		}
 		return await handler(ctx, args);
 	},

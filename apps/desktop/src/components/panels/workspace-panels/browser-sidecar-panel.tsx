@@ -18,6 +18,7 @@ import { apiUrl, makeHeaders } from "@/src/lib/api/client.ts";
 import { CONTRIBUTED_LINK_OPENED_EVENT } from "@/src/lib/contributed-link-handler.ts";
 import { clearMediaSource, publishMediaSource } from "@/src/lib/media-pip.ts";
 import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
+import { BrowserBotLiveView } from "./browser-bot-live-view.tsx";
 import {
 	BROWSER_PLUGIN_ID,
 	formatBrowserContext,
@@ -47,6 +48,9 @@ export function BrowserSidecarPanel({
 	const [askRyuPending, setAskRyuPending] = useState(false);
 	const askRyuPendingRef = useRef(false);
 	const [isFrozen, setIsFrozen] = useState(false);
+	// "agents" shows the read-only live view of the agents' hidden Bot lanes.
+	const [view, setView] = useState<"agents" | "user">("user");
+	const userViewActive = active && view === "user";
 	const [themeTokens, setThemeTokens] = useState(() =>
 		readCompanionThemeTokens(undefined, { includeStoredPreferences: true })
 	);
@@ -262,7 +266,7 @@ export function BrowserSidecarPanel({
 			setShot(null);
 			return;
 		}
-		if (!active || isFrozen) {
+		if (!userViewActive || isFrozen) {
 			clearMediaSource(`browser:${activeId}`);
 			return;
 		}
@@ -283,7 +287,7 @@ export function BrowserSidecarPanel({
 		tick();
 		const timer = window.setInterval(tick, 800);
 		return () => window.clearInterval(timer);
-	}, [active, activeId, isFrozen, screenshot]);
+	}, [userViewActive, activeId, isFrozen, screenshot]);
 
 	useEffect(() => {
 		return () => {
@@ -390,71 +394,95 @@ export function BrowserSidecarPanel({
 					>
 						Refresh
 					</button>
+					<button
+						aria-pressed={view === "agents"}
+						className={cn(
+							"rounded-lg px-2 py-0.5 text-muted-foreground text-xs hover:bg-accent",
+							view === "agents" && "bg-accent text-foreground"
+						)}
+						onClick={() =>
+							setView((current) => (current === "agents" ? "user" : "agents"))
+						}
+						title="Watch the agents' own browser sessions (read-only)"
+						type="button"
+					>
+						Agents
+					</button>
 				</form>
 			</div>
-			<div className="flex min-h-0 flex-1">
-				<ul className="w-48 shrink-0 overflow-y-auto border-border border-e text-xs">
-					{tabs.length === 0 && (
-						<li className="p-2 text-muted-foreground">No open tabs.</li>
-					)}
-					{tabs.map((t) => (
-						<li
-							className={cn(
-								"flex items-center gap-1 border-border border-b px-2 py-1.5",
-								t.id === activeId && "bg-accent"
-							)}
-							key={t.id}
-						>
-							<button
-								className="min-w-0 flex-1 truncate text-start"
-								onClick={() => {
-									setActiveId(t.id);
-									screenshot(t.id).catch(() => undefined);
-								}}
-								title={t.url}
-								type="button"
+			{view === "agents" ? (
+				<BrowserBotLiveView active={active} base={base} call={call} />
+			) : (
+				<div className="flex min-h-0 flex-1">
+					<ul className="w-48 shrink-0 overflow-y-auto border-border border-e text-xs">
+						{tabs.length === 0 && (
+							<li className="p-2 text-muted-foreground">No open tabs.</li>
+						)}
+						{tabs.map((t) => (
+							<li
+								className={cn(
+									"flex items-center gap-1 border-border border-b px-2 py-1.5",
+									t.id === activeId && "bg-accent"
+								)}
+								key={t.id}
 							>
-								{t.title || t.url || t.id}
-							</button>
-							<button
-								className="shrink-0 text-muted-foreground hover:text-foreground"
-								onClick={() => closeTab(t.id).catch(() => undefined)}
-								type="button"
-							>
-								×
-							</button>
-						</li>
-					))}
-				</ul>
-				<div className="relative flex min-w-0 flex-1">
-					{error && (
-						<div className="pointer-events-none absolute start-2 end-2 top-2 z-10 rounded-lg border border-border bg-popover px-2 py-1 text-center text-status-destructive text-xs shadow-lg">
-							{error}
-						</div>
-					)}
-					<BrowserAnnotationSurface
-						askRyuPending={askRyuPending}
-						context={context}
-						imageUrl={shot}
-						isAnnotating={isAnnotating}
-						onAnnotate={annotate}
-						onAskRyu={() => askRyu().catch(() => undefined)}
-						onClearAnnotations={clearAnnotations}
-						onContext={(selections) =>
-							activeId
-								? getContext(activeId, selections, true).catch((e: unknown) => {
-										setError(
-											e instanceof Error ? e.message : "browser context failed"
-										);
-										return null;
-									})
-								: Promise.resolve(null)
-						}
-						onDeleteAnnotation={deleteAnnotation}
-						onToggleAnnotating={() => toggleAnnotating().catch(() => undefined)}
-					/>
+								<button
+									className="min-w-0 flex-1 truncate text-start"
+									onClick={() => {
+										setActiveId(t.id);
+										screenshot(t.id).catch(() => undefined);
+									}}
+									title={t.url}
+									type="button"
+								>
+									{t.title || t.url || t.id}
+								</button>
+								<button
+									className="shrink-0 text-muted-foreground hover:text-foreground"
+									onClick={() => closeTab(t.id).catch(() => undefined)}
+									type="button"
+								>
+									×
+								</button>
+							</li>
+						))}
+					</ul>
+					<div className="relative flex min-w-0 flex-1">
+						{error && (
+							<div className="pointer-events-none absolute start-2 end-2 top-2 z-10 rounded-lg border border-border bg-popover px-2 py-1 text-center text-status-destructive text-xs shadow-lg">
+								{error}
+							</div>
+						)}
+						<BrowserAnnotationSurface
+							askRyuPending={askRyuPending}
+							context={context}
+							imageUrl={shot}
+							isAnnotating={isAnnotating}
+							onAnnotate={annotate}
+							onAskRyu={() => askRyu().catch(() => undefined)}
+							onClearAnnotations={clearAnnotations}
+							onContext={(selections) =>
+								activeId
+									? getContext(activeId, selections, true).catch(
+											(e: unknown) => {
+												setError(
+													e instanceof Error
+														? e.message
+														: "browser context failed"
+												);
+												return null;
+											}
+										)
+									: Promise.resolve(null)
+							}
+							onDeleteAnnotation={deleteAnnotation}
+							onToggleAnnotating={() =>
+								toggleAnnotating().catch(() => undefined)
+							}
+						/>
+					</div>
 				</div>
-			</div>
+			)}
 		</div>
 	);
 }

@@ -31,7 +31,7 @@ describe("REWARDS_STORE catalog", () => {
 		const reward = storeCreditReward(credit5!);
 		expect(reward).not.toBeNull();
 		expect(reward?.creditMicroUsd).toBeGreaterThan(0);
-		expect(reward?.pool).toBe("cloudflare");
+		expect(reward?.pool).toBe("azure-credits");
 	});
 
 	it("returns null credit reward for entitlement items", () => {

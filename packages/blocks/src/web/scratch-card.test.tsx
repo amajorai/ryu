@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { I18nProvider } from "@ryu/i18n/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ScratchCard, { rubMask } from "./scratch-card.tsx";
 
@@ -62,6 +63,38 @@ describe("ScratchCard", () => {
 		expect(html).toContain("@container");
 		expect(html).toContain("text-[clamp(1.125rem,12cqi,2.25rem)]");
 		expect(html).toContain("whitespace-nowrap");
+	});
+
+	test("formats discountPercent in the reader's number format", () => {
+		const percentCard = (locale: string) =>
+			renderToStaticMarkup(
+				<I18nProvider initialLocale={locale}>
+					<ScratchCard code="LAUNCH30" discountPercent={30} />
+				</I18nProvider>
+			);
+		expect(percentCard("en")).toContain(">30% off<");
+		// French puts a no-break space (narrow in current ICU) before the sign.
+		const french = new Intl.NumberFormat("fr", { style: "percent" }).format(
+			0.3
+		);
+		expect(french).toMatch(/^30[\u00a0\u202f]%$/u);
+		expect(percentCard("fr")).toContain(`>${french} off<`);
+		expect(percentCard("fr")).not.toContain(">30% off<");
+		for (const locale of ["de", "tr", "ar"]) {
+			const expected = new Intl.NumberFormat(locale, {
+				style: "percent",
+			}).format(0.3);
+			expect(percentCard(locale)).toContain(`>${expected} off<`);
+		}
+		// Turkish puts the sign before the number.
+		expect(percentCard("tr")).toContain(">%30 off<");
+	});
+
+	test("keeps a preformatted discountLabel as an override", () => {
+		const html = renderToStaticMarkup(
+			<ScratchCard code="X" discountLabel="Half" discountPercent={50} />
+		);
+		expect(html).toContain("Half off");
 	});
 });
 

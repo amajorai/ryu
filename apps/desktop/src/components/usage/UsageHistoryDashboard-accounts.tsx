@@ -13,6 +13,7 @@ import {
 	type UsageHistoryReport,
 } from "@/src/lib/api/usage-history.ts";
 import { historyCounterDisplay } from "./history-format.ts";
+import { usageHistorySourceLabel } from "./usage-history-source-labels.ts";
 
 export function RecordedAccounts({
 	accounts,
@@ -110,7 +111,7 @@ export function SourceCoverage({
 							</span>
 						}
 						key={source.id}
-						title={source.label}
+						title={usageHistorySourceLabel(source, tl)}
 					>
 						<p className="text-muted-foreground text-xs">
 							{tl(source.limitations)}

@@ -64,7 +64,7 @@ import {
 } from "./channels-routing-section.tsx";
 import {
 	CHANNEL_LABELS,
-	CHANNEL_SETUP,
+	channelSetup,
 	SECRET_LABELS,
 } from "./channels-setup.ts";
 
@@ -107,8 +107,8 @@ export {
 } from "./channels-model.ts";
 export {
 	CHANNEL_LABELS,
-	CHANNEL_SETUP,
 	type ChannelSecretLabels,
+	channelSetup,
 	SECRET_LABELS,
 } from "./channels-setup.ts";
 
@@ -180,7 +180,7 @@ export function ChannelsView({
 	// Only render a toggle the selected platform can actually honour — a control
 	// that does nothing reads as a promise the bot won't keep.
 	const supported = supportedSettings(form.channelType);
-	const setup = CHANNEL_SETUP[form.channelType];
+	const setup = channelSetup(tl, form.channelType);
 	const managedBotReady =
 		selected?.credentialSource === "ryu_managed" &&
 		selected.managedProvisioningState === "ready";

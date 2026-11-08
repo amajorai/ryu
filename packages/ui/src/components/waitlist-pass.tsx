@@ -10,6 +10,7 @@ import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import { passBackdropSeed } from "../lib/pass-share.ts";
 import { cn } from "../lib/utils.ts";
 import { EntityAvatar } from "./entity-avatar.tsx";
+import { handleLabel } from "./handle-text.tsx";
 import { Logo } from "./logo.tsx";
 import { PassCardShell } from "./pass-card-shell.tsx";
 import { PassQrBack } from "./pass-qr-back.tsx";
@@ -328,6 +329,9 @@ export function WaitlistPass({
 	// line exactly when the hero already IS the handle.
 	const formatLocale = useFormatLocale();
 	const showHandle = Boolean(username) && displayName !== `@${username}`;
+	// The handle as drawn: kept `@name` under rtl (the avatar takes the plain text).
+	const heroText =
+		showHandle || !username ? displayName : handleLabel(username);
 	const memberSince = formatPassDate(joinedAt, formatLocale);
 	const showPosition =
 		isNativeNumber(totalWaiting) && totalWaiting > QUEUE_STATS_MIN;
@@ -422,7 +426,7 @@ export function WaitlistPass({
 							maxPx={NAME_MAX_PX}
 							minPx={NAME_MIN_PX}
 						>
-							{displayName}
+							{heroText}
 						</AutoFitText>
 						{/* No placeholder for an unclaimed handle: an empty-state line
 					    under the name reads as a defect on a card whose whole job
@@ -434,7 +438,7 @@ export function WaitlistPass({
 								maxPx={HANDLE_MAX_PX}
 								minPx={HANDLE_MIN_PX}
 							>
-								{`@${username}`}
+								{handleLabel(username ?? "")}
 							</AutoFitText>
 						) : null}
 					</div>

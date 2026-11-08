@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge.tsx";
 import { StatusMessage } from "@/components/ui/status-message.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { toolActivityLabel } from "../../core/transcriptPresentation.ts";
+import { tr as cliTr } from "../../i18n/translate.ts";
+import { busyElapsedLabel } from "../../ui/StatusBar-elapsed.ts";
 import type { Overlay } from "./types.ts";
 
 // WorkspaceBar - the desktop project-folder + model row that sits above the
@@ -93,15 +95,16 @@ function useElapsedSeconds(startedAt: number | null): number {
  */
 export function busyActivityLabel(
 	overlayKind: Overlay["kind"],
-	activeTool: string | null
+	activeTool: string | null,
+	tr: (value: string) => string = cliTr
 ): string {
 	if (overlayKind === "permission") {
-		return "Waiting for permission…";
+		return tr("Waiting for permission…");
 	}
 	if (overlayKind === "question") {
-		return "Waiting for your answer…";
+		return tr("Waiting for your answer…");
 	}
-	return activeTool ? toolActivityLabel(activeTool) : "Thinking…";
+	return activeTool ? toolActivityLabel(activeTool, tr) : tr("Thinking…");
 }
 
 // The busy row sits above the composer at a fixed one-row height. Route and
@@ -130,7 +133,7 @@ export function StatusLine({
 		<box flexDirection="row" flexShrink={0} gap={1} height={1} paddingLeft={1}>
 			{busy ? (
 				<>
-					<StatusMessage variant="loading">{`${activity} ${elapsed}s`}</StatusMessage>
+					<StatusMessage variant="loading">{`${activity} ${busyElapsedLabel(elapsed)}`}</StatusMessage>
 					{interruptible ? (
 						<text fg={theme.colors.mutedForeground}>· Esc interrupt</text>
 					) : null}

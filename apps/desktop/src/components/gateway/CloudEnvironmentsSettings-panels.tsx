@@ -13,6 +13,7 @@ import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@ryu/ui/components/native-select.tsx";
+import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import type { Dispatch, SetStateAction } from "react";
 import { Segmented } from "@/src/components/gateway/quiet.tsx";
 import {
@@ -402,13 +403,21 @@ export function SharedTemplatesSection({
 	);
 }
 
+/** A setup run's exit code and its redacted stdout/stderr, kept apart so the
+ *  exit sentence translates while the raw output stays verbatim. */
+export interface SetupResult {
+	exitCode: number;
+	output: string;
+}
+
 export function SetupResultDialog({
 	result,
 	setResult,
 }: {
-	result: string | null;
-	setResult: (result: string | null) => void;
+	result: SetupResult | null;
+	setResult: (result: SetupResult | null) => void;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<Dialog
 			onOpenChange={(open) => {
@@ -427,8 +436,18 @@ export function SetupResultDialog({
 						agent task.
 					</DialogDescription>
 				</DialogHeader>
-				<pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-3 font-mono text-xs">
-					{result}
+				{result ? (
+					<p className="font-medium text-sm">
+						{tl("Setup exited with code {code}", {
+							code: formatNumber(result.exitCode),
+						})}
+					</p>
+				) : null}
+				<pre
+					className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-3 font-mono text-xs"
+					dir="ltr"
+				>
+					{result?.output}
 				</pre>
 				<DialogFooter>
 					<Button onClick={() => setResult(null)} variant="outline">

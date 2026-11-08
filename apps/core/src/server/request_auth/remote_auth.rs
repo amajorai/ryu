@@ -267,6 +267,13 @@ pub(in crate::server) fn credential_route_policy(
     if is_cloud_environment_mutation(method, path) && !is_owner_or_member_session(context) {
         return RoutePolicy::OwnerOnly;
     }
+    // The owner's personalization note is rendered into the system prompt of
+    // every owner chat turn. Its handler only compares the caller's user id
+    // with the node owner, which a hosted OAuth/MCP delegation or a paired
+    // device also carries, so neither may read or rewrite it.
+    if path == "/api/preferences/user-personalization" && !is_owner_or_member_session(context) {
+        return RoutePolicy::OwnerOnly;
+    }
     // Attaching as the node's network exit, steering provider traffic through
     // it, or detaching the owner's desktop is a node-owner control no OAuth
     // scope covers. The handler only compares the caller's user id with the
@@ -274,6 +281,12 @@ pub(in crate::server) fn credential_route_policy(
     // device also carries; only the owner token and a member's own signed-in
     // session (the desktop's node-list delegation) may reach it.
     if path_has_prefix(path, "/api/local-egress/route") && !is_owner_or_member_session(context) {
+        return RoutePolicy::OwnerOnly;
+    }
+    // Listing or answering the owner's security-key ceremonies (a relayed
+    // passkey registration or sign-in) is a node-owner control no OAuth scope
+    // covers; the handler only compares user ids.
+    if path_has_prefix(path, "/api/security-key") && !is_owner_or_member_session(context) {
         return RoutePolicy::OwnerOnly;
     }
     route_policy(method, path)

@@ -4,7 +4,7 @@
 // a key or an agent. The host supplies the choices for each kind; an agent id
 // can also be typed, because agents are not a closed list.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Input } from "@ryu/ui/components/input";
 import { Label } from "@ryu/ui/components/label";
 import {
@@ -34,13 +34,14 @@ export interface PolicyScopePickerProps {
 	value: PolicyScopeRef;
 }
 
-const ID_PLACEHOLDERS = {
-	org: "",
-	team: "Choose a team",
-	member: "Choose a member",
-	key: "Choose a key",
-	agent: "Choose an agent",
-} satisfies Record<PolicyScopeKind, string>;
+const idPlaceholders = (tl: LiteralMessage) =>
+	({
+		org: "",
+		team: tl("Choose a team"),
+		member: tl("Choose a member"),
+		key: tl("Choose a key"),
+		agent: tl("Choose an agent"),
+	}) satisfies Record<PolicyScopeKind, string>;
 
 /** The scope a kind starts at: the org itself, or the first choice. */
 export function defaultScopeFor(
@@ -140,7 +141,7 @@ export function PolicyScopePicker({
 							value={value.id || null}
 						>
 							<SelectTrigger className="w-56" id={scopeId}>
-								<SelectValue placeholder={ID_PLACEHOLDERS[value.kind]} />
+								<SelectValue placeholder={idPlaceholders(tl)[value.kind]} />
 							</SelectTrigger>
 							<SelectContent>
 								{choices.map((choice) => (

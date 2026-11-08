@@ -176,3 +176,29 @@ async fn persistent_store_prunes_expired_spans_on_demand_and_at_boot() {
     drop(reopened);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+async fn surviving_seqs(store: &TraceStore) -> Vec<i64> {
+    let conn = store.inner.conn.lock().await;
+    let mut statement = conn.prepare("SELECT seq FROM spans ORDER BY seq").unwrap();
+    let rows = statement.query_map([], |row| row.get(0)).unwrap();
+    rows.collect::<std::result::Result<Vec<i64>, _>>().unwrap()
+}
+
+#[tokio::test]
+async fn row_cap_keeps_exactly_the_newest_rows_below_at_and_above_the_cap() {
+    for (cap, expected_deleted) in [(0_u64, 5_u64), (2, 3), (4, 1), (5, 0), (9, 0)] {
+        let store = TraceStore::open_in_memory().unwrap();
+        seed(&store, "conv-k", &["a", "b", "c", "d", "e"]).await;
+        let before = surviving_seqs(&store).await;
+
+        let summary = prune_with(&store, None, Some(cap)).await;
+
+        assert_eq!(summary.deleted_rows, expected_deleted, "cap {cap}");
+        let keep = before.len().min(usize::try_from(cap).unwrap());
+        assert_eq!(
+            surviving_seqs(&store).await,
+            before[before.len() - keep..].to_vec(),
+            "cap {cap}"
+        );
+    }
+}

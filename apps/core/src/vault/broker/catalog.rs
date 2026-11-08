@@ -71,6 +71,7 @@ fn replace_ref(auth: &ServiceAuth, from: &str, to: &str) -> ServiceAuth {
                 .collect(),
         },
         ServiceAuth::Passthrough => ServiceAuth::Passthrough,
+        ServiceAuth::OAuth(binding) => ServiceAuth::OAuth(binding.clone()),
     }
 }
 
@@ -100,6 +101,7 @@ pub fn instantiate(
         substitutions: Vec::new(),
         enabled: true,
         allow_insecure_http: false,
+        box_relay: false,
         description: template.name.clone(),
         notes: String::new(),
     }

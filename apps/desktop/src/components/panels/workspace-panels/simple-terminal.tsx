@@ -37,7 +37,7 @@ export function SimpleTerminal({
 			type: "output",
 			text: cwd
 				? tl("Terminal — {cwd}\nType a command and press Enter.", { cwd })
-				: "Terminal\nType a command and press Enter.",
+				: tl("Terminal\nType a command and press Enter."),
 		},
 	]);
 	const [input, setInput] = useState("");

@@ -5,6 +5,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { HistoryImportReport } from "@/src/lib/api/usage-history.ts";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../../packages/i18n/src/active-locale.ts";
 
 if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
@@ -18,6 +23,7 @@ class ApiError extends Error {
 	serverMessage = "";
 }
 mock.module("@/src/lib/api/client.ts", () => ({ ApiError }));
+let trackingFailure: Error | null = null;
 const pending: {
 	target: ApiTarget;
 	signal: AbortSignal;
@@ -33,7 +39,10 @@ mock.module("@/src/lib/api/usage-history.ts", () => ({
 		});
 	},
 	fetchUsageHistoryTracking: () => Promise.resolve({ enabled: false }),
-	setUsageHistoryTracking: () => Promise.resolve({ enabled: true }),
+	setUsageHistoryTracking: () =>
+		trackingFailure
+			? Promise.reject(trackingFailure)
+			: Promise.resolve({ enabled: true }),
 	importUsageHistory: (
 		target: ApiTarget,
 		_body: Parameters<
@@ -108,6 +117,53 @@ test("aborts imports on node switch and ignores late results from the old node",
 		expect(serializedKeys).not.toContain('"b"');
 		expect(reads.filter((url) => url === "http://node-b")).toHaveLength(1);
 	} finally {
+		await act(async () => root.unmount());
+		client.clear();
+	}
+});
+
+test("Core's English refusals show in the UI language", async () => {
+	const { messageIdForLiteral } = await import("@ryu/i18n/core");
+	const refusal =
+		"The provider rate limited this report. Retry this page later.";
+	const german = {
+		direction: "ltr" as const,
+		locale: "de",
+		translate: (id: string, _values?: unknown, fallback?: string) =>
+			id === messageIdForLiteral(refusal)
+				? "Der Anbieter hat diesen Bericht begrenzt. Versuche es später erneut."
+				: (fallback ?? id),
+	};
+	const failure = new ApiError("Too Many Requests");
+	failure.serverMessage = refusal;
+	trackingFailure = failure;
+	registerActiveI18nRuntime(german);
+	const client = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	});
+	const root = createRoot(document.createElement("div"));
+	let latest: ReturnType<typeof useUsageHistory> | undefined;
+	function Reader() {
+		latest = useUsageHistory({ url: "http://node-c", token: "c" }, null);
+		return null;
+	}
+	try {
+		await act(async () =>
+			root.render(
+				<QueryClientProvider client={client}>
+					<Reader />
+				</QueryClientProvider>
+			)
+		);
+		await act(async () => {
+			await latest?.toggleTracking(true);
+		});
+		expect(latest?.trackingError).toBe(
+			"Der Anbieter hat diesen Bericht begrenzt. Versuche es später erneut."
+		);
+	} finally {
+		trackingFailure = null;
+		unregisterActiveI18nRuntime(german);
 		await act(async () => root.unmount());
 		client.clear();
 	}

@@ -60,8 +60,10 @@ async fn sequential_proxy_requests_reuse_connections_and_keep_headers_per_reques
             caller_resource_ids: None,
             caller_rate_subject: None,
             caller_agent_id: None,
+            caller_agent_egress_allowlist: None,
             caller_agent_restricted: false,
             event_delivery: None,
+            trusted_first_party: false,
         })
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -128,8 +130,10 @@ async fn dead_sidecar_502s_only_its_own_route() {
             caller_resource_ids: None,
             caller_rate_subject: None,
             caller_agent_id: None,
+            caller_agent_egress_allowlist: None,
             caller_agent_restricted: false,
             event_delivery: None,
+            trusted_first_party: false,
         })
         .await
     };
@@ -194,8 +198,10 @@ async fn streaming_response_yields_headers_before_body_completes() {
         caller_resource_ids: None,
         caller_rate_subject: None,
         caller_agent_id: None,
+        caller_agent_egress_allowlist: None,
         caller_agent_restricted: false,
         event_delivery: None,
+        trusted_first_party: false,
     });
     // Headers must arrive well before the body finishes (buffering ⇒ >3s ⇒ timeout).
     let resp = tokio::time::timeout(Duration::from_secs(1), fut)

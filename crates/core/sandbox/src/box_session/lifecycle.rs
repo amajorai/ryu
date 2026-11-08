@@ -13,11 +13,22 @@ impl BoxSessionClient {
         idempotency_key: &str,
     ) -> Result<WorkspaceId, BoxApiError> {
         validate_labels(&spec.labels)?;
+        let id = self.post_create(create_body(spec), idempotency_key).await?;
+        self.wait_until_ready(&id).await?;
+        Ok(id)
+    }
+
+    /// `POST /boxes` with a prepared body; the created Box's id.
+    pub(super) async fn post_create(
+        &self,
+        body: Value,
+        idempotency_key: &str,
+    ) -> Result<WorkspaceId, BoxApiError> {
         let value = self
             .request(
                 reqwest::Method::POST,
                 "/boxes",
-                Some(create_body(spec)),
+                Some(body),
                 Some(idempotency_key),
                 None,
             )
@@ -28,14 +39,12 @@ impl BoxSessionClient {
             .and_then(Value::as_str)
             .ok_or_else(|| invalid_response("Box create response did not contain box.id"))?;
         check_box_id(id)?;
-        let id = WorkspaceId(id.to_owned());
-        self.wait_until_ready(&id).await?;
-        Ok(id)
+        Ok(WorkspaceId(id.to_owned()))
     }
 
     /// Poll `GET /boxes/:id` until the Box is `ready` (or `running`), and
     /// fail when it settles anywhere else.
-    async fn wait_until_ready(&self, id: &WorkspaceId) -> Result<BoxView, BoxApiError> {
+    pub(super) async fn wait_until_ready(&self, id: &WorkspaceId) -> Result<BoxView, BoxApiError> {
         let deadline = Instant::now() + READY_DEADLINE;
         loop {
             let value = self

@@ -19,7 +19,6 @@ import {
 import { SettingsNavRow } from "../settings-nav.tsx";
 import { PolicyList } from "./policy-list.tsx";
 import {
-	POLICY_LADDER_COPY,
 	type PolicyView,
 	policiesWithAssignment,
 	policiesWithoutAssignment,
@@ -318,7 +317,9 @@ export function PolicyWorkspace({
 	return (
 		<div className="flex flex-col gap-6" ref={rootRef}>
 			<SettingsSection
-				caption={`${POLICY_LADDER_COPY} ${UNASSIGNED_POLICY_COPY}.`}
+				caption={tl(
+					"Ryu platform, then organization, team, member, key and agent. Each scope can only tighten what the scopes above it set. Unassigned policies enforce nothing."
+				)}
 				headerAction={
 					canEdit ? (
 						<Button

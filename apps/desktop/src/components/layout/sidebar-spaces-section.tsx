@@ -25,6 +25,11 @@ import {
 	type VisibilityDragPayload,
 } from "@/src/lib/resource-visibility.ts";
 import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
+import {
+	spaceDisplayName,
+	spaceSelectOptions,
+	withSpaceDisplayLabels,
+} from "@/src/lib/spaces/system-space-label.ts";
 import { openEntityInNewWindow } from "@/src/lib/window-routing.ts";
 import { SectionLoadError } from "./sidebar-agents-section.tsx";
 import { useNestedSections } from "./sidebar-nested-sections.ts";
@@ -173,13 +178,12 @@ export function SpacesSection({
 		false
 	);
 	const privateOptions = useMemo(
-		() =>
-			spacesByVisibility.private.map((s) => ({ label: s.name, value: s.id })),
-		[spacesByVisibility.private]
+		() => spaceSelectOptions(spacesByVisibility.private, tl),
+		[spacesByVisibility.private, tl]
 	);
 	const teamOptions = useMemo(
-		() => spacesByVisibility.team.map((s) => ({ label: s.name, value: s.id })),
-		[spacesByVisibility.team]
+		() => spaceSelectOptions(spacesByVisibility.team, tl),
+		[spacesByVisibility.team, tl]
 	);
 	const [privateSelection, setPrivateSelection] = usePickerSelection(
 		"ryu:sidebar-private-space-selection",
@@ -270,7 +274,7 @@ export function SpacesSection({
 								onRequestDelete={() =>
 									setPendingDelete({
 										id: selectedSpace.id,
-										name: selectedSpace.name,
+										name: spaceDisplayName(selectedSpace, tl),
 									})
 								}
 								onRequestVisibilityChange={requestVisibilityChange}
@@ -316,7 +320,8 @@ export function SpacesSection({
 				<SidebarMenu>{renderSpaceRows(groupPaged.visible)}</SidebarMenu>
 				<SectionPagingControls
 					overflow={{
-						getSearchText: (space) => space.name ?? "",
+						getSearchText: (space) =>
+							`${spaceDisplayName(space, tl)} ${space.name ?? ""}`,
 						items: groupPaged.items,
 						label:
 							group === "private" ? tl("private spaces") : tl("team spaces"),
@@ -334,7 +339,7 @@ export function SpacesSection({
 	// page no longer renders its own space list, so selection is driven from here.
 	const openSpace = (space: (typeof visibleSpaces)[number], forceNew = false) =>
 		openTab(`/spaces/${space.id}`, {
-			title: space.name,
+			title: spaceDisplayName(space, tl),
 			forceNew,
 			icon: space.icon ?? null,
 		});
@@ -342,7 +347,7 @@ export function SpacesSection({
 	const openSpaceInNewWindow = (space: (typeof visibleSpaces)[number]) => {
 		void openEntityInNewWindow({
 			path: `/spaces/${space.id}`,
-			title: space.name,
+			title: spaceDisplayName(space, tl),
 		});
 	};
 
@@ -407,12 +412,12 @@ export function SpacesSection({
 				onOpenInNewWindow={() => openSpaceInNewWindow(space)}
 				onRename={(name) => rename(space.id, name)}
 				onRequestDelete={() =>
-					setPendingDelete({ id: space.id, name: space.name })
+					setPendingDelete({ id: space.id, name: spaceDisplayName(space, tl) })
 				}
 				onRequestVisibilityChange={requestVisibilityChange}
 				setDocumentIcon={setDocumentIcon}
 				setSpaceIcon={setSpaceIcon}
-				space={space}
+				space={withSpaceDisplayLabels(space, tl)}
 			/>
 		));
 	const orderedVisibilityGroups = visibilityGroups.orderedKeys.filter(

@@ -1,5 +1,6 @@
 "use client";
 
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import get from "lodash/get.js";
@@ -118,6 +119,8 @@ function ChartContainer({
 				)}
 				data-chart={chartId}
 				data-slot="chart"
+				// Axes and SVG text anchors stay left to right under RTL locales.
+				dir="ltr"
 				{...props}
 				style={chartStyle}
 			>
@@ -234,6 +237,7 @@ function ChartTooltipContent({
 				"relative grid min-w-32 items-start gap-1.5 rounded-xl border border-border bg-popover px-2.5 py-1.5 text-popover-foreground text-xs shadow-(--shadow-popover)",
 				className
 			)}
+			dir="auto"
 		>
 			{nestLabel ? null : tooltipLabel}
 			<div className="grid gap-1.5">
@@ -326,6 +330,9 @@ function ChartLegendContent({
 	nameKey?: string;
 } & RechartsPrimitive.DefaultLegendContentProps) {
 	const { config } = useChart();
+	// The container pins axes left to right; series order and each swatch's
+	// side follow the UI language instead.
+	const direction = useDirection();
 
 	if (!payload?.length) {
 		return null;
@@ -338,6 +345,7 @@ function ChartLegendContent({
 				verticalAlign === "top" ? "pb-3" : "pt-3",
 				className
 			)}
+			dir={direction}
 		>
 			{payload
 				.filter((item) => item.type !== "none")

@@ -39,6 +39,19 @@ const MAX_PROXY_BYTES: usize = 10 * 1024 * 1024;
 /// sever it mid-answer.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Process-wide client so proxied calls (a burst of `/frame` fetches while
+/// scrubbing) reuse pooled connections instead of building a client each time.
+/// Connect-only timeout, so the long-lived `/agent` SSE stream is unaffected.
+fn shadow_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
 /// The Shadow sub-paths this proxy forwards, per method. Everything else 404s —
 /// undeclared paths are never forwarded (the ext-proxy's exact-route safety).
 const GET_ALLOWLIST: &[&str] = &[
@@ -166,10 +179,7 @@ async fn shadow_proxy(
         .unwrap_or_default();
     let target = format!("{}/{sub_path}{query}", base.trim_end_matches('/'));
 
-    let client = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    let client = shadow_http_client();
 
     let mut headers = reqwest::header::HeaderMap::new();
     for (name, value) in parts.headers.iter() {
@@ -231,6 +241,11 @@ async fn shadow_proxy(
 mod tests {
     use super::*;
     use axum::http::Method;
+
+    #[test]
+    fn shadow_http_client_is_a_shared_singleton() {
+        assert!(std::ptr::eq(shadow_http_client(), shadow_http_client()));
+    }
 
     #[test]
     fn allowlist_admits_only_declared_method_path_pairs() {

@@ -1,6 +1,13 @@
-//! Templated rule paths (see the parent module docs).
+//! Policy templates: `{{identity.*}}` placeholders in rule paths and values.
 
+use std::collections::BTreeMap;
+
+use anyhow::{bail, Result};
+
+use super::super::policy::{glob_matches, PolicyRule};
 use super::*;
+
+// ── Templates ─────────────────────────────────────────────────────────────
 
 /// The caller identity templates expand against.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

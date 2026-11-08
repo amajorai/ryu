@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	FREE_MODEL_TAG,
+	payableFreeModels,
 	tagFreeModels,
 	totalFreeCredit,
 } from "./free-model-tag.ts";
@@ -50,5 +51,47 @@ describe("totalFreeCredit", () => {
 		expect(
 			totalFreeCredit([{ expiresAt: null, remainingMicroUsd: 0 }])
 		).toBeNull();
+	});
+});
+
+describe("payableFreeModels (separate pools)", () => {
+	const core = ["openai/gpt-5-mini", "anthropic/claude-sonnet-4.5"];
+
+	it("tags only the Free models the user's pools pay for", () => {
+		const credit = totalFreeCredit([
+			{
+				expiresAt: null,
+				freeModelIds: ["OpenAI/GPT-5-mini"],
+				remainingMicroUsd: 5,
+			},
+		]);
+		expect([...(payableFreeModels(core, credit) ?? [])]).toEqual([
+			"openai/gpt-5-mini",
+		]);
+	});
+
+	it("keeps every Free id when the control plane did not say which pool pays", () => {
+		const credit = totalFreeCredit([{ expiresAt: null, remainingMicroUsd: 5 }]);
+		expect(payableFreeModels(core, credit)?.size).toBe(2);
+	});
+
+	it("tags nothing without free credit or when no pool pays for any Free id", () => {
+		expect(payableFreeModels(core, null)).toBeUndefined();
+		const drained = totalFreeCredit([
+			{
+				expiresAt: null,
+				freeModelIds: ["openai/gpt-5-mini"],
+				remainingMicroUsd: 0,
+			},
+		]);
+		expect(payableFreeModels(core, drained)).toBeUndefined();
+		const other = totalFreeCredit([
+			{
+				expiresAt: null,
+				freeModelIds: ["google/gemini-2.5-flash"],
+				remainingMicroUsd: 5,
+			},
+		]);
+		expect(payableFreeModels(core, other)).toBeUndefined();
 	});
 });

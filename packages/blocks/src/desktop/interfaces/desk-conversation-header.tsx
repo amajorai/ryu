@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { DeskAvatarStack } from "./desk-avatar.tsx";
 import type { DeskRow } from "./desk-model.ts";
 import { DeskStatusPill } from "./desk-status.tsx";
+import { newConversationLabel } from "./thread-display-title.ts";
 
 export function ConversationHeader({
 	detailsInline,
@@ -33,7 +34,7 @@ export function ConversationHeader({
 	stacked: boolean;
 }) {
 	const tl = useLiteralMessages();
-	const title = row ? row.title : "New conversation";
+	const title = row ? row.title : newConversationLabel(tl);
 	let context: ReactNode = newTargetLabel
 		? tl("With {newTargetLabel} · write the first message below", {
 				newTargetLabel,

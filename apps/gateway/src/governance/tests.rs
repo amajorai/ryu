@@ -464,6 +464,41 @@ fn healing_run_recovery_grants_are_reviewed_and_runs_is_reserved() {
 }
 
 #[test]
+fn runs_failures_is_owner_exclusive_to_the_healing_app() {
+    // `core#run.failed` carries every member's private failed-run text.
+    assert!(!default_grant_allowlist()
+        .iter()
+        .any(|g| g == "runs:failures"));
+    for id in ["@ryu/healing", "com.ryu.healing"] {
+        let d = validate_grants_for(Some(id), &scopes(&["runs:failures"]));
+        assert!(d.all_approved(), "{id} denied: {:?}", d.denied);
+    }
+    for id in ["com.example.runlog", "@ryu/notes", "com.evil.runs"] {
+        let d = validate_grants_for(Some(id), &scopes(&["runs:failures"]));
+        assert_eq!(d.denied, vec!["runs:failures".to_string()], "{id}");
+    }
+}
+
+#[test]
+fn warmup_crud_is_owner_exclusive_to_the_warmup_app() {
+    // `warmup:crud` schedules unattended agent turns on an app-supplied prompt.
+    assert!(!default_grant_allowlist().iter().any(|g| g == "warmup:crud"));
+    for id in ["@ryu/warmup", "com.ryu.warmup"] {
+        let d = validate_grants_for(Some(id), &scopes(&["warmup:crud"]));
+        assert!(d.all_approved(), "{id} denied: {:?}", d.denied);
+    }
+    for id in [
+        "com.example.app",
+        "@example/app",
+        "@ryu/notes",
+        "com.evil.warmup",
+    ] {
+        let d = validate_grants_for(Some(id), &scopes(&["warmup:crud"]));
+        assert_eq!(d.denied, vec!["warmup:crud".to_string()], "{id}");
+    }
+}
+
+#[test]
 fn cross_app_request_grants_are_form_checked_and_individually_reviewed() {
     // The one reviewed target: the Workflows Companion reading Recipes.
     let d = validate_grants_for(Some("@ryu/workflows"), &scopes(&["app:http:@ryu/recipes"]));
@@ -574,9 +609,10 @@ fn every_pre_grammar_allowlist_entry_still_validates() {
         // declarative `http` / `command` tool plugins
         ("exa", "tool:http-egress:api.exa.ai"),
         ("@ryu/advisor", "tool:http-egress:127.0.0.1"),
-        ("spider", "tool:command:spider"),
-        ("rtk", "tool:command:rtk"),
-        ("just-bash", "tool:command:just-bash"),
+        // (owner-exclusive since the command-grant fix; real declarer ids)
+        ("@ryu/spider", "tool:command:spider"),
+        ("@ryu/rtk", "tool:command:rtk"),
+        ("@ryu/just-bash", "tool:command:just-bash"),
         // data scopes
         ("@ryu/canvas", "memory.read"),
         ("@ryu/canvas", "memory.write"),
@@ -615,6 +651,7 @@ fn every_pre_grammar_allowlist_entry_still_validates() {
         ("@ryu/browser", "security-key:relay"),
         ("@ryu/projects", "chat:project-guidance"),
         ("@ryu/healing", "runs:rerun-agent"),
+        ("@ryu/healing", "runs:failures"),
         // widget consent + companion host primitives
         ("sample-widget", "widget:render"),
         ("@ryu/canvas", "spaces:docs"),

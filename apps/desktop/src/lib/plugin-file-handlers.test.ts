@@ -55,6 +55,47 @@ describe("opened file scope", () => {
 		).rejects.toThrow("file_too_large");
 	});
 
+	test("binary reads hash the exact bytes and fall back to a blob for non-UTF-8", async () => {
+		const utf8 = new TextEncoder().encode("\uFEFFhéllo 🙂");
+		const raw = new Uint8Array([0xff, 0x00, 0xc3, 0x28, 0x80]);
+		const toBase64 = (bytes: Uint8Array<ArrayBuffer>) => {
+			let binary = "";
+			for (const byte of bytes) {
+				binary += String.fromCharCode(byte);
+			}
+			return btoa(binary);
+		};
+		const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>) =>
+			Array.from(
+				new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+				(byte) => byte.toString(16).padStart(2, "0")
+			).join("");
+		const blobs: Record<string, string> = {
+			"/work/text.md": toBase64(utf8),
+			"/work/raw.bin": toBase64(raw),
+		};
+		const io = {
+			read: async () => "",
+			write: async () => undefined,
+			readBinary: async (path: string) => blobs[path] ?? "",
+		};
+		const text = await createOpenedFileAccess(
+			"/work/text.md",
+			false,
+			io
+		).read();
+		expect(text.text).toBe("\uFEFFhéllo 🙂");
+		expect(text.revision).toBe(await sha256Hex(utf8));
+		const binary = await createOpenedFileAccess(
+			"/work/raw.bin",
+			false,
+			io
+		).read();
+		expect(binary.text).toBeUndefined();
+		expect(binary.blob).toBe(blobs["/work/raw.bin"]);
+		expect(binary.revision).toBe(await sha256Hex(raw));
+	});
+
 	test("read-only handlers receive no writer", () => {
 		const access = createOpenedFileAccess("/work/view.txt", false);
 		expect(access.write).toBeUndefined();

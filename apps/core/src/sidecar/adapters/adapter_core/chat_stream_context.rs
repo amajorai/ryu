@@ -89,6 +89,7 @@ pub(super) async fn record_turn_memory(
     effective_agent_id: &Option<String>,
     memory_project_id: &Option<String>,
     user_text: &str,
+    persisted_user_message_id: Option<&str>,
 ) {
     // Record the user's turn into long-term memory when opted in, so it informs
     // future sessions. No-op (and nothing is stored) when disabled. Metadata is
@@ -129,7 +130,15 @@ pub(super) async fn record_turn_memory(
                     .attr("scope", mirrored_scope),
             )
             .await;
-            let recorded = memory.record_full(&owner, &scope, new).await;
+            // Provenance: the fact came from this conversation, citing the stored
+            // user message, so the Library and Dream can show how it was known.
+            let metadata = crate::server::memory::MemoryMetadata::conversation(
+                req.conversation_id.clone(),
+                persisted_user_message_id.map(str::to_owned),
+            );
+            let recorded = memory
+                .record_full_with_metadata(&owner, &scope, new, metadata)
+                .await;
             end_trace_span(
                 traces,
                 memory_span.as_ref(),
@@ -170,3 +179,7 @@ pub(super) async fn record_turn_memory(
         crate::memory_provider::sync_turn(user_text, "user");
     }
 }
+
+#[cfg(test)]
+#[path = "chat_stream_context_tests.rs"]
+mod tests;

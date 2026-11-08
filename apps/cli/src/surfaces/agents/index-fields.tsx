@@ -1,6 +1,6 @@
 /* @jsxImportSource @opentui/react */
 import { StatusMessage } from "@/components/ui/status-message.tsx";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 import { Loading } from "../../ui/Loading.tsx";
 import type { SkillPickerRow, ToolPickerRow } from "./capabilities.ts";
 import {
@@ -84,7 +84,6 @@ export function AgentCapabilityPicker({
 	theme: Theme;
 }) {
 	const title = kind === "tools" ? "Agent tools" : "Agent skills";
-	const noun = kind === "tools" ? "tools" : "skills";
 	const start = Math.max(
 		0,
 		Math.min(
@@ -106,7 +105,11 @@ export function AgentCapabilityPicker({
 			/>
 			<box flexDirection="column" gap={1} padding={1}>
 				{status === "loading" && rows.length === 0 ? (
-					<Loading label={tf("Loading {noun}…", { noun })} />
+					<Loading
+						label={
+							kind === "tools" ? tr("Loading tools…") : tr("Loading skills…")
+						}
+					/>
 				) : null}
 				{error ? (
 					<StatusMessage variant="error">
@@ -115,10 +118,13 @@ export function AgentCapabilityPicker({
 									"Catalog refresh failed: {error}. Showing saved/current rows; press r to retry.",
 									{ error }
 								)
-							: tf("Couldn't load {noun}: {error}. Press r to retry.", {
-									error,
-									noun,
-								})}
+							: kind === "tools"
+								? tf("Couldn't load tools: {error}. Press r to retry.", {
+										error,
+									})
+								: tf("Couldn't load skills: {error}. Press r to retry.", {
+										error,
+									})}
 					</StatusMessage>
 				) : null}
 				{status === "ready" && rows.length === 0 ? (

@@ -30,6 +30,23 @@ export const ENROLLED_TWO_FACTOR_STEP_UP_PATHS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Better Auth's emailed two-factor code endpoints. Ryu sends them only during
+ * sign-in, while the pending two-factor cookie stands in for a session. Called
+ * with a signed-in session, `verify-otp` instead turns `twoFactorEnabled` on
+ * from an emailed code with no authenticator behind it, which every
+ * stored-enrollment check (org `requireMfa`, marketplace publishing, the
+ * account mandate) would then read as an enrolled second factor. Ryu's own
+ * step-up flow never routes a signed-in session here, so the gate refuses both
+ * paths whenever one is present.
+ */
+export const SIGN_IN_ONLY_TWO_FACTOR_PATHS: ReadonlySet<string> = new Set([
+	"/two-factor/send-otp",
+	"/two-factor/verify-otp",
+]);
+
+export const TWO_FACTOR_OTP_SIGNED_IN = "TWO_FACTOR_OTP_SIGNED_IN";
+
+/**
  * The step-up scope `path` needs for an account whose two-factor state is
  * `twoFactorEnabled`, or null when it needs none.
  */
@@ -47,6 +64,8 @@ export function enrolledTwoFactorStepUpScope(
  * `account.security` proof while the caller's two-factor is on. Like
  * `stepUpGate`, it judges the session the endpoint will run as (cookie or
  * bearer) and fails open with no session so the endpoint's own 401 answers.
+ * It also refuses `SIGN_IN_ONLY_TWO_FACTOR_PATHS` to a signed-in session, so an
+ * emailed code can never mark an account as having an authenticator.
  */
 export function twoFactorStepUpGate(): BetterAuthPlugin {
 	return {
@@ -75,6 +94,21 @@ export function twoFactorStepUpGate(): BetterAuthPlugin {
 							code: STEP_UP_REQUIRED,
 							message: "Verify your identity to continue",
 							scope,
+						});
+					}),
+				},
+				{
+					matcher: (context: { path?: string }) =>
+						SIGN_IN_ONLY_TWO_FACTOR_PATHS.has(context.path ?? ""),
+					handler: createAuthMiddleware(async (ctx) => {
+						const resolved = await resolveSessionForHook(ctx);
+						if (!resolved?.session.id) {
+							return;
+						}
+						throw new APIError("FORBIDDEN", {
+							code: TWO_FACTOR_OTP_SIGNED_IN,
+							message:
+								"Emailed two-factor codes are only used to finish signing in",
 						});
 					}),
 				},

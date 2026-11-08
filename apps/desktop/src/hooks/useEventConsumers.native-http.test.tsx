@@ -40,6 +40,9 @@ mock.module("@/src/hooks/useUserAvailability.ts", () => ({
 	useUserAvailability: () => ({ status: availability }),
 }));
 const { createRoot } = await import("react-dom/client");
+const { TabsContext } = await import("@/src/contexts/TabsContext.tsx");
+// Notification links open through the tab context; these tests never follow one.
+const tabs = { openTab: () => undefined };
 const { Toaster, toast } = await import("@ryu/ui/components/sileo.tsx");
 const { useApprovalEvents } = await import("@/src/hooks/useApprovalEvents.ts");
 const { useQuestEvents } = await import("@/src/hooks/useQuestEvents.ts");
@@ -536,7 +539,9 @@ async function renderAll() {
 	await act(async () =>
 		root.render(
 			<QueryClientProvider client={qc}>
-				<AllNotificationConsumers />
+				<TabsContext.Provider value={tabs as never}>
+					<AllNotificationConsumers />
+				</TabsContext.Provider>
 			</QueryClientProvider>
 		)
 	);

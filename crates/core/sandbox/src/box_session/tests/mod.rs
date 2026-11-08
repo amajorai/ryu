@@ -133,6 +133,13 @@ fn session_spec(size: BoxSize) -> DisposableBoxSpec {
 
 const READY_BOX: &str = r#"{"ok":true,"box":{"id":"bx_0123456789abcdef0123456789abcdef","status":"ready","size":"large","runningSince":"2026-10-19T04:00:00.000Z","desktop":{"ready":true,"viewers":1,"width":1280,"height":800},"placement":{"tier":"hetzner","provider":"hetzner","location":"nbg1","serverType":"cx43","isolation":"vm"}}}"#;
 
+// Beside their modules so the staged-test check pairs them.
+#[path = "../broker_relay_test.rs"]
+mod broker_relay_test;
+#[path = "../browser_fill_test.rs"]
+mod browser_fill_test;
 mod client_tests;
+#[path = "../network_secrets_test.rs"]
+mod network_secrets_test;
 mod session_create_tests;
 mod session_verb_tests;

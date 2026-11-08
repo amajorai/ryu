@@ -105,9 +105,14 @@ describe("DeprecationNotice replacement sentence", () => {
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 20));
 		});
-		expect(host.textContent).toContain("استخدم @acme/new بدلاً من ذلك.");
+		expect(host.textContent).toContain(
+			"استخدم \u2068@acme/new\u2069 بدلاً من ذلك."
+		);
 		expect(host.textContent).not.toContain("لعناصر نائبة مسماة");
-		expect(host.querySelector("code")?.textContent).toBe("@acme/new");
+		// The Latin id stays bidi-isolated inside the RTL sentence's code chip.
+		expect(host.querySelector("code")?.textContent).toBe(
+			"\u2068@acme/new\u2069"
+		);
 	});
 
 	test("en keeps the source sentence", async () => {

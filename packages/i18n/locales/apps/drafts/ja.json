@@ -1,4 +1,7 @@
 {
+  "Failed to send": "送信に失敗しました",
+  "Send failed": "送信に失敗しました",
+  "Send was interrupted; review and resend": "送信が中断されました。確認して再送信してください",
   "Sending at a set time": "指定時刻に送信",
   "Sending at {when}": "{when} に送信",
   "Waiting for agents to start, then finish": "エージェントの開始と完了を待っています",

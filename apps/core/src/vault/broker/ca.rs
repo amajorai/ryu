@@ -197,8 +197,13 @@ pub fn combined_bundle(system_roots: &[CertificateDer<'_>], certificate_pem: &st
 /// combined OS-plus-broker bundle (`<data dir>/state/vault/broker-ca-bundle.pem`)
 /// where child processes can read them.
 pub fn write_bundle(certificate_pem: &str) -> Result<CaFiles> {
-    let dir = crate::paths::state_path("vault");
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    write_bundle_in(&crate::paths::state_path("vault"), certificate_pem)
+}
+
+/// [`write_bundle`] into `dir`. Both files are public certificates, so
+/// runtime sessions write them where a sandboxed agent can still read them.
+pub fn write_bundle_in(dir: &std::path::Path, certificate_pem: &str) -> Result<CaFiles> {
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let ca_only = dir.join("broker-ca.pem");
     std::fs::write(&ca_only, certificate_pem)
         .with_context(|| format!("writing {}", ca_only.display()))?;

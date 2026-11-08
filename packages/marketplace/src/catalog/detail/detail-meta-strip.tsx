@@ -5,6 +5,7 @@ import {
 	Tag01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { surfaceLabel } from "../surface-labels.ts";
@@ -53,6 +54,7 @@ export function DetailMetaStrip({
 	detail: PluginCatalogDetail | null;
 	entry: CatalogEntry;
 }) {
+	const tl = useLiteralMessages();
 	const version = detail?.version ?? entry.version ?? null;
 	const updated = formatDate(detail?.updatedAt);
 	const created = formatDate(detail?.createdAt);
@@ -89,7 +91,10 @@ export function DetailMetaStrip({
 			? {
 					icon: Download01Icon,
 					label: "Downloads",
-					value: `${formatCount(downloads)} downloads`,
+					value: tl(
+						"{count, plural, one {{countText} download} other {{countText} downloads}}",
+						{ count: downloads, countText: formatCount(downloads) }
+					),
 				}
 			: null,
 	].filter((item): item is Exclude<typeof item, null> => Boolean(item));

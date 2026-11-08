@@ -8,6 +8,7 @@ import {
 	SceneCanvas,
 	Wire,
 } from "./scene.tsx";
+import { SCENE_CHIP_LABELS } from "./scene-chip-labels.ts";
 
 /**
  * Ryu Core's homepage card: the orchestration map. A task drops into the hub;
@@ -43,7 +44,7 @@ const ENGINES = [
 
 const RESOURCES = [
 	{ label: "mcp", row: ROWS[0] },
-	{ label: "memory", row: ROWS[1] },
+	{ label: SCENE_CHIP_LABELS.memory, row: ROWS[1] },
 	{ label: "git", row: ROWS[2] },
 ] as const;
 

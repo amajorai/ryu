@@ -83,6 +83,7 @@ import {
 	type ScreenSurfaceState,
 	SURFACE_CHANNELS,
 } from "../shared/screen-surface.ts";
+import { SYSTEM_LANGUAGES_CHANNEL } from "../shared/system-languages-channel.ts";
 
 // Subscribe a renderer listener to an IPC event channel, returning an
 // unsubscribe function. The raw Electron `event` arg is stripped so the
@@ -412,6 +413,8 @@ contextBridge.exposeInMainWorld("island", api);
 const languageApi: IslandLanguageApi = {
 	select: (packId: string | null): Promise<boolean> =>
 		ipcRenderer.invoke(LANGUAGE_SELECTION_CHANNEL, packId),
+	systemLanguages: (): Promise<unknown> =>
+		ipcRenderer.invoke(SYSTEM_LANGUAGES_CHANNEL),
 };
 
 contextBridge.exposeInMainWorld("islandLanguage", languageApi);

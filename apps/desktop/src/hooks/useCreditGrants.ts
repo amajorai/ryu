@@ -34,6 +34,11 @@ import { useActiveOrgId } from "@/src/lib/api/orgs.ts";
 export interface GrantPoolBalance {
 	/** ISO timestamp when this pool's grant money lapses, or null if it does not. */
 	expiresAt: string | null;
+	/**
+	 * The Ryu Router model ids this pool's grant pays for (separate pools), or
+	 * undefined when the control plane did not say.
+	 */
+	freeModelIds?: readonly string[];
 	/** Whether this balance can only be used with an allocated free provider. */
 	isFreeProvider: boolean;
 	/** The pool's user-facing tier name ("Ryu Fast"), never a vendor name. */
@@ -120,6 +125,7 @@ const selectGrantPools = (
 			remainingMicroUsd: entry.remainingMicroUsd,
 			isFreeProvider: entry.isFreeProvider,
 			expiresAt: entry.expiresAt,
+			freeModelIds: entry.freeModelIds,
 		}));
 
 export function useCreditGrants(): UseCreditGrantsResult {

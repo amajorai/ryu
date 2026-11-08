@@ -379,3 +379,29 @@ async fn message_feedback_set_list_and_turn_resolution() {
         .await
         .unwrap());
 }
+
+#[tokio::test]
+async fn conversation_titles_returns_decrypted_titles_for_known_ids_only() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    store
+        .append_message("c1", "user", "hello there", None, None, None)
+        .await
+        .unwrap();
+    store.set_title("c1", "Database schema plan").await.unwrap();
+    store
+        .ensure_conversation("c2", None, None, Tenancy::Unattributed)
+        .await
+        .unwrap();
+
+    let titles = store
+        .conversation_titles(&["c1".to_owned(), "c2".to_owned(), "missing".to_owned()])
+        .await
+        .unwrap();
+    assert_eq!(
+        titles.get("c1").map(String::as_str),
+        Some("Database schema plan")
+    );
+    // An untitled conversation and an unknown id are both absent.
+    assert!(!titles.contains_key("c2"));
+    assert!(!titles.contains_key("missing"));
+}

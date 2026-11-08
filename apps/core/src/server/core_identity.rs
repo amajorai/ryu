@@ -29,6 +29,11 @@
 //! example on Core's public port after the facade stopped) still gets a proof
 //! for the private address, and one that relays through the facade from
 //! another address gets a proof for the facade's address, never its own.
+//!
+//! An agent that holds only its `rvb_` broker session (not the node token)
+//! sends `broker_session=<lookup id>` with the nonce, and Core proves the
+//! session's stored hash instead, under its own domain
+//! (`vault::broker::session_identity`).
 
 use std::net::SocketAddr;
 
@@ -44,6 +49,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 const IDENTITY_DOMAIN: &str = "ryu-core-identity-v2";
+/// Domain of the proof keyed by a broker session's stored hash.
+const BROKER_IDENTITY_DOMAIN: &str = "ryu-core-identity-broker-v1";
 const NONCE_HEX_LEN: usize = 64;
 
 /// Peer and local socket of one accepted HTTP connection. Core's listener
@@ -95,9 +102,19 @@ pub fn canonical_local_addr(local: SocketAddr) -> String {
 /// The proof a client expects for `nonce` from a Core whose connection to it
 /// is bound locally to `local`.
 pub fn identity_proof(node_token: &str, local: SocketAddr, nonce: &str) -> String {
+    proof_in(IDENTITY_DOMAIN, node_token, local, nonce)
+}
+
+/// The proof a broker-session client expects: keyed by the session's stored
+/// hash (`sha256_hex(token)`), never the token or the node token.
+pub fn broker_identity_proof(session_key: &str, local: SocketAddr, nonce: &str) -> String {
+    proof_in(BROKER_IDENTITY_DOMAIN, session_key, local, nonce)
+}
+
+fn proof_in(domain: &str, key: &str, local: SocketAddr, nonce: &str) -> String {
     ryu_crypto::hmac_sha256_hex(
-        node_token.as_bytes(),
-        format!("{IDENTITY_DOMAIN}:{}:{nonce}", canonical_local_addr(local)).as_bytes(),
+        key.as_bytes(),
+        format!("{domain}:{}:{nonce}", canonical_local_addr(local)).as_bytes(),
     )
 }
 
@@ -108,9 +125,27 @@ fn valid_nonce(nonce: &str) -> bool {
 #[derive(Debug, Deserialize)]
 pub struct IdentityQuery {
     nonce: Option<String>,
+    /// Lookup id of a broker session; the proof is then keyed by that session.
+    broker_session: Option<String>,
+}
+
+/// Which secret the proof is keyed by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProofKind {
+    NodeToken,
+    BrokerSession,
 }
 
 fn respond(token: Option<String>, local: Option<SocketAddr>, nonce: Option<&str>) -> Response {
+    respond_as(ProofKind::NodeToken, token, local, nonce)
+}
+
+fn respond_as(
+    kind: ProofKind,
+    token: Option<String>,
+    local: Option<SocketAddr>,
+    nonce: Option<&str>,
+) -> Response {
     let Some(nonce) = nonce.filter(|nonce| valid_nonce(nonce)) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
@@ -124,7 +159,11 @@ fn respond(token: Option<String>, local: Option<SocketAddr>, nonce: Option<&str>
         [(header::CACHE_CONTROL, "no-store")],
         Json(json!({
             "version": 2,
-            "proof": identity_proof(&token, local, &nonce.to_ascii_lowercase()),
+            "proof": match kind {
+                ProofKind::NodeToken => identity_proof(&token, local, &nonce.to_ascii_lowercase()),
+                ProofKind::BrokerSession =>
+                    broker_identity_proof(&token, local, &nonce.to_ascii_lowercase()),
+            },
         })),
     )
         .into_response()
@@ -142,13 +181,41 @@ pub fn identity_response(
     nonce: Option<&str>,
     relay_key: Option<&str>,
 ) -> Response {
+    identity_response_as(
+        ProofKind::NodeToken,
+        token,
+        connection_local,
+        headers,
+        nonce,
+        relay_key,
+    )
+}
+
+/// [`identity_response`] for a proof keyed by `kind`'s secret.
+pub fn identity_response_as(
+    kind: ProofKind,
+    token: Option<String>,
+    connection_local: Option<SocketAddr>,
+    headers: &HeaderMap,
+    nonce: Option<&str>,
+    relay_key: Option<&str>,
+) -> Response {
     use crate::dev_execution::{relayed_local_addr, RelayedLocal};
     let local = match relayed_local_addr(headers, nonce, relay_key) {
         RelayedLocal::Absent => connection_local,
         RelayedLocal::Verified(facade_local) => Some(facade_local),
         RelayedLocal::Rejected => None,
     };
-    respond(token, local, nonce)
+    respond_as(kind, token, local, nonce)
+}
+
+/// The stored hash of the live broker session `lookup` names, if any.
+async fn broker_session_key(lookup: &str) -> Option<String> {
+    let store = crate::plugin_secrets::global()?;
+    let conn = store.conn.lock().await;
+    crate::vault::broker::session_identity::identity_key(&conn, lookup)
+        .ok()
+        .flatten()
 }
 
 /// `GET /api/health/identity?nonce=<64 hex>`: public, credential-free.
@@ -157,6 +224,20 @@ pub async fn identity_handler(
     headers: HeaderMap,
     Query(query): Query<IdentityQuery>,
 ) -> Response {
+    if let Some(lookup) = query.broker_session.as_deref() {
+        // Check the nonce first so a malformed challenge costs no lookup.
+        if !query.nonce.as_deref().is_some_and(valid_nonce) {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        return identity_response_as(
+            ProofKind::BrokerSession,
+            broker_session_key(lookup).await,
+            local.map(|Extension(LocalAddr(addr))| addr),
+            &headers,
+            query.nonce.as_deref(),
+            crate::dev_execution::worker_relay_key().as_deref(),
+        );
+    }
     identity_response(
         crate::node_token::active_token(),
         local.map(|Extension(LocalAddr(addr))| addr),
@@ -214,6 +295,28 @@ mod tests {
         assert_eq!(
             identity_proof("node-secret", addr("[::1]:7980"), NONCE),
             "b3ff0967bcc5d24f202186d01c9cb19f9e13628400bcfd566ff1eed72fbdfa87"
+        );
+    }
+
+    #[tokio::test]
+    async fn broker_session_proofs_use_their_own_domain_and_key() {
+        let core = addr("127.0.0.1:7980");
+        let key = "aa".repeat(32);
+        let response = respond_as(ProofKind::BrokerSession, Some(key.clone()), Some(core), Some(NONCE));
+        assert_eq!(response.status(), StatusCode::OK);
+        let proof = body(response).await["proof"].as_str().unwrap().to_string();
+        assert_eq!(proof, broker_identity_proof(&key, core, NONCE));
+        // Never the node-token proof for the same key, so neither answers for the other.
+        assert_ne!(proof, identity_proof(&key, core, NONCE));
+        // An unknown session has nothing to prove.
+        assert_eq!(
+            respond_as(ProofKind::BrokerSession, None, Some(core), Some(NONCE)).status(),
+            StatusCode::NOT_FOUND
+        );
+        // Pinned vector shared with packages/core-client/src/core-identity-broker.test.ts.
+        assert_eq!(
+            broker_identity_proof(&key, core, NONCE),
+            "92c82b23a4ffc50312944cef5e29c249480a103dce905478d2f21eca4b585112"
         );
     }
 

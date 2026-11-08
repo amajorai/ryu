@@ -202,3 +202,9 @@ pub(crate) const OPENAI_CREDITS_PROVIDER_ID: &str = "openai-credits";
 /// reason as [`OPENAI_CREDITS_PROVIDER_ID`]: `"anthropic"` is the untagged BYOK
 /// slot and must never draw a pool-restricted grant.
 pub(crate) const ANTHROPIC_CREDITS_PROVIDER_ID: &str = "anthropic-credits";
+
+/// Registry id of Ryu's Microsoft Azure (Azure OpenAI / AI Foundry) supply, the
+/// slot behind the `azure-credits` pool. There is no BYOK `azure` slot today,
+/// but the id is suffixed like the other first-party accounts so a future BYOK
+/// Azure slot can take the bare name without drawing pool-restricted grants.
+pub(crate) const AZURE_CREDITS_PROVIDER_ID: &str = "azure-credits";

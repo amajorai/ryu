@@ -1,9 +1,14 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@ryu/ui/components/native-select.tsx";
 import type { BackupOverview } from "@/src/lib/api/backups.ts";
+import {
+	type SystemSpaceLabelSource,
+	spaceDisplayName,
+} from "@/src/lib/spaces/system-space-label.ts";
 
 export function BackupScopeFields({
 	id,
@@ -24,8 +29,9 @@ export function BackupScopeFields({
 	spaceId?: string;
 	selection: string;
 	setSelection: (value: string) => void;
-	spaces: ReadonlyArray<{ id: string; name: string }>;
+	spaces: ReadonlyArray<SystemSpaceLabelSource & { id: string }>;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<>
 			<div className="grid gap-4 sm:grid-cols-2">
@@ -62,7 +68,7 @@ export function BackupScopeFields({
 						)}
 						{spaces.map((space) => (
 							<NativeSelectOption key={space.id} value={space.id}>
-								{space.name}
+								{spaceDisplayName(space, tl)}
 							</NativeSelectOption>
 						))}
 					</NativeSelect>

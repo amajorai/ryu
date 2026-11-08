@@ -23,10 +23,28 @@ const REGION_NAMES = {
 
 const BOTTOM_ALIGNMENTS = [
 	["center", "Center"],
-	["full", "Full Width"],
+	["full", "Full width"],
 	["left", "Left"],
 	["right", "Right"],
 ] as const satisfies ReadonlyArray<readonly [BottomAlignment, string]>;
+
+/** Each alignment title is one whole message, so a translation never embeds
+ * an English label. */
+function bottomAlignmentTitle(
+	alignment: BottomAlignment,
+	tl: LiteralMessage
+): string {
+	switch (alignment) {
+		case "center":
+			return tl("Align Bottom Pane: Center");
+		case "full":
+			return tl("Align Bottom Pane: Full width");
+		case "left":
+			return tl("Align Bottom Pane: Left");
+		default:
+			return tl("Align Bottom Pane: Right");
+	}
+}
 
 export interface WorkbenchCommand {
 	checked?: boolean;
@@ -213,7 +231,7 @@ export function workbenchLayoutCommands({
 			id: `workbench-align-bottom-${alignment}`,
 			keywords: `align bottom pane panel width ${label.toLowerCase()} layout`,
 			run: () => dispatch({ type: "bottom/align", alignment }),
-			title: tl("Align Bottom Pane: {label}", { label }),
+			title: bottomAlignmentTitle(alignment, tl),
 		});
 	}
 

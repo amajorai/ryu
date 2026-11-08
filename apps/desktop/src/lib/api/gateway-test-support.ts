@@ -65,7 +65,8 @@ export function gatewayDialogSource(): string {
 
 /** The gateway config module: `config.rs` and its `config/` submodules. */
 export const GATEWAY_CONFIG_RS = "apps/gateway/src/config.rs";
-const ROUTER_RS = "crates/gateway/router/src/lib.rs";
+const ROUTER_SRC = "crates/gateway/router/src";
+const ROUTER_RS = `${ROUTER_SRC}/prefixes.rs`;
 export const CLASSIFY_SIDECAR_RS =
 	"apps/core/src/sidecar/providers/llamacpp/classify.rs";
 // `AlertTier` lives in the neutral contracts crate, not in the gateway binary —
@@ -80,7 +81,9 @@ export const BUDGET_RS = "crates/gateway/budget/src/lib.rs";
 export const CORE_POLICY_ALERTS_RS = "apps/core/src/policy_alerts/mod.rs";
 
 export const gatewayConfigRs = rustModuleSource(GATEWAY_CONFIG_RS);
-export const routerRs = rustSource(ROUTER_RS);
+export const routerRs = ["lib", "prefixes", "pool_routes", "tables", "classify"]
+	.map((name) => rustSource(`${ROUTER_SRC}/${name}.rs`))
+	.join("\n");
 export const classifySidecarRs = rustSource(CLASSIFY_SIDECAR_RS);
 export const contractsRs = rustSource(CONTRACTS_RS);
 export const budgetRs = rustSource(BUDGET_RS);
@@ -384,7 +387,8 @@ export function routerBuiltinPrefixes(): [string, string][] {
 //     buildBudgetRule guards above — the `.tsx` cannot be imported here.
 
 export const GATEWAY_API_CONFIG_RS = "apps/gateway/src/api/config.rs";
-export const GATEWAY_PROVIDERS_RS = "apps/gateway/src/providers/mod.rs";
+export const GATEWAY_PROVIDERS_RS =
+	"apps/gateway/src/providers/tests/registry.rs";
 export const gatewayApiConfigRs = rustSource(GATEWAY_API_CONFIG_RS);
 export const gatewayProvidersRs = rustSource(GATEWAY_PROVIDERS_RS);
 export const gatewayDialogTsx = gatewayDialogSource();

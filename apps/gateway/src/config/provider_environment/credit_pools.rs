@@ -1,5 +1,5 @@
 //! Credit-pool provider slots (Cloudflare, Bedrock, Vertex and the donated
-//! OpenAI/Anthropic allowances) filled from the captured provider environment.
+//! OpenAI/Anthropic allowances and Ryu's Azure account) filled from the captured provider environment.
 use super::*;
 
 impl ProviderEnvironment {
@@ -129,5 +129,38 @@ impl ProviderEnvironment {
                 });
             }
         }
+        // Ryu's Microsoft Azure account (Azure OpenAI / AI Foundry). The v1
+        // surface is OpenAI-compatible but resource-scoped, so the slot needs a
+        // resource name (`AZURE_CREDITS_RESOURCE`) or an explicit base URL; a
+        // key alone cannot say where to send traffic and leaves the slot off.
+        if let Ok(key) = self.var("AZURE_CREDITS_API_KEY") {
+            let base_url = self
+                .var("AZURE_CREDITS_BASE_URL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .map(|url| url.trim().trim_end_matches('/').to_owned())
+                .or_else(|| {
+                    self.var("AZURE_CREDITS_RESOURCE")
+                        .ok()
+                        .filter(|s| !s.trim().is_empty())
+                        .map(|resource| azure_v1_base_url(&resource))
+                });
+            if let Some(base_url) = base_url {
+                if !key.trim().is_empty() {
+                    config.providers.azure_credits = Some(OpenAiProviderConfig {
+                        api_key: key,
+                        api_keys: self.keys("AZURE_CREDITS_API_KEYS"),
+                        base_url,
+                    });
+                }
+            }
+        }
     }
+}
+
+/// The Azure OpenAI v1 base URL for a resource name. `OpenAiProvider` appends
+/// `/chat/completions`; the v1 surface takes the resource key as a bearer token
+/// and needs no `api-version` query parameter.
+pub(super) fn azure_v1_base_url(resource: &str) -> String {
+    format!("https://{}.openai.azure.com/openai/v1", resource.trim())
 }

@@ -15,6 +15,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import { SIDEBAR_OVERFLOW_POPOVER_KEY } from "./appearance-context-menu.tsx";
 import { SIDEBAR_CHAT_SCOPE_ATTRIBUTES } from "./sidebar-chat-selection.tsx";
+import { searchLabelFor } from "./sidebar-section-search-label.ts";
 
 // How many rows the overflow popover reveals per infinite-scroll step.
 const OVERFLOW_WINDOW_STEP = 30;
@@ -45,7 +46,9 @@ export function SectionOverflowPopover<T>({
 	const { t } = useI18n();
 	const tl = useLiteralMessages();
 	const sectionLabel = useLocalizedString(overflow.label) ?? overflow.label;
-	const searchLabel = t("sidebar.search-section", { section: sectionLabel });
+	const searchLabel = searchLabelFor(overflow.label, tl, () =>
+		t("sidebar.search-section", { section: sectionLabel })
+	);
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
 	const [windowCount, setWindowCount] = useState(OVERFLOW_WINDOW_STEP);

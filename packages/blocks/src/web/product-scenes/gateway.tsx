@@ -7,6 +7,7 @@ import {
 	SceneCanvas,
 	Wire,
 } from "./scene.tsx";
+import { SCENE_CHIP_LABELS } from "./scene-chip-labels.ts";
 
 /**
  * Homepage card scene for Gateway: the checkpoint between an agent and
@@ -29,7 +30,7 @@ const PROVIDER_X = 250;
 
 const PROVIDERS = [
 	{ className: styles.model, label: "model", y: 44 },
-	{ className: styles.backup, label: "backup", y: 92 },
+	{ className: styles.backup, label: SCENE_CHIP_LABELS.backup, y: 92 },
 	{ className: styles.tool, label: "tool", y: 140 },
 ] as const;
 

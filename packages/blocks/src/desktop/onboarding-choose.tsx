@@ -7,6 +7,37 @@ import { type ReactNode, useState } from "react";
 import { OnboardingActions, OnboardingCta } from "./onboarding-shell.tsx";
 import type { OnboardingViewProps } from "./onboarding-types.ts";
 
+// The translated reason the local pick failed, then the backend's raw cause
+// under "Details": it is the only clue distinguishing a 404 on the release asset
+// from a full disk. The raw cause is technical text (paths, OS errors), so it is
+// isolated left-to-right and never mirrored inside a right-to-left page.
+function LocalErrorDetails({
+	error,
+}: {
+	error: OnboardingViewProps["localError"];
+}) {
+	if (!error) {
+		return null;
+	}
+	const { message, detail } =
+		typeof error === "string" ? { message: null, detail: error } : error;
+	return (
+		<>
+			{message ? (
+				<p className="mt-2 text-muted-foreground text-sm">{message}</p>
+			) : null}
+			{detail ? (
+				<details className="mt-2 text-muted-foreground text-xs">
+					<summary className="cursor-pointer">Details</summary>
+					<p className="mt-1 break-all text-start" dir="ltr">
+						<bdi>{detail}</bdi>
+					</p>
+				</details>
+			) : null}
+		</>
+	);
+}
+
 // The runtime-choice fork (WS8). Local is the primary, always-available path
 // (BYO keys / on-device); Ryu Cloud is gated on the plan entitlement. When not
 // entitled, its button opens web pricing instead of provisioning anything.
@@ -75,15 +106,7 @@ export function ChooseStep({
 				testId="onboarding-local-choice"
 				title="Couldn't start local AI"
 			>
-				{/* The backend's own message stays reachable under the friendly line:
-				    it is the only clue distinguishing a 404 on the release asset from
-				    a full disk. */}
-				{localError ? (
-					<details className="mt-2 text-muted-foreground text-xs">
-						<summary className="cursor-pointer">Details</summary>
-						<p className="mt-1 break-all">{localError}</p>
-					</details>
-				) : null}
+				<LocalErrorDetails error={localError} />
 			</ChoiceCard>
 		);
 	} else if (localUnreachable) {

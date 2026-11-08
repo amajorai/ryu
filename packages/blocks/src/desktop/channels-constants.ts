@@ -95,7 +95,7 @@ export function defaultReactionLearningSettings(): ReactionLearningSettings {
 }
 
 // Every platform below has a real, registered gateway adapter, so none are
-// gated. What differs is the setup each one demands — see CHANNEL_SETUP.
+// gated. What differs is the setup each one demands — see channelSetup().
 //
 // The required keys MUST match what the adapter actually bails on at construction
 // time, or a bot saves fine and then dies at gateway startup with a bare "failed

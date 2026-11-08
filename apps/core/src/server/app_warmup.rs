@@ -45,6 +45,8 @@ use super::ServerState;
 use crate::identity_verify::VerifiedCaller;
 use crate::scheduler::store::{JobTarget, Schedule};
 
+mod ping_prompt;
+
 /// The grant every operation requires. Already in the Gateway's reviewed
 /// vocabulary and already declared by `@ryu/warmup`.
 pub(crate) const GRANT_WARMUP: &str = "warmup:crud";
@@ -400,6 +402,7 @@ fn warmup_target(target: WarmupTargetArg) -> Result<JobTarget, WarmupError> {
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| invalid(format!("warmup.apply target needs '{field}'")))
     };
+    ping_prompt::check_ping_prompt(&target.prompt).map_err(invalid)?;
     match target.kind.as_str() {
         "agent" => Ok(JobTarget::Agent {
             agent_id: required(target.agent_id, "agentId")?,

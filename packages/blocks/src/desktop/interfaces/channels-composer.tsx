@@ -8,6 +8,7 @@ import {
 	DropdownMenuRadioItem,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
+import { HandleText } from "@ryu/ui/components/handle-text.tsx";
 import { Kbd, KbdGroup } from "@ryu/ui/components/kbd.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceAgent } from "@ryuhq/protocol/interfaces";
@@ -193,7 +194,7 @@ function RecipientPicker({
 				{chosen ? (
 					<ChannelsAvatar agent={chosen} name={chosen.name} size={16} />
 				) : null}
-				<span className="truncate">@{chosen?.name ?? "agent"}</span>
+				<HandleText className="truncate" name={chosen?.name ?? "agent"} />
 				<ChevronDown aria-hidden="true" className="size-3.5" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent

@@ -159,7 +159,7 @@ export function buildMomentsFlows(snapshot: InterfaceSnapshot): MomentsFlow[] {
 				id: "needs-you",
 				kind: "needs-you",
 				modules: needsYou,
-				name: "Review what needs you",
+				name: tr("Review what needs you"),
 				start: {},
 			}),
 			latestAt: latest[0]?.thread.updatedAt ?? "",
@@ -185,7 +185,8 @@ export function buildMomentsFlows(snapshot: InterfaceSnapshot): MomentsFlow[] {
 					id: key,
 					kind,
 					modules: list,
-					name: group?.name ?? (kind === "project" ? "Project" : "Team"),
+					name:
+						group?.name ?? (kind === "project" ? tr("Project") : tr("Team")),
 					start: kind === "project" ? { projectId: id } : { teamId: id },
 				})
 			);
@@ -208,7 +209,7 @@ export function buildMomentsFlows(snapshot: InterfaceSnapshot): MomentsFlow[] {
 					id: "unassigned",
 					kind: "unassigned",
 					modules: list,
-					name: "Unassigned threads",
+					name: tr("Unassigned threads"),
 					start: {},
 				})
 			);

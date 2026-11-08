@@ -4,7 +4,7 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
-import { compactAge } from "./interface-renderer.ts";
+import { compactAge, formatNameList } from "./interface-renderer.ts";
 import {
 	TICKET_STATUS_LABELS,
 	type Ticket,
@@ -116,7 +116,7 @@ function RequesterCard({ ticket }: { ticket: Ticket }) {
 						))}
 					</span>
 					<span className="truncate text-foreground">
-						{ticket.ccs.map((agent) => agent.name).join(", ")}
+						{formatNameList(ticket.ccs.map((agent) => agent.name))}
 					</span>
 				</div>
 			) : null}

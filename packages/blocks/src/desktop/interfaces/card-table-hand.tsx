@@ -40,6 +40,7 @@ import { CardBack } from "./card-table-pieces.tsx";
 import { CardVerdictsContext, threadReading } from "./card-table-rows.tsx";
 import { agentById } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
+import { threadDisplayTitle } from "./thread-display-title.ts";
 
 // The face and the hand's surroundings live in their own modules; these
 // re-exports keep the hand's import path for them stable.
@@ -295,7 +296,7 @@ export function CardTableHand({
 					});
 					const reading = threadReading(thread, now, verdicts);
 					const agent = agentById(snapshot, thread.agentIds[0]);
-					const title = thread.title.trim() || "Untitled thread";
+					const title = threadDisplayTitle(thread, tl);
 					const isActive = thread.id === activeThreadId;
 					const isNew = !previous.current.has(thread.id);
 					const { delay, transition } = motionFor(thread, index);

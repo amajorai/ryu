@@ -1,5 +1,6 @@
 import styles from "./console.module.css";
 import { Check, Chip, Label, type MotionStyle, SceneCanvas } from "./scene.tsx";
+import { SCENE_CHIP_LABELS } from "./scene-chip-labels.ts";
 
 /**
  * The homepage card for Agent (the Console realm): the operator's board, not
@@ -89,7 +90,7 @@ export function ConsoleScene() {
 	return (
 		<SceneCanvas className={styles.root} id="console">
 			<Chip label="models" width={52} x={40} y={18} />
-			<Chip label="tools" width={46} x={95} y={18} />
+			<Chip label={SCENE_CHIP_LABELS.tools} width={46} x={95} y={18} />
 			<Chip label="approvals" width={70} x={159} y={18} />
 
 			<Status done={styles.supportDone} y={ROWS.support} />

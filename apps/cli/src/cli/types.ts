@@ -169,12 +169,20 @@ export interface ScaffoldResult {
  *  layer, so tests swap in a fake and `ryu init` never spawns a process. */
 export type ScaffoldRunner = (argv: string[]) => Promise<ScaffoldResult>;
 
+/** Options for one {@link ProcessRunner} call. */
+export interface ProcessRunOptions {
+	/** Aborting stops the child (SIGTERM, then SIGKILL if it lingers); the
+	 *  promise still resolves to its exit code (`ryu secrets run --watch`). */
+	signal?: AbortSignal;
+}
+
 /** Runs a child process with inherited stdio and the given environment, resolving
  *  to its exit code (`ryu secrets run`). Injected so tests never spawn and so a
  *  test can assert the environment a child would receive. */
 export type ProcessRunner = (
 	cmd: string[],
-	env: Record<string, string>
+	env: Record<string, string>,
+	options?: ProcessRunOptions
 ) => Promise<number>;
 
 /** A minimal `fetch` for local probes (`ryu doctor agents`). Injected so tests
@@ -194,6 +202,9 @@ export interface CliContext {
 	/** Docker and host seams for `ryu secrets run --isolation=container`;
 	 *  the real host when unset. */
 	containerHost?: ContainerHost;
+	/** Working directory for project-file lookups (`.ryu-vault.json`);
+	 *  `process.cwd()` when unset. */
+	cwd?: string;
 	/** Process environment for commands that read credentials from it
 	 *  (`RYU_VAULT_TOKEN`). Defaults to `process.env`. */
 	env: Record<string, string | undefined>;

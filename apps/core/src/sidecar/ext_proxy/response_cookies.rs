@@ -125,8 +125,10 @@ mod tests {
             caller_resource_ids: None,
             caller_rate_subject: None,
             caller_agent_id: None,
+            caller_agent_egress_allowlist: None,
             caller_agent_restricted: false,
             event_delivery: None,
+            trusted_first_party: false,
         })
         .await;
 

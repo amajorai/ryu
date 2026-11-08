@@ -129,7 +129,9 @@ export function PushDialog({
 			}
 			onFinished();
 		} catch (failure) {
-			toast.error(failureMessage(failure, "Could not push the branch.", tl));
+			toast.error(
+				failureMessage(failure, tl("Could not push the branch."), tl)
+			);
 		} finally {
 			setPending(false);
 		}

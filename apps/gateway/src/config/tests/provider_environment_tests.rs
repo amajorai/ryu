@@ -355,3 +355,39 @@ fn native_sources_omit_closed_imports() {
     assert_eq!(closed.get("cloudflare"), Some(&"environment"));
     assert!(!closed.contains_key("openai"));
 }
+
+#[test]
+fn azure_credits_needs_a_resource_or_base_url_and_never_fills_byok() {
+    let key_only = applied(&[("AZURE_CREDITS_API_KEY", "azure-ryu")]);
+    assert!(key_only.providers.azure_credits.is_none());
+
+    let by_resource = applied(&[
+        ("AZURE_CREDITS_API_KEY", "azure-ryu"),
+        ("AZURE_CREDITS_RESOURCE", "ryu-startups"),
+    ]);
+    assert!(by_resource.providers.openai.is_none());
+    assert!(by_resource.providers.openai_credits.is_none());
+    let azure = by_resource.providers.azure_credits.expect("azure pool");
+    assert_eq!(azure.api_key, "azure-ryu");
+    assert_eq!(
+        azure.base_url,
+        "https://ryu-startups.openai.azure.com/openai/v1"
+    );
+
+    let pinned = applied(&[
+        ("AZURE_CREDITS_API_KEY", "azure-ryu"),
+        ("AZURE_CREDITS_RESOURCE", "ignored"),
+        (
+            "AZURE_CREDITS_BASE_URL",
+            "https://ryu.services.ai.azure.com/openai/v1/",
+        ),
+    ]);
+    assert_eq!(
+        pinned
+            .providers
+            .azure_credits
+            .expect("pinned slot")
+            .base_url,
+        "https://ryu.services.ai.azure.com/openai/v1"
+    );
+}

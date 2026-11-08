@@ -4,6 +4,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import Link from "next/link";
 import { LinkArrow } from "../link-arrow.tsx";
 import { nextLinkHref } from "../next-link-href.ts";
+import { LocalizedPricingLead } from "../product-page/sections/localized-pricing-lead.tsx";
 import { ScrollRegion } from "../product-page/sections/scroll-region.tsx";
 import { sectionChipClass } from "../product-page/sections/section-shell.tsx";
 import { ProductsCategoryCaption } from "./products-category-caption.tsx";
@@ -54,7 +55,11 @@ export function AvailabilityChip({ row }: { row: ProductsIndexRow }) {
 
 function PricingCell({ row }: { row: ProductsIndexRow }) {
 	if (row.pricing) {
-		return <span className="text-pretty text-foreground">{row.pricing}</span>;
+		return (
+			<span className="text-pretty text-foreground">
+				<LocalizedPricingLead fallback={row.pricing} slug={row.slug} />
+			</span>
+		);
 	}
 	return (
 		<Link

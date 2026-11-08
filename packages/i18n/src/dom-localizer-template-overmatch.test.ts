@@ -78,7 +78,7 @@ describe("template overmatch on untranslated English", () => {
 
 	test.each([
 		["ja", JAPANESE, "Q3 roadmap を編集中"],
-		["ar", ARABIC, "تعديل Q3 roadmap"],
+		["ar", ARABIC, "تعديل \u2068Q3 roadmap\u2069"],
 	] as const)("%s leaves prose alone and keeps values", (locale, catalog, title) => {
 		const localeIndex = new LiteralTemplateIndex(catalog);
 		expect(
@@ -88,6 +88,62 @@ describe("template overmatch on untranslated English", () => {
 			localeIndex.match("Can I build my own app?", locale)
 		).toBeUndefined();
 		expect(localeIndex.match("Editing Q3 roadmap", locale)).toBe(title);
+	});
+});
+
+// The real ja/de/ar entries whose count or time placeholder took an English
+// verb: `List pull requests` read `プルリクエスト List 件`.
+const TYPED: Record<string, Record<string, string>> = {
+	ar: {
+		"{count} pull requests": "{count} طلب سحب",
+		"Signed in {relativeTime}": "تم تسجيل الدخول {relativeTime}",
+		"{title} failed at {time}": "فشل {title} في {time}",
+	},
+	de: {
+		"{count} pull requests": "{count} Pull Requests",
+		"Signed in {relativeTime}": "Angemeldet {relativeTime}",
+		"{title} failed at {time}": "{title} um {time} fehlgeschlagen",
+	},
+	ja: {
+		"{count} pull requests": "プルリクエスト {count} 件",
+		"Signed in {relativeTime}": "{relativeTime}にサインイン",
+		"{title} failed at {time}": "{title} が {time} に失敗しました",
+		"{items} remaining": "残り {items, plural, other {# 件}}",
+	},
+};
+
+describe("count and time placeholders only take numbers and times", () => {
+	const locales = ["ja", "de", "ar"] as const;
+	const typedIndex = (locale: string) =>
+		new LiteralTemplateIndex(TYPED[locale] ?? {});
+
+	test.each(
+		locales.flatMap((locale) =>
+			[
+				"List pull requests",
+				"Merge pull requests",
+				"Signed in as a@b.com",
+				"Sync failed at startup",
+				"Tasks remaining",
+			].map((text) => [locale, text] as const)
+		)
+	)("%s leaves %p as written", (locale, text) => {
+		expect(typedIndex(locale).match(text, locale)).toBeUndefined();
+	});
+
+	test.each([
+		["ja", "15 pull requests", "プルリクエスト 15 件"],
+		["de", "15 pull requests", "15 Pull Requests"],
+		["ar", "15 pull requests", "15 طلب سحب"],
+		["ja", "Signed in yesterday", "yesterdayにサインイン"],
+		["de", "Signed in 2 hours ago", "Angemeldet 2 hours ago"],
+		["ar", "Signed in just now", "تم تسجيل الدخول \u2068just now\u2069"],
+		["ja", "Sync failed at 10:42 AM", "Sync が 10:42 AM に失敗しました"],
+		["de", "Sync failed at last Monday", "Sync um last Monday fehlgeschlagen"],
+		["ja", "3 remaining", "残り 3 件"],
+		["de", "Signed in gestern", "Angemeldet gestern"],
+	] as const)("%s still translates %p", (locale, text, expected) => {
+		expect(typedIndex(locale).match(text, locale)).toBe(expected);
 	});
 });
 

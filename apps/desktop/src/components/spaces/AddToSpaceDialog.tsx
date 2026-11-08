@@ -43,6 +43,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useSpaceFileUpload } from "@/src/hooks/useSpaceFileUpload.ts";
+import { spaceDisplayName } from "@/src/lib/spaces/system-space-label.ts";
 
 /** The system space every other upload path in the app already writes to, and so
  *  the least surprising default when the dialog is opened without a target. */
@@ -124,7 +125,9 @@ export function AddToSpaceDialog({
 				<DialogHeader>
 					<DialogTitle>
 						{target
-							? tl("Add to {spaceName}", { spaceName: target.name })
+							? tl("Add to {spaceName}", {
+									spaceName: spaceDisplayName(target, tl),
+								})
 							: "Add to a space"}
 					</DialogTitle>
 					<DialogDescription>
@@ -136,7 +139,10 @@ export function AddToSpaceDialog({
 						<div className="flex flex-col gap-1.5">
 							<Label>Space</Label>
 							<Select
-								items={spaces.map((s) => ({ label: s.name, value: s.id }))}
+								items={spaces.map((s) => ({
+									label: spaceDisplayName(s, tl),
+									value: s.id,
+								}))}
 								onValueChange={(value) => {
 									if (value !== null) {
 										setPickedId(value);
@@ -150,7 +156,7 @@ export function AddToSpaceDialog({
 								<SelectContent>
 									{spaces.map((s) => (
 										<SelectItem key={s.id} value={s.id}>
-											{s.name}
+											{spaceDisplayName(s, tl)}
 										</SelectItem>
 									))}
 								</SelectContent>

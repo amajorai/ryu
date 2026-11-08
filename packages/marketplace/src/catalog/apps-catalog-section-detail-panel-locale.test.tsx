@@ -26,6 +26,7 @@ const { CatalogHostProvider } = await import("./host.tsx");
 const { AppDetailPanel } = await import(
 	"./apps-catalog-section-detail-panel.tsx"
 );
+const { VARIANT_COPY } = await import("./apps-catalog-section-variant-copy.ts");
 
 const FAILED =
 	"{failures, plural, one {# failed check} other {# failed checks}} — read them before installing.";
@@ -114,11 +115,11 @@ test("regrades the listing's Health summary when the UI language changes", async
 						isInstalling={() => false}
 						item={ITEM as never}
 						lifecyclePending={false}
-						noun="app"
 						renderAffordance={() => null}
 						selectedId={ITEM.entry.id}
 						setEnabled={() => Promise.resolve()}
 						settingsOpener={() => null}
+						variantCopy={VARIANT_COPY.apps}
 					/>
 				</CatalogHostProvider>
 			</I18nProvider>

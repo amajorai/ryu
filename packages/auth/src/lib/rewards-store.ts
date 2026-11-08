@@ -29,7 +29,7 @@
  *    scheduled for removal when the window ends. Fulfilled automatically.
  */
 
-import type { CreditPoolId } from "./credit-pools.ts";
+import { type CreditPoolId, DEFAULT_FREE_CREDIT_POOL } from "./credit-pools.ts";
 import type { PlanId } from "./plans.ts";
 
 /** What a store item grants when redeemed. */
@@ -70,7 +70,11 @@ export const REWARDS_STORE: readonly StoreItemDef[] = [
 			"$5 of Ryu Credits, spendable on Ryu's cloud models. The everyday redemption.",
 		icon: "coins",
 		costPoints: 500,
-		reward: { kind: "credit", creditMicroUsd: usd(5), pool: "cloudflare" },
+		reward: {
+			kind: "credit",
+			creditMicroUsd: usd(5),
+			pool: DEFAULT_FREE_CREDIT_POOL,
+		},
 	},
 	{
 		key: "credit-25",
@@ -78,7 +82,11 @@ export const REWARDS_STORE: readonly StoreItemDef[] = [
 		description: "$25 of Ryu Credits, spendable on Ryu's cloud models.",
 		icon: "coins",
 		costPoints: 2200,
-		reward: { kind: "credit", creditMicroUsd: usd(25), pool: "cloudflare" },
+		reward: {
+			kind: "credit",
+			creditMicroUsd: usd(25),
+			pool: DEFAULT_FREE_CREDIT_POOL,
+		},
 	},
 	{
 		key: "desktop-1m",

@@ -223,12 +223,13 @@ pub(in crate::server) async fn run_chat_with_hooks_attached(
                                 if crate::sidecar::adapters::is_done_frame(&bytes) {
                                     continue;
                                 }
-                                let forwarded = bytes.to_vec();
-                                yield Ok::<_, std::convert::Infallible>(forwarded.clone());
+                                // One copy for the client; the probe reads the
+                                // borrowed frame, so no second copy per token.
+                                yield Ok::<_, std::convert::Infallible>(bytes.to_vec());
                                 if let (Some(probe), Some(sender)) =
                                     (action_probe.as_mut(), notes_sender.as_ref())
                                 {
-                                    for action in probe.feed(&forwarded) {
+                                    for action in probe.feed(&bytes) {
                                         spawn_action_hooks(
                                             &state,
                                             &hooks,

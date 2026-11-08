@@ -113,6 +113,7 @@ function compactRows(
 export function buildUsageTrendChart({
 	data,
 	forecast,
+	horizonLabel = USAGE_FORECAST_HORIZON_LABELS[data.granularity],
 	metric,
 	metricLabel,
 	now = Date.now(),
@@ -120,7 +121,10 @@ export function buildUsageTrendChart({
 }: {
 	data: UsageAnalyticsData;
 	forecast: boolean;
+	/** The translated horizon; defaults to the English source label. */
+	horizonLabel?: string;
 	metric: UsageTrendMetric;
+	/** The translated metric name for the total series. */
 	metricLabel: string;
 	now?: number;
 	view: UsageTrendView;
@@ -145,7 +149,6 @@ export function buildUsageTrendChart({
 	const keys = inputs.map((_, index) =>
 		effectiveView === "provider" ? `series${index}` : "actual"
 	);
-	const horizonLabel = USAGE_FORECAST_HORIZON_LABELS[data.granularity];
 	const base = {
 		bandKey: "band",
 		horizonLabel,

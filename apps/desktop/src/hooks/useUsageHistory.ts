@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	useCallback,
@@ -21,15 +22,16 @@ import {
 	syncUsageHistoryAccount,
 } from "@/src/lib/api/usage-history.ts";
 
+// Core's history refusals and import failures are English catalog keys.
 function message<TError>(error: TError): string {
 	if (error instanceof ApiError) {
 		return error.status === 404
-			? "Update this node to use historical usage imports."
-			: (error.serverMessage ?? error.message);
+			? tl("Update this node to use historical usage imports.")
+			: tl(error.serverMessage ?? error.message);
 	}
 	return error instanceof Error
-		? error.message
-		: "Unable to read usage history.";
+		? tl(error.message)
+		: tl("Unable to read usage history.");
 }
 
 interface OperationState {

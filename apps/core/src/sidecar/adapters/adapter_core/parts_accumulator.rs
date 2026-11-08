@@ -25,11 +25,12 @@ impl PartsAccumulator {
     /// opening it on first delta.
     pub(crate) fn text_delta(&mut self, block_id: &str, delta: &str) {
         if let Some(&i) = self.text_idx.get(block_id) {
-            let prev = self.parts[i]
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            self.parts[i]["text"] = Value::String(format!("{prev}{delta}"));
+            // Append in place: rebuilding the string per delta is O(n^2) over a
+            // reply streamed as thousands of small chunks.
+            match self.parts[i].get_mut("text") {
+                Some(Value::String(text)) => text.push_str(delta),
+                _ => self.parts[i]["text"] = Value::String(delta.to_owned()),
+            }
         } else {
             let i = self.parts.len();
             self.parts
@@ -199,5 +200,52 @@ impl PartsAccumulator {
     /// to `"[]"` if serialization somehow fails (it cannot for these JSON values).
     pub(crate) fn to_json(&self) -> String {
         serde_json::to_string(&self.parts).unwrap_or_else(|_| "[]".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_deltas_concatenate_per_block_in_order() {
+        let mut acc = PartsAccumulator::default();
+        acc.text_delta("b", "Hel");
+        acc.text_delta("c", "other ");
+        acc.text_delta("b", "lo ");
+        acc.text_delta("c", "block");
+        acc.text_delta("b", "world");
+        let parts: Vec<Value> = serde_json::from_str(&acc.to_json()).expect("parts json");
+        assert_eq!(
+            parts,
+            vec![
+                serde_json::json!({ "type": "text", "text": "Hello world", "state": "done" }),
+                serde_json::json!({ "type": "text", "text": "other block", "state": "done" }),
+            ]
+        );
+    }
+
+    #[test]
+    fn many_small_deltas_keep_every_byte() {
+        let mut acc = PartsAccumulator::default();
+        let mut expected_len = 0;
+        for n in 0..50_000 {
+            let delta = if n % 2 == 0 { "ab" } else { "c" };
+            expected_len += delta.len();
+            acc.text_delta("b", delta);
+        }
+        assert_eq!(acc.parts.len(), 1);
+        let text = acc.parts[0]["text"].as_str().expect("text part");
+        assert_eq!(text.len(), expected_len);
+        assert!(text.starts_with("abcabc"));
+    }
+
+    #[test]
+    fn non_string_text_field_is_replaced_by_the_delta() {
+        let mut acc = PartsAccumulator::default();
+        acc.text_delta("b", "first");
+        acc.parts[0]["text"] = Value::Null;
+        acc.text_delta("b", "second");
+        assert_eq!(acc.parts[0]["text"], Value::String("second".to_owned()));
     }
 }

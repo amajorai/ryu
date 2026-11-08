@@ -29,9 +29,12 @@ pub(super) async fn serve_acp_instance(
     let captured_pi_account = prep.captured_pi_account;
     let _projection = prep.projection;
 
+    // `_broker_lease` lives as long as the instance: dropping it on any exit
+    // path revokes the run's broker session.
     let Some(LaunchedServer {
         server,
         sandbox_notice,
+        broker_lease: _broker_lease,
     }) = launch_agent_server(
         &spawn_cmd,
         environment,

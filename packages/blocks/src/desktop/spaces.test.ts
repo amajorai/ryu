@@ -261,7 +261,7 @@ describe("the shared-context Space home", () => {
 		);
 		expect(RENDERED).toContain(".filter(isMarkdownPage)");
 		expect(RENDERED).toContain("previewLoading");
-		expect(RENDERED).toContain('label="Blank document"');
+		expect(RENDERED).toContain('label={tl("Blank document")}');
 	});
 
 	it("does not add decorative copy to the primary home chrome", () => {

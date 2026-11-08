@@ -61,7 +61,7 @@ export function McpDetailPanel({
 					</EmptyMedia>
 					<EmptyTitle>No server selected</EmptyTitle>
 					<EmptyDescription>
-						Pick an MCP server on the left to review what it launches before
+						Pick an MCP server from the list to review what it launches before
 						adding it.
 					</EmptyDescription>
 				</EmptyHeader>

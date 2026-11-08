@@ -1,3 +1,4 @@
+import { useLiteralMessages, useLocalizedString } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { ArrowRight } from "lucide-react";
@@ -33,9 +34,28 @@ export function BeforeAfterSummary({
 	footer,
 	next,
 }: BeforeAfterSummaryProps) {
+	const tl = useLiteralMessages();
+	// Callers pass catalog English ("Current", "After top-up"); look each part up
+	// as-is (non-catalog text, like a plan name, passes through unchanged), then
+	// frame them in one whole message so a translation can reorder it.
+	const currentEyebrow = useLocalizedString(current.eyebrow) ?? current.eyebrow;
+	const currentLabel = useLocalizedString(current.label) ?? current.label;
+	const nextEyebrow = useLocalizedString(next.eyebrow) ?? next.eyebrow;
+	const nextLabel = useLocalizedString(next.label) ?? next.label;
+	const accessibleName = tl(
+		"{currentEyebrow}: {currentLabel}, {currentAmount}. {nextEyebrow}: {nextLabel}, {nextAmount}.",
+		{
+			currentAmount: current.amount,
+			currentEyebrow,
+			currentLabel,
+			nextAmount: next.amount,
+			nextEyebrow,
+			nextLabel,
+		}
+	);
 	return (
 		<div
-			aria-label={`${current.eyebrow}: ${current.label}, ${current.amount}. ${next.eyebrow}: ${next.label}, ${next.amount}.`}
+			aria-label={accessibleName}
 			className={cn(
 				"rounded-3xl border border-border/80 bg-muted/20 p-3.5 shadow-sm",
 				className

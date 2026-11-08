@@ -123,7 +123,18 @@ impl TraceStore {
             )?;
             let rows =
                 statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
-            rows.collect::<std::result::Result<Vec<_>, _>>()?
+            // Keep only unsealed values so already-sealed ciphertext is
+            // dropped as it streams past instead of being held in memory.
+            let mut pending = Vec::new();
+            for row in rows {
+                let (id, input, output): (String, Option<String>, Option<String>) = row?;
+                let input = input.filter(|stored| !sealer.is_sealed(stored));
+                let output = output.filter(|stored| !sealer.is_sealed(stored));
+                if input.is_some() || output.is_some() {
+                    pending.push((id, input, output));
+                }
+            }
+            pending
         };
         let mut sealed = 0u64;
         for (id, input, output) in rows {

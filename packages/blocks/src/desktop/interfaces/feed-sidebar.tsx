@@ -23,6 +23,7 @@ import {
 	feedAuthor,
 } from "./feed-parts.tsx";
 import { agentById } from "./interface-renderer.ts";
+import { untitledDisplayTitle } from "./thread-display-title.ts";
 
 /** Pill search box that live-filters the timeline. */
 export function FeedSearch({
@@ -144,7 +145,7 @@ export function WhatsHappening({
 										{tl("{name} · Working", { name: author.name })}
 									</span>
 									<span className="mt-0.5 line-clamp-2 font-medium text-[15px] text-foreground leading-5">
-										{post.title || "Untitled"}
+										{untitledDisplayTitle(post.title, tl)}
 									</span>
 									<span
 										className={cn("mt-0.5 text-[13px] leading-4", FEED_META)}

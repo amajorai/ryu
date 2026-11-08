@@ -201,12 +201,16 @@ export interface ImportOutcome {
 	/** Revision acknowledged from the exact bytes stored by Core. */
 	contentRevision?: string;
 	detail?: string;
+	/** The detail as Core messages; absent for a relayed error or an older node. */
+	detailI18n?: unknown[];
 	/** For `instructions` items: the containing folder to register as a project. */
 	folderPath?: string;
 	id: string;
 	kind: ImportItemKind;
 	status: ImportStatus;
 	title: string;
+	/** The title as a Core message; absent when Core sent a path or is older. */
+	titleI18n?: unknown;
 }
 
 export interface ImportSelection {
@@ -244,11 +248,13 @@ export async function runImport(
 						already_exists: z.boolean().optional(),
 						content_revision: z.string().optional(),
 						detail: z.string().optional(),
+						detail_i18n: z.array(z.unknown()).optional(),
 						folder_path: z.string().optional(),
 						id: z.string(),
 						kind: importItemKindSchema,
 						status: z.enum(["imported", "skipped", "failed"]),
 						title: z.string(),
+						title_i18n: z.unknown().optional(),
 					})
 				)
 				.optional(),
@@ -268,7 +274,9 @@ export async function runImport(
 			status: r.status,
 			alreadyExists: r.already_exists ?? false,
 			detail: r.detail,
+			detailI18n: r.detail_i18n,
 			folderPath: r.folder_path,
+			titleI18n: r.title_i18n,
 		})),
 	};
 }

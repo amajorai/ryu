@@ -61,6 +61,8 @@ export const userNotificationEventSchema = preserveNotificationReply(
 	z.object({
 		body: z.string().nullish(),
 		level: z.string(),
+		/** A desktop route the tap opens; surfaces open only allowlisted routes. */
+		link: z.string().nullish(),
 		notification_id: z.string().nullish(),
 		source_app_id: z.string().nullish(),
 		target_user_id: z.string().nullish(),

@@ -238,9 +238,15 @@ describe("cloud environment runtime", () => {
 					...environment,
 					runtime: { backend: "box", executor: "codex", lifetimeMinutes: 30 },
 				},
-				[{ key: "OPENAI_API_KEY", kind: "networkSecret" }]
+				[
+					{
+						domains: ["api.openai.com"],
+						key: "OPENAI_API_KEY",
+						kind: "networkSecret",
+					},
+				]
 			)
-		).toContain("network secrets");
+		).toBeNull();
 		expect(
 			cloudEnvironmentRuntimeIssue({
 				...environment,
@@ -254,6 +260,42 @@ describe("cloud environment runtime", () => {
 			})
 		).toBeNull();
 		expect(cloudEnvironmentRuntimeIssue(environment)).toBeNull();
+	});
+	test("lets a box substitute network secrets only for host names it may reach", () => {
+		const box = (domainPolicy: "all" | "custom", allowedDomains: string[]) => ({
+			internet: { allowedDomains, domainPolicy, enabled: true },
+			runtime: {
+				backend: "box" as const,
+				executor: "codex" as const,
+				lifetimeMinutes: 30,
+			},
+			tailscaleVaultKey: null,
+			vaultKeys: ["OPENAI_API_KEY"],
+		});
+		const secret = (domains: string[]) => [
+			{ domains, key: "OPENAI_API_KEY", kind: "networkSecret" as const },
+		];
+		expect(
+			cloudEnvironmentRuntimeIssue(
+				box("custom", ["*.openai.com"]),
+				secret(["api.openai.com"])
+			)
+		).toBeNull();
+		expect(
+			cloudEnvironmentRuntimeIssue(
+				box("custom", ["github.com"]),
+				secret(["api.openai.com"])
+			)
+		).toContain("api.openai.com");
+		expect(
+			cloudEnvironmentRuntimeIssue(box("all", []), secret(["10.0.0.7"]))
+		).toContain("host names");
+		expect(
+			cloudEnvironmentRuntimeIssue(
+				{ ...box("all", []), vaultKeys: [] },
+				secret(["10.0.0.7"])
+			)
+		).toBeNull();
 	});
 	test("flags variables a box reserves or cannot carry", () => {
 		const environment = {

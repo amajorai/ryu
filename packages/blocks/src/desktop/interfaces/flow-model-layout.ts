@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
@@ -92,7 +93,7 @@ function collectGroups(
 		groups.push({
 			key: FLOW_UNASSIGNED_KEY,
 			kind: "lead",
-			lead: { kind: "lane", label: "Unassigned" },
+			lead: { kind: "lane", label: tr("Unassigned") },
 			threads: orphans.sort(byUrgency),
 		});
 	}
@@ -176,8 +177,7 @@ function addRootRow(cursor: Cursor, node: FlowNode, dashed: boolean): void {
 	cursor.edges.push({
 		arrow: !dashed,
 		dashed,
-		id: `edge:${node.id}`,
-		// Filled in once the origin's height is known.
+		id: `edge:${node.id}`, // Points are filled in once the origin's y is known.
 		points: [
 			[g.busX, node.y],
 			[g.busX, node.y],

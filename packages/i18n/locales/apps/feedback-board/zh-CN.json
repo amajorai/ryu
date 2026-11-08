@@ -143,6 +143,7 @@
   "Starting workflow…": "正在启动工作流…",
   "Submission moderation": "提交审核",
   "Tell us more": "详细说明",
+  "The Feedback Board bridge is unavailable in this Ryu host.": "此 Ryu 主机中无法使用 Feedback Board 桥接。",
   "The Ryu host bridge did not return a workspace.": "Ryu 主机桥未返回工作区。",
   "The Ryu host bridge is unavailable.": "Ryu 主机桥接不可用。",
   "The inbox is clear.": "收件箱已清空。",

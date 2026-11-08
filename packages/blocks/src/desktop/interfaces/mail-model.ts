@@ -277,11 +277,14 @@ export interface MailStatusChip {
 export function mailStatusChip(thread: InterfaceThread): MailStatusChip | null {
 	const status: ThreadStatus = threadStatus(thread);
 	if (status === "working") {
-		return { label: "Working", tone: "success" };
+		return { label: tr("Working"), tone: "success" };
 	}
 	if (status === "attention") {
 		return {
-			label: thread.runState === "interrupted" ? "Interrupted" : "Run failed",
+			label:
+				thread.runState === "interrupted"
+					? tr("Interrupted")
+					: tr("Run failed"),
 			tone: "destructive",
 		};
 	}

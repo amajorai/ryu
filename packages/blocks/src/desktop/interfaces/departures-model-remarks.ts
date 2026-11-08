@@ -31,11 +31,11 @@ export function eventRemark(event: InterfaceEvent): RemarkPart[] {
 /** A past run's remark: a failure is the news; a success says how long it took. */
 export function pastEventRemark(event: InterfaceEvent): RemarkPart[] {
 	if (event.outcome === "failure") {
-		return [strong("Run failed")];
+		return [strong(tr("Run failed"))];
 	}
 	const start = parseTime(event.start);
 	const end = parseTime(event.end);
-	const parts = [plain("Done")];
+	const parts = [plain(tr("Done"))];
 	if (start !== null && end !== null && end > start) {
 		parts.push(
 			plain(tr("Ran {duration}", { duration: flightDuration(end - start) }))

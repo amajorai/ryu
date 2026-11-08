@@ -40,6 +40,7 @@ import {
 	INTERFACE_COLOR_THEMES_DEFAULT,
 	INTERFACE_COLOR_THEMES_KEY,
 } from "@/src/lib/themes/theme-override.ts";
+import { withDisplayLabel } from "./interface-setting-labels.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -293,7 +294,9 @@ export function InterfaceSettingsPanel() {
 		INTERFACE_COLOR_THEMES_DEFAULT
 	);
 
-	const fields = interfaceSettingsFor(selected);
+	const fields = interfaceSettingsFor(selected).map((field) =>
+		withDisplayLabel(selected, field, tl)
+	);
 	const params = interfaceParamsWithOverrides(selected, overrides);
 	const pickerItems = interfaces.map((descriptor) => ({
 		label: descriptor.label,

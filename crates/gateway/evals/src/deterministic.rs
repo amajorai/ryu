@@ -4,6 +4,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::assertion::{Assertion, AssertionResult};
+use crate::deterministic_codes::with_detail_code;
 use crate::options::{apply_assertion_options, assertion_options, AssertionMetrics};
 use crate::text_shape::{
     comma_values, is_html_like, is_sql_like, is_xml_like, normalized_levenshtein,
@@ -16,7 +17,16 @@ pub fn eval_assertion_deterministic(assertion: &Assertion, response_text: &str) 
 }
 
 /// Metrics-aware deterministic assertion evaluator used by the Gateway runner.
+/// The result carries a localizable detail `code` where one is defined.
 pub fn eval_assertion_deterministic_with_metrics(
+    assertion: &Assertion,
+    response_text: &str,
+    metrics: AssertionMetrics,
+) -> AssertionResult {
+    with_detail_code(assertion, evaluate(assertion, response_text, metrics))
+}
+
+fn evaluate(
     assertion: &Assertion,
     response_text: &str,
     metrics: AssertionMetrics,
@@ -192,6 +202,7 @@ pub fn eval_assertion_deterministic_with_metrics(
                             "levenshtein inputs are limited to {MAX_LEVENSHTEIN_CHARS} characters"
                         ),
                         executed: false,
+                        ..Default::default()
                     },
                     options,
                 );
@@ -207,6 +218,7 @@ pub fn eval_assertion_deterministic_with_metrics(
                     score,
                     detail,
                     executed: true,
+                    ..Default::default()
                 },
                 options,
             );
@@ -236,6 +248,7 @@ pub fn eval_assertion_deterministic_with_metrics(
                     score,
                     detail,
                     executed: expected.is_some() && metrics.latency_ms.is_some(),
+                    ..Default::default()
                 },
                 options,
             );
@@ -268,6 +281,7 @@ pub fn eval_assertion_deterministic_with_metrics(
                     score,
                     detail,
                     executed: expected.is_some() && metrics.cost_micro_usd.is_some(),
+                    ..Default::default()
                 },
                 options,
             );
@@ -284,6 +298,7 @@ pub fn eval_assertion_deterministic_with_metrics(
                         score: 1.0,
                         detail: "empty assertion set".to_owned(),
                         executed: true,
+                        ..Default::default()
                     },
                     options,
                 );
@@ -310,6 +325,7 @@ pub fn eval_assertion_deterministic_with_metrics(
                     score,
                     detail,
                     executed: results.iter().all(|result| result.executed),
+                    ..Default::default()
                 },
                 options,
             );
@@ -456,6 +472,7 @@ pub fn eval_assertion_deterministic_with_metrics(
                     | Assertion::ContextFaithfulness { .. }
                     | Assertion::AnswerRelevance { .. }
             ),
+            ..Default::default()
         },
         assertion_options(assertion),
     )

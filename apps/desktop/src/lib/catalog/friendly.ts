@@ -23,6 +23,7 @@ import {
 } from "@ryu/marketplace/catalog/friendly";
 import type { ModelCard } from "@/src/lib/api/models.ts";
 import type { SkillCard } from "@/src/lib/api/skills.ts";
+import { localizedDownloadLabel } from "@/src/lib/catalog/download-label-messages.ts";
 
 export {
 	displayTokens,
@@ -59,8 +60,19 @@ const QUANT_IN_FILENAME_RE = /\b(I?Q\d[\w]*|[FB]F?(?:16|32))\b/i;
  * detail verbatim. The detail is preserved either way so the user still knows
  * which file/quant is downloading. **Any parse miss or empty result falls back
  * to the raw label** — a friendly name is never worth losing information over.
+ *
+ * With `tl`, a Core-built label of a known English shape ("Ryu update (…)",
+ * "CUDA runtime", …) renders as its translated sentence first.
  */
-export function friendlyDownloadLabel(label: string, kind: string): string {
+export function friendlyDownloadLabel(
+	label: string,
+	kind: string,
+	tl?: LiteralMessage
+): string {
+	const localized = tl ? localizedDownloadLabel(label, tl) : null;
+	if (localized) {
+		return localized;
+	}
 	if (kind === "skill") {
 		const titled = titleCase(label);
 		return titled.length > 0 ? titled : label;

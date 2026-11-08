@@ -8,7 +8,7 @@
 
 /* Share of today's headroom the current pace consumes before the window resets. */
 .projectedConsumption {
-	left: var(--usage-projected-left);
+	inset-inline-start: var(--usage-projected-left);
 	width: var(--usage-projected-width);
 	background-image: repeating-linear-gradient(
 		-45deg,

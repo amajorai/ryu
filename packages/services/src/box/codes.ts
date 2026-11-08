@@ -37,6 +37,8 @@ export const BOX_ERROR_CODES = [
 	"billing_owner_mismatch",
 	"stream_direct_only",
 	"token_replayed",
+	"browser_fill_unsupported",
+	"browser_fill_echoed",
 ] as const;
 
 /** One Box error code. */

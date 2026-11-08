@@ -53,6 +53,45 @@ pub(crate) async fn require_owner_may_run_agent(
     owner_user_id: Option<&str>,
     agent_id: &str,
 ) -> Result<(), String> {
+    require_owner_permission(
+        owner_user_id,
+        permissions::AGENT_RUN,
+        crate::acl::KIND_AGENT,
+        agent_id,
+    )
+    .await
+    .map_err(|refusal| refusal.message(|| denied(agent_id)))
+}
+
+/// Why a routine owner's current authority refused a firing.
+pub(super) enum OwnerRefusal {
+    /// The owner's current membership could not be resolved.
+    Unavailable,
+    /// The owner is not (or no longer) allowed.
+    Denied,
+}
+
+impl OwnerRefusal {
+    /// The refusal text, using `denied` for a permission refusal.
+    pub(super) fn message(self, denied: impl FnOnce() -> String) -> String {
+        match self {
+            Self::Unavailable => {
+                "current authorization for the routine's owner is unavailable".to_owned()
+            }
+            Self::Denied => denied(),
+        }
+    }
+}
+
+/// Require that the routine owner `owner_user_id` currently holds `permission`
+/// on the `kind` resource `resource_id`, with the owner, node-binding and
+/// lookup-failure rules [`require_owner_may_run_agent`] documents.
+pub(super) async fn require_owner_permission(
+    owner_user_id: Option<&str>,
+    permission: &str,
+    kind: &str,
+    resource_id: &str,
+) -> Result<(), OwnerRefusal> {
     let Some(owner) = owner_user_id else {
         return Ok(());
     };
@@ -61,18 +100,18 @@ pub(crate) async fn require_owner_may_run_agent(
     }
     let (caller, resolved) = resolve_owner(owner)
         .await
-        .map_err(|_| "current authorization for the routine's owner is unavailable".to_owned())?;
+        .map_err(|_| OwnerRefusal::Unavailable)?;
     if caller.user_id != owner {
-        return Err(denied(agent_id));
+        return Err(OwnerRefusal::Denied);
     }
     crate::server::enforce_permission_on_resolved(
         &Some(caller),
-        permissions::AGENT_RUN,
-        crate::acl::KIND_AGENT,
-        agent_id,
+        permission,
+        kind,
+        resource_id,
         resolved,
     )
-    .map_err(|_| denied(agent_id))
+    .map_err(|_| OwnerRefusal::Denied)
 }
 
 /// [`require_owner_may_run_agent`] for every agent a routine call would run.

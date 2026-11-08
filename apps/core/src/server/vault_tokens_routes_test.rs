@@ -455,3 +455,96 @@ async fn a_member_without_vault_grants_is_refused_and_changes_nothing() {
         .iter()
         .any(|existing| existing.name == quota));
 }
+
+#[tokio::test]
+async fn a_policy_that_requires_wrapping_refuses_unwrapped_requests() {
+    use crate::vault::policy::{Policy, PolicyRule};
+    let user = unique("wrapper-");
+    let policy = unique("wrapq-");
+    let store = vault();
+    {
+        let conn = store.conn.lock().await;
+        crate::vault::policy::put_policy(
+            &conn,
+            &Policy {
+                name: policy.clone(),
+                description: String::new(),
+                rules: vec![PolicyRule {
+                    path: "sys/quotas".into(),
+                    capabilities: vec![Capability::Admin],
+                    min_wrapping_ttl_secs: Some(60),
+                    max_wrapping_ttl_secs: Some(600),
+                    ..PolicyRule::default()
+                }],
+            },
+        )
+        .unwrap();
+        crate::vault::policy::bind(&conn, &policy, &format!("user:{user}"), None, None).unwrap();
+    }
+    let node = RegisteredNode {
+        org: RegisteredOrg {
+            id: "org-wrapq".to_owned(),
+            name: "Org".to_owned(),
+            slug: None,
+        },
+        node_id: "node-wrapq".to_owned(),
+        scope: NodeScope::Org,
+        team_id: None,
+        owner_user_id: None,
+    };
+    let caller = Some(VerifiedCaller {
+        user_id: user.clone(),
+        email: None,
+        email_verified: false,
+        org_id: Some("org-wrapq".to_owned()),
+        role: OrgRole::Member,
+        teams: Vec::new(),
+    });
+    with_test_node_binding(false, Some(node), async {
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        let router = routes()
+            .layer(axum::middleware::from_fn(request_layer))
+            .layer(axum::Extension(caller))
+            .with_state(state);
+        let call = |wrap: Option<&str>| {
+            let mut request = axum::http::Request::builder().uri("/api/vault/sys/quotas");
+            if let Some(ttl) = wrap {
+                request = request.header(WRAP_TTL_HEADER, ttl);
+            }
+            router.clone().oneshot(request.body(Body::empty()).unwrap())
+        };
+        let read = |response: Response| async move {
+            let status = response.status();
+            let wrapped = response.headers().contains_key("x-ryu-wrapped");
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+            (status, wrapped, body)
+        };
+
+        // Unwrapped: refused with the bounds to send.
+        let (status, _, body) = read(call(None).await.unwrap()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        let error = body["error"].as_str().unwrap();
+        assert!(error.starts_with("vault_wrapping_required:"), "{error}");
+        assert!(error.contains("between 60s and 600s"), "{error}");
+        // Too short and too long wrap TTLs are refused too.
+        for ttl in ["30", "1h"] {
+            let (status, _, body) = read(call(Some(ttl)).await.unwrap()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{ttl}: {body}");
+            assert!(body["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("vault_wrapping_required:"));
+        }
+        // A wrap TTL within the bounds is served, wrapped.
+        let (status, wrapped, body) = read(call(Some("5m")).await.unwrap()).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(wrapped);
+        assert!(body["wrapInfo"]["token"].as_str().is_some(), "{body}");
+        assert!(body.get("quotas").is_none(), "{body}");
+    })
+    .await;
+}

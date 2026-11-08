@@ -322,10 +322,13 @@ const TOOL_ACTIVITY_NAME_CHARS = 22;
  * Status-row activity for the tool a turn is running (`Running command…`),
  * falling back to `Running <name>…` for tools without a known kind.
  */
-export const toolActivityLabel = (name: string): string => {
+export const toolActivityLabel = (
+	name: string,
+	translate: (value: string) => string = tr
+): string => {
 	const kind = toolKind(name);
 	if (kind) {
-		return TOOL_ACTIVITY_LABELS[kind];
+		return translate(TOOL_ACTIVITY_LABELS[kind]);
 	}
 	const trimmed = clampTerminalLine(
 		sanitizeTerminalText(name),

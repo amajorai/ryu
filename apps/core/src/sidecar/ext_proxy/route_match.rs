@@ -231,61 +231,6 @@ pub(super) fn required_permission_for(
     Some((permission, resource_id))
 }
 
-/// The agent a request runs for, when Core's HTTP-tool seam stamped one.
-///
-/// Browser managed-Bot lanes are an internal Core capability, not a public
-/// query selector. Accept the query only when the Core HTTP-tool seam supplied
-/// a proof tied to the exact request; direct ext-proxy callers are refused.
-///
-/// Every other app learns its agent from [`HDR_CALLER_AGENT_ID`], which counts
-/// only with a [`HDR_CALLER_AGENT_PROOF`] tied to the same agent, method, path
-/// and query. A named agent with a missing or bad proof is refused rather than
-/// forwarded as an agent-less call, so an agent can never shed its account
-/// access by mangling the proof.
-pub(super) fn verified_agent_lane(
-    req: &Request,
-    plugin_id: &str,
-) -> Result<Option<String>, Response> {
-    if plugin_id != "@ryu/browser" {
-        return verified_agent_header(req);
-    }
-    let query = req.uri().query().unwrap_or_default();
-    let agent_ids: Vec<String> = url::form_urlencoded::parse(query.as_bytes())
-        .filter(|(name, _)| name == "agent_id")
-        .map(|(_, value)| value.into_owned())
-        .collect();
-    let Some(agent_id) = agent_ids.first() else {
-        return Ok(None);
-    };
-    if agent_ids.len() != 1 || agent_id.trim().is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "browser agent_id must be supplied exactly once",
-        )
-            .into_response());
-    }
-    let Some(proof) = req
-        .headers()
-        .get(HDR_CALLER_AGENT_PROOF)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "browser agent lanes require a Core-issued capability proof",
-        )
-            .into_response());
-    };
-    let path_and_query = req
-        .uri()
-        .path_and_query()
-        .map(|value| value.as_str())
-        .unwrap_or_else(|| req.uri().path());
-    if !verify_agent_lane(agent_id, req.method().as_str(), path_and_query, proof) {
-        return Err((StatusCode::FORBIDDEN, "browser agent lane proof is invalid").into_response());
-    }
-    Ok(Some(agent_id.clone()))
-}
-
 /// Whether a request that resolved to a `Public` route must be refused because its
 /// ORIGINAL (still percent-encoded) URI path hides a dot segment, a backslash, or a
 /// separator that only appears after decoding.
@@ -300,45 +245,6 @@ pub(super) fn verified_agent_lane(
 /// bearer, and some legitimately carry encoded separators in ids.
 pub(super) fn public_route_raw_path_is_unsafe(auth: RouteAuth, raw_path: &str) -> bool {
     auth == RouteAuth::Public && has_dot_segment(raw_path)
-}
-
-pub(super) fn verified_agent_header(req: &Request) -> Result<Option<String>, Response> {
-    let mut named = req.headers().get_all(HDR_CALLER_AGENT_ID).iter();
-    let Some(agent_id) = named.next() else {
-        return Ok(None);
-    };
-    let agent_id = agent_id
-        .to_str()
-        .ok()
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && named.next().is_none())
-        .ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                "the calling agent must be named exactly once",
-            )
-                .into_response()
-        })?;
-    let Some(proof) = req
-        .headers()
-        .get(HDR_CALLER_AGENT_PROOF)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "a calling agent requires a Core-issued capability proof",
-        )
-            .into_response());
-    };
-    let path_and_query = req
-        .uri()
-        .path_and_query()
-        .map(|value| value.as_str())
-        .unwrap_or_else(|| req.uri().path());
-    if !verify_agent_lane(agent_id, req.method().as_str(), path_and_query, proof) {
-        return Err((StatusCode::FORBIDDEN, "calling agent proof is invalid").into_response());
-    }
-    Ok(Some(agent_id.to_owned()))
 }
 
 /// Find the most-specific declared route on `manifest` that matches `sub_path`,

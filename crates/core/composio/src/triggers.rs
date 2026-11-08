@@ -58,12 +58,17 @@ pub struct TriggerSubscription {
     pub account_entity: String,
     /// Whether the account is one connected to the agent's own identity.
     pub own_account: bool,
+    /// The verified user who subscribed a legacy row. Delivery re-checks that
+    /// this user may still run the agent; empty for rows from before it was
+    /// recorded, for workflow rows and for Connect rows. Never serialized.
+    #[serde(skip)]
+    pub subscriber_user_id: String,
 }
 
 /// The `SELECT` list [`subscription_row`] reads. A legacy row stores its
 /// account's Composio entity in `provider_user_id`; a Connect row stores
 /// Connect's provider identity there, which is never an agent entity.
-const SUBSCRIPTION_COLUMNS: &str = "id,agent_id,toolkit,trigger_slug,connected_account_id,composio_trigger_id,target_kind,workflow_id,created_at,CASE WHEN owner_user_id='' THEN provider_user_id ELSE '' END";
+const SUBSCRIPTION_COLUMNS: &str = "id,agent_id,toolkit,trigger_slug,connected_account_id,composio_trigger_id,target_kind,workflow_id,created_at,CASE WHEN owner_user_id='' THEN provider_user_id ELSE '' END,subscriber_user_id";
 
 /// Whether a recorded account entity is an agent's own entity.
 fn is_agent_entity(account_entity: &str) -> bool {
@@ -100,6 +105,7 @@ fn subscription_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TriggerSubscrip
         created_at: row.get(8)?,
         own_account: is_agent_entity(&account_entity),
         account_entity,
+        subscriber_user_id: row.get(10)?,
     })
 }
 
@@ -475,6 +481,10 @@ impl ComposioTriggerStore {
                 "auth_config_id",
                 "ALTER TABLE subscriptions ADD COLUMN auth_config_id TEXT NOT NULL DEFAULT ''",
             ),
+            (
+                "subscriber_user_id",
+                "ALTER TABLE subscriptions ADD COLUMN subscriber_user_id TEXT NOT NULL DEFAULT ''",
+            ),
         ] {
             if !existing.contains(name) {
                 conn.execute(statement, [])?;
@@ -639,9 +649,11 @@ impl ComposioTriggerStore {
     }
 
     /// Register a trigger instance with Composio and persist an **agent**-target
-    /// mapping. Kept for existing callers; delegates to [`Self::subscribe_target`].
+    /// mapping on behalf of `subscriber_user_id` (the verified caller, empty on
+    /// an unbound node's anonymous path). Delegates to [`Self::subscribe_target`].
     pub async fn subscribe(
         &self,
+        subscriber_user_id: &str,
         agent_id: &str,
         toolkit: &str,
         trigger_slug: &str,
@@ -650,6 +662,7 @@ impl ComposioTriggerStore {
     ) -> Result<TriggerSubscription> {
         self.subscribe_target(
             "agent",
+            subscriber_user_id,
             agent_id,
             None,
             "",
@@ -668,6 +681,7 @@ impl ComposioTriggerStore {
     /// the agent and its account policy on every event.
     pub async fn subscribe_own_account(
         &self,
+        subscriber_user_id: &str,
         agent_id: &str,
         account_entity: &str,
         toolkit: &str,
@@ -688,6 +702,7 @@ impl ComposioTriggerStore {
         }
         self.subscribe_target(
             "agent",
+            subscriber_user_id,
             agent_id,
             None,
             account_entity,
@@ -713,6 +728,7 @@ impl ComposioTriggerStore {
         self.subscribe_target(
             "workflow",
             "",
+            "",
             Some(workflow_id),
             "",
             toolkit,
@@ -723,11 +739,13 @@ impl ComposioTriggerStore {
         .await
     }
 
-    /// Shared subscribe implementation for either target kind.
+    /// Shared subscribe implementation for either target kind. The subscribing
+    /// user is recorded so delivery can re-check their access.
     #[allow(clippy::too_many_arguments)]
     async fn subscribe_target(
         &self,
         target_kind: &str,
+        subscriber_user_id: &str,
         agent_id: &str,
         workflow_id: Option<&str>,
         account_entity: &str,
@@ -782,8 +800,8 @@ impl ComposioTriggerStore {
                 "INSERT INTO subscriptions
                     (id, agent_id, toolkit, trigger_slug, connected_account_id,
                      composio_trigger_id, target_kind, workflow_id, created_at,
-                     provider_user_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                     provider_user_id, subscriber_user_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     id,
                     agent_id,
@@ -795,6 +813,7 @@ impl ComposioTriggerStore {
                     workflow_id,
                     created_at,
                     account_entity,
+                    subscriber_user_id,
                 ],
             )?;
         }
@@ -810,6 +829,7 @@ impl ComposioTriggerStore {
             created_at,
             account_entity: account_entity.to_owned(),
             own_account: is_agent_entity(account_entity),
+            subscriber_user_id: subscriber_user_id.to_owned(),
         })
     }
 
@@ -1054,6 +1074,7 @@ impl ComposioTriggerStore {
             created_at,
             account_entity: String::new(),
             own_account: false,
+            subscriber_user_id: String::new(),
         })
     }
 
@@ -1239,15 +1260,24 @@ impl ComposioTriggerStore {
                 continue;
             }
 
+            // The subscriber must still be allowed to run the agent (revoked
+            // access stops the trigger), and the agent must still be allowed
+            // the account.
             let may_receive = match crate::host::host() {
-                Ok(h) => {
-                    h.agent_may_receive(
-                        &sub.agent_id,
-                        &sub.connected_account_id,
-                        &sub.account_entity,
-                    )
+                Ok(h) => match h
+                    .subscriber_may_run_agent(&sub.subscriber_user_id, &sub.agent_id)
                     .await
-                }
+                {
+                    Ok(true) => {
+                        h.agent_may_receive(
+                            &sub.agent_id,
+                            &sub.connected_account_id,
+                            &sub.account_entity,
+                        )
+                        .await
+                    }
+                    denied => denied,
+                },
                 Err(e) => Err(e),
             };
             match may_receive {
@@ -1256,7 +1286,7 @@ impl ComposioTriggerStore {
                     tracing::info!(
                         agent = %sub.agent_id,
                         trigger = %sub.trigger_slug,
-                        "composio trigger skipped: the agent may no longer use this account"
+                        "composio trigger skipped: the subscriber may no longer run the agent, or the agent may no longer use this account"
                     );
                     continue;
                 }
@@ -1773,7 +1803,15 @@ mod tests {
                 || (account_entity.starts_with("agent:")
                     && account_entity.ends_with(&format!(":{agent_id}"))))
         }
+
+        /// Stands in for Core's fresh `agent.run` decision: `revoked-user` has
+        /// lost access to every agent.
+        async fn subscriber_may_run_agent(&self, subscriber: &str, _agent: &str) -> Result<bool> {
+            Ok(subscriber != "revoked-user")
+        }
     }
+
+    mod subscriber_access;
 
     fn host_calls() -> Vec<(String, String)> {
         HOST_CALLS.lock().unwrap_or_else(|e| e.into_inner()).clone()
@@ -1906,6 +1944,7 @@ mod tests {
 
         let sub = store
             .subscribe(
+                "",
                 "agent-1",
                 "slack",
                 "SLACK_MSG",
@@ -1939,7 +1978,7 @@ mod tests {
 
         let (store, _dir) = temp_store().await;
         let err = store
-            .subscribe("agent-1", "slack", "SLACK_MSG", "ca_1", json!({}))
+            .subscribe("", "agent-1", "slack", "SLACK_MSG", "ca_1", json!({}))
             .await
             .expect_err("upstream 400 must surface");
         assert!(err.to_string().contains("trigger upsert"));
@@ -1959,7 +1998,7 @@ mod tests {
 
         let (store, _dir) = temp_store().await;
         let err = store
-            .subscribe("agent-1", "slack", "SLACK_MSG", "ca_1", json!({}))
+            .subscribe("", "agent-1", "slack", "SLACK_MSG", "ca_1", json!({}))
             .await
             .expect_err("no key must error before HTTP");
         assert!(err.to_string().contains("API key not set"));
@@ -1985,7 +2024,7 @@ mod tests {
 
         let (store, _dir) = temp_store().await;
         let sub = store
-            .subscribe("agent-x", "github", "GH_PUSH", "ca_9", json!({}))
+            .subscribe("", "agent-x", "github", "GH_PUSH", "ca_9", json!({}))
             .await
             .unwrap();
 
@@ -2018,7 +2057,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .subscribe("agent-a", "gmail", "MAIL_IN", "ca_3", json!({}))
+            .subscribe("", "agent-a", "gmail", "MAIL_IN", "ca_3", json!({}))
             .await
             .unwrap();
         store
@@ -2096,7 +2135,7 @@ mod tests {
 
         let (store, _dir) = temp_store().await;
         store
-            .subscribe("agent-1", "slack", "SLACK_MSG", "ca_1", json!({}))
+            .subscribe("", "agent-1", "slack", "SLACK_MSG", "ca_1", json!({}))
             .await
             .unwrap();
         store
@@ -2104,7 +2143,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .subscribe("FAIL-AGENT", "gmail", "MAIL_IN", "ca_3", json!({}))
+            .subscribe("", "FAIL-AGENT", "gmail", "MAIL_IN", "ca_3", json!({}))
             .await
             .unwrap();
 
@@ -2160,7 +2199,14 @@ mod tests {
 
         let (store, _dir) = temp_store().await;
         store
-            .subscribe("agent-id-match", "slack", "SLACK_MSG", "ca_1", json!({}))
+            .subscribe(
+                "",
+                "agent-id-match",
+                "slack",
+                "SLACK_MSG",
+                "ca_1",
+                json!({}),
+            )
             .await
             .unwrap();
 
@@ -2319,6 +2365,7 @@ mod tests {
         let (store, _dir) = temp_store().await;
         store
             .subscribe(
+                "",
                 "agent-v3",
                 "github",
                 "GITHUB_COMMIT_EVENT",
@@ -2386,7 +2433,15 @@ mod tests {
         ] {
             assert!(
                 store
-                    .subscribe_own_account(agent, entity, "gmail", "GMAIL_NEW", "own_1", json!({}))
+                    .subscribe_own_account(
+                        "",
+                        agent,
+                        entity,
+                        "gmail",
+                        "GMAIL_NEW",
+                        "own_1",
+                        json!({})
+                    )
                     .await
                     .is_err(),
                 "{agent} / {entity}"
@@ -2396,6 +2451,7 @@ mod tests {
 
         let sub = store
             .subscribe_own_account(
+                "",
                 "a1",
                 "agent:u1:a1",
                 "gmail",
@@ -2419,7 +2475,7 @@ mod tests {
 
         // A user-account subscription keeps an empty entity.
         let user = store
-            .subscribe("a1", "gmail", "GMAIL_NEW", "ca_user", json!({}))
+            .subscribe("", "a1", "gmail", "GMAIL_NEW", "ca_user", json!({}))
             .await
             .unwrap();
         assert!(!user.own_account);

@@ -186,6 +186,48 @@ impl GatewayConfig {
             applied.push("anthropic_credits".to_string());
         }
 
+        if let Some(key) = non_empty_provider_key(keys, "azure_credits") {
+            // Azure is resource-scoped like Vertex: a vault key applies only
+            // when the slot already has an endpoint or the environment names one.
+            let base_url = self
+                .providers
+                .azure_credits
+                .as_ref()
+                .map(|provider| provider.base_url.clone())
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    environment
+                        .var("AZURE_CREDITS_BASE_URL")
+                        .ok()
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|value| value.trim().trim_end_matches('/').to_owned())
+                })
+                .or_else(|| {
+                    let resource = environment.var("AZURE_CREDITS_RESOURCE").ok()?;
+                    (!resource.trim().is_empty())
+                        .then(|| format!("https://{}.openai.azure.com/openai/v1", resource.trim()))
+                });
+            if let Some(base_url) = base_url {
+                let mut provider =
+                    self.providers
+                        .azure_credits
+                        .take()
+                        .unwrap_or(OpenAiProviderConfig {
+                            api_key: String::new(),
+                            api_keys: Vec::new(),
+                            base_url,
+                        });
+                provider.api_key = key.to_owned();
+                provider.api_keys.clear();
+                self.providers.azure_credits = Some(provider);
+                applied.push("azure_credits".to_string());
+            } else {
+                tracing::warn!(
+                    "provider vault contains an Azure credits key but AZURE_CREDITS_RESOURCE or AZURE_CREDITS_BASE_URL is missing; the Azure pool remains disabled"
+                );
+            }
+        }
+
         if let Some(key) = non_empty_provider_key(keys, "composio") {
             self.composio.api_key = Some(key.to_owned());
             self.composio.enabled = true;

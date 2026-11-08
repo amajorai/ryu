@@ -1,9 +1,9 @@
 import type { AgentOption } from "@ryu/blocks/desktop/channels.tsx";
 import {
 	CHANNEL_LABELS,
-	CHANNEL_SETUP,
 	CHANNEL_TYPES,
 	type ChannelType,
+	channelSetup,
 	type GroupReplyMode,
 	REQUIRED_SECRETS,
 	type ReactionLearningSettings,
@@ -111,7 +111,7 @@ export function AddChannelDialog({
 	}, [open, initialAgentId, initialAgentName, initialChannelType]);
 
 	const requiredKeys = REQUIRED_SECRETS[form.channelType];
-	const setup = CHANNEL_SETUP[form.channelType];
+	const setup = channelSetup(tl, form.channelType);
 	const managedAvailable = form.channelType === "telegram";
 	const usingManaged = managedAvailable && connectMode === "managed";
 

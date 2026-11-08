@@ -19,6 +19,7 @@
 //! [`crate::server::app_notify`], which calls [`notify_all`] (and records the activity
 //! item).
 
+mod connect_suggestion;
 pub mod delivery_view;
 pub mod run_push;
 pub mod store;
@@ -28,6 +29,7 @@ mod tests;
 
 use std::sync::OnceLock;
 
+pub use connect_suggestion::deliver_connect_suggestion;
 pub use ryu_notify::NotifyTarget;
 
 /// Inbox source used for private suggestions produced by Connect agent triggers.
@@ -136,6 +138,10 @@ pub async fn notify_all(
             };
             for (locale, tokens) in groups {
                 let (title, message) = render(locale);
+                let message = match text {
+                    Some(_) => crate::i18n::bidi::rtl_body(message, locale),
+                    None => message,
+                };
                 ryu_notify::push_expo_message(http, &tokens, &title, &message, alert.data.clone())
                     .await;
             }
@@ -182,6 +188,59 @@ pub async fn deliver_user_notification(
     ack_required: bool,
     source_app_id: Option<&str>,
 ) -> Result<String, String> {
+    let route = DeliveryRoute {
+        workflow_run_id,
+        node_id,
+        ack_required,
+        source_app_id,
+        link: None,
+    };
+    deliver_routed(store, user_id, title, body, level, route).await
+}
+
+/// Deliver a Core-raised notification whose tap opens `link`, a desktop route
+/// (see [`crate::events::DesktopNotification::link`]), on every surface: the
+/// inbox row, the user-scoped toast, and the mobile push `data`.
+pub async fn deliver_linked_notification(
+    store: &NotifyStore,
+    user_id: &str,
+    title: &str,
+    body: &str,
+    level: &str,
+    link: &str,
+) -> Result<String, String> {
+    let route = DeliveryRoute {
+        link: Some(link),
+        ..DeliveryRoute::default()
+    };
+    deliver_routed(store, user_id, title, body, level, route).await
+}
+
+/// Where a delivered notification leads and what raised it.
+#[derive(Default)]
+struct DeliveryRoute<'a> {
+    workflow_run_id: Option<&'a str>,
+    node_id: Option<&'a str>,
+    ack_required: bool,
+    source_app_id: Option<&'a str>,
+    link: Option<&'a str>,
+}
+
+async fn deliver_routed(
+    store: &NotifyStore,
+    user_id: &str,
+    title: &str,
+    body: &str,
+    level: &str,
+    route: DeliveryRoute<'_>,
+) -> Result<String, String> {
+    let DeliveryRoute {
+        workflow_run_id,
+        node_id,
+        ack_required,
+        source_app_id,
+        link,
+    } = route;
     let id = format!("ntf_{}", uuid::Uuid::new_v4().simple());
     let row = NotificationRow {
         id: id.clone(),
@@ -212,6 +271,7 @@ pub async fn deliver_user_notification(
         target_user_id: Some(user_id.to_owned()),
         notification_id: Some(id.clone()),
         source_app_id: source_app_id.map(|s| s.to_owned()),
+        link: link.map(str::to_owned),
     });
 
     // 3. Mobile push to the member's registered devices.
@@ -219,6 +279,7 @@ pub async fn deliver_user_notification(
         "notification_id": id,
         "workflow_run_id": workflow_run_id,
         "ack_required": ack_required,
+        "link": link,
     });
     push_to_user(
         store,
@@ -229,6 +290,12 @@ pub async fn deliver_user_notification(
     )
     .await;
     Ok(id)
+}
+
+/// The shared HTTP client for Expo push delivery (one TLS connector and pool).
+fn push_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
 }
 
 /// Push to `user_id`'s registered devices. When `localized`, the devices are
@@ -248,76 +315,23 @@ async fn push_to_user(
             return;
         }
     };
-    let http = reqwest::Client::new();
-    let groups = if localized && !devices.is_empty() {
+    if devices.is_empty() {
+        return;
+    }
+    let groups = if localized {
         tokens_by_locale(&devices, crate::i18n::locale::node_locale().await)
     } else {
         vec![("en", devices.into_iter().map(|d| d.token).collect())]
     };
     for (locale, tokens) in groups {
         let (title, body) = render(locale);
-        ryu_notify::push_expo_message(&http, &tokens, &title, &body, data.clone()).await;
+        let body = if localized {
+            crate::i18n::bidi::rtl_body(body, locale)
+        } else {
+            body
+        };
+        ryu_notify::push_expo_message(push_client(), &tokens, &title, &body, data.clone()).await;
     }
-}
-
-/// Persist an Island suggestion without sending it to mobile push. The stable id
-/// makes Connect retries idempotent; the notification stream and inbox list let
-/// Island recover suggestions after it was offline.
-pub async fn deliver_connect_suggestion(
-    store: &NotifyStore,
-    notification_id: &str,
-    user_id: &str,
-    title: &str,
-    body: &str,
-) -> Result<String, String> {
-    if let Some(existing) = store
-        .get_notification(notification_id)
-        .await
-        .map_err(|error| format!("failed to check existing suggestion: {error}"))?
-    {
-        if existing.user_id.as_deref() != Some(user_id)
-            || existing.source_app_id.as_deref() != Some(ISLAND_CONNECT_SUGGESTION_SOURCE)
-        {
-            return Err("Connect suggestion id is already used by another notification".to_owned());
-        }
-        return Ok(notification_id.to_owned());
-    }
-
-    let row = NotificationRow {
-        id: notification_id.to_owned(),
-        user_id: Some(user_id.to_owned()),
-        title: title.to_owned(),
-        body: Some(body.to_owned()),
-        level: "info".to_owned(),
-        workflow_run_id: None,
-        node_id: None,
-        ack_required: false,
-        acked: false,
-        read_at: None,
-        created_at: chrono::Utc::now().to_rfc3339(),
-        source_app_id: Some(ISLAND_CONNECT_SUGGESTION_SOURCE.to_owned()),
-        archived_at: None,
-    };
-    store
-        .insert_notification(&row)
-        .await
-        .map_err(|error| format!("failed to persist Island suggestion: {error}"))?;
-
-    // The row keeps the English placeholder; the toast shows the node's language.
-    let (mut title, mut body) = (row.title, row.body);
-    if streaming_privacy::is_privacy_placeholder(&title, body.as_deref()) {
-        let locale = crate::i18n::locale::node_locale().await;
-        localize_privacy_placeholder(&mut title, &mut body, locale);
-    }
-    crate::events::publish(crate::events::DesktopNotification {
-        title,
-        body,
-        level: row.level,
-        target_user_id: row.user_id,
-        notification_id: Some(row.id.clone()),
-        source_app_id: row.source_app_id,
-    });
-    Ok(notification_id.to_owned())
 }
 
 /// Deliver a plain app-raised notification (no workflow gate) into the user's
@@ -436,6 +450,7 @@ pub(crate) async fn persist_and_toast(
         target_user_id: row.user_id,
         notification_id: Some(row.id),
         source_app_id: row.source_app_id,
+        link: None,
     });
     Ok(())
 }
@@ -464,3 +479,7 @@ fn fire_notification_hooks(alert_json: serde_json::Value) {
         let _ = crate::plugin_host::dispatch_global(crate::plugin_host::ON_NOTIFICATION, ctx).await;
     });
 }
+
+#[cfg(test)]
+#[path = "linked_tests.rs"]
+mod linked_tests;

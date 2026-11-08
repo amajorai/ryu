@@ -1,7 +1,8 @@
-import type {
-	VaultCoords,
-	VaultPasswordManagerGrantMode,
-	VaultSecretMetadataPatch,
+import {
+	VAULT_VALUE_TYPES,
+	type VaultCoords,
+	type VaultPasswordManagerGrantMode,
+	type VaultSecretMetadataPatch,
 } from "@ryuhq/core-client/vault";
 import { z } from "zod";
 import { UsageError } from "./types.ts";
@@ -32,11 +33,13 @@ const VALUE_FLAGS = new Set([
 	"--address",
 	"--allow",
 	"--approvals",
+	"--auth",
 	"--before",
 	"--broker",
 	"--cardholder",
 	"--city",
 	"--country",
+	"--credential",
 	"--description",
 	"--env",
 	"--exp",
@@ -44,19 +47,28 @@ const VALUE_FLAGS = new Set([
 	"--field",
 	"--format",
 	"--grant",
+	"--header",
+	"--host",
 	"--image",
 	"--increment",
+	"--instructions",
+	"--interval",
 	"--isolation",
 	"--k8s-name",
 	"--k8s-namespace",
+	"--lease",
+	"--lease-ttl",
 	"--limit",
 	"--max-uses",
 	"--merchant",
+	"--message",
 	"--method",
 	"--mode",
 	"--mount",
 	"--name",
 	"--on-conflict",
+	"--org-project",
+	"--out",
 	"--passphrase",
 	"--path",
 	"--position",
@@ -64,6 +76,7 @@ const VALUE_FLAGS = new Set([
 	"--provider",
 	"--reason",
 	"--region",
+	"--remote",
 	"--rotate-every",
 	"--scope",
 	"--scope-id",
@@ -71,6 +84,7 @@ const VALUE_FLAGS = new Set([
 	"--status",
 	"--subject",
 	"--tag",
+	"--tags",
 	"--ttl",
 	"--type",
 ]);
@@ -79,11 +93,14 @@ const BOOLEAN_FLAGS = new Set([
 	"--all",
 	"--approle",
 	"--container",
+	"--human",
 	"--jwt",
 	"--no-known-values",
+	"--no-project",
 	"--protected",
 	"--unprotected",
 	"--verify",
+	"--watch",
 ]);
 
 /** Card secrets are never taken as arguments (visible in `ps` and history). */
@@ -239,6 +256,8 @@ export function rfc3339(value: string, name: string): string {
 	return new Date(millis).toISOString();
 }
 
+const valueTypeSchema = z.enum(VAULT_VALUE_TYPES);
+
 export function metadataFrom(
 	args: SecretsArgs
 ): VaultSecretMetadataPatch | undefined {
@@ -247,6 +266,14 @@ export function metadataFrom(
 	const tags = args.values.get("--tag");
 	const expiresAt = flag(args, "--expires-at");
 	const rotateEvery = flag(args, "--rotate-every");
+	const valueType = flag(args, "--type");
+	if (valueType !== undefined) {
+		const parsed = valueTypeSchema.safeParse(valueType);
+		if (!parsed.success) {
+			throw new UsageError("--type must be config, secret, or sealed.");
+		}
+		metadata.valueType = parsed.data;
+	}
 	if (description !== undefined) {
 		metadata.description = description;
 	}

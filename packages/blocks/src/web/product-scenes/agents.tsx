@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import styles from "./agents.module.css";
 import { Label, Packet, type Point, SceneCanvas, Wire } from "./scene.tsx";
+import { SCENE_CHIP_LABELS } from "./scene-chip-labels.ts";
 
 /**
  * The Agents card: what an agent is. A core with its parts plugged in: the
@@ -57,8 +58,13 @@ const MODELS: readonly Part[] = [
 	{ face: FACES[2], glyph: TRIANGLE, label: "image", y: ROWS[2] },
 ];
 const ABILITIES: readonly Part[] = [
-	{ face: FACES[0], glyph: WRENCH, label: "tools", y: ROWS[0] },
-	{ face: FACES[1], glyph: MEMORY, label: "memory", y: ROWS[1] },
+	{ face: FACES[0], glyph: WRENCH, label: SCENE_CHIP_LABELS.tools, y: ROWS[0] },
+	{
+		face: FACES[1],
+		glyph: MEMORY,
+		label: SCENE_CHIP_LABELS.memory,
+		y: ROWS[1],
+	},
 	{ face: FACES[2], glyph: DOC, label: "prompt", y: ROWS[2] },
 ];
 

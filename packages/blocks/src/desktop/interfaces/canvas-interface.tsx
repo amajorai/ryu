@@ -42,6 +42,7 @@ import {
 } from "./canvas-parts.tsx";
 import { CanvasToolbar } from "./canvas-toolbar.tsx";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
+import { threadDisplayTitle } from "./thread-display-title.ts";
 
 /**
  * Canvas: threads as sticky notes on an infinite, zoomable board, first filed
@@ -150,7 +151,7 @@ export function CanvasInterface({
 			<p aria-live="polite" className="sr-only" data-testid="canvas-announcer">
 				{selectedCard
 					? tl("Selected: {title}", {
-							title: selectedCard.thread.title.trim() || "Untitled thread",
+							title: threadDisplayTitle(selectedCard.thread, tl),
 						})
 					: ""}
 			</p>

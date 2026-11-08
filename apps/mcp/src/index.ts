@@ -13,6 +13,7 @@ import { version as packageVersion } from "../package.json" with {
 	type: "json",
 };
 import { loadToken, runLogin, runLogout, runWhoami } from "./auth.ts";
+import { registerBrokerTools } from "./broker-tools.ts";
 import { buildTarget } from "./target.ts";
 import { registerRyuTools } from "./tools.ts";
 
@@ -29,6 +30,9 @@ const serve = async (): Promise<void> => {
 			});
 
 			registerRyuTools(server, target);
+			// Broker discover/propose, when this process runs under a broker
+			// session (inherited from a brokered agent) or a machine token.
+			registerBrokerTools(server, target);
 			return server;
 		},
 		{ legacy: "serve" }

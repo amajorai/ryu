@@ -1,4 +1,5 @@
 import { formatMessage } from "./format.ts";
+import { stripBidiIsolates } from "./format-bidi.ts";
 import {
 	collapseLiteralWhitespace,
 	type LiteralCatalog,
@@ -222,7 +223,7 @@ export class LiteralTemplateIndex {
 	 * formatted for `locale`, or undefined when no template matches.
 	 */
 	match(text: string, locale: string): string | undefined {
-		const collapsed = collapseLiteralWhitespace(text);
+		const collapsed = collapseLiteralWhitespace(stripBidiIsolates(text));
 		if (!collapsed || collapsed.length > MAX_TEMPLATE_TEXT_LENGTH) {
 			return;
 		}

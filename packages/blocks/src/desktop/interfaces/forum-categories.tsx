@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceSnapshot } from "@ryuhq/protocol/interfaces";
 import {
@@ -8,6 +9,7 @@ import {
 } from "./forum-model.ts";
 import { CategorySwatch, ForumAvatar, TEXT_BUTTON } from "./forum-parts.tsx";
 import { agentById, compactAge } from "./interface-renderer.ts";
+import { untitledTopicTitle } from "./thread-display-title.ts";
 
 const HEAD_CELL =
 	"h-10 px-2 text-start align-middle font-normal text-muted-foreground text-sm";
@@ -23,6 +25,7 @@ function LatestCell({
 	onOpen: (threadId: string) => void;
 	snapshot: InterfaceSnapshot;
 }) {
+	const tl = useLiteralMessages();
 	const latest = category.latest;
 	if (!latest) {
 		return <span className="text-muted-foreground text-sm">No topics yet</span>;
@@ -40,10 +43,11 @@ function LatestCell({
 						TEXT_BUTTON,
 						"block max-w-full truncate font-medium text-foreground text-sm leading-5"
 					)}
+					data-ryu-i18n="off"
 					onClick={() => onOpen(latest.id)}
 					type="button"
 				>
-					{latest.title || "Untitled topic"}
+					{untitledTopicTitle(latest.title, tl)}
 				</button>
 				<p className="truncate text-muted-foreground text-xs leading-4">
 					{author?.name ?? "You"}

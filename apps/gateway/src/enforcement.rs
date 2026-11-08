@@ -54,6 +54,11 @@ use crate::pipeline::RequestContext;
 use crate::policy::ResolvedOrg;
 use crate::state::AppState;
 
+mod in_flight;
+mod wire;
+pub use in_flight::*;
+pub use wire::*;
+
 /// Requests a minute for a throttled subject the control plane sent no rate
 /// for. Matches the platform floor's degraded-mode minimum (spec 02.3.1).
 pub const DEFAULT_THROTTLE_RPM: u64 = 10;
@@ -72,139 +77,6 @@ const CONCURRENCY_RETRY_AFTER_SECS: u64 = 2;
 const MAX_LADDER_ENTRIES: usize = 16;
 /// The most models the floor's restricted list may carry.
 pub const MAX_RESTRICTED_MODELS: usize = 512;
-
-// ─── Wire ──────────────────────────────────────────────────────────────────
-
-/// Which subject a ladder entry names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LadderScope {
-    Org,
-    Credential,
-    User,
-    /// A tenant's end user (spec 04.3). Parsed so one flagged end user never
-    /// fails the whole key, but not enforced from resolve: the resolve names
-    /// the key, not the end user a request carries.
-    EndUser,
-    /// A trusted forwarder's user. Parsed and not enforced from resolve, as
-    /// for [`Self::EndUser`].
-    ForwardedUser,
-}
-
-impl LadderScope {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Org => "org",
-            Self::Credential => "credential",
-            Self::User => "user",
-            Self::EndUser => "end_user",
-            Self::ForwardedUser => "forwarded_user",
-        }
-    }
-
-    /// Whether this Gateway applies entries of this scope from resolve.
-    const fn enforced_from_resolve(self) -> bool {
-        matches!(self, Self::Org | Self::Credential | Self::User)
-    }
-}
-
-/// One subject's ladder level as the control plane sent it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LadderEntry {
-    pub scope: LadderScope,
-    /// The subject's id. `None` names the resolved org or credential.
-    pub subject_id: Option<String>,
-    /// 0 to 3. Levels 4 and 5 are refusals and travel as a `state`.
-    pub level: u8,
-    pub rpm: Option<u64>,
-    pub concurrency: Option<u32>,
-    pub reason_class: Option<String>,
-    pub until: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WireEntry {
-    scope: LadderScope,
-    #[serde(default)]
-    subject_id: Option<String>,
-    level: u8,
-    #[serde(default)]
-    rpm: Option<u64>,
-    #[serde(default)]
-    concurrency: Option<u32>,
-    #[serde(default)]
-    reason_class: Option<String>,
-    #[serde(default)]
-    until: Option<String>,
-}
-
-/// Why a ladder could not be read. The caller refuses the whole standing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MalformedLadder;
-
-impl LadderEntry {
-    /// Parse the standing's `ladder`. Absent or `null` is empty. Anything
-    /// else must be an array of well-formed entries, or the standing fails
-    /// closed.
-    pub fn list_from_wire(value: Option<&Value>) -> Result<Vec<Self>, MalformedLadder> {
-        let Some(value) = value.filter(|value| !value.is_null()) else {
-            return Ok(Vec::new());
-        };
-        let items = value.as_array().ok_or(MalformedLadder)?;
-        if items.len() > MAX_LADDER_ENTRIES {
-            return Err(MalformedLadder);
-        }
-        items.iter().map(Self::from_wire).collect()
-    }
-
-    fn from_wire(value: &Value) -> Result<Self, MalformedLadder> {
-        let wire = WireEntry::deserialize(value).map_err(|_| MalformedLadder)?;
-        if wire.level > 3 || wire.rpm == Some(0) || wire.concurrency == Some(0) {
-            return Err(MalformedLadder);
-        }
-        let subject_id = match wire.subject_id {
-            None => None,
-            Some(id) if valid_id(&id) => Some(id),
-            Some(_) => return Err(MalformedLadder),
-        };
-        let names_itself = matches!(wire.scope, LadderScope::Org | LadderScope::Credential);
-        if !names_itself && subject_id.is_none() {
-            // A user or end user is not named anywhere else on the resolve.
-            return Err(MalformedLadder);
-        }
-        let label = |value: Option<String>| {
-            value.and_then(|value| crate::standing::label(value, crate::standing::MAX_LABEL_BYTES))
-        };
-        Ok(Self {
-            scope: wire.scope,
-            subject_id,
-            level: wire.level,
-            rpm: wire.rpm,
-            concurrency: wire.concurrency,
-            reason_class: label(wire.reason_class),
-            until: label(wire.until),
-        })
-    }
-
-    /// The org-scope L3 a `restricted` standing state means.
-    pub fn org_restricted(reason_class: Option<String>, until: Option<String>) -> Self {
-        Self {
-            scope: LadderScope::Org,
-            subject_id: None,
-            level: 3,
-            rpm: None,
-            concurrency: None,
-            reason_class,
-            until,
-        }
-    }
-}
-
-/// A non-empty, trimmed, control-free id of at most 256 bytes.
-fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 256 && id.trim() == id && !id.chars().any(char::is_control)
-}
 
 // ─── Posture ───────────────────────────────────────────────────────────────
 
@@ -399,60 +271,6 @@ impl Posture {
     }
 }
 
-// ─── In-flight caps ────────────────────────────────────────────────────────
-
-/// Per-subject in-flight counters, one per process.
-#[derive(Debug, Default)]
-pub struct InFlight {
-    counts: DashMap<String, u32>,
-}
-
-impl InFlight {
-    /// Take one slot of `cap` under `key`, or `None` when all are taken.
-    fn acquire(self: &Arc<Self>, key: &str, cap: u32) -> Option<Slot> {
-        let mut count = self.counts.entry(key.to_owned()).or_insert(0);
-        if *count >= cap {
-            return None;
-        }
-        *count += 1;
-        drop(count);
-        Some(Slot {
-            counts: Arc::clone(self),
-            key: key.to_owned(),
-        })
-    }
-
-    /// Requests in flight under `key`.
-    #[cfg(test)]
-    pub fn count(&self, key: &str) -> u32 {
-        self.counts.get(key).map_or(0, |count| *count)
-    }
-}
-
-/// One held in-flight slot, given back on drop.
-#[derive(Debug)]
-struct Slot {
-    counts: Arc<InFlight>,
-    key: String,
-}
-
-impl Drop for Slot {
-    fn drop(&mut self) {
-        let emptied = match self.counts.counts.get_mut(&self.key) {
-            Some(mut count) => {
-                *count = count.saturating_sub(1);
-                *count == 0
-            }
-            None => false,
-        };
-        if emptied {
-            self.counts
-                .counts
-                .remove_if(&self.key, |_, count| *count == 0);
-        }
-    }
-}
-
 // ─── Per-request enforcement ───────────────────────────────────────────────
 
 /// A fleet request's ladder posture and the in-flight slots it holds. It
@@ -636,8 +454,8 @@ pub fn authorize_route(
     let Some(enforcement) = ctx.enforcement.as_deref().filter(|e| e.restricted()) else {
         return Ok(());
     };
-    let own_supply = crate::credit_pools::pool_for_gateway_provider(provider)
-        .is_some_and(crate::credit_pools::is_own_supply_pool);
+    // Any slot holding Ryu's credential: own supply, or retired Bedrock.
+    let own_supply = crate::credit_pools::is_ryu_held_slot(provider);
     if own_supply || !restricted_model_allowed(state, model) {
         return Err(enforcement.restriction());
     }

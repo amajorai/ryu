@@ -14,6 +14,10 @@
 //! * rotate the identity-token signing key past its rotation period and
 //!   prune retired keys past the verification window;
 //! * once a day, tidy PKI certificates expired for more than 72 hours;
+//! * once a day, rotate the vault data key when the active version is older
+//!   than `RYU_VAULT_KEY_ROTATION_DAYS` (default 90; `0` turns scheduled
+//!   rotation off), rewrap every row onto it, and prune retired data keys no
+//!   row uses any more;
 //! * once a day, prune audit rows older than `RYU_VAULT_AUDIT_RETENTION_DAYS`
 //!   (default 365; `0` keeps everything). Pruning records an anchor so
 //!   verification of the remaining chain still succeeds.
@@ -30,6 +34,8 @@ use crate::plugin_secrets::PluginSecretStore;
 const TICK: Duration = Duration::from_secs(60);
 const ENV_AUDIT_RETENTION_DAYS: &str = "RYU_VAULT_AUDIT_RETENTION_DAYS";
 const DEFAULT_AUDIT_RETENTION_DAYS: i64 = 365;
+const ENV_KEY_ROTATION_DAYS: &str = "RYU_VAULT_KEY_ROTATION_DAYS";
+const DEFAULT_KEY_ROTATION_DAYS: i64 = 90;
 const DAY_MILLIS: i64 = 24 * 3600 * 1000;
 
 fn audit_retention_days() -> i64 {
@@ -37,6 +43,15 @@ fn audit_retention_days() -> i64 {
         .ok()
         .and_then(|value| value.trim().parse().ok())
         .unwrap_or(DEFAULT_AUDIT_RETENTION_DAYS)
+}
+
+/// Days after which the active data key is rotated; `0` disables it.
+fn key_rotation_days() -> i64 {
+    std::env::var(ENV_KEY_ROTATION_DAYS)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(DEFAULT_KEY_ROTATION_DAYS)
+        .max(0)
 }
 
 /// Summary of one maintenance pass.
@@ -54,9 +69,12 @@ pub struct TickReport {
     pub identity_keys_rotated: usize,
     pub identity_keys_pruned: usize,
     pub pki_certs_tidied: usize,
+    pub keys_rotated: usize,
+    pub keys_pruned: usize,
 }
 
-/// Run one maintenance pass. `prune_audit` gates the daily audit step.
+/// Run one maintenance pass. `prune_audit` gates the daily steps (audit
+/// pruning, PKI tidy, and keyring upkeep).
 pub async fn tick(store: &PluginSecretStore, prune_audit: bool) -> TickReport {
     let mut report = TickReport::default();
     if !store.keyring.is_sealed() {
@@ -91,6 +109,18 @@ pub async fn tick(store: &PluginSecretStore, prune_audit: bool) -> TickReport {
             }
             Err(error) => tracing::warn!("listing due transit rotations failed: {error:#}"),
         }
+        if prune_audit {
+            match store
+                .keyring_maintain(key_rotation_days().saturating_mul(DAY_MILLIS))
+                .await
+            {
+                Ok(done) => {
+                    report.keys_rotated = usize::from(done.rotated.is_some());
+                    report.keys_pruned = done.pruned.len();
+                }
+                Err(error) => tracing::warn!("vault keyring maintenance failed: {error:#}"),
+            }
+        }
         match store.identity_maintain().await {
             Ok((rotated, pruned)) => {
                 report.identity_keys_rotated = usize::from(rotated);
@@ -117,6 +147,11 @@ pub async fn tick(store: &PluginSecretStore, prune_audit: bool) -> TickReport {
         match super::policy::prune_expired(&conn) {
             Ok(count) => report.bindings_pruned = count,
             Err(error) => tracing::warn!("pruning policy bindings failed: {error:#}"),
+        }
+        // Ended access-request grants delete their policies; the bindings
+        // above already stopped applying when they expired.
+        if let Err(error) = super::access_requests::prune(&conn, now_millis()) {
+            tracing::warn!("pruning access requests failed: {error:#}");
         }
         if prune_audit {
             let days = audit_retention_days();
@@ -172,5 +207,27 @@ mod tests {
     async fn an_idle_store_has_nothing_to_do() {
         let store = PluginSecretStore::in_memory().unwrap();
         assert_eq!(tick(&store, true).await, TickReport::default());
+    }
+
+    #[tokio::test]
+    async fn the_daily_pass_rotates_a_data_key_past_its_period() {
+        let store = PluginSecretStore::in_memory().unwrap();
+        store.set("plug", "token", "s3cret").await.unwrap();
+        store
+            .conn
+            .lock()
+            .await
+            .execute("UPDATE vault_keyring SET created_at = 0", [])
+            .unwrap();
+        // Only the daily pass touches the keyring.
+        assert_eq!(tick(&store, false).await.keys_rotated, 0);
+        assert_eq!(store.keyring.active_version(), 1);
+        let report = tick(&store, true).await;
+        assert_eq!(report.keys_rotated, 1);
+        assert_eq!(store.keyring.active_version(), 2);
+        assert_eq!(
+            store.get("plug", "token").await.unwrap().as_deref(),
+            Some("s3cret")
+        );
     }
 }

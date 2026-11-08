@@ -156,7 +156,7 @@ function categoryBuckets(snapshot: InterfaceSnapshot): Bucket[] {
 		addTo(
 			buckets,
 			"unassigned",
-			{ id: "unassigned", kind: "unassigned", name: "Unassigned" },
+			{ id: "unassigned", kind: "unassigned", name: tr("Unassigned") },
 			thread
 		);
 	}

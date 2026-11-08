@@ -162,6 +162,31 @@ impl ConversationStore {
         Ok(out)
     }
 
+    /// Current decrypted titles for `conversation_ids`, used to label message
+    /// search hits. Ids that do not resolve or have no title yet are absent.
+    /// This applies no tenancy filter: callers pass only ids they already
+    /// limited to conversations the caller may read.
+    pub async fn conversation_titles(
+        &self,
+        conversation_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let mut out = std::collections::HashMap::new();
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare_cached("SELECT title FROM conversations WHERE id = ?1")
+            .context("preparing conversation title lookup")?;
+        for id in conversation_ids {
+            let sealed: Option<Option<String>> = stmt
+                .query_row(params![id], |row| row.get(0))
+                .optional()
+                .context("reading conversation title")?;
+            if let Some(title) = self.open_opt(sealed.flatten()) {
+                out.insert(id.clone(), title);
+            }
+        }
+        Ok(out)
+    }
+
     /// Provider/model changes are append-only conversation events. The newest
     /// event is also the conversation's current selection, so collaborators
     /// share one durable value without relying on their per-user preferences.

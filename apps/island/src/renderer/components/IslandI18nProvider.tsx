@@ -12,6 +12,7 @@ import {
 	selectionFromLanguagePacks,
 	type UiLanguageSelection,
 } from "../../shared/language-selection.ts";
+import { useOsPreferredLanguages } from "../hooks/use-os-preferred-languages.ts";
 import {
 	type LanguagePacksSource,
 	watchLanguagePacks,
@@ -53,7 +54,9 @@ function sameSelection(
  * preference, shared with Desktop: the Island picker and Desktop both write
  * it and Desktop adopts an Island choice, so the last writer wins), so both
  * Island windows follow one choice. Without a fixed choice the provider
- * follows the OS's preferred languages (`languagechange`). The on-screen
+ * follows the OS's preferred languages as the main process reads them (the
+ * list its Ghost cursor label and suggestions use), re-read on
+ * `languagechange`, else `navigator.languages`. The on-screen
  * generative UI window passes its own `languagePacks` bridge. */
 export function IslandI18nProvider({
 	children,
@@ -64,6 +67,7 @@ export function IslandI18nProvider({
 }) {
 	const [packs, setPacks] = useState<LanguagePack[]>([]);
 	const [selection, setSelection] = useState<UiLanguageSelection | null>(null);
+	const osLanguages = useOsPreferredLanguages();
 
 	useEffect(
 		() =>
@@ -82,19 +86,22 @@ export function IslandI18nProvider({
 	if (selection) {
 		initialPackId = fixed ? selection.packId : null;
 	}
+	// A new OS list rebuilds the runtime, as a new selection does.
+	const osKey = !fixed && osLanguages ? `-${osLanguages.join(",")}` : "";
 
 	return (
 		<I18nProvider
 			// Automatic mode walks every OS preference (`nl-NL, de` answers `de`)
-			// and follows a later OS language change without a relaunch.
-			followSystemLocale={!fixed}
-			initialLocale={fixed ? null : systemLocales()}
+			// and follows a later OS language change without a relaunch: through
+			// the main process's list when it answered, else `navigator.languages`.
+			followSystemLocale={!fixed && osLanguages === null}
+			initialLocale={fixed ? null : (osLanguages ?? systemLocales())}
 			// Until the main process answers, the local cache restores the last
 			// choice; afterwards its selection wins and a change rebuilds the runtime.
 			initialPackId={initialPackId}
 			packs={packs}
 			persistPackId={persistIslandLanguage}
-			selectionKey={languageSelectionKey(selection)}
+			selectionKey={`${languageSelectionKey(selection)}${osKey}`}
 		>
 			<I18nDirectionProvider>{children}</I18nDirectionProvider>
 		</I18nProvider>

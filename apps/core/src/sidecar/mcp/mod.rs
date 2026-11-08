@@ -2765,6 +2765,8 @@ struct CapabilityAdapterBridge {
     /// The ADDITIONAL ids `callNamed` may reach, from `adapter.tools`. Fixed by the
     /// manifest; a name outside this set (and outside [`Self::target`]) is refused.
     allowed: std::collections::HashSet<String>,
+    /// The providing plugin; a target on a tool it does not own is refused.
+    provider_id: String,
     agent_id: Option<String>,
     user_id: Option<String>,
     profile_ids: Vec<String>,
@@ -2828,7 +2830,7 @@ impl crate::tool_exec::SandboxBridge for CapabilityAdapterBridge {
             // Fail-closed on any path or id the manifest did not declare. Surfaced as
             // a catchable tool error rather than an abort so a buggy adapter reports
             // cleanly instead of killing the turn.
-            let target = match self.resolve_target(&path, &args) {
+            let target = match self.resolve_owned_target(&path, &args).await {
                 Ok(target) => target,
                 Err(reason) => {
                     return InvokeOutcome::Result(ToolInvokeResult {
@@ -8565,6 +8567,10 @@ impl McpRegistry {
                     resolved.provider_id
                 ));
             }
+            // Nor at a tool another plugin or the user owns (`gmail.send_email`).
+            self.provider_target_ownership(&resolved.provider_id, &target)
+                .await
+                .map_err(|reason| anyhow!(reason))?;
             // The user's per-layer argument defaults ("web search returns 25
             // results", "crawl at most 50 pages"), merged UNDER the caller's own
             // arguments. Read here rather than cached with the verb resolution
@@ -9608,6 +9614,7 @@ impl McpRegistry {
             registry,
             target: resolved.binding.tool.clone(),
             allowed: adapter.tools.iter().cloned().collect(),
+            provider_id: resolved.provider_id.clone(),
             agent_id: agent_id.map(str::to_owned),
             user_id: user_id.map(str::to_owned),
             profile_ids: profile_ids.to_vec(),
@@ -11848,6 +11855,7 @@ for line in sys.stdin:
             registry: Arc::new(registry),
             target: CREATE_AGENT_TOOL_ID.to_owned(),
             allowed: std::collections::HashSet::new(),
+            provider_id: "com.example.provider".to_owned(),
             agent_id: Some(restricted.id.clone()),
             user_id: None,
             profile_ids: Vec::new(),
@@ -13005,6 +13013,7 @@ for line in sys.stdin:
             }),
             target: target.to_owned(),
             allowed: allowed.iter().map(|s| (*s).to_owned()).collect(),
+            provider_id: "com.example.provider".to_owned(),
             agent_id: None,
             user_id: None,
             profile_ids: Vec::new(),

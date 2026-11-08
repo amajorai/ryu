@@ -1,7 +1,7 @@
 use super::language::with_dream_language;
 
 fn base_system() -> String {
-    super::dream_prompt(&[]).0
+    super::dream_prompt(&[], &[]).0
 }
 
 #[test]

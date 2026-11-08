@@ -116,6 +116,28 @@ test("keeps spent grants silent, warns about unreadable rows, and retains permis
 		warnings.mockRestore();
 	}
 });
+test("carries each pool's payable Free model ids, and drops a malformed list", async () => {
+	values.set(TOKEN_KEY, "session");
+	reply =
+		'{"pools":[{"poolLabel":"Ryu Standard","remainingMicroUsd":5,"isFreeProvider":true,"expiresAt":null,"freeModelIds":["openai/gpt-5-mini"]},{"poolLabel":"Ryu Vision","remainingMicroUsd":3,"isFreeProvider":false,"expiresAt":null,"freeModelIds":"nope"}]}';
+	expect(await fetchMyCampaigns()).toEqual({
+		pools: [
+			{
+				poolLabel: "Ryu Standard",
+				remainingMicroUsd: 5,
+				isFreeProvider: true,
+				expiresAt: null,
+				freeModelIds: ["openai/gpt-5-mini"],
+			},
+			{
+				poolLabel: "Ryu Vision",
+				remainingMicroUsd: 3,
+				isFreeProvider: false,
+				expiresAt: null,
+			},
+		],
+	});
+});
 test("preserves malformed pool/envelope fallbacks and reports transport failures", async () => {
 	values.set(TOKEN_KEY, "session");
 	const warnings = spyOn(console, "warn").mockImplementation(() => undefined);

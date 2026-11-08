@@ -1,5 +1,11 @@
 //! Control-group request storage: create, authorize, redeem, list, prune.
 
+use anyhow::{bail, Context, Result};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+
+use super::super::VaultError;
 use super::*;
 
 /// Create the control-group table. Idempotent.

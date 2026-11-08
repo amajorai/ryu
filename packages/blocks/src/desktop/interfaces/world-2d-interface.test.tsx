@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage } from "@ryu/i18n";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceAgent,
 	InterfacePort,
@@ -20,7 +22,7 @@ import {
 	TALK_SIDE_OFFSET,
 	talkSpot,
 	villagerStatuses,
-	villagerStatusSuffix,
+	visitVillagerLabel,
 } from "./world-2d-model.ts";
 
 const NOW = Date.now();
@@ -158,6 +160,9 @@ function render(snapshot: InterfaceSnapshot, loading = false): string {
 	);
 }
 
+const english: LiteralMessage = (source, values) =>
+	formatMessage(source, values);
+
 describe("world 2d villager status", () => {
 	test("ranks each villager by their most urgent thread", () => {
 		const statuses = villagerStatuses(AGENTS, THREADS);
@@ -180,8 +185,13 @@ describe("world 2d villager status", () => {
 	});
 
 	test("names the status in hotbar and actor accessible names", async () => {
-		expect(villagerStatusSuffix("attention")).toBe(" (needs attention)");
-		expect(villagerStatusSuffix("idle")).toBe("");
+		expect(visitVillagerLabel("Cipher", "attention", english)).toBe(
+			"Visit Cipher (needs attention)"
+		);
+		expect(visitVillagerLabel("Cipher", "your-turn", english)).toBe(
+			"Visit Cipher (your turn)"
+		);
+		expect(visitVillagerLabel("Cipher", "idle", english)).toBe("Visit Cipher");
 		const { container, dispose } = await mount(
 			<World2dInterface
 				activeThreadId={null}

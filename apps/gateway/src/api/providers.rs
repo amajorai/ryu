@@ -291,7 +291,7 @@ async fn require_trusted_as(
     let core_forwarded_dynamic = !ctx.is_master_key
         && ctx.key_config.is_none()
         && ctx.org_id.is_some()
-        && crate::pipeline::has_core_proof_key(headers, ctx.org_id.as_deref());
+        && crate::pipeline::has_core_proof_key(state, headers, ctx.org_id.as_deref()).await?;
     if !trusted && !core_forwarded_dynamic {
         return Err(GatewayError::Unauthorized(
             "managed provider calls require Core's trusted forwarder".to_owned(),
@@ -344,7 +344,8 @@ const UNRESOLVED_PROVIDER: &str = "unresolved";
 ///
 /// A relay credential that names another org, or a forwarder without the
 /// proof, is refused. The error never echoes the claimed org.
-fn billed_org<'a>(
+async fn billed_org<'a>(
+    state: &AppState,
     ctx: &'a RequestContext,
     trusted_org_selector: bool,
     headers: &HeaderMap,
@@ -363,7 +364,9 @@ fn billed_org<'a>(
             "Core provider organization does not match the relay credential".to_owned(),
         ));
     }
-    if ctx.is_master_key || crate::pipeline::has_core_proof_key(headers, Some(requested)) {
+    if ctx.is_master_key
+        || crate::pipeline::has_core_proof_key(state, headers, Some(requested)).await?
+    {
         return Ok(Some(requested));
     }
     Err(GatewayError::Unauthorized(
@@ -397,7 +400,8 @@ pub async fn provider_call(
         provider_call_guard::audit_refusal(&state, &ctx, target, &error);
         error
     };
-    let validated = billed_org(&ctx, trusted_org_selector, &headers, &body).and_then(|org_id| {
+    let billed = billed_org(&state, &ctx, trusted_org_selector, &headers, &body).await;
+    let validated = billed.and_then(|org_id| {
         if body.tool_id.trim().is_empty() || body.request_id.trim().is_empty() {
             return Err(GatewayError::BadRequest(
                 "tool_id and request_id are required".to_owned(),
@@ -745,6 +749,7 @@ mod tests {
             Some("rgw_beta") => ("org-beta", 1_000_000),
             Some("rgw_poor") => ("org-poor", 1_000),
             Some("rgw_empty") => ("org-empty", 0),
+            Some("rgw_retired") => ("org-retired", 1_000_000),
             _ => {
                 return (
                     StatusCode::UNAUTHORIZED,
@@ -765,6 +770,13 @@ mod tests {
                 "standing": { "state": "active", "refuses": "none" }
             })),
         )
+    }
+
+    /// A member who could hold node root has left `org-retired`, so its
+    /// epoch-0 Core proof keys are retired.
+    async fn mock_org_epoch(Path(org): Path<String>) -> Json<Value> {
+        let epoch = u64::from(org == "org-retired");
+        Json(json!({ "managedInference": true, "boxProofKeyEpoch": epoch }))
     }
 
     async fn mock_debit(
@@ -896,6 +908,7 @@ mod tests {
         let (debit_tx, debit_rx) = mpsc::unbounded_channel();
         let control_router = Router::new()
             .route("/api/control-plane/gateway/resolve", get(mock_resolve))
+            .route("/api/gateway/orgs/:org/budget", get(mock_org_epoch))
             .route("/api/credits/debit", post(mock_debit))
             .with_state(debit_tx);
         let (control_url, control_server) = serve_mock(control_router).await;
@@ -1062,6 +1075,7 @@ mod tests {
         let (debit_tx, mut debit_rx) = mpsc::unbounded_channel();
         let control_router = Router::new()
             .route("/api/control-plane/gateway/resolve", get(mock_resolve))
+            .route("/api/gateway/orgs/:org/budget", get(mock_org_epoch))
             .route("/api/credits/debit", post(mock_debit))
             .with_state(debit_tx);
         let (control_url, control_server) = serve_mock(control_router).await;
@@ -1866,6 +1880,7 @@ mod tests {
         let (debit_tx, debits) = mpsc::unbounded_channel();
         let control_router = Router::new()
             .route("/api/control-plane/gateway/resolve", get(mock_resolve))
+            .route("/api/gateway/orgs/:org/budget", get(mock_org_epoch))
             .route("/api/credits/debit", post(mock_debit))
             .with_state(debit_tx);
         let (control_url, control_server) = serve_mock(control_router).await;
@@ -2668,6 +2683,7 @@ mod tests {
         let (debit_tx, _debit_rx) = mpsc::unbounded_channel();
         let control_router = Router::new()
             .route("/api/control-plane/gateway/resolve", get(mock_resolve))
+            .route("/api/gateway/orgs/:org/budget", get(mock_org_epoch))
             .route("/api/credits/debit", post(mock_debit))
             .with_state(debit_tx);
         let (control_url, control_server) = serve_mock(control_router).await;
@@ -2862,6 +2878,9 @@ mod tests {
             "{rows:?}"
         );
     }
+
+    /// `providers/tests/core_proof_epoch.rs`.
+    mod core_proof_epoch;
 }
 
 #[cfg(test)]

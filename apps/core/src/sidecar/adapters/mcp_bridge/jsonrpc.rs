@@ -109,7 +109,24 @@ pub(crate) async fn serve_http_jsonrpc_versioned_with_headers(
     modern: bool,
     headers: &axum::http::HeaderMap,
 ) -> Option<Value> {
-    serve_jsonrpc_message(
+    // Broker discover/propose, authorized by the agent's broker credential on
+    // this request (never the node bearer); see `hosted_broker`.
+    let hosted_allowlist = allowlist.clone();
+    if let Some(answer) = hosted_broker::intercept_call(
+        &mcp,
+        &agent_id,
+        hosted_allowlist.as_deref(),
+        message,
+        modern,
+        headers,
+    )
+    .await
+    {
+        return Some(answer);
+    }
+    let hosted_mcp = Arc::clone(&mcp);
+    let hosted_agent = agent_id.clone();
+    let response = serve_jsonrpc_message(
         message,
         modern,
         headers,
@@ -135,6 +152,24 @@ pub(crate) async fn serve_http_jsonrpc_versioned_with_headers(
                 permission_scope_id: None,
             }
         },
+    )
+    .await;
+    let response = hosted_broker::extend_list(
+        &hosted_mcp,
+        &hosted_agent,
+        hosted_allowlist.as_deref(),
+        message,
+        headers,
+        response,
+    )
+    .await;
+    hosted_broker_catalog::extend_search(
+        &hosted_mcp,
+        &hosted_agent,
+        hosted_allowlist.as_deref(),
+        message,
+        headers,
+        response,
     )
     .await
 }

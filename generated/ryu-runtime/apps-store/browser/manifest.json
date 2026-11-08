@@ -10,7 +10,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/browser",
   "name": "Browser",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "stability": "experimental",
   "system": true,
   "description": "A real-Chromium browser (Electron) exposed as the grant-gated `browser.control` capability. Local nodes can share one embedded session with the user; managed cloud nodes give each Bot a hidden tab lane with its own persistent Chromium profile, so each agent signs in to sites separately and never sees another agent's cookies, logins, browsing history, site permissions, or downloads. Core routes the desktop Browser panel and agent tools through its authenticated ext-proxy.",
@@ -50,7 +50,8 @@
     }
   },
   "engines": {
-    "ryu": ">=0.1.0"
+    "ryu": ">=0.1.0",
+    "host_api": ">=1.21.0"
   },
   "runnables": [
     {
@@ -398,14 +399,19 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/ext/@ryu/browser/tabs/{id}/context",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Return a live page context bundle: URL/title, viewport, accessibility snapshot, saved annotations, a bounded list of page-declared WebMCP tools, and a PNG screenshot. Optionally pass CSS-pixel selection rectangles to retrieve DOM identity (tag, selector, XPath, attributes, computed styles, component hint, and text) for the pointed elements.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string", "description": "Tab id." },
+            "id": {
+              "type": "string",
+              "description": "Tab id."
+            },
             "include_screenshot": {
               "type": "boolean",
               "description": "Set false for a text-only context refresh."
@@ -416,10 +422,20 @@
               "items": {
                 "type": "object",
                 "properties": {
-                  "x": { "type": "number" },
-                  "y": { "type": "number" },
-                  "width": { "type": "number", "minimum": 0 },
-                  "height": { "type": "number", "minimum": 0 }
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "height": {
+                    "type": "number",
+                    "minimum": 0
+                  }
                 },
                 "required": ["x", "y"]
               }
@@ -439,14 +455,19 @@
         "caller_agent_query": "agent_id",
         "method": "GET",
         "url": "core:/api/ext/@ryu/browser/tabs/{id}/webmcp",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "List the structured WebMCP tools currently exposed in one browser tab. Each tool includes its tool_id, name, description, JSON input schema, origin, and read-only, consequential-action, debugging, or untrusted-output hints. Call this before chromium.execute_webmcp_tool.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string", "description": "Tab id." }
+            "id": {
+              "type": "string",
+              "description": "Tab id."
+            }
           },
           "required": ["id"]
         }
@@ -462,14 +483,19 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/ext/@ryu/browser/tabs/{id}/webmcp/execute",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Execute one WebMCP tool exposed in a browser tab. Use the exact tool_name, tool_id, and arguments from chromium.list_webmcp_tools; tool_id distinguishes same-name tools from different frames. This runs page JavaScript visibly in the user's signed-in tab and can cause external effects, so follow normal browser confirmation policy.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string", "description": "Tab id." },
+            "id": {
+              "type": "string",
+              "description": "Tab id."
+            },
             "tool_name": {
               "type": "string",
               "description": "Exact WebMCP name returned by the list operation."
@@ -497,14 +523,18 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/ext/@ryu/browser/tabs/{id}/annotations",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Attach a durable visual comment to a browser tab. Use kind `element` for one pointed element, `elements` for a relationship between multiple pointed elements, or `area` for a drawn region. The sidecar captures the target DOM context at annotation time.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string" },
+            "id": {
+              "type": "string"
+            },
             "kind": {
               "type": "string",
               "enum": ["area", "element", "elements"]
@@ -512,10 +542,20 @@
             "rect": {
               "type": "object",
               "properties": {
-                "x": { "type": "number" },
-                "y": { "type": "number" },
-                "width": { "type": "number", "minimum": 0 },
-                "height": { "type": "number", "minimum": 0 }
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "width": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "height": {
+                  "type": "number",
+                  "minimum": 0
+                }
               },
               "required": ["x", "y"]
             },
@@ -525,10 +565,20 @@
               "items": {
                 "type": "object",
                 "properties": {
-                  "x": { "type": "number" },
-                  "y": { "type": "number" },
-                  "width": { "type": "number", "minimum": 0 },
-                  "height": { "type": "number", "minimum": 0 }
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "height": {
+                    "type": "number",
+                    "minimum": 0
+                  }
                 },
                 "required": ["x", "y"]
               }
@@ -556,13 +606,19 @@
         "caller_agent_query": "agent_id",
         "method": "DELETE",
         "url": "core:/api/ext/@ryu/browser/tabs/{id}/annotations",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Clear all saved visual annotations from one browser tab.",
         "input_schema": {
           "type": "object",
-          "properties": { "id": { "type": "string" } },
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
           "required": ["id"]
         }
       }
@@ -577,15 +633,21 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/ext/@ryu/browser/hover",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Move the real pointer over a snapshot element without clicking it, useful for menus and hover states.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "ref": { "type": "string" },
-            "tab_id": { "type": "string" }
+            "ref": {
+              "type": "string"
+            },
+            "tab_id": {
+              "type": "string"
+            }
           },
           "required": ["ref"]
         }
@@ -601,18 +663,33 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/ext/@ryu/browser/click-at",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Click a CSS-pixel viewport coordinate for canvas and custom controls when no accessibility ref exists.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "x": { "type": "number" },
-            "y": { "type": "number" },
-            "button": { "type": "string", "enum": ["left", "middle", "right"] },
-            "count": { "type": "integer", "minimum": 1, "maximum": 3 },
-            "tab_id": { "type": "string" }
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "button": {
+              "type": "string",
+              "enum": ["left", "middle", "right"]
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "tab_id": {
+              "type": "string"
+            }
           },
           "required": ["x", "y"]
         }
@@ -628,15 +705,24 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/ext/@ryu/browser/key",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Press a browser key or chord at the current focus, such as [\"cmd\", \"l\"] or [\"Escape\"].",
         "input_schema": {
           "type": "object",
           "properties": {
-            "keys": { "type": "array", "items": { "type": "string" } },
-            "tab_id": { "type": "string" }
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tab_id": {
+              "type": "string"
+            }
           },
           "required": ["keys"]
         }
@@ -652,7 +738,9 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/ext/@ryu/browser/drag",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Drag the real browser pointer between two CSS-pixel viewport coordinates.",
@@ -662,20 +750,30 @@
             "from": {
               "type": "object",
               "properties": {
-                "x": { "type": "number" },
-                "y": { "type": "number" }
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
               },
               "required": ["x", "y"]
             },
             "to": {
               "type": "object",
               "properties": {
-                "x": { "type": "number" },
-                "y": { "type": "number" }
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
               },
               "required": ["x", "y"]
             },
-            "tab_id": { "type": "string" }
+            "tab_id": {
+              "type": "string"
+            }
           },
           "required": ["from", "to"]
         }
@@ -691,10 +789,12 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/vault/agent-accounts",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
-        "description": "Create YOUR OWN website account record in the Ryu vault BEFORE you fill a sign-up form. Ryu generates a strong password and stores it; you never see it and must never ask the user for one or try to read it from the page. Pass the site's URL and the username and/or email you will register with. Returns `{account:{id,site,host,username,email,label,has_password,has_totp,...}}` with no secrets. Then fill the sign-up form with chromium.fill_credential (fields `username`, `email`, `password`) using `account.id`, and submit it. If the site then offers two-factor setup, use chromium.capture_totp.",
+        "description": "Create YOUR OWN website account record in the Ryu vault BEFORE you fill a sign-up form. Ryu generates a strong password and stores it; you never see it and must never ask the user for one or try to read it from the page. Pass the site's URL and the username and/or email you will register with. Pass `submit_urls` with the sign-in page the site's login form posts to when you know it; a session Box fills the password only there. Returns `{account:{id,site,host,username,email,label,has_password,has_totp,submit_urls,...}}` with no secrets. Then fill the sign-up form with chromium.fill_credential (fields `username`, `email`, `password`) using `account.id`, and submit it. If the site then offers two-factor setup, use chromium.capture_totp.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -719,6 +819,14 @@
             "label": {
               "type": "string",
               "description": "Optional note to tell several accounts on the same site apart."
+            },
+            "submit_urls": {
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "string"
+              },
+              "description": "Up to four https login URLs: the exact pages the site's sign-in form POSTs to, on the account's host, its www. variant or a subdomain, with no query or fragment (e.g. [\"https://github.com/session\"]). In a session Box the password is only ever submitted to one of these, and an account without any cannot be filled there."
             }
           },
           "required": ["site"]
@@ -735,10 +843,12 @@
         "caller_agent_query": "agent_id",
         "method": "GET",
         "url": "core:/api/vault/agent-accounts",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
-        "description": "List the website accounts you created with chromium.create_account, optionally only those for one site. Use it before logging in to find the account `id` to pass to chromium.fill_credential, and before signing up to avoid creating a duplicate. Returns `{accounts:[{id,site,host,username,email,label,has_password,has_totp,...}]}` — metadata only; passwords and 2FA secrets are never returned. `has_totp` tells you whether a login will need chromium.fill_credential with field `totp`.",
+        "description": "List the website accounts you created with chromium.create_account, optionally only those for one site. Use it before logging in to find the account `id` to pass to chromium.fill_credential, and before signing up to avoid creating a duplicate. Returns `{accounts:[{id,site,host,username,email,label,has_password,has_totp,submit_urls,...}],attached:[{handle,site,host,kind,fields,submit_urls,login_url_bound}]}` — metadata only; passwords and 2FA secrets are never returned. `has_totp` tells you whether a login will need chromium.fill_credential with field `totp`. `attached` lists the user's own vault items the user attached to your browser session: fill one with chromium.fill_credential, passing its `handle` (`attached:<n>`) as `account` and one of its `fields`, only on its `host`. You cannot create, list the values of, or keep attached items; they expire when the user revokes them.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -747,6 +857,42 @@
               "description": "Optional site URL or host (e.g. \"github.com\") to filter by."
             }
           }
+        }
+      }
+    },
+    {
+      "id": "tool-browser-set-account-login-urls",
+      "name": "Set Agent Account Login URLs",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.set_account_login_urls",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "PUT",
+        "url": "core:/api/vault/agent-accounts/login-urls",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Replace the login URLs of one of YOUR OWN accounts: the https pages the site's sign-in form POSTs to (e.g. \"https://github.com/session\"), on the account's host, its www. variant or a subdomain, with no query or fragment, at most four. In a session Box the account's password is only ever submitted to one of these, so set them before logging in there; an empty list clears them. The change is audited. Returns `{account:{id,site,host,...,submit_urls}}` with no secrets. An account created before login URLs existed cannot hold them: create a new account for the site.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "account": {
+              "type": "string",
+              "description": "Account id from chromium.create_account or chromium.list_accounts, e.g. \"github.com--a1b2c3d4\"."
+            },
+            "submit_urls": {
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "string"
+              },
+              "description": "The complete new list of login URLs."
+            }
+          },
+          "required": ["account", "submit_urls"]
         }
       }
     },
@@ -760,16 +906,18 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/ext/@ryu/browser/fill-credential",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
-        "description": "Type one field of your vault account into the input a chromium.snapshot_tab `ref` names, replacing what is there — WITHOUT you ever seeing the value. Use it for sign-up and login forms instead of chromium.type: field `username` or `email` for the identifier, `password` for the password, and `totp` for the current 6-digit two-factor code (only after chromium.capture_totp enrolled it). Never ask the user for the password and never try to read it back from the page. Ryu refuses when the page is not https, its host is not the account's site, the input is inside an iframe, or (for `password`) the input is not a password field. Returns `{ok,tab,account,field,filled}`; set `submit` to press Enter afterwards.",
+        "description": "Type one field of your vault account into the input a chromium.snapshot_tab `ref` names, replacing what is there — WITHOUT you ever seeing the value. Use it for sign-up and login forms, with your own account or with an item the user attached to your browser session (its `attached:<n>` handle from chromium.list_accounts) instead of chromium.type: field `username` or `email` for the identifier, `password` for the password, and `totp` for the current 6-digit two-factor code (only after chromium.capture_totp enrolled it). Never ask the user for the password and never try to read it back from the page. Ryu refuses when the page is not https, its host is not the account's site, the input is inside an iframe, or (for `password`) the input is not a password field. Returns `{ok,tab,account,field,filled}`; set `submit` to press Enter afterwards.",
         "input_schema": {
           "type": "object",
           "properties": {
             "account": {
               "type": "string",
-              "description": "Account id from chromium.create_account or chromium.list_accounts, e.g. \"github.com--a1b2c3d4\"."
+              "description": "Account id from chromium.create_account or chromium.list_accounts, e.g. \"github.com--a1b2c3d4\", or the `handle` of an item the user attached to your session, e.g. \"attached:1\"."
             },
             "field": {
               "type": "string",
@@ -803,7 +951,9 @@
         "caller_agent_query": "agent_id",
         "method": "POST",
         "url": "core:/api/ext/@ryu/browser/capture-totp",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "When a site shows a two-factor (authenticator app) setup page for your account, enroll it in the vault: point `ref` at the QR code image, or at the text setup key (a \"can't scan?\" or \"enter this key manually\" link usually reveals it). Ryu reads the secret straight from the page and stores it; you never see it. Then complete the site's verification step with chromium.fill_credential field `totp`, and use the same at every later login. Returns `{ok,tab,account,enrolled}`. A 400 means no setup key was found under `ref`.",
@@ -824,6 +974,50 @@
             }
           },
           "required": ["account", "ref"]
+        }
+      }
+    },
+    {
+      "id": "tool-browser-list-sessions",
+      "name": "List Browser Sessions",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.list_sessions",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "GET",
+        "url": "core:/api/ext/@ryu/browser/sessions",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "List your own open browser session: `{sessions:[{id,agent_id,profile,tabs:[{id,url,title}]}]}`, empty when you have not used the browser since it last closed. The `id` is the browser session the user's attached vault items are pinned to after your first fill from them; it changes when the session is closed or the browser restarts. You never see another agent's session.",
+        "input_schema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "id": "tool-browser-close-session",
+      "name": "Close Browser Session",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.close_session",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "DELETE",
+        "url": "core:/api/ext/@ryu/browser/sessions/current",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Close your own browser session: every tab you have open and its hidden window. Your sign-ins and history stay in your profile, and your next browser tool call opens a new session with a new id, so items the user attached to the old session can no longer be filled. Returns `{ok,closed}`; `closed` is false when you had no open session.",
+        "input_schema": {
+          "type": "object",
+          "properties": {}
         }
       }
     }
@@ -853,17 +1047,30 @@
       },
       "port": 7993,
       "health_path": "/health",
-      "host_api": { "grants": ["vault:fill", "security-key:relay"] },
+      "host_api": {
+        "grants": ["vault:fill", "security-key:relay"]
+      },
       "lazy": true,
       "idle_stop_secs": 300,
       "http": {
         "routes": [
-          { "path": "/", "permission": "browser.view" },
+          {
+            "path": "/",
+            "permission": "browser.view"
+          },
           {
             "path": "/health"
           },
-          { "path": "/theme", "method": "PUT", "permission": "browser.view" },
-          { "path": "/tabs", "method": "GET", "permission": "browser.view" },
+          {
+            "path": "/theme",
+            "method": "PUT",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/tabs",
+            "method": "GET",
+            "permission": "browser.view"
+          },
           {
             "path": "/tabs",
             "method": "POST",
@@ -879,12 +1086,30 @@
             "method": "DELETE",
             "permission": "browser.control"
           },
-          { "path": "/tabs/:id/navigate", "permission": "browser.control" },
-          { "path": "/tabs/:id/screenshot", "permission": "browser.view" },
-          { "path": "/tabs/:id/eval", "permission": "browser.control" },
-          { "path": "/tabs/:id/snapshot", "permission": "browser.view" },
-          { "path": "/tabs/:id/title", "permission": "browser.view" },
-          { "path": "/tabs/:id/context", "permission": "browser.view" },
+          {
+            "path": "/tabs/:id/navigate",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/tabs/:id/screenshot",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/tabs/:id/eval",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/tabs/:id/snapshot",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/tabs/:id/title",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/tabs/:id/context",
+            "permission": "browser.view"
+          },
           {
             "path": "/tabs/:id/webmcp",
             "method": "GET",
@@ -895,18 +1120,42 @@
             "method": "POST",
             "permission": "browser.control"
           },
-          { "path": "/tabs/:id/annotations", "permission": "browser.control" },
+          {
+            "path": "/tabs/:id/annotations",
+            "permission": "browser.control"
+          },
           {
             "path": "/tabs/:id/annotations/:annotation_id",
             "permission": "browser.control"
           },
-          { "path": "/click", "permission": "browser.control" },
-          { "path": "/type", "permission": "browser.control" },
-          { "path": "/scroll", "permission": "browser.control" },
-          { "path": "/hover", "permission": "browser.control" },
-          { "path": "/click-at", "permission": "browser.control" },
-          { "path": "/key", "permission": "browser.control" },
-          { "path": "/drag", "permission": "browser.control" },
+          {
+            "path": "/click",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/type",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/scroll",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/hover",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/click-at",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/key",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/drag",
+            "permission": "browser.control"
+          },
           {
             "path": "/fill-credential",
             "method": "POST",
@@ -915,6 +1164,46 @@
           {
             "path": "/capture-totp",
             "method": "POST",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/lanes",
+            "method": "GET",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/lanes/:agent/tabs/:tab/screencast",
+            "method": "GET",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/lanes/:agent/tabs/:tab/screencast",
+            "method": "DELETE",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/profiles",
+            "method": "GET",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/profiles/:id",
+            "method": "DELETE",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/profiles/:id/export",
+            "method": "GET",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/sessions",
+            "method": "GET",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/sessions/current",
+            "method": "DELETE",
             "permission": "browser.control"
           }
         ]
@@ -998,6 +1287,12 @@
         },
         "browser.drag": {
           "tool": "chromium.drag"
+        },
+        "browser.fill_credential": {
+          "tool": "chromium.fill_credential"
+        },
+        "browser.list_credentials": {
+          "tool": "chromium.list_accounts"
         }
       }
     }

@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { CircleAlert, MessageSquare, Pin } from "lucide-react";
@@ -261,7 +262,7 @@ function CompactFace({
 	tiny: boolean;
 }) {
 	const { thread, status } = card;
-	const title = thread.title.trim() || "Untitled thread";
+	const title = thread.title.trim() || tr("Untitled thread");
 	return (
 		<>
 			<span className="relative flex h-7 items-center gap-2">

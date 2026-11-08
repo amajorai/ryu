@@ -6,17 +6,19 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { ApiError } from "./client.ts";
+import type { VaultPasswordManagerGrantMode } from "./vault.ts";
 import {
 	decideVaultBrokerProposal,
-	decideVaultCardApproval,
 	listVaultBrokerProposals,
 	listVaultBrokerServices,
-	listVaultCardApprovals,
 	type VaultBrokerProposal,
 	type VaultBrokerService,
+} from "./vault-broker.ts";
+import {
+	decideVaultCardApproval,
+	listVaultCardApprovals,
 	type VaultCardApproval,
-	type VaultPasswordManagerGrantMode,
-} from "./vault.ts";
+} from "./vault-cards.ts";
 
 interface Seen {
 	authorization: string | null;

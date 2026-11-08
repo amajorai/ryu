@@ -1,8 +1,10 @@
 //! Vault event notifications.
 //!
-//! A process-wide broadcast bus that tells consumers (the Desktop vault page,
-//! `ryu secrets run --watch`, agent sandboxes) that something changed without
-//! polling. Events are derived from successfully appended audit rows, so every
+//! A process-wide broadcast bus that tells consumers that something changed
+//! without polling. The routes in `server/vault_audit_events_api.rs` stream it
+//! as SSE; today's consumer is `ryu secrets run --watch` (through
+//! `packages/core-client/src/vault-events.ts`), which restarts its command when
+//! a value or one of its leases changes. Desktop does not subscribe yet. Events are derived from successfully appended audit rows, so every
 //! audited write path (KV writes and deletes, rotation, lease issue, renew,
 //! revoke and expiry, seal changes, change-request decisions) emits one with
 //! no extra call sites, and nothing reaches the bus that the audit chain did
@@ -192,9 +194,11 @@ pub fn from_row(row: &AuditRow) -> Option<VaultEvent> {
     })
 }
 
-/// Publish the event for an appended row. Never blocks; with no subscribers
-/// the event is dropped.
+/// Publish the event for an appended row, and hand a newly filed broker
+/// proposal to its notifier. Never blocks; with no subscribers the event is
+/// dropped.
 pub fn publish_row(row: &AuditRow) {
+    super::broker::proposal_notify::observe(row);
     if let Some(event) = from_row(row) {
         let _ = bus().send(event);
     }

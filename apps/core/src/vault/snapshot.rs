@@ -180,22 +180,29 @@ impl PluginSecretStore {
         passphrase: &str,
         actor: &AuditActor,
     ) -> Result<Envelope> {
-        let entries: Vec<Entry> = self
-            .current_values(filter)
-            .await?
-            .into_iter()
-            .filter(|(info, _)| allow(&info.coords()))
-            .map(|(info, value)| Entry {
+        let mut withheld = 0usize;
+        let mut entries: Vec<Entry> = Vec::new();
+        for (info, value) in self.current_values(filter).await? {
+            if !allow(&info.coords()) {
+                continue;
+            }
+            // A sealed value is use-only: a snapshot would hand its plaintext
+            // to whoever knows the passphrase, so it never leaves this store.
+            if !info.metadata.value_type.is_revealable() {
+                withheld += 1;
+                continue;
+            }
+            entries.push(Entry {
                 coords: info.coords(),
                 value,
                 metadata: info.metadata,
-            })
-            .collect();
+            });
+        }
         let envelope = seal(&entries, passphrase, DEFAULT_ITERATIONS)?;
         if !self
             .audit(
                 &AuditEntry::new(actor, "vault.snapshot.export", "ok")
-                    .details(json!({ "secrets": entries.len() })),
+                    .details(json!({ "secrets": entries.len(), "withheldSealed": withheld })),
             )
             .await
         {
@@ -245,17 +252,29 @@ impl PluginSecretStore {
                 .secret_info(&coords)
                 .await?
                 .filter(|info| info.deleted_at.is_none());
-            if existing.is_some() {
+            if let Some(info) = &existing {
                 if on_conflict == OnConflict::Skip {
                     report.skipped += 1;
                     continue;
                 }
-                if self.reveal_unaudited(&coords).await?.as_deref() == Some(entry.value.as_str()) {
+                // Never compare against a sealed value: reporting `unchanged`
+                // would confirm a guessed plaintext. It is rewritten instead.
+                if info.metadata.value_type.is_revealable()
+                    && self.reveal_unaudited(&coords).await?.as_deref()
+                        == Some(entry.value.as_str())
+                {
                     report.unchanged += 1;
                     continue;
                 }
             }
-            let patch = SecretMetadataPatch::from_metadata(&entry.metadata);
+            let mut patch = SecretMetadataPatch::from_metadata(&entry.metadata);
+            // A sealed value stays sealed whatever the file says its type is.
+            if existing
+                .as_ref()
+                .is_some_and(|info| !info.metadata.value_type.is_revealable())
+            {
+                patch.value_type = Some(crate::plugin_secrets::kv::ValueType::Sealed);
+            }
             self.write_secret(WriteRequest {
                 coords,
                 value: Some(&entry.value),
@@ -374,5 +393,75 @@ mod tests {
             target.reveal(&coords, None, &actor).await.unwrap(),
             "secret-value"
         );
+    }
+
+    async fn write_typed(
+        store: &PluginSecretStore,
+        coords: &SecretCoords,
+        value: &str,
+        value_type: crate::plugin_secrets::kv::ValueType,
+    ) {
+        store
+            .write_secret(WriteRequest {
+                coords: coords.clone(),
+                value: Some(value),
+                patch: SecretMetadataPatch {
+                    value_type: Some(value_type),
+                    ..Default::default()
+                },
+                actor: &AuditActor::system(),
+                source: VersionSource::Write,
+                expected_version: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn snapshots_never_carry_sealed_values() {
+        use crate::plugin_secrets::kv::ValueType;
+        let store = PluginSecretStore::in_memory().unwrap();
+        let sealed = SecretCoords::root(SecretScope::User, "u1", None, "SEALED_KEY");
+        let plain = SecretCoords::root(SecretScope::User, "u1", None, "PLAIN_KEY");
+        write_typed(&store, &sealed, "sealed-plaintext", ValueType::Sealed).await;
+        write_typed(&store, &plain, "plain-value", ValueType::Secret).await;
+        let envelope = store
+            .snapshot_export(
+                &ListFilter::default(),
+                |_| true,
+                "passphrase-123",
+                &AuditActor::system(),
+            )
+            .await
+            .unwrap();
+        let entries = open(&envelope, "passphrase-123").unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.coords.name.as_str()).collect();
+        assert_eq!(names, ["PLAIN_KEY"]);
+        assert!(entries.iter().all(|e| e.value != "sealed-plaintext"));
+    }
+
+    #[tokio::test]
+    async fn importing_a_sealed_values_plaintext_never_reports_unchanged() {
+        use crate::plugin_secrets::kv::ValueType;
+        let store = PluginSecretStore::in_memory().unwrap();
+        let coords = SecretCoords::root(SecretScope::User, "u1", None, "SEALED_KEY");
+        write_typed(&store, &coords, "sealed-plaintext", ValueType::Sealed).await;
+        let entries = vec![Entry {
+            coords: coords.clone(),
+            value: "sealed-plaintext".into(),
+            metadata: SecretMetadata::default(),
+        }];
+        let report = store
+            .import_entries(
+                entries,
+                OnConflict::Overwrite,
+                |_, _| true,
+                &AuditActor::system(),
+            )
+            .await
+            .unwrap();
+        assert_eq!((report.unchanged, report.updated), (0, 1));
+        let info = store.secret_info(&coords).await.unwrap().unwrap();
+        assert_eq!(info.metadata.value_type, ValueType::Sealed);
     }
 }

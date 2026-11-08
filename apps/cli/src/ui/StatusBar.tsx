@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { Spinner } from "@/components/ui/spinner.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { DEFAULT_HINT_PRIORITY, type KeyHint } from "../core/keymap.ts";
+import { busyElapsedLabel } from "./StatusBar-elapsed.ts";
 
 export type { KeyHint } from "../core/keymap.ts";
 
@@ -266,7 +267,9 @@ export function StatusBar({
 	const theme = useTheme();
 	const { width } = useTerminalDimensions();
 	const elapsed = useElapsedSeconds(busy?.startedAt);
-	const busyLabel = busy ? `${busy.label} · ${elapsed}s` : undefined;
+	const busyLabel = busy
+		? `${busy.label} · ${busyElapsedLabel(elapsed)}`
+		: undefined;
 	const fit = fitStatusBar({
 		busy: busyLabel ? `${SPINNER_PLACEHOLDER} ${busyLabel}` : undefined,
 		hints,

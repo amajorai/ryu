@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type InterfaceAgent,
@@ -184,12 +185,12 @@ export function projectMessengerEntries(
 			? [
 					{
 						...summarize(orphans, []),
-						description: "Conversations without an agent or team",
+						description: tr("Conversations without an agent or team"),
 						id: "unassigned",
 						key: UNASSIGNED_KEY,
 						kind: "other",
 						members: [],
-						name: "Unassigned",
+						name: tr("Unassigned"),
 					},
 				]
 			: [];

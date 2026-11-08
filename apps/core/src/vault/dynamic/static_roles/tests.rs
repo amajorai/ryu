@@ -1,10 +1,15 @@
-//! Static-role tests: validation, rotation into KV versions, retries, and the
-//! AWS IAM and Redis providers against local fakes.
-
-use super::*;
-use crate::plugin_secrets::SecretScope;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+use serde_json::json;
+
+use super::super::redis;
+use super::iam::{iam_sign, xml_text, IAM_ENDPOINT};
+use super::*;
+use crate::plugin_secrets::{PluginSecretStore, SecretScope};
+use crate::vault::audit::AuditActor;
+use crate::vault::now_millis;
 
 fn target() -> SecretCoords {
     SecretCoords::root(SecretScope::Node, "local", None, "CACHE_PASSWORD")
@@ -30,7 +35,7 @@ fn providers_validate_their_targets() {
         json!({ "kind": "postgres", "connectionUrl": "mysql://db", "username": "app" }),
         json!({ "kind": "postgres", "connectionUrl": "postgres://db", "username": "a\"b" }),
         json!({ "kind": "postgres", "connectionUrl": "postgres://db", "username": "app",
-                "rotationStatements": ["SELECT 1"] }),
+                    "rotationStatements": ["SELECT 1"] }),
         json!({ "kind": "redis", "connectionUrl": "redis://h", "username": "default" }),
         json!({ "kind": "webhook", "url": "http://example.com", "signingSecret": "x".repeat(16), "username": "u" }),
         json!({ "kind": "aws-iam", "accessKeyId": "", "secretAccessKey": "s", "userName": "ci" }),
@@ -39,7 +44,7 @@ fn providers_validate_their_targets() {
         let provider: StaticProvider = serde_json::from_value(bad.clone()).unwrap();
         assert!(provider.validate().is_err(), "{bad}");
     }
-    assert_eq!(provider_kinds().len(), 4);
+    assert_eq!(provider_kinds().len(), 6);
 }
 
 #[tokio::test]
@@ -275,7 +280,7 @@ async fn fake_iam(initial: &str) -> (String, Arc<std::sync::Mutex<FakeIam>>) {
                         StatusCode::OK,
                         format!(
                             "<AccessKey><AccessKeyId>{id}</AccessKeyId>\
-                             <SecretAccessKey>s{id}</SecretAccessKey></AccessKey>"
+                                 <SecretAccessKey>s{id}</SecretAccessKey></AccessKey>"
                         ),
                     )
                 }
@@ -407,7 +412,7 @@ fn iam_requests_are_sigv4_signed_for_iam() {
         "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260101/us-east-1/iam/aws4_request"
     ));
     assert_eq!(
-        xml_text("<CreateAccessKeyResult><AccessKey><AccessKeyId>AKIA1</AccessKeyId></AccessKey></CreateAccessKeyResult>", "AccessKeyId"),
-        Some("AKIA1")
-    );
+            xml_text("<CreateAccessKeyResult><AccessKey><AccessKeyId>AKIA1</AccessKeyId></AccessKey></CreateAccessKeyResult>", "AccessKeyId"),
+            Some("AKIA1")
+        );
 }

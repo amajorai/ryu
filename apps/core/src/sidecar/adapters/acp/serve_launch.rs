@@ -1,9 +1,11 @@
 use super::*;
 
-/// The agent server [`launch_agent_server`] built, with its one-time sandbox notice.
+/// The agent server [`launch_agent_server`] built, with its one-time sandbox
+/// notice and the run's credential-broker session (revoked when dropped).
 pub(super) struct LaunchedServer {
     pub(super) server: agent_client_protocol::schema::v1::McpServer,
     pub(super) sandbox_notice: Option<String>,
+    pub(super) broker_lease: Option<crate::vault::broker::runtime::RuntimeBrokerLease>,
 }
 
 /// Builds the confined stdio server; `None` when the queued turns were refused instead.
@@ -26,6 +28,7 @@ pub(super) async fn launch_agent_server(
     // Told to the user once, on the first turn, when the agent runs under the
     // untrusted-workspace profile (or could not be confined).
     let mut sandbox_notice: Option<String> = None;
+    let mut broker_lease = None;
     let parsed_agent = acp_spawn_from_spawn(&spawn_cmd)?;
     let server = match parsed_agent.into_server() {
         agent_client_protocol::schema::v1::McpServer::Stdio(mut stdio) => {
@@ -88,6 +91,21 @@ pub(super) async fn launch_agent_server(
                     crate::sidecar::gateway::acp_inference_proxy_v1(),
                 );
             }
+            // Egress through the credential broker, set after every other
+            // variable so nothing the project declares can redirect it. A
+            // run that is not brokered starts exactly as before.
+            broker_lease = crate::vault::broker::runtime::lease_for_launch(runtime_launch(
+                &stdio,
+                is_managed_pi,
+                is_claude_code,
+                workspace_autonomy.trusted,
+                account_confinement,
+                |name| std::env::var(name).ok(),
+            ))
+            .await;
+            if let Some(lease) = broker_lease.as_ref() {
+                apply_broker_env(&mut stdio.env, lease.env());
+            }
             ensure_gateway_spawn_ready(&stdio)?;
             if let Err(error) = refresh_limited_pi_config(&stdio) {
                 tracing::warn!(%error, "limited agent: refusing a Pi whose config could not be rebuilt");
@@ -139,5 +157,6 @@ pub(super) async fn launch_agent_server(
     Ok(Some(LaunchedServer {
         server,
         sandbox_notice,
+        broker_lease,
     }))
 }

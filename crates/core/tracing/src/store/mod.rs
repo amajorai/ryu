@@ -275,7 +275,7 @@ fn prune_connection(
         let max_rows = max_rows.min(i64::MAX as u64) as i64;
         deleted_rows = deleted_rows.saturating_add(conn.execute(
             "DELETE FROM spans
-				 WHERE seq NOT IN (SELECT seq FROM spans ORDER BY seq DESC LIMIT ?1)",
+              WHERE seq <= (SELECT seq FROM spans ORDER BY seq DESC LIMIT 1 OFFSET ?1)",
             params![max_rows],
         )? as u64);
     }

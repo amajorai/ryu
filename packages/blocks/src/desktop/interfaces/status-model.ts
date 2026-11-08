@@ -188,8 +188,8 @@ function runIncident(
 		agentIds,
 		at: event.start,
 		body: resolvedAt
-			? "The next scheduled run finished cleanly."
-			: "The scheduled run did not finish, and it has not succeeded since.",
+			? tl("The next scheduled run finished cleanly.")
+			: tl("The scheduled run did not finish, and it has not succeeded since."),
 		id: `run:${event.id}`,
 		kind: "run",
 		resolvedAt,

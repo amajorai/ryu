@@ -262,7 +262,8 @@ describe("values in the reader's own script", () => {
 	test("ar tl() output is not translated again", async () => {
 		const runtime = runtimeFor("ar");
 		const opened = tl(runtime, "Open {name}", { name: "Release v2.4" });
-		expect(opened).toBe("فتح Release v2.4");
+		// The Latin value is bidi-isolated (FSI ... PDI) inside the RTL sentence.
+		expect(opened).toBe("فتح \u2068Release v2.4\u2069");
 		document.body.innerHTML = `<p id=open>${opened}</p>`;
 		localize(runtime);
 		await settle();

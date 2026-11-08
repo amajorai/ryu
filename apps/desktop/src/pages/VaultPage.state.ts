@@ -5,10 +5,15 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import type { VaultTransferMode } from "@/src/components/vault/VaultTransferDialog.tsx";
 import { vaultErrorMessage } from "@/src/components/vault/vault-errors.ts";
+import {
+	DEFAULT_VALUE_TYPE,
+	type VaultValueType,
+	withValueType,
+} from "@/src/components/vault/vault-value-type.ts";
 import {
 	buildFolderTree,
 	inFolder,
@@ -30,6 +35,7 @@ import {
 	vaultCoordsOf,
 } from "@/src/lib/api/vault.ts";
 import { vaultSecretsQuery } from "@/src/lib/route-queries.ts";
+import { getVaultFocus, useVaultFocus } from "@/src/lib/vault-focus.ts";
 import { NAME_PATTERN, type VaultTab } from "./VaultPage.model.ts";
 
 /** Vault queries, mutations, scope and environment selection, and the secret list model. */
@@ -42,12 +48,24 @@ export function useVaultPageState() {
 		userJwt: node.userJwt ?? null,
 	};
 	const queryClient = useQueryClient();
-	const [tab, setTab] = useState<VaultTab>("secrets");
+	// A deep link (a tapped broker notification) picks the tab, on open or
+	// while the page is already showing.
+	const focus = useVaultFocus();
+	const [tab, setTab] = useState<VaultTab>(
+		() => getVaultFocus()?.tab ?? "secrets"
+	);
+	useEffect(() => {
+		if (focus) {
+			setTab(focus.tab);
+		}
+	}, [focus]);
 	const [scope, setScope] = useState<VaultScope>("user");
 	const [scopeId, setScopeId] = useState("");
 	const [name, setName] = useState("");
 	const [value, setValue] = useState("");
 	const [bindingId, setBindingId] = useState("");
+	const [valueType, setValueType] =
+		useState<VaultValueType>(DEFAULT_VALUE_TYPE);
 	const [formFolder, setFormFolder] = useState("");
 	/** `null` follows the node's active environment. */
 	const [environment, setEnvironment] = useState<string | null>(null);
@@ -97,11 +115,17 @@ export function useVaultPageState() {
 				environment: activeEnvironment,
 				path: formFolder.trim() ? normalizeFolder(formFolder) : folder,
 				value,
+				// Only a picked non-default type is sent, so rotating a config or
+				// sealed value keeps its type.
+				...(valueType === DEFAULT_VALUE_TYPE
+					? undefined
+					: { metadata: withValueType({}, null, valueType) }),
 			});
 			return result.kind;
 		},
 		onSuccess: async (kind) => {
 			setValue("");
+			setValueType(DEFAULT_VALUE_TYPE);
 			await invalidateVault();
 			sileo.success({
 				title: kind === "pending" ? "Sent for approval" : "Vault secret saved",
@@ -245,6 +269,7 @@ export function useVaultPageState() {
 		setTab,
 		setTransfer,
 		setValue,
+		setValueType,
 		sharedDisabled,
 		showDeleted,
 		state,
@@ -253,6 +278,7 @@ export function useVaultPageState() {
 		teamIds,
 		transfer,
 		value,
+		valueType,
 		vaultQuery,
 		visibleSecrets,
 	};

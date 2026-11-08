@@ -13,6 +13,7 @@ import { BarnBody, PlotBody } from "./farm-panel-bodies.tsx";
 import { FarmActMode, Ledger } from "./farm-panel-rows.tsx";
 import { PlantGlyph } from "./farm-plants.tsx";
 import { GameSheet } from "./game-shell.tsx";
+import { newConversationLabel } from "./thread-display-title.ts";
 
 export type FarmPanelView =
 	| { crop: FarmCrop | undefined; kind: "thread"; plot: FarmPlot | undefined }
@@ -100,7 +101,9 @@ function FarmPanelBody({
 				subtitle={
 					view.plot ? tl("{name}'s plot", { name: view.plot.name }) : undefined
 				}
-				title={view.crop ? cropTitle(view.crop.thread) : "New conversation"}
+				title={
+					view.crop ? cropTitle(view.crop.thread) : newConversationLabel(tl)
+				}
 			>
 				{view.crop ? <Ledger crop={view.crop} plot={view.plot} /> : null}
 				<div className="flex min-h-0 flex-1 flex-col">{threadView}</div>

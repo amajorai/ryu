@@ -188,27 +188,27 @@ export function SpaceHomeShell({
 							<SpaceTemplateCard
 								featured
 								kind="blank"
-								label="Blank document"
+								label={tl("Blank document")}
 								onClick={onNewPage}
 							/>
 							<SpaceTemplateCard
 								kind="welcome"
-								label="Welcome to Space"
+								label={tl("Welcome to Space")}
 								onClick={onNewPage}
 							/>
 							<SpaceTemplateCard
 								kind="table"
-								label="First table"
+								label={tl("First table")}
 								onClick={onNewDatabase}
 							/>
 							<SpaceTemplateCard
 								kind="simple"
-								label="Single spaced"
+								label={tl("Single spaced")}
 								onClick={onNewPage}
 							/>
 							<SpaceTemplateCard
 								kind="board"
-								label="Blank board"
+								label={tl("Blank board")}
 								onClick={onNewWhiteboard}
 							/>
 							<div className="flex shrink-0 items-center px-2 text-primary text-xs">
@@ -260,14 +260,15 @@ export function SpaceHomeShell({
 						>
 							{(
 								[
-									["recent", "Recent"],
-									["pinned", "Pinned"],
-									["shared", "Shared with Me"],
+									["recent", tl("Recent")],
+									["pinned", tl("Pinned")],
+									["shared", tl("Shared with Me")],
 								] as const
 							).map(([value, label]) => (
 								<button
 									aria-selected={activeTab === value}
 									className={`border-b-2 px-0.5 py-2 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === value ? "border-space-navigation-active font-semibold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+									key={value}
 									onClick={() => setActiveTab(value)}
 									role="tab"
 									type="button"

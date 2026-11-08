@@ -51,6 +51,7 @@ import {
 } from "./card-table-spread-place.ts";
 import { agentById } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
+import { threadDisplayTitle } from "./thread-display-title.ts";
 
 // The Cards layout's cards. Every card stays mounted while its deck rests,
 // fans out or docks, so a move is just a new pose: a card going into or out of
@@ -134,7 +135,7 @@ function SpreadCard({
 	const initial = from ? { ...from, opacity: target.opacity } : target;
 	const reading = useThreadReading(thread, now);
 	const agent = agentById(snapshot, thread.agentIds[0]);
-	const title = thread.title.trim() || "Untitled thread";
+	const title = threadDisplayTitle(thread, tl);
 	const active = thread.id === activeThreadId;
 	const hidden = !interactive;
 	return (

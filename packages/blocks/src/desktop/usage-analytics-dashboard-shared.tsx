@@ -1,6 +1,7 @@
 "use client";
 
 import { formatDurationUnit } from "@ryu/i18n/format-intl";
+import { translate as tl } from "@ryu/i18n/lite";
 import { useLocalizedText } from "@ryu/i18n/react";
 import { formatCount, formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import type { ComponentProps, CSSProperties } from "react";
@@ -158,7 +159,9 @@ export function formatTrendValue(metric: TrendMetric, value: number): string {
 }
 
 export function formatBreakdownValue(entry: UsageBreakdownRow): string {
-	const requests = `${formatCompact(entry.requests)} req`;
+	const requests = tl("{requests} req", {
+		requests: formatCompact(entry.requests),
+	});
 	return entry.spendMicroUsd === null
 		? requests
 		: `${formatMicroUsd(entry.spendMicroUsd)} · ${requests}`;

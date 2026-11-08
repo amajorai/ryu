@@ -16,6 +16,7 @@ mod assertion;
 mod case;
 mod config;
 mod deterministic;
+mod deterministic_codes;
 mod judge;
 pub mod online;
 mod options;

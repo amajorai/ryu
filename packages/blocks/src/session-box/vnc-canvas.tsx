@@ -123,6 +123,13 @@ const STATUS_TEXT: Record<VncConnectionStatus, string> = {
 	error: "Couldn't connect to the screen.",
 };
 
+// Catalog copy like STATUS_TEXT: the status overlay shows it as an exact
+// literal, which the DOM localizer translates.
+const REFUSAL_TEXT = {
+	credentials: "The screen asked for credentials, which Ryu never sends.",
+	security: "The screen refused the connection.",
+} as const;
+
 /**
  * A live, interactive remote screen. Remount it with a new `key` to force a
  * fresh connection (for example from a Reconnect button).
@@ -270,12 +277,12 @@ export function VncCanvas({
 				rfb.disconnect();
 			};
 			rfb.addEventListener("credentialsrequired", () =>
-				refuse("The screen asked for credentials, which Ryu never sends.")
+				refuse(REFUSAL_TEXT.credentials)
 			);
 			rfb.addEventListener(
 				"securityfailure",
 				(event: CustomEvent<RfbEventDetail>) =>
-					refuse(event.detail?.reason ?? "The screen refused the connection.")
+					refuse(event.detail?.reason ?? REFUSAL_TEXT.security)
 			);
 		},
 		[clearRetry, teardown]

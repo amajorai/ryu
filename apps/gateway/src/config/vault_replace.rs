@@ -70,6 +70,10 @@ impl GatewayConfig {
             provider.api_key.clear();
             provider.api_keys.clear();
         }
+        if let Some(provider) = self.providers.azure_credits.as_mut() {
+            provider.api_key.clear();
+            provider.api_keys.clear();
+        }
         if let Some(provider) = self.providers.vercel.as_mut() {
             provider.api_key.clear();
             provider.api_keys.clear();
@@ -112,6 +116,9 @@ impl GatewayConfig {
         }
         if non_empty_provider_key(keys, "anthropic_credits").is_none() {
             self.providers.anthropic_credits = None;
+        }
+        if non_empty_provider_key(keys, "azure_credits").is_none() {
+            self.providers.azure_credits = None;
         }
         if non_empty_provider_key(keys, "vercel").is_none() {
             self.providers.vercel = None;

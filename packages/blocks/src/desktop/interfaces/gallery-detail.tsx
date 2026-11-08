@@ -12,6 +12,7 @@ import { GalleryCover } from "./gallery-cover.tsx";
 import { type GalleryItem, galleryColumns } from "./gallery-model.ts";
 import { useInlineSign } from "./inline-direction.ts";
 import { relativeAge, threadStatusLabel } from "./interface-renderer.ts";
+import { conversationLabel } from "./thread-display-title.ts";
 
 /** Gutter inside the "More like this" shelf. */
 const SHELF_GAP = 12;
@@ -117,7 +118,7 @@ export function GalleryDetail({
 	const title = item?.thread.title ?? tl("New conversation");
 	const conversation = (
 		<section
-			aria-label="Conversation"
+			aria-label={conversationLabel(tl)}
 			className="min-h-0 min-w-0 flex-1"
 			data-testid="gallery-thread-view"
 		>

@@ -18,9 +18,7 @@ export interface OwnSupplySeedRow {
 	/**
 	 * A row the gateway must prove callable (its local 1-token canary) before
 	 * it routes there or the row is advertised as Free, even on a gateway that
-	 * otherwise trusts the seed. Bedrock non-Claude rows: the Bedrock slot
-	 * speaks Anthropic Messages, so they are expected to fail until a matching
-	 * surface exists.
+	 * otherwise trusts the seed.
 	 */
 	readonly canaryRequired: boolean;
 	/** The Ryu Router (OpenRouter) id the user picks. Lowercase. */
@@ -32,8 +30,8 @@ export interface OwnSupplySeedRow {
 }
 
 /**
- * `anthropic/claude-3.5-sonnet` (Bedrock) was dropped: OpenRouter no longer
- * lists it, so a Free tag on it could never be picked.
+ * No AWS Bedrock rows: Bedrock is no longer own supply (Ryu's AWS credit pays
+ * for its own VMs), so the retired `bedrock` pool serves nothing.
  */
 export const OWN_SUPPLY_SEED: readonly OwnSupplySeedRow[] = [
 	{
@@ -53,18 +51,6 @@ export const OWN_SUPPLY_SEED: readonly OwnSupplySeedRow[] = [
 		slot: "anthropic-credits",
 		upstreamId: "claude-haiku-4-5",
 		canaryRequired: false,
-	},
-	{
-		openrouterId: "amazon/nova-pro-v1",
-		slot: "bedrock",
-		upstreamId: "amazon.nova-pro-v1:0",
-		canaryRequired: true,
-	},
-	{
-		openrouterId: "meta-llama/llama-3.1-70b-instruct",
-		slot: "bedrock",
-		upstreamId: "meta.llama3-1-70b-instruct-v1:0",
-		canaryRequired: true,
 	},
 	{
 		openrouterId: "openai/gpt-5",
@@ -111,7 +97,6 @@ export const OWN_SUPPLY_SEED: readonly OwnSupplySeedRow[] = [
  */
 export const OWN_SUPPLY_SEED_POOL_DEFAULTS: Readonly<Record<string, string>> = {
 	"anthropic-credits": "anthropic/claude-sonnet-4.5",
-	bedrock: "amazon/nova-pro-v1",
 	cloudflare: "meta-llama/llama-3.1-8b-instruct",
 	"openai-credits": "openai/o3",
 	vertex: "google/gemini-2.5-flash",

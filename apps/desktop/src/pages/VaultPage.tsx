@@ -36,6 +36,7 @@ import { VaultBrokerPanel } from "@/src/components/vault/VaultBrokerPanel.tsx";
 import { VaultChangeRequests } from "@/src/components/vault/VaultChangeRequests.tsx";
 import { VaultSealControl } from "@/src/components/vault/VaultSealControl.tsx";
 import { VaultSecretDialog } from "@/src/components/vault/VaultSecretDialog.tsx";
+import { VaultSyncsPanel } from "@/src/components/vault/VaultSyncsPanel.tsx";
 import { VaultTransferDialog } from "@/src/components/vault/VaultTransferDialog.tsx";
 import { vaultErrorMessage } from "@/src/components/vault/vault-errors.ts";
 import { callerSubject } from "@/src/components/vault/vault-view.ts";
@@ -83,6 +84,7 @@ export default function VaultPage() {
 		setTab,
 		setTransfer,
 		setValue,
+		setValueType,
 		sharedDisabled,
 		showDeleted,
 		state,
@@ -91,6 +93,7 @@ export default function VaultPage() {
 		teamIds,
 		transfer,
 		value,
+		valueType,
 		vaultQuery,
 		visibleSecrets,
 	} = useVaultPageState();
@@ -141,6 +144,7 @@ export default function VaultPage() {
 						<TabsList variant="pills">
 							<TabsTrigger value="secrets">Secrets</TabsTrigger>
 							<TabsTrigger value="broker">Broker</TabsTrigger>
+							<TabsTrigger value="syncs">Syncs</TabsTrigger>
 							<TabsTrigger value="audit">Audit</TabsTrigger>
 						</TabsList>
 					</Tabs>
@@ -149,7 +153,9 @@ export default function VaultPage() {
 				{isAdmin && tab === "audit" ? (
 					<VaultAuditPanel target={target} />
 				) : isAdmin && tab === "broker" ? (
-					<VaultBrokerPanel target={target} />
+					<VaultBrokerPanel environment={activeEnvironment} target={target} />
+				) : isAdmin && tab === "syncs" ? (
+					<VaultSyncsPanel environment={activeEnvironment} target={target} />
 				) : (
 					<>
 						<div className="flex flex-wrap items-end justify-between gap-3">
@@ -224,10 +230,12 @@ export default function VaultPage() {
 							setName,
 							setScopeId,
 							setValue,
+							setValueType,
 							sharedDisabled,
 							state,
 							teamIds,
 							value,
+							valueType,
 						})}
 
 						{renderVaultSecretList({

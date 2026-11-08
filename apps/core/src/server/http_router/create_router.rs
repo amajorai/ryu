@@ -119,6 +119,9 @@ pub fn create_router(
         // Session Box screen relay (Core ticket) and Box inference relay
         // (`gwb1` key): neither caller holds the node bearer.
         .merge(session_box::public_routes())
+        // Box broker relay: a Box's egress sidecar holds only its own `rvb_`
+        // relay session, checked in the handler against the Box's lease.
+        .merge(crate::vault::broker::box_relay::routes())
         // Public-mount routes for apps that own a stable external URL prefix
         // (e.g. mail's `/api/mail/*`). Axum routers are immutable after serve,
         // so use the startup snapshot of installed and bootstrap manifests.

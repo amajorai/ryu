@@ -49,8 +49,9 @@ pub(super) async fn proxy_for_plugin(
         .headers()
         .contains_key(HDR_WEB_DELEGATION)
         .then(|| web_delegation_facts(&manifests, manifest, required.is_some(), req.headers()));
-    let caller_agent_id = match verified_agent_lane(&req, plugin_id) {
-        Ok(value) => value,
+    let (caller_agent_id, caller_agent_egress_allowlist) = match verified_agent(&req, plugin_id) {
+        Ok(Some(agent)) => (Some(agent.id), agent.egress_allowlist),
+        Ok(None) => (None, None),
         Err(response) => return response,
     };
     // Only an agent whose account access is restricted needs the app's
@@ -94,6 +95,9 @@ pub(super) async fn proxy_for_plugin(
     let caller_resource_scope = http.caller_resource_scope.clone();
     // The manager key for this sidecar.
     let sidecar_name = crate::sidecar::manifest_sidecar::namespaced_name(plugin_id, &spec.name);
+    // Only an exact compiled first-party manifest keeps the shared origin for the
+    // documents it serves (see `response_hardening`).
+    let trusted_first_party = crate::plugins::builtins::is_exact_compiled_manifest(manifest);
     drop(manifests);
     // Whether this sidecar opted into on-demand start — resolved from the manager's
     // registered state (lazy-registered, or carrying an idle-stop timeout so it may
@@ -327,8 +331,10 @@ pub(super) async fn proxy_for_plugin(
         caller_resource_ids: caller_resource_ids.as_deref(),
         caller_rate_subject: caller_rate_subject.as_deref(),
         caller_agent_id: caller_agent_id.as_deref(),
+        caller_agent_egress_allowlist: caller_agent_egress_allowlist.as_deref(),
         caller_agent_restricted,
         event_delivery: None,
+        trusted_first_party,
     })
     .await;
     if web_facts.is_some() {

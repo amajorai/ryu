@@ -37,7 +37,9 @@
 //!
 //! The canonical contract is `docs/vault-parity-spec.md`.
 
+pub mod access_requests;
 pub mod agent_accounts;
+pub mod agent_identity;
 pub mod audit;
 pub mod audit_devices;
 pub mod auth_methods;
@@ -60,6 +62,7 @@ pub mod pki;
 pub mod policy;
 pub mod policy_ext;
 pub mod quotas;
+pub mod run_project;
 pub mod scan;
 pub mod scheduler;
 pub mod seal_ext;

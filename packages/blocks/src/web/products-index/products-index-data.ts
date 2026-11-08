@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type Product,
 	type ProductCategory,
@@ -66,9 +67,17 @@ function availabilityOf(product: Product): ProductsIndexAvailability {
 	return product.status ?? "available";
 }
 
-/** A catalog product as an index row: status, the published price lead and docs. */
-export function productsIndexRow(product: Product): ProductsIndexRow {
-	const facts = productBaseFacts(product);
+/**
+ * A catalog product as an index row: status, the published price lead and
+ * docs. `tl` and `locale` translate and format the price lead (English by
+ * default; the client cell re-formats it for the reader).
+ */
+export function productsIndexRow(
+	product: Product,
+	tl?: LiteralMessage,
+	locale?: string | null
+): ProductsIndexRow {
+	const facts = productBaseFacts(product, tl, locale);
 	const availability = availabilityOf(product);
 	const pricing = facts.find((fact) => fact.label === "Pricing");
 	const docs = facts.find((fact) => fact.label === "Docs");
@@ -97,7 +106,7 @@ export function productsIndexGroups(
 	for (const category of productCategories) {
 		const rows = productsByCategory(category)
 			.filter((product) => !hidden.has(product.slug))
-			.map(productsIndexRow);
+			.map((product) => productsIndexRow(product));
 		if (rows.length > 0) {
 			groups.push({ category, rows });
 		}

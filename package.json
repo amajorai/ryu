@@ -42,7 +42,8 @@
     "@expo/cli>zod": "^4.6.6",
     "@expo/plist>@xmldom/xmldom": "^0.8.15",
     "@happy-dom/global-registrator": "21.0.4",
-    "@hono/node-server": "^2.1.5",
+    "@hono/node-server": "^2.1.6",
+    "hono": "^4.13.16",
     "@istanbuljs/load-nyc-config>js-yaml": "^3.15.2",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@openai/mcp-extensions>zod": "^4.6.6",
@@ -83,9 +84,9 @@
     "vite@7.3.7": "patches/vite@7.3.7.patch",
     "decode-uri-component@0.5.1": "patches/decode-uri-component@0.5.1.patch",
     "expo-notifications@55.0.23": "patches/expo-notifications@55.0.23.patch",
-    "@better-auth/oauth-provider@1.7.7": "patches/@better-auth%2Foauth-provider@1.7.7.patch",
-    "next@16.4.1": "patches/next@16.4.1.patch",
-    "happy-dom@21.0.4": "patches/happy-dom@21.0.4.patch"
+    "@better-auth/oauth-provider@1.7.16": "patches/@better-auth%2Foauth-provider@1.7.16.patch",
+    "happy-dom@21.0.4": "patches/happy-dom@21.0.4.patch",
+    "next@16.4.5": "patches/next@16.4.5.patch"
   },
   "private": true,
   "scripts": {
@@ -115,14 +116,14 @@
       "effect": "4.0.6",
       "zod": "^4.6.6",
       "@types/bun": "^1.4.4",
-      "better-auth": "1.7.7",
-      "@better-auth/api-key": "1.7.7",
-      "@better-auth/i18n": "1.7.7",
-      "@better-auth/mcp": "1.7.7",
-      "@better-auth/oauth-provider": "1.7.7",
-      "@better-auth/passkey": "1.7.7",
-      "@better-auth/sso": "1.7.7",
-      "@better-auth/scim": "1.7.7",
+      "better-auth": "1.7.16",
+      "@better-auth/api-key": "1.7.16",
+      "@better-auth/i18n": "1.7.16",
+      "@better-auth/mcp": "1.7.16",
+      "@better-auth/oauth-provider": "1.7.16",
+      "@better-auth/passkey": "1.7.16",
+      "@better-auth/sso": "1.7.16",
+      "@better-auth/scim": "1.7.16",
       "ai": "^7.0.0",
       "lucide-react": "^0.546.0",
       "next-themes": "^0.4.6",
@@ -132,7 +133,7 @@
       "@ai-sdk/react": "^4.0.0",
       "@types/react-dom": "^19.2.3",
       "tailwindcss": "^4.1.18",
-      "@better-auth/expo": "1.7.7"
+      "@better-auth/expo": "1.7.16"
     }
   }
 }

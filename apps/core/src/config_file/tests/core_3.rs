@@ -106,6 +106,7 @@ const CASES: &[(&str, &str)] = &[
         "vault.externalAllowPrivate",
         "RYU_VAULT_EXTERNAL_ALLOW_PRIVATE",
     ),
+    ("vault.keyRotationDays", "RYU_VAULT_KEY_ROTATION_DAYS"),
     ("vault.loginRatePerMin", "RYU_VAULT_LOGIN_RATE_PER_MIN"),
     ("vault.shared", "RYU_VAULT_SHARED"),
     ("vault.sharedCacheSecs", "RYU_VAULT_SHARED_CACHE_SECS"),

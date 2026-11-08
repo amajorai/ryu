@@ -167,12 +167,15 @@ pub fn run_finished_push(
 ) -> (String, String, serde_json::Value) {
     use crate::i18n::{messages, Message};
     let failed = run.run_status.as_deref() == Some("failed");
-    let body = Message::new(if failed {
-        messages::RUN_FAILED_BODY_MESSAGE
-    } else {
-        messages::RUN_FINISHED_BODY_MESSAGE
-    })
-    .render(locale);
+    let body = crate::i18n::bidi::rtl_body(
+        Message::new(if failed {
+            messages::RUN_FAILED_BODY_MESSAGE
+        } else {
+            messages::RUN_FINISHED_BODY_MESSAGE
+        })
+        .render(locale),
+        locale,
+    );
     let data = serde_json::json!({
         "kind": "agent-done",
         "conversationId": run.id,

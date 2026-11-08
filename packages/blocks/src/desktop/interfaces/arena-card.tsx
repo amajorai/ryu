@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
@@ -43,7 +44,7 @@ const STATE_DOT: Record<Exclude<ArenaAgentState, "working">, string> = {
 };
 
 function threadTitle(thread: InterfaceThread): string {
-	return thread.title.trim() || "Untitled thread";
+	return thread.title.trim() || tr("Untitled thread");
 }
 
 /** "Launch Crew" stays a name; "+2" becomes "2 others". */

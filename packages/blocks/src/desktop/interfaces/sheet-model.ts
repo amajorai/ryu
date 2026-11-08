@@ -7,6 +7,7 @@ import {
 	type ThreadStatus,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
+import { threadDisplayTitle } from "./thread-display-title.ts";
 
 export {
 	moveSheetCell,
@@ -195,7 +196,7 @@ export function buildSheetRows(snapshot: InterfaceSnapshot): SheetRow[] {
 			status: threadStatus(thread),
 			team: thread.teamId ? (groups.get(thread.teamId)?.name ?? null) : null,
 			thread,
-			title: thread.title.trim() || UNTITLED_THREAD,
+			title: threadDisplayTitle(thread),
 			updatedAt: Number.isNaN(parsed) ? 0 : parsed,
 		};
 	});

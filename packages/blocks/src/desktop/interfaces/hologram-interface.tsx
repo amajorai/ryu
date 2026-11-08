@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import type { InterfaceParamsByRenderer } from "@ryuhq/protocol/interfaces";
 import { Plus } from "lucide-react";
@@ -135,7 +136,7 @@ export function HologramInterface({
 	const view = useMemo(() => buildHologram(snapshot, now), [snapshot, now]);
 	const hour = new Date(now).getHours();
 	const brief = loading
-		? "Syncing with your agents."
+		? tr("Syncing with your agents.")
 		: briefing(view.totals, hour);
 
 	const frameOpen = threadView !== null && threadView !== undefined;

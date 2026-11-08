@@ -12,9 +12,11 @@ import { expo } from "@better-auth/expo";
  *
  * No first-party client needs the handoff: mobile signs in with device
  * authorization and holds a bearer token, and the extension uses a one-time
- * token. The plugin's request rewrite (`expo-origin` to `origin`) and its
- * authorization-proxy endpoint are kept; only the after-hooks are dropped, so
- * a custom-scheme redirect still happens but carries no credential.
+ * token. The plugin's request rewrite (`expo-origin` to `origin`) and Better
+ * Auth's authorization-proxy endpoint (required for Expo OAuth in WebBrowser)
+ * stay enabled; only the after-hooks that copy session cookies into redirects
+ * are dropped. Upstream 1.7.16+ fixes GHSA-4wq4-2ppv-q3hg on the proxy itself;
+ * removing the plugin entirely would break native OAuth unless replaced.
  */
 export function expoWithoutSessionHandoff(): ReturnType<typeof expo> {
 	const plugin = expo();

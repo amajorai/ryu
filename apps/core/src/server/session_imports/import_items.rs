@@ -3,6 +3,12 @@
 
 use crate::server::*;
 
+/// Provenance for a fact brought in from another tool's memory or export, so
+/// the Library can tell an imported fact from one this node learned itself.
+pub(in crate::server) fn imported_memory_metadata() -> memory::MemoryMetadata {
+    memory::MemoryMetadata::from_source(memory::MemorySource::Import)
+}
+
 /// Lower a foreign MCP entry into `~/.ryu/mcp.json` (enabled — it is the user's
 /// own server), screening remote URLs and refusing names that collide.
 pub(in crate::server) async fn import_mcp_item(
@@ -21,7 +27,11 @@ pub(in crate::server) async fn import_mcp_item(
             );
         }
     };
-    let title = format!("MCP server '{name}'");
+    let title_msg = crate::import::named_title(
+        crate::i18n::messages::IMPORT_MCP_SERVER_TITLE_MESSAGE,
+        &name,
+    );
+    let title = crate::import::english(&title_msg);
     let cfg = match crate::import::read_mcp_entry(root, token, &name) {
         Ok(cfg) => cfg,
         Err(e) => {
@@ -30,36 +40,45 @@ pub(in crate::server) async fn import_mcp_item(
                 &selection.id,
                 &title,
                 &e.to_string(),
-            );
+            )
+            .titled(title_msg);
         }
     };
     // Name + shape gates mirror `create_mcp_server` (no `__`, exactly-one of
     // command/url, SSRF screen on remote urls).
     let trimmed = name.trim();
     if trimmed.is_empty() || trimmed.contains("__") {
-        return crate::import::ImportOutcome::failed(
+        return crate::import::ImportOutcome::failed_msg(
             crate::import::kind::MCP_SERVER,
             &selection.id,
             &title,
-            &format!("server name {trimmed:?} is not a valid MCP server name"),
-        );
+            crate::i18n::Message::new(
+                crate::i18n::messages::IMPORT_OUTCOME_INVALID_MCP_NAME_MESSAGE,
+            )
+            .text("name", trimmed),
+        )
+        .titled(title_msg);
     }
     if cfg.url.is_some() == cfg.command.is_some() {
-        return crate::import::ImportOutcome::failed(
+        return crate::import::ImportOutcome::failed_because(
             crate::import::kind::MCP_SERVER,
             &selection.id,
             &title,
-            "MCP server declares neither a command (stdio) nor a url (remote), or both",
-        );
+            crate::i18n::messages::IMPORT_OUTCOME_MCP_TRANSPORT_MESSAGE,
+        )
+        .titled(title_msg);
     }
     if let Some(url) = &cfg.url {
         if let Err(e) = screen_agent_egress_url(url).await {
-            return crate::import::ImportOutcome::failed(
+            return crate::import::ImportOutcome::failed_msg(
                 crate::import::kind::MCP_SERVER,
                 &selection.id,
                 &title,
-                &format!("unsafe url {url:?}: {e}"),
-            );
+                crate::i18n::Message::new(crate::i18n::messages::IMPORT_OUTCOME_UNSAFE_URL_MESSAGE)
+                    .text("url", url.as_str())
+                    .text("error", e.to_string()),
+            )
+            .titled(title_msg);
         }
     }
     match write_imported_mcp_entry(&name, cfg).await {
@@ -77,7 +96,8 @@ pub(in crate::server) async fn import_mcp_item(
             &selection.id,
             &title,
             &msg,
-        ),
+        )
+        .titled(title_msg),
     }
 }
 
@@ -104,11 +124,11 @@ pub(in crate::server) async fn import_plugin_item(
     let manifest_path = match crate::import::find_manifest_path(&dir) {
         Some(p) => p,
         None => {
-            return crate::import::ImportOutcome::failed(
+            return crate::import::ImportOutcome::failed_because(
                 crate::import::kind::PLUGIN,
                 &selection.id,
                 &selection.id,
-                "no manifest found",
+                crate::i18n::messages::IMPORT_OUTCOME_NO_MANIFEST_MESSAGE,
             );
         }
     };
@@ -136,7 +156,11 @@ pub(in crate::server) async fn import_plugin_item(
             );
         }
     };
-    let title = format!("Plugin '{}'", manifest.name);
+    let title_msg = crate::import::named_title(
+        crate::i18n::messages::IMPORT_PLUGIN_TITLE_MESSAGE,
+        &manifest.name,
+    );
+    let title = crate::import::english(&title_msg);
     match persist_installed_plugin(state, manifest, None, None).await {
         Ok(_) => {
             crate::import::ImportOutcome::ok(crate::import::kind::PLUGIN, &selection.id, &title)
@@ -151,7 +175,8 @@ pub(in crate::server) async fn import_plugin_item(
             &selection.id,
             &title,
             &msg,
-        ),
+        )
+        .titled(title_msg),
     }
 }
 
@@ -194,11 +219,11 @@ pub(in crate::server) async fn import_memory_item(
         }
     }
     let Some((content, when_to_use, importance)) = crate::import::parse_claude_memory(&path) else {
-        return crate::import::ImportOutcome::failed(
+        return crate::import::ImportOutcome::failed_because(
             crate::import::kind::MEMORY,
             &selection.id,
             &selection.id,
-            "not a readable memory file",
+            crate::i18n::messages::IMPORT_OUTCOME_UNREADABLE_MEMORY_MESSAGE,
         );
     };
     let tag = format!(
@@ -237,14 +262,18 @@ pub(in crate::server) async fn import_memory_item(
     if !memory::detect_sensitive_topics(&mem.content).is_empty()
         && !sensitive_memory_enabled(&state, caller).await
     {
-        return crate::import::ImportOutcome::failed(
+        return crate::import::ImportOutcome::failed_because(
             crate::import::kind::MEMORY,
             &selection.id,
             &selection.id,
-            "sensitive topics are disabled in Settings → Memory",
+            crate::i18n::messages::IMPORT_OUTCOME_SENSITIVE_MEMORY_MESSAGE,
         );
     }
-    match state.memory.record_full(&owner, "default", mem).await {
+    match state
+        .memory
+        .record_full_with_metadata(&owner, "default", mem, imported_memory_metadata())
+        .await
+    {
         Ok(Some(id)) => {
             match state.memory.get(&id).await {
                 Ok(Some(entry)) => index_memory_entry(state, &entry).await,
@@ -252,11 +281,11 @@ pub(in crate::server) async fn import_memory_item(
             }
             crate::import::ImportOutcome::ok(crate::import::kind::MEMORY, &selection.id, "Memory")
         }
-        Ok(None) => crate::import::ImportOutcome::failed(
+        Ok(None) => crate::import::ImportOutcome::failed_because(
             crate::import::kind::MEMORY,
             &selection.id,
             &selection.id,
-            "empty memory content",
+            crate::i18n::messages::IMPORT_OUTCOME_EMPTY_MEMORY_MESSAGE,
         ),
         Err(e) => crate::import::ImportOutcome::failed(
             crate::import::kind::MEMORY,
@@ -331,7 +360,11 @@ pub(in crate::server) async fn import_saved_context_item(
             tags: vec![tag, format!("import:{}", export.id())],
             author_agent_id: None,
         };
-        match state.memory.record_full(&owner, "default", mem).await {
+        match state
+            .memory
+            .record_full_with_metadata(&owner, "default", mem, imported_memory_metadata())
+            .await
+        {
             Ok(Some(id)) => {
                 if let Ok(Some(entry)) = state.memory.get(&id).await {
                     index_memory_entry(state, &entry).await;

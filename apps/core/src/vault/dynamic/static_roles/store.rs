@@ -1,10 +1,19 @@
-//! Static-role storage: create/replace (stamping the role's writer), list,
-//! read, delete, and the sealed rotation state.
-//!
-//! test-exempt: moved out of `static_roles.rs` to keep it within the size limits; covered by
-//! `static_roles/tests.rs` and `target_guard_test.rs`.
+//! Static role CRUD (stamping the role's writer) and the sealed per-role
+//! state.
 
-use super::*;
+use anyhow::Result;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::json;
+
+use super::super::target_guard::{self, RoleWriter, TargetEgress};
+use super::{
+    info_from_row, info_locked, password_generator, rotation_lock, SealedState, StaticRoleInfo,
+    StaticRoleInput, DEFAULT_PASSWORD_LENGTH, INFO_COLUMNS, MAX_ROTATION_SECS, MIN_ROTATION_SECS,
+    RETRY_SECS,
+};
+use crate::plugin_secrets::{PluginSecretStore, SecretCoords};
+use crate::vault::audit::{AuditActor, AuditEntry};
+use crate::vault::{now_millis, VaultError};
 
 impl PluginSecretStore {
     /// Create or replace a static role as a configuration manager. Test-only:
@@ -32,7 +41,7 @@ impl PluginSecretStore {
         writer: RoleWriter,
         actor: &AuditActor,
     ) -> Result<StaticRoleInfo> {
-        if !crate::vault::dynamic::is_valid_role_name(name) {
+        if !super::super::is_valid_role_name(name) {
             return Err(VaultError::Invalid("invalid static role name".into()).into());
         }
         input
@@ -108,9 +117,9 @@ impl PluginSecretStore {
                 .into());
             } else if !old.retired_access_keys.is_empty() {
                 return Err(VaultError::Conflict(format!(
-                    "static role `{name}` still has replaced access keys ({}) that could not \
-                     be deleted; rotate it successfully (or delete them in AWS and recreate \
-                     the role) before changing the account or target",
+                    "static role `{name}` still has replaced keys ({}) that could not be \
+                     retired; rotate it successfully (or retire them with the provider and \
+                     recreate the role) before changing the account or target",
                     old.retired_access_keys.join(", ")
                 ))
                 .into());
@@ -155,6 +164,48 @@ impl PluginSecretStore {
             })),
         );
         info_locked(&conn, name)
+    }
+
+    /// Whether the stored role `name` already matches `input` and `target`
+    /// (Core-managed provider fields carried over, as an edit would keep
+    /// them); `None` when there is no such role. Used by declarative init.
+    pub(crate) async fn static_role_matches(
+        &self,
+        name: &str,
+        input: &StaticRoleInput,
+        target: &SecretCoords,
+    ) -> Result<Option<bool>> {
+        let target_json = serde_json::to_string(&target.clone().normalize()?)?;
+        let conn = self.conn.lock().await;
+        let row: Option<(String, i64, u16, Vec<u8>, Vec<u8>, u32)> = conn
+            .query_row(
+                "SELECT target, rotation_period_secs, password_length, nonce, ciphertext,
+                        key_version
+                 FROM vault_static_roles WHERE name = ?1",
+                params![name],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((stored_target, period, length, nonce, ciphertext, version)) = row else {
+            return Ok(None);
+        };
+        let stored: SealedState =
+            serde_json::from_slice(&self.open_row(version, &nonce, &ciphertext)?)?;
+        Ok(Some(
+            stored_target == target_json
+                && period == input.rotation_period_secs
+                && length == input.password_length.unwrap_or(DEFAULT_PASSWORD_LENGTH)
+                && input.provider.with_managed_fields_from(&stored.provider) == stored.provider,
+        ))
     }
 
     /// Every static role.
@@ -221,13 +272,14 @@ impl PluginSecretStore {
         let (key_version, nonce, ciphertext) = self.seal_row(&serde_json::to_vec(state)?)?;
         conn.execute(
             "UPDATE vault_static_roles SET nonce = ?1, ciphertext = ?2, key_version = ?3,
-                 pending = ?4, updated_at = ?5 WHERE name = ?6",
+                 pending = ?4, updated_at = ?5, summary = ?6 WHERE name = ?7",
             params![
                 nonce,
                 ciphertext,
                 key_version,
                 state.pending.is_some() as i64,
                 now_millis(),
+                state.provider.summary().to_string(),
                 name
             ],
         )?;
@@ -248,5 +300,66 @@ impl PluginSecretStore {
         let table = "vault_static_roles";
         state.egress = target_guard::row_egress(&conn, table, name, writer.as_deref())?;
         Ok((info, state))
+    }
+
+    pub(super) async fn static_record_failure(
+        &self,
+        name: &str,
+        error: &anyhow::Error,
+        actor: &AuditActor,
+    ) {
+        let conn = self.conn.lock().await;
+        let message: String = error.to_string().chars().take(500).collect();
+        if let Err(write_error) = conn.execute(
+            "UPDATE vault_static_roles SET last_error = ?1, next_rotation_at = ?2 WHERE name = ?3",
+            params![message, now_millis() + RETRY_SECS * 1000, name],
+        ) {
+            tracing::warn!("recording static rotation failure for `{name}`: {write_error:#}");
+        }
+        self.audit_locked(
+            &conn,
+            &AuditEntry::new(actor, "static.rotate", "error")
+                .details(json!({ "role": name, "error": message })),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugin_secrets::SecretScope;
+
+    #[tokio::test]
+    async fn roles_with_bad_names_or_periods_are_refused() {
+        let store = PluginSecretStore::in_memory().unwrap();
+        let actor = AuditActor::system();
+        let target = SecretCoords::root(SecretScope::Node, "local", None, "KEY");
+        let input = |period: i64| -> StaticRoleInput {
+            serde_json::from_value(json!({
+                "provider": { "kind": "openai", "adminApiKey": "k", "projectId": "proj_a" },
+                "rotationPeriodSecs": period,
+            }))
+            .unwrap()
+        };
+        for (name, period) in [
+            ("bad name", 3600),
+            ("ok", 60),
+            ("ok", MAX_ROTATION_SECS + 1),
+        ] {
+            let error = store
+                .static_put_role(name, &input(period), target.clone(), &actor)
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<VaultError>(),
+                Some(VaultError::Invalid(_))
+            ));
+        }
+        let info = store
+            .static_put_role("ok", &input(3600), target, &actor)
+            .await
+            .unwrap();
+        assert_eq!(info.summary["projectId"], "proj_a");
+        assert!(store.static_list_roles().await.unwrap().len() == 1);
     }
 }

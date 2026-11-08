@@ -43,7 +43,6 @@ const requestSchema = z.object({
 	status: z.enum(["pending", "approving", "approved", "denied"]),
 	surface: z.enum(["desktop", "extension", "mobile", "web"]),
 	userAgent: z.string().nullable().catch(null),
-	userCode: z.string(),
 });
 const nullableStringSchema = z.string().min(1).nullable().catch(null);
 const startSchema = z.object({
@@ -273,13 +272,19 @@ export async function pollLoginApprovalSession(
 	await pollLoginApprovalGrant(base, clientId, start, options);
 }
 
-/** Read all pending approval prompts for the authenticated account. */
+/**
+ * Read all pending approval prompts for the authenticated account. `code` (a
+ * code scanned from the requesting device's QR) narrows the list to its request,
+ * since pending prompts never carry the code themselves.
+ */
 export async function listLoginApprovals(
 	base: string,
 	auth: LoginApprovalAuth = {},
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	code?: string
 ): Promise<LoginApprovalRequest[]> {
-	const response = await fetch(apiUrl(base, "/pending"), {
+	const query = code ? `?code=${encodeURIComponent(code)}` : "";
+	const response = await fetch(apiUrl(base, `/pending${query}`), {
 		credentials: "include",
 		headers: authHeaders(auth.token),
 		method: "GET",
@@ -299,12 +304,13 @@ async function resolveLoginApproval(
 	base: string,
 	requestId: string,
 	auth: LoginApprovalAuth,
-	action: "approve" | "deny"
+	action: "approve" | "deny",
+	body: Record<string, string> = {}
 ): Promise<void> {
 	const response = await fetch(
 		apiUrl(base, `/pending/${encodeURIComponent(requestId)}/${action}`),
 		{
-			body: "{}",
+			body: JSON.stringify(body),
 			credentials: "include",
 			headers: {
 				...authHeaders(auth.token),
@@ -318,13 +324,18 @@ async function resolveLoginApproval(
 	}
 }
 
-/** Approve a pending login from the caller's existing authenticated session. */
+/**
+ * Approve a pending login from the caller's existing authenticated session.
+ * `code` is the matching code the requesting device shows; the API refuses an
+ * approval whose code does not match.
+ */
 export function approveLoginApproval(
 	base: string,
 	requestId: string,
+	code: string,
 	auth: LoginApprovalAuth = {}
 ): Promise<void> {
-	return resolveLoginApproval(base, requestId, auth, "approve");
+	return resolveLoginApproval(base, requestId, auth, "approve", { code });
 }
 
 /** Deny a pending login from the caller's existing authenticated session. */
@@ -403,6 +414,7 @@ export async function streamLoginApprovals(
 
 export {
 	LOGIN_APPROVAL_CLIENTS,
+	LOGIN_APPROVAL_USER_CODE_LENGTH,
 	normalizeLoginApprovalUserCode,
 	parseLoginApprovalQr,
 } from "./login-approval-contract.ts";

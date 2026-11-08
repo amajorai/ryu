@@ -47,6 +47,7 @@ import {
 	UsageAnalyticsDashboard,
 	type UsageAnalyticsDashboardProps,
 } from "./usage-analytics-dashboard.tsx";
+import { localizeUsageTaskLabel } from "./usage-task-label.ts";
 
 /** Ledger reason → the words a customer would use. */
 const REASON_LABELS = new Map(
@@ -359,7 +360,7 @@ function UsageRowItem({ row }: { row: UsageRow }) {
 					) : null}
 					{row.taskLabel ? (
 						<span className="text-muted-foreground text-xs">
-							{row.taskLabel}
+							{localizeUsageTaskLabel(row.taskLabel, tl)}
 						</span>
 					) : null}
 				</div>

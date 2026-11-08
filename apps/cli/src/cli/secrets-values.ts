@@ -1,6 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import {
 	deleteVaultSecret,
+	destroyVaultSecret,
+	exportVaultSnapshot,
 	importVaultSecrets,
 	listVaultSecrets,
 	listVaultSecretVersions,
@@ -10,6 +12,7 @@ import {
 	rollbackVaultSecret,
 	type VaultImportFormat,
 	vaultAgentSecret,
+	vaultValueType,
 } from "@ryuhq/core-client/vault";
 import { z } from "zod";
 import { tf } from "../i18n/translate.ts";
@@ -29,6 +32,7 @@ import {
 	printJson,
 	reportWrite,
 } from "./secrets-output.ts";
+import { selectTagged } from "./secrets-run-env.ts";
 import { type CliContext, UsageError } from "./types.ts";
 import { withStepUpHint } from "./vaultStepUp.ts";
 
@@ -60,12 +64,13 @@ export async function listSecrets(
 		secret.environment,
 		secret.path,
 		secret.scope,
+		vaultValueType(secret.metadata),
 		String(secret.version),
 		secret.status,
 		truncate(secret.metadata.description, 40),
 	]);
 	ctx.io.out(
-		`${formatTable(["NAME", "ENV", "PATH", "SCOPE", "VERSION", "STATUS", "DESCRIPTION"], rows)}\n`
+		`${formatTable(["NAME", "ENV", "PATH", "SCOPE", "TYPE", "VERSION", "STATUS", "DESCRIPTION"], rows)}\n`
 	);
 	return 0;
 }
@@ -133,13 +138,29 @@ async function readValue(
 	return given === undefined && value === "" ? undefined : value;
 }
 
+/**
+ * `set NAME [VALUE|-]`. `agentMarker` is the detected AI agent marker when the
+ * agent guard applies: a metadata-only change to `config` is then refused,
+ * because it would re-label the stored secret plaintext as readable.
+ */
 export async function setSecret(
 	ctx: CliContext,
-	args: SecretsArgs
+	args: SecretsArgs,
+	agentMarker?: string
 ): Promise<number> {
 	const name = arg(args, 1, "set NAME [VALUE|-]");
 	const metadata = metadataFrom(args);
 	const value = await readValue(ctx, args);
+	if (
+		agentMarker !== undefined &&
+		value === undefined &&
+		metadata?.valueType === "config"
+	) {
+		ctx.io.err(
+			`${tf("Refusing to change {name} to config without a new value in an AI agent session ({marker} is set): the stored value may be a secret. Pass the new value in the same command. A person at a terminal can add --human.", { name, marker: agentMarker })}\n`
+		);
+		return 1;
+	}
 	if (value === "") {
 		throw new UsageError(
 			"Refusing to store an empty value (Core treats it as a delete). Use 'ryu-cli secrets delete'."
@@ -245,6 +266,7 @@ export async function exportSecrets(
 	ctx: CliContext,
 	args: SecretsArgs
 ): Promise<number> {
+	await selectTagged(ctx, args);
 	const result = await exportResult(ctx, args, exportFormat(args));
 	if (ctx.flags.json) {
 		printJson(ctx, result);
@@ -304,5 +326,95 @@ export async function importSecrets(
 			`${tf("Imported {file}: {created} created, {updated} updated, {skipped} skipped, {unchanged} unchanged.", { file, created: String(report.created), updated: String(report.updated), skipped: String(report.skipped), unchanged: String(report.unchanged) })}\n`
 		);
 	}
+	return 0;
+}
+
+/** `destroy NAME VERSION…` or `destroy NAME --all`: permanently erase stored
+ *  versions. Unlike `delete`, this cannot be undone, so destroying every
+ *  version needs an explicit `--all`. */
+export async function destroySecret(
+	ctx: CliContext,
+	args: SecretsArgs
+): Promise<number> {
+	const usage = "destroy NAME VERSION… | destroy NAME --all";
+	const name = arg(args, 1, usage);
+	const versions = args.positional.slice(2).map((raw) => {
+		const version = Number(raw);
+		if (!(Number.isInteger(version) && version > 0)) {
+			throw new UsageError("VERSION must be a positive integer.");
+		}
+		return version;
+	});
+	const all = args.booleans.has("--all");
+	if (versions.length === 0 && !all) {
+		throw new UsageError(
+			`Usage: ryu-cli secrets ${usage} (destroyed versions cannot be restored)`
+		);
+	}
+	if (versions.length > 0 && all) {
+		throw new UsageError("Pass VERSIONs or --all, not both.");
+	}
+	const input: Parameters<typeof destroyVaultSecret>[2] = coordsFrom(args);
+	if (versions.length > 0) {
+		input.versions = versions;
+	}
+	const result = await destroyVaultSecret(ctx.target, name, input);
+	if (ctx.flags.json) {
+		printJson(ctx, result);
+	} else {
+		ctx.io.out(
+			`${tf("Destroyed {count} version(s) of {name}.", { count: String(result.destroyed), name })}\n`
+		);
+	}
+	return 0;
+}
+
+/** `snapshot [--out FILE]`: a passphrase-sealed export of the readable values
+ *  that `import FILE --format snapshot` restores. The passphrase comes from
+ *  RYU_VAULT_PASSPHRASE or --passphrase. */
+export async function snapshot(
+	ctx: CliContext,
+	args: SecretsArgs
+): Promise<number> {
+	const passphrase = flag(args, "--passphrase") ?? ctx.env.RYU_VAULT_PASSPHRASE;
+	if (!passphrase) {
+		throw new UsageError(
+			"A snapshot needs RYU_VAULT_PASSPHRASE (or --passphrase) to seal it."
+		);
+	}
+	const input: Parameters<typeof exportVaultSnapshot>[1] = { passphrase };
+	const environment = flag(args, "--env");
+	const path = flag(args, "--path");
+	if (environment) {
+		input.environment = environment;
+	}
+	if (path) {
+		input.path = path;
+	}
+	const envelope = await withStepUpHint(() =>
+		exportVaultSnapshot(ctx.target, input)
+	);
+	const content = `${JSON.stringify(envelope, null, 2)}\n`;
+	const out = flag(args, "--out");
+	if (!out) {
+		ctx.io.out(content);
+		return 0;
+	}
+	try {
+		await writeFile(out, content, {
+			mode: 0o600,
+			flag: ctx.flags.force ? "w" : "wx",
+		});
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+			throw new UsageError(
+				tf("{file} already exists. Pass --force to replace it.", { file: out })
+			);
+		}
+		throw error;
+	}
+	ctx.io.err(
+		`${tf("Wrote an encrypted snapshot to {file}. Restore it with 'ryu-cli secrets import {file} --format snapshot'.", { file: out })}\n`
+	);
 	return 0;
 }

@@ -28,6 +28,7 @@ import {
 	CloudEnvironmentsFilters,
 	CloudEnvironmentsList,
 	DeleteVaultEntryDialog,
+	type SetupResult,
 	SetupResultDialog,
 	SharedTemplatesSection,
 } from "./CloudEnvironmentsSettings-panels.tsx";
@@ -135,7 +136,7 @@ function TargetCloudEnvironmentsSettings({
 
 	const [importOpen, setImportOpen] = useState(false);
 
-	const [result, setResult] = useState<string | null>(null);
+	const [result, setResult] = useState<SetupResult | null>(null);
 
 	const [deleting, setDeleting] = useState<CloudVaultEntry | null>(null);
 
@@ -243,9 +244,10 @@ function TargetCloudEnvironmentsSettings({
 		try {
 			const output = await runCloudEnvironmentSetup(target, environment.id);
 
-			setResult(
-				`Setup exited with code ${output.exitCode}\n\n${output.stdout}\n${output.stderr}`
-			);
+			setResult({
+				exitCode: output.exitCode,
+				output: `${output.stdout}\n${output.stderr}`,
+			});
 		} catch (failure) {
 			setError(errorMessage(failure));
 		} finally {

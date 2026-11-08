@@ -463,3 +463,16 @@ fn created_at_is_read_from_the_resolve_credential() {
 // live in a sibling file so each stays under the repository's file size limit.
 #[path = "enforcement_admission_tests.rs"]
 mod admission;
+
+#[test]
+fn the_wire_and_in_flight_modules_keep_their_contracts() {
+    assert_eq!(wire::LadderScope::Org.as_str(), "org");
+    assert!(wire::LadderScope::Credential.enforced_from_resolve());
+    assert!(!wire::LadderScope::EndUser.enforced_from_resolve());
+
+    let caps = Arc::new(in_flight::InFlight::default());
+    let first = caps.acquire("k", 1).expect("one slot");
+    assert!(caps.acquire("k", 1).is_none(), "the cap holds");
+    drop(first);
+    assert_eq!(caps.count("k"), 0, "a dropped slot is given back");
+}

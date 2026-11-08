@@ -34,6 +34,7 @@ import type { BoardStartInput } from "./board-column.tsx";
 import type { BoardFilterField } from "./board-filter.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
 import { agentById, threadStatusLabel } from "./interface-renderer.ts";
+import { threadDisplayTitle } from "./thread-display-title.ts";
 
 /**
  * Every typed word must appear somewhere in the item's text. cmdk's default
@@ -145,7 +146,7 @@ export function BoardCommandPalette({
 						<CommandGroup heading={searching ? "Threads" : "Recent threads"}>
 							{shownThreads.map((thread) => {
 								const lead = agentById(snapshot, thread.agentIds[0]);
-								const title = thread.title.trim() || "Untitled thread";
+								const title = threadDisplayTitle(thread, tl);
 								return (
 									<CommandItem
 										key={thread.id}

@@ -97,7 +97,7 @@ export interface ChannelBehavior {
 // NOT live here. This module once carried its own copy, which silently drifted
 // from the gateway's real contract (it still demanded only 2 of WhatsApp's 4
 // keys) while having zero consumers. The form's copy — the one that renders —
-// is REQUIRED_SECRETS/SECRET_LABELS/CHANNEL_SETUP in
+// is REQUIRED_SECRETS/SECRET_LABELS/channelSetup in
 // packages/blocks/src/desktop/channels.tsx, and the enforcing copy is
 // REQUIRED_SECRETS in packages/api/src/routers/channel-settings.ts (the server guard,
 // mirroring apps/gateway/src/channels/*.rs). Don't add a third.

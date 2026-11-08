@@ -3,7 +3,11 @@ import {
 	ALL_CREDIT_POOLS,
 	CREDIT_POOL_IDS,
 	CREDIT_POOLS,
+	DEFAULT_FREE_CREDIT_POOL,
+	grantPoolsForServingPool,
 	isCreditPoolId,
+	isFreeCreditPool,
+	isIssuablePool,
 	isOwnSupplyPool,
 	OWN_SUPPLY_POOLS,
 	poolForGatewayProvider,
@@ -42,6 +46,8 @@ describe("CREDIT_POOLS", () => {
 				"gcp",
 				"vertex",
 				"gemini",
+				"azure",
+				"microsoft",
 			]) {
 				expect(label).not.toContain(vendor);
 			}
@@ -68,6 +74,22 @@ describe("CREDIT_POOLS", () => {
 			3_000_000_000
 		);
 		expect(CREDIT_POOLS.openrouter.budgetCeilingMicroUsd).toBe(0);
+		expect(CREDIT_POOLS["azure-credits"].budgetCeilingMicroUsd).toBe(
+			100_000_000_000
+		);
+	});
+
+	it("makes the Azure startup credit the default, visible free pool", () => {
+		const azure = CREDIT_POOLS[DEFAULT_FREE_CREDIT_POOL];
+		expect(DEFAULT_FREE_CREDIT_POOL).toBe("azure-credits");
+		expect(azure.tier).toBe("free");
+		expect(azure.visible).toBe(true);
+		expect(isOwnSupplyPool(DEFAULT_FREE_CREDIT_POOL)).toBe(true);
+		// First in catalog order: the gateway's tie-break and the admin default.
+		expect(CREDIT_POOL_IDS[0]).toBe("azure-credits");
+		expect(ALL_CREDIT_POOLS.find((pool) => pool.visible)?.id).toBe(
+			"azure-credits"
+		);
 	});
 
 	it("caps every frontier pool Ryu holds credit for", () => {
@@ -97,7 +119,6 @@ describe("CREDIT_POOLS", () => {
 
 describe("poolForGatewayProvider", () => {
 	it("maps a registry id to its pool", () => {
-		expect(poolForGatewayProvider("bedrock")).toBe("bedrock");
 		expect(poolForGatewayProvider("cloudflare")).toBe("cloudflare");
 		expect(poolForGatewayProvider("openrouter")).toBe("openrouter");
 		expect(poolForGatewayProvider("vertex")).toBe("vertex");
@@ -105,6 +126,8 @@ describe("poolForGatewayProvider", () => {
 		expect(poolForGatewayProvider("anthropic-credits")).toBe(
 			"anthropic-credits"
 		);
+		expect(poolForGatewayProvider("azure-credits")).toBe("azure-credits");
+		expect(poolForGatewayProvider("azure")).toBeNull();
 	});
 
 	it("returns null for an untagged provider instead of guessing", () => {
@@ -147,8 +170,8 @@ describe("isCreditPoolId", () => {
 describe("isOwnSupplyPool", () => {
 	it("is every pool but the retail pass-through, and nothing unknown", () => {
 		expect(OWN_SUPPLY_POOLS.map((pool) => pool.id)).toEqual([
+			"azure-credits",
 			"cloudflare",
-			"bedrock",
 			"vertex",
 			"openai-credits",
 			"anthropic-credits",
@@ -157,5 +180,40 @@ describe("isOwnSupplyPool", () => {
 		expect(isOwnSupplyPool("openai")).toBe(false);
 		expect(isOwnSupplyPool(null)).toBe(false);
 		expect(isOwnSupplyPool(undefined)).toBe(false);
+	});
+});
+
+describe("the retired Bedrock pool", () => {
+	it("is not served from: no gateway slot and not own supply", () => {
+		// Ryu's AWS credit pays for its own VMs, not free inference.
+		expect(CREDIT_POOLS.bedrock.tier).toBe("retired");
+		expect(CREDIT_POOLS.bedrock.visible).toBe(false);
+		expect(poolForGatewayProvider("bedrock")).toBeNull();
+		expect(isOwnSupplyPool("bedrock")).toBe(false);
+	});
+
+	it("issues nothing new, but grants already issued stay free credit", () => {
+		expect(isIssuablePool("bedrock")).toBe(false);
+		expect(isFreeCreditPool("bedrock")).toBe(true);
+		expect(isIssuablePool("azure-credits")).toBe(true);
+		expect(isFreeCreditPool("azure-credits")).toBe(true);
+		expect(isFreeCreditPool("openrouter")).toBe(false);
+		expect(isIssuablePool("not-a-pool")).toBe(false);
+	});
+});
+
+describe("grantPoolsForServingPool (separate pools)", () => {
+	it("reaches the serving pool's own grants plus retired pools' for own supply", () => {
+		expect(grantPoolsForServingPool("azure-credits")).toEqual([
+			"azure-credits",
+			"bedrock",
+		]);
+		expect(grantPoolsForServingPool("vertex")).not.toContain("azure-credits");
+	});
+
+	it("reaches only its own pool for retail, and nothing for BYOK", () => {
+		expect(grantPoolsForServingPool("openrouter")).toEqual(["openrouter"]);
+		expect(grantPoolsForServingPool(null)).toEqual([]);
+		expect(grantPoolsForServingPool(undefined)).toEqual([]);
 	});
 });

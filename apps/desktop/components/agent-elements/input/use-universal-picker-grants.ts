@@ -50,9 +50,10 @@ export function useUniversalPickerGrants() {
 		return index;
 	}, [grantPools]);
 
-	// The user's FREE CREDIT — every grant summed, nearest expiry. Free credit is
-	// spent automatically (first) on Ryu Router models Ryu serves from its own
-	// supply, so it is one figure on the Ryu Router row, not a per-pool split.
+	// The user's FREE CREDIT — every grant summed, nearest expiry, and the
+	// models those grants' pools pay for (separate pools). It is spent
+	// automatically (first) on the Ryu Router models its pool serves, so it is
+	// one figure on the Ryu Router row; only the Free tag follows the pools.
 	const freeCredit = useMemo(() => totalFreeCredit(grantPools), [grantPools]);
 
 	return { freeCredit, grantByPoolId, grantedPoolIds };

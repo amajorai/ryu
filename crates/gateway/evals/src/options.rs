@@ -82,6 +82,7 @@ mod tests {
             score,
             detail: "d".to_owned(),
             executed,
+            ..Default::default()
         }
     }
 

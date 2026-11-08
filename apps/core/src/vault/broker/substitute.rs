@@ -11,7 +11,9 @@
 //! `body` (explicit opt-in; JSON bodies
 //! get JSON-string escaping, form bodies percent-encoding, `text/*` and XML the
 //! raw value; compressed, multipart, binary, non-UTF-8, and bodies over
-//! [`MAX_BODY_SUBSTITUTION_BYTES`] are left untouched).
+//! [`MAX_BODY_SUBSTITUTION_BYTES`] are left untouched), and `websocket`
+//! (explicit opt-in; client text messages of a brokered WebSocket, JSON
+//! messages with JSON-string escaping and other text with the raw value).
 //!
 //! Path, query, and body are opt-in because upstreams reflect them: a 404 page
 //! that echoes the path, a search endpoint that echoes the query, or a
@@ -36,6 +38,9 @@ pub enum Surface {
     Query,
     Path,
     Body,
+    /// Client text messages on a brokered WebSocket connection.
+    #[serde(rename = "websocket")]
+    WebSocket,
 }
 
 /// Default surfaces when a substitution names none: headers only. Path,
@@ -151,6 +156,49 @@ pub fn substitute_body(body: &[u8], kind: BodyKind, pairs: &[(String, String)]) 
         BodyKind::Opaque => None,
     }?;
     Some(rewritten.into_bytes())
+}
+
+/// Rewrite one WebSocket text message, or `None` when it has no
+/// placeholder. A message that parses as JSON gets JSON-string escaping (the
+/// placeholder sits inside a string literal); other text gets the raw value.
+pub fn substitute_message(text: &str, pairs: &[(String, String)]) -> Option<String> {
+    if serde_json::from_str::<serde::de::IgnoredAny>(text).is_ok() {
+        replace_all(text, pairs, encode_json_string)
+    } else {
+        replace_all(text, pairs, str::to_owned)
+    }
+}
+
+/// Shortest value [`redact_message`] hides; a shorter one would match
+/// ordinary text.
+pub const MIN_REDACTED_VALUE_LEN: usize = 4;
+
+/// Swap substituted values (raw and JSON-escaped) back to their
+/// placeholders in a message the upstream sends, so an upstream that echoes
+/// a message does not hand the credential to the agent. `None` when nothing
+/// matched.
+pub fn redact_message(text: &str, pairs: &[(String, String)]) -> Option<String> {
+    let mut forms: Vec<(String, &str)> = Vec::new();
+    for (placeholder, value) in pairs {
+        if value.len() < MIN_REDACTED_VALUE_LEN {
+            continue;
+        }
+        let escaped = encode_json_string(value);
+        if escaped != *value {
+            forms.push((escaped, placeholder));
+        }
+        forms.push((value.clone(), placeholder));
+    }
+    // Longest first, so a value that contains another is replaced whole.
+    forms.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    let mut out: Option<String> = None;
+    for (form, placeholder) in &forms {
+        let current = out.as_deref().unwrap_or(text);
+        if current.contains(form.as_str()) {
+            out = Some(current.replace(form.as_str(), placeholder));
+        }
+    }
+    out
 }
 
 /// One piece of a `{{secret:REF}}` header template.
@@ -340,6 +388,39 @@ mod tests {
             }))
             .unwrap();
         assert_eq!(parsed.surfaces, vec![Surface::Header]);
+    }
+
+    #[test]
+    fn websocket_messages_escape_json_and_redact_echoes() {
+        let json = substitute_message(r#"{"auth":"__KEY__"}"#, &pairs()).unwrap();
+        assert_eq!(json, r#"{"auth":"a b\"c&d"}"#);
+        assert_eq!(
+            substitute_message("auth __KEY__", &pairs()).unwrap(),
+            "auth a b\"c&d"
+        );
+        assert_eq!(substitute_message("no placeholder", &pairs()), None);
+
+        assert_eq!(
+            redact_message(&json, &pairs()).unwrap(),
+            r#"{"auth":"__KEY__"}"#
+        );
+        assert_eq!(
+            redact_message("echo a b\"c&d", &pairs()).unwrap(),
+            "echo __KEY__"
+        );
+        assert_eq!(redact_message("nothing here", &pairs()), None);
+        let short = vec![("__PIN__".to_owned(), "123".to_owned())];
+        assert_eq!(redact_message("call 123", &short), None);
+        let nested = vec![
+            ("__A__".to_owned(), "token".to_owned()),
+            ("__B__".to_owned(), "token-long".to_owned()),
+        ];
+        assert_eq!(
+            redact_message("token-long token", &nested).unwrap(),
+            "__B__ __A__"
+        );
+        let surfaces: Vec<Surface> = serde_json::from_str(r#"["websocket"]"#).unwrap();
+        assert_eq!(surfaces, vec![Surface::WebSocket]);
     }
 
     #[test]

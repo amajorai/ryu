@@ -2,6 +2,7 @@
 
 import {
 	LOGIN_APPROVAL_SURFACE_LABELS,
+	LOGIN_APPROVAL_USER_CODE_LENGTH,
 	type LoginApprovalRequest,
 } from "@ryu/auth/lib/login-approval-contract";
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
@@ -14,7 +15,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog";
-import { OTPCodeDisplay } from "@ryu/ui/components/motion/otp-input";
+import { OTPCodeDisplay, OTPInput } from "@ryu/ui/components/motion/otp-input";
 import { QRCode } from "@ryu/ui/components/qr-code.tsx";
 import { Spinner } from "@ryu/ui/components/spinner";
 import {
@@ -22,19 +23,28 @@ import {
 	QrCode as QrCodeIcon,
 	ShieldCheck,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 
 export interface LoginApprovalPromptProps {
 	approving?: boolean;
 	error?: string | null;
-	onApprove: () => void | Promise<void>;
+	/** Called with the matching code the approver typed from the requesting device. */
+	onApprove: (code: string) => void | Promise<void>;
 	onDeny: () => void | Promise<void>;
 	onOpenChange?: (open: boolean) => void;
 	open: boolean;
 	request: LoginApprovalRequest | null;
 }
 
-/** Shared approval dialog used by the website, desktop, and extension hosts. */
+/**
+ * Shared approval dialog used by the website, desktop, and extension hosts.
+ *
+ * The approver types the code shown on the requesting device (number matching),
+ * so a request started by someone who only knows the email cannot be approved
+ * with one click. The surface and network address come from the server; the
+ * device name and browser are reported by the requesting device and shown as
+ * such.
+ */
 export function LoginApprovalPrompt({
 	approving = false,
 	error = null,
@@ -45,9 +55,13 @@ export function LoginApprovalPrompt({
 	request,
 }: LoginApprovalPromptProps) {
 	const tl = useLiteralMessages();
+	// Keyed by request so a newly shown request always starts with an empty code.
+	const [entry, setEntry] = useState({ code: "", requestId: "" });
 	if (!request) {
 		return null;
 	}
+	const code = entry.requestId === request.id ? entry.code : "";
+	const codeComplete = code.length === LOGIN_APPROVAL_USER_CODE_LENGTH;
 	const surfaceLabel = tl(LOGIN_APPROVAL_SURFACE_LABELS[request.surface]);
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
@@ -73,27 +87,42 @@ export function LoginApprovalPrompt({
 					<div className="flex items-start gap-3">
 						<LaptopMinimalCheck className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
 						<div className="min-w-0">
-							<p className="font-medium">{request.deviceLabel}</p>
-							{request.userAgent ? (
-								<p className="mt-1 break-words text-muted-foreground text-xs">
-									{request.userAgent}
+							<p className="font-medium">{surfaceLabel}</p>
+							{request.ipAddress ? (
+								<p className="mt-1 text-muted-foreground text-xs">
+									{tl("Requested from {ipAddress}", {
+										ipAddress: request.ipAddress,
+									})}
 								</p>
 							) : null}
+							<p className="mt-2 break-words text-muted-foreground text-xs">
+								{tl("Reported by the requesting device: {deviceLabel}", {
+									deviceLabel: request.userAgent
+										? `${request.deviceLabel} · ${request.userAgent}`
+										: request.deviceLabel,
+								})}
+							</p>
 						</div>
 					</div>
 					<div className="border-border/60 border-t pt-3 text-center">
-						<p className="text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
-							Matching code
-						</p>
-						<div className="mt-2 flex justify-center">
-							<OTPCodeDisplay
-								aria-label="Matching sign-in code"
-								code={request.userCode}
+						<div className="flex justify-center">
+							<OTPInput
+								aria-label="Code shown on the requesting device"
+								autoFocus
+								charset="alphanumeric"
+								disabled={approving}
+								label="Enter the code shown on the device"
+								length={LOGIN_APPROVAL_USER_CODE_LENGTH}
+								onChange={(value) =>
+									setEntry({ code: value, requestId: request.id })
+								}
 								size="compact"
+								value={code}
 							/>
 						</div>
 						<p className="mt-1 text-muted-foreground text-xs">
-							Make sure it matches the code shown on the device.
+							Only the device asking to sign in shows this code. If you cannot
+							see it, choose Not now.
 						</p>
 					</div>
 				</div>
@@ -108,7 +137,10 @@ export function LoginApprovalPrompt({
 					<Button disabled={approving} onClick={() => onDeny()} variant="ghost">
 						Not now
 					</Button>
-					<Button disabled={approving} onClick={() => onApprove()}>
+					<Button
+						disabled={approving || !codeComplete}
+						onClick={() => onApprove(code)}
+					>
 						{approving ? <Spinner className="size-4" /> : null}
 						{approving ? "Approving…" : "Approve sign-in"}
 					</Button>
@@ -188,17 +220,17 @@ export function LoginApprovalWait({
 					{userCode ? (
 						<div>
 							<p className="text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
-								Fallback sign-in code
+								Sign-in code
 							</p>
 							<div className="mt-2 flex justify-center">
 								<OTPCodeDisplay
-									aria-label="Fallback sign-in code"
+									aria-label="Sign-in code"
 									code={userCode}
 									size="compact"
 								/>
 							</div>
 							<p className="mt-1 text-muted-foreground text-xs">
-								Make sure it matches the code shown on the device.
+								Enter this code on the device where you approve the sign-in.
 							</p>
 						</div>
 					) : null}

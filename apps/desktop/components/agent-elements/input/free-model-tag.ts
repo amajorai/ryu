@@ -7,22 +7,39 @@ export const FREE_MODEL_TAG = "Free";
 export interface FreeCredit {
 	/** The soonest expiry among the grants, ISO, or null when none lapses. */
 	expiresAt: string | null;
+	/**
+	 * The Ryu Router model ids the user's grants can pay for (separate pools:
+	 * each pool's grant pays only for its own models). Undefined when the
+	 * control plane did not say, which keeps every Free id tagged.
+	 */
+	payableModelIds?: ReadonlySet<string>;
 	remainingMicroUsd: number;
 }
 
 /**
- * Fold per-pool grant balances into the ONE free-credit figure a user sees.
- * Free credit is not tied to a model family or supplier any more, so showing
- * it per pool would only invent distinctions. `null` when there is none.
+ * Fold per-pool grant balances into the ONE free-credit figure a user sees,
+ * plus the union of the models those pools pay for. The balance stays one
+ * number; only the Free tag follows the pools. `null` when there is none.
  */
 export function totalFreeCredit(
-	grants: ReadonlyArray<{ expiresAt: string | null; remainingMicroUsd: number }>
+	grants: ReadonlyArray<{
+		expiresAt: string | null;
+		freeModelIds?: readonly string[];
+		remainingMicroUsd: number;
+	}>
 ): FreeCredit | null {
 	let remainingMicroUsd = 0;
 	let expiresAt: string | null = null;
+	let payable: Set<string> | undefined;
 	for (const grant of grants) {
 		if (!(grant.remainingMicroUsd > 0)) {
 			continue;
+		}
+		if (grant.freeModelIds) {
+			payable ??= new Set();
+			for (const id of grant.freeModelIds) {
+				payable.add(id.toLowerCase());
+			}
 		}
 		remainingMicroUsd += grant.remainingMicroUsd;
 		if (
@@ -33,7 +50,31 @@ export function totalFreeCredit(
 			expiresAt = grant.expiresAt;
 		}
 	}
-	return remainingMicroUsd > 0 ? { expiresAt, remainingMicroUsd } : null;
+	if (!(remainingMicroUsd > 0)) {
+		return null;
+	}
+	return payable
+		? { expiresAt, payableModelIds: payable, remainingMicroUsd }
+		: { expiresAt, remainingMicroUsd };
+}
+
+/**
+ * The Free ids to tag for this user: Core's Free list (what the Gateway routes
+ * to own supply), narrowed to the models the user's pools pay for when known.
+ * `undefined` when nothing is left to tag.
+ */
+export function payableFreeModels(
+	coreFreeIds: readonly string[] | undefined,
+	freeCredit: FreeCredit | null
+): ReadonlySet<string> | undefined {
+	if (!(freeCredit && coreFreeIds?.length)) {
+		return undefined;
+	}
+	const payable = freeCredit.payableModelIds;
+	const ids = payable
+		? coreFreeIds.filter((id) => payable.has(id.toLowerCase()))
+		: coreFreeIds;
+	return ids.length > 0 ? new Set(ids) : undefined;
 }
 
 /**

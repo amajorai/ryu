@@ -115,7 +115,7 @@ function accountSecurityMethods(user: {
 	twoFactorEnabled: boolean;
 }): string[] {
 	if (user.twoFactorEnabled) {
-		return ["totp", "otp", "backup"];
+		return ["totp", "backup"];
 	}
 	return user.hasPassword ? ["password", "magic-link"] : ["magic-link"];
 }

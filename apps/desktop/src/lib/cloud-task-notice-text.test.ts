@@ -62,7 +62,7 @@ test("renders a notice in German and in Arabic from the same Core message", () =
 	};
 	for (const [locale, expected] of [
 		["de", "Codex ist auf diesem Knoten nicht installiert."],
-		["ar", "Codex غير مثبت على هذه العقدة."],
+		["ar", "\u2068Codex\u2069 غير مثبت على هذه العقدة."],
 	] as const) {
 		const tl: NoticeTranslate = (source, values) =>
 			formatMessage(catalogs[locale]?.[source] ?? source, values, locale);

@@ -3,6 +3,9 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
 import * as ResizablePrimitive from "react-resizable-panels";
 
+// RTL needs no handling here: the library pairs panels in laid-out (offsetLeft)
+// order, so under dir="rtl" drags and arrow keys already follow the divider.
+// Negating deltas or swapping keys would invert them (resizable-direction.test.tsx).
 function ResizablePanelGroup({
 	className,
 	...props

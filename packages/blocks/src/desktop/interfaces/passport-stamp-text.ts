@@ -6,6 +6,7 @@
  */
 
 import type { StampShape } from "./passport-model.ts";
+import { untitledConversationTitle } from "./thread-display-title.ts";
 
 /** The stamp box, in stamp units. */
 export const STAMP_BOX_WIDTH = 168;
@@ -161,6 +162,22 @@ export function wrapBalanced(
 		words.slice(0, split).join(" "),
 		ellipsize(words.slice(split).join(" "), second, measure),
 	];
+}
+
+/**
+ * The English fallback passport-stamp.tsx passes for an untitled thread. The
+ * stamp is measured here, so the title is localized before it is wrapped and
+ * cut; otherwise a German stamp would break "Untitled conversation" by its
+ * English widths and the DOM localizer would see only fragments of it.
+ */
+const UNTITLED_STAMP_SENTINEL = "Untitled conversation";
+
+/** The destination text a stamp prints: the title, or the localized fallback. */
+export function stampTitleText(title: string): string {
+	const clean = title.trim();
+	return untitledConversationTitle(
+		clean === UNTITLED_STAMP_SENTINEL ? "" : clean
+	);
 }
 
 export interface StampTextRow {
@@ -354,7 +371,11 @@ export function stampTextRows({
 	const titleWidths = titleDraft
 		.filter(({ row }) => row.kind === "title")
 		.map(({ row, y }) => roomAt(shape, y, row.size));
-	const titleLines = wrapBalanced(title, titleWidths, titleMeasure);
+	const titleLines = wrapBalanced(
+		stampTitleText(title),
+		titleWidths,
+		titleMeasure
+	);
 	let placed = placeRows(shape, build(markingLines, titleLines));
 	if (titleLines.length === 1 && slots.length > 1) {
 		// Centred on one line it may sit where the shape is narrower; if it

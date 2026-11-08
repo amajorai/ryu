@@ -1,15 +1,11 @@
-//! Store CRUD and connection on [`PluginSecretStore`].
+//! Store connections: create, list, delete, test.
 //!
-//! Split out of [`super`], which re-exports the public items at their
-//! original paths.
-//!
-//! test-exempt: code moved verbatim out of `mod.rs`; exercised by tests.rs (store_credentials_are_sealed_and_never_listed) and k8s_origin_tests.rs.
+//! test-exempt: split out of `external/mod.rs` unchanged in shape; exercised
+//! end to end by `external/tests.rs` and `external/targets/tests.rs`.
 
 use super::*;
 
 impl PluginSecretStore {
-    // ── Stores ────────────────────────────────────────────────────────────
-
     /// Create a store; credentials are sealed with the keyring.
     pub async fn external_store_create(
         &self,
@@ -37,9 +33,9 @@ impl PluginSecretStore {
             "INSERT INTO vault_external_stores
                 (id, name, kind, address, namespace, auth_method, auth_mount, role,
                  mount, path_prefix, kv_version, project_id, infisical_environment, secret_path,
-                 nonce, ciphertext, key_version, created_at, updated_at)
+                 nonce, ciphertext, key_version, created_at, updated_at, options)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?18)",
+                     ?17, ?18, ?18, ?19)",
             params![
                 record.id,
                 record.name,
@@ -58,7 +54,8 @@ impl PluginSecretStore {
                 nonce,
                 ciphertext,
                 key_version,
-                record.created_at
+                record.created_at,
+                serde_json::to_string(&record.options)?
             ],
         )?;
         self.audit_locked(
@@ -144,6 +141,9 @@ impl PluginSecretStore {
         remote_path: &str,
     ) -> Result<RemoteFolder> {
         let (record, credentials) = self.external_connection(store_id).await?;
+        if record.kind.is_sync_target() {
+            bail!("{} stores are push-only", record.kind.as_str());
+        }
         let session = Session::connect(&record, &credentials).await?;
         session.read(remote_path).await
     }
@@ -153,6 +153,9 @@ impl PluginSecretStore {
     pub async fn external_store_test(&self, id: &str, actor: &AuditActor) -> Result<()> {
         let result = async {
             let (record, credentials) = self.external_connection(id).await?;
+            if record.kind.is_sync_target() {
+                return targets::check(&record, &credentials).await;
+            }
             Session::connect(&record, &credentials).await?.check().await
         }
         .await;

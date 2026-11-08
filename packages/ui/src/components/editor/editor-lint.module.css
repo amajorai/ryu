@@ -69,7 +69,7 @@
 }
 
 .editortableNode1 {
-	padding-left: var(--editortableNode1-padding-left);
+	padding-inline-start: var(--editortableNode1-padding-left);
 }
 .editortableNode2 {
 	width: var(--editortableNode2-width);

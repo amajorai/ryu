@@ -344,7 +344,7 @@ fn default_grant_allowlist() -> Vec<String> {
         // `spidercloud` is the hosted half of the same engine the `spider` CLI plugin
         // shells out to, and the second `web.crawl` provider. It is a declarative
         // `http` plugin, so it needs an egress entry here even though its CLI sibling
-        // is covered by `tool:command:spider` below — the two grants name different
+        // is covered by the owner-exclusive `tool:command:spider` — the two grants name different
         // things and neither implies the other.
         "tool:http-egress:api.spider.cloud",
         // `mem0` is the same shape, for the swappable `memory` layer rather than a
@@ -358,15 +358,10 @@ fn default_grant_allowlist() -> Vec<String> {
         // Platform), carrying `/v3/workspaces/{ws}/peers/{peer}/chat` and
         // `/v3/workspaces/{ws}/peers/{peer}/search`.
         "tool:http-egress:api.honcho.dev",
-        // `spider`, `rtk`, `ripgrep` and `just-bash` were decoupled from Core into
-        // declarative `command` tool plugins, so each declares a `tool:command:<bin>`
-        // grant instead of an in-Core provider. Same re-enable rationale as the
-        // scopes above.
-        "tool:command:spider",
-        "tool:command:rtk",
-        "tool:command:rg",
-        "tool:command:just-bash",
-        "tool:command:bws",
+        // `tool:command:<bin>` grants are NOT here: a `command` tool chooses literal
+        // argv for a trusted binary (`rtk proxy sh -c …`), which is unsandboxed
+        // exec. Each is owner-exclusive to its first-party plugin instead (see
+        // `OWNER_EXCLUSIVE_GRANTS`).
         // Ship-code-in-a-manifest, for BOTH an `inline_js` tool and a capability
         // ADAPTER (the JS a layer provider ships when its shape — an async job API,
         // a token vocabulary — is beyond what the declarative binding fields can
@@ -374,15 +369,9 @@ fn default_grant_allowlist() -> Vec<String> {
         // grant-gated precisely so shipping code stays a visible, approvable act,
         // and a plugin self-approving it would defeat that.
         "tool:execute",
-        // `advisor` and `shadow` were decoupled into declarative `http` tools that
-        // call Core-local bridges (/api/advisor/consult and the shadow proxy), so
-        // both declare loopback egress rather than an `mcp:<name>` grant. `bytebot`
-        // (the second `computer.control` provider) shares this ONE entry: it reaches
-        // Bytebot's `bytebotd` daemon at 127.0.0.1:9990 — a third-party process, not
-        // a Core bridge — so do not delete this line as "advisor/shadow only". The
-        // grant names a HOST, not a port, so loopback egress is granted wholesale
-        // here and the URL in the manifest is what pins the port.
-        "tool:http-egress:127.0.0.1",
+        // `tool:http-egress:127.0.0.1` is NOT here: it names a host, not a port, so
+        // it reaches every loopback listener. It is owner-exclusive to its reviewed
+        // first-party declarers (see `loopback_egress::LOOPBACK_EGRESS_OWNERS`).
         "mcp:ghost",
         "mcp:shadow",
         // The Blueprint app's own MCP server (`blueprint.plan_publish` /
@@ -471,10 +460,8 @@ fn default_grant_allowlist() -> Vec<String> {
         // capability on the reviewed list rather than teaching the Gateway
         // about the Outreach app itself.
         "mail:crud",
-        // Warmup is a Core-owned host bridge rather than an app-owned namespace.
-        // Keep its explicit grant reviewed so the reserved `warmup` namespace
-        // cannot be self-approved by a lookalike app.
-        "warmup:crud",
+        // `warmup:crud` is owner-exclusive (see `OWNER_EXCLUSIVE_GRANTS`): it
+        // schedules unattended agent turns, so only the reviewed Warmup app.
         // Owner-tier subscription accounts and cached usage. Core still requires
         // a verified node owner/admin caller. `subscriptions:pin` is reserved
         // and deliberately NOT allowlisted.
@@ -503,11 +490,8 @@ fn default_grant_allowlist() -> Vec<String> {
         // shows up as GrantsDenied on re-enable. Swappable via the env override.
         "spaces:docs",
         "spaces:database",
-        // Feedback Board invokes the shared Workflows and Blueprint host planes;
-        // these are cross-app capabilities, not owner-scoped `@ryu/workflows`
-        // capabilities.
-        "workflows:crud",
-        "workflows:runstate",
+        // Read-only node-config catalogs. `workflows:crud` / `workflows:runstate`
+        // are owner-exclusive (see `OWNER_EXCLUSIVE_GRANTS`).
         "workflows:catalogs",
         "blueprint:review",
         "core:list_agents",
@@ -598,14 +582,11 @@ fn default_grant_allowlist() -> Vec<String> {
         // `quests:crud` for the inbox's task check-off and deliberately does NOT
         // hold this.
         "quests:capture",
-        // Run recovery, the Self-Healing extraction (`@ryu/healing`). Three
-        // cross-app holds, each reviewed on its own because the reach differs:
+        // Run recovery, the Self-Healing extraction (`@ryu/healing`).
         //
-        // `runs:failures` receives the `core#run.failed` kernel event: the
-        // instruction and error text of every failed chat, scheduled-agent and
-        // workflow run. That is user data from runs the app did not start, so it
-        // is a reserved-namespace entry here rather than an owner-scoped match.
-        "runs:failures",
+        // `runs:failures` is owner-exclusive (see `OWNER_EXCLUSIVE_GRANTS`): the
+        // `core#run.failed` event carries the instruction and output of EVERY
+        // member's failed runs node-wide, including private ones.
         // `approvals:request` queues a proposed fix into the Approvals inbox
         // through the `approvals.request` kernel capability. Distinct from the
         // owner-scoped `approvals:crud` (list/approve/reject the inbox): a holder
@@ -750,6 +731,13 @@ fn protected_owner_id_list() -> &'static Vec<String> {
             "rlm",
             "tuition",
             "blueprint",
+            // First-party owners of host-API grants (`host-api.json`) the
+            // desktop forwards with the owner node token: `subtitles:crud`,
+            // `background:control`, `voice:models:manage`. Guarded by
+            // `every_host_api_grant_namespace_is_squat_proof`.
+            "subtitles",
+            "background",
+            "voice",
         ]
         .into_iter()
         .flat_map(|name| [format!("@ryu/{name}"), format!("com.ryu.{name}")])
@@ -910,7 +898,34 @@ struct OwnerExclusiveGrant {
 /// - `chat:project-guidance` — a project's standing goal and instructions, which
 ///   Core puts in the system prompt of every turn in that project.
 /// - `runs:rerun-agent` — an unattended agent turn on an app-supplied prompt.
+/// - `runs:failures` — every member's failed-run instruction and output.
+/// - `warmup:crud` — scheduled unattended agent turns on an app-supplied prompt.
+/// - `workflows:crud` / `workflows:runstate` — saved workflows whose nodes call
+///   any MCP tool or agent as the owner without approval.
+/// - `tool:command:<bin>` — a manifest-chosen argv for a trusted binary, i.e.
+///   unsandboxed process execution; only the plugin that ships that command.
+/// - `tool:http-egress:127.0.0.1` — reach to every loopback port on the node.
 const OWNER_EXCLUSIVE_GRANTS: &[OwnerExclusiveGrant] = &[
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/spider", "com.ryu.spider"],
+        grants: &["tool:command:spider"],
+    },
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/rtk", "com.ryu.rtk"],
+        grants: &["tool:command:rtk"],
+    },
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/ripgrep", "com.ryu.ripgrep"],
+        grants: &["tool:command:rg"],
+    },
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/just-bash", "com.ryu.just-bash"],
+        grants: &["tool:command:just-bash"],
+    },
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/bitwarden", "com.ryu.bitwarden"],
+        grants: &["tool:command:bws"],
+    },
     OwnerExclusiveGrant {
         owner_ids: &["@ryu/kill-switch", "com.ryu.kill-switch"],
         grants: &["execution:control"],
@@ -971,10 +986,42 @@ const OWNER_EXCLUSIVE_GRANTS: &[OwnerExclusiveGrant] = &[
         grants: &["chat:project-guidance"],
     },
     // `runs.rerunAgent` starts an unattended turn of the named agent on the
-    // caller's prompt, with no approval. Only the reviewed Healing app may.
+    // caller's prompt, with no approval; `core#run.failed` (`runs:failures`)
+    // carries every member's failed-run text, private runs included. Only the
+    // reviewed Healing app may hold either.
     OwnerExclusiveGrant {
         owner_ids: &["@ryu/healing", "com.ryu.healing"],
-        grants: &["runs:rerun-agent"],
+        grants: &["runs:rerun-agent", "runs:failures"],
+    },
+    // `warmup.apply` / `warmup.runNow` schedule and run unattended agent turns
+    // with no approval. Only the reviewed Warmup app may (Core also bounds the
+    // prompt to a short single-line ping).
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/warmup", "com.ryu.warmup"],
+        grants: &["warmup:crud"],
+    },
+    // Saved workflows run Tool / Mcp / GhostAction / Script / Agent nodes as the
+    // owner with no per-call approval, so authoring and running them is
+    // `tool:call`-equivalent. Only the reviewed Workflows editor and Feedback
+    // Board may; Healing only re-runs failed runs (`workflows.rerun`).
+    OwnerExclusiveGrant {
+        owner_ids: &[
+            "@ryu/workflows",
+            "com.ryu.workflows",
+            "@ryu/feedback-board",
+            "com.ryu.feedback-board",
+        ],
+        grants: &["workflows:crud", "workflows:runstate"],
+    },
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/healing", "com.ryu.healing"],
+        grants: &["workflows:runstate"],
+    },
+    // Wholesale loopback egress (any 127.0.0.1 port) for the reviewed in-repo
+    // declarers only; a marketplace manifest cannot self-request it.
+    OwnerExclusiveGrant {
+        owner_ids: loopback_egress::LOOPBACK_EGRESS_OWNERS,
+        grants: &[loopback_egress::LOOPBACK_EGRESS_GRANT],
     },
 ];
 
@@ -1304,5 +1351,15 @@ pub fn verify_manifest(
     ryu_gw_governance::verify_manifest(manifest, signature_b64, &verifying_key)
 }
 
+mod loopback_egress;
+
+#[cfg(test)]
+mod command_grant_tests;
+#[cfg(test)]
+mod host_grant_namespace_tests;
+#[cfg(test)]
+mod loopback_egress_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod workflow_grant_tests;

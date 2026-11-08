@@ -34,9 +34,14 @@ export const MCP_EXAMPLE = [
 	"}",
 ].join("\n");
 
-export type VaultTab = "secrets" | "broker" | "audit";
+export type VaultTab = "secrets" | "broker" | "syncs" | "audit";
 
-export const VAULT_TABS: readonly VaultTab[] = ["secrets", "broker", "audit"];
+export const VAULT_TABS: readonly VaultTab[] = [
+	"secrets",
+	"broker",
+	"syncs",
+	"audit",
+];
 
 export function vaultTab(value: string): VaultTab {
 	return VAULT_TABS.find((tab) => tab === value) ?? "secrets";

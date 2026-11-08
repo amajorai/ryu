@@ -125,7 +125,7 @@ test("Start in a worktree asks Core to isolate the new chat in a worktree", asyn
 test("Start opens the new chat with the thread's agent", async ({ page }) => {
 	await open(page, "task-suggestion-agent");
 	const agentSettings = page.getByRole("button", {
-		name: "Chat settings · Second Agent",
+		name: "Chat settings: Second Agent",
 		exact: true,
 	});
 	await expect(agentSettings).toBeVisible();

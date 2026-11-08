@@ -22,22 +22,27 @@ pub(in crate::server) async fn import_chat_export_item(
 
     let id = &selection.id;
     let Some(export) = chat_exports::detect(root) else {
-        return ImportOutcome::failed(
+        return ImportOutcome::failed_because(
             kind::CONVERSATIONS,
             id,
             id,
-            "not a ChatGPT or Claude export",
+            crate::i18n::messages::IMPORT_OUTCOME_NOT_CHAT_EXPORT_MESSAGE,
         );
     };
     let Some(group) = chat_export_group(id) else {
-        return ImportOutcome::failed(kind::CONVERSATIONS, id, id, "invalid conversations id");
-    };
-    if native_history_access_denied(caller.as_ref()).is_some() {
-        return ImportOutcome::failed(
+        return ImportOutcome::failed_because(
             kind::CONVERSATIONS,
             id,
             id,
-            "importing chat history requires a signed-in member of this node",
+            crate::i18n::messages::IMPORT_OUTCOME_INVALID_CONVERSATIONS_MESSAGE,
+        );
+    };
+    if native_history_access_denied(caller.as_ref()).is_some() {
+        return ImportOutcome::failed_because(
+            kind::CONVERSATIONS,
+            id,
+            id,
+            crate::i18n::messages::IMPORT_OUTCOME_MEMBER_REQUIRED_MESSAGE,
         );
     }
     // Take this group out of the batch (a repeated selection reads again).
@@ -288,11 +293,11 @@ pub(in crate::server) async fn import_markdown_memory_item(
             .unwrap_or_default()
     );
     let Some(doc) = crate::import::frameworks::parse_markdown_memory(path) else {
-        return ImportOutcome::failed(
+        return ImportOutcome::failed_because(
             kind::MEMORY,
             &selection.id,
             &title,
-            "not a readable memory file",
+            crate::i18n::messages::IMPORT_OUTCOME_UNREADABLE_MEMORY_MESSAGE,
         );
     };
     if doc.entries.is_empty() {
@@ -331,7 +336,11 @@ pub(in crate::server) async fn import_markdown_memory_item(
             tags: vec![tag, format!("import:{}", framework.id())],
             author_agent_id: None,
         };
-        match state.memory.record_full(&owner, "default", mem).await {
+        match state
+            .memory
+            .record_full_with_metadata(&owner, "default", mem, imported_memory_metadata())
+            .await
+        {
             Ok(Some(id)) => {
                 if let Ok(Some(entry)) = state.memory.get(&id).await {
                     index_memory_entry(state, &entry).await;

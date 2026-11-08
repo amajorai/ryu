@@ -143,6 +143,7 @@
   "Starting workflow…": "Avvio del workflow…",
   "Submission moderation": "Moderazione degli invii",
   "Tell us more": "Raccontaci di più",
+  "The Feedback Board bridge is unavailable in this Ryu host.": "Il bridge di Feedback Board non è disponibile in questo host Ryu.",
   "The Ryu host bridge did not return a workspace.": "Il bridge host di Ryu non ha restituito alcuno spazio di lavoro.",
   "The Ryu host bridge is unavailable.": "Il bridge host di Ryu non è disponibile.",
   "The inbox is clear.": "La posta in arrivo è vuota.",

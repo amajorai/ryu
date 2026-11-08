@@ -13,6 +13,7 @@ import {
 	isProjectMainThread,
 } from "@/src/lib/thread-hierarchy.ts";
 import type { Conversation } from "@/types/chat.ts";
+import { displayThreadTitle } from "./snapshot-thread-title.ts";
 import {
 	MAX_INTERFACE_THREADS,
 	type RunFrameStatus,
@@ -144,7 +145,7 @@ export function toThread(
 			hierarchy?.ownerKind === "group" && hierarchy.ownerId
 				? hierarchy.ownerId
 				: null,
-		title: conversation.title.trim() || "New chat",
+		title: displayThreadTitle(conversation.title),
 		updatedAt: toIso(activityMs(conversation)),
 	};
 	if (

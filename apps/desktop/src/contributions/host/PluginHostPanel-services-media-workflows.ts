@@ -100,6 +100,7 @@ import { createCompanionTranscribeAudio } from "./companion-voice-engine.ts";
 import { createCompanionMediaServices } from "./media-host-services.ts";
 import { inlineToDataUrl, pickFiles } from "./PluginHostPanel-host-media.ts";
 import type { PluginHostServicesContext } from "./PluginHostPanel-services-context.ts";
+import { gateWorkflowAuthoring } from "./workflow-authoring-guard.ts";
 
 export function buildPluginHostMediaWorkflowServices({
 	companion,
@@ -107,7 +108,9 @@ export function buildPluginHostMediaWorkflowServices({
 	node,
 	tl,
 }: PluginHostServicesContext): Partial<HostServices> {
-	return {
+	// Workflow authoring/run verbs reach the owner-token `/workflows` APIs, whose
+	// saved nodes call any tool as the owner; only reviewed authors keep them.
+	return gateWorkflowAuthoring(companion.pluginId, {
 		// Media services — host-direct governed fetches (same pattern as
 		// listAgents: the host holds the node token and calls the Gateway-governed
 		// Core media endpoints). Every result is normalized to a `data:` URL so the
@@ -419,5 +422,5 @@ export function buildPluginHostMediaWorkflowServices({
 			readWebhookSecret(toTarget(node), companion.pluginId, id),
 		webhooksSecretSet: ({ id, secret }) =>
 			writeWebhookSecret(toTarget(node), companion.pluginId, id, secret),
-	};
+	});
 }

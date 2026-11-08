@@ -136,8 +136,10 @@ pub(super) async fn post_to_provider_hop(
         caller_resource_ids: None,
         caller_rate_subject: None,
         caller_agent_id: None,
+        caller_agent_egress_allowlist: None,
         caller_agent_restricted: false,
         event_delivery,
+        trusted_first_party: false,
     })
     .await
 }

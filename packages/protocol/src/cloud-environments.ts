@@ -197,7 +197,8 @@ export function cloudEnvironmentRuntimeIssue(
 		CloudEnvironment,
 		"internet" | "runtime" | "tailscaleVaultKey" | "vaultKeys"
 	>,
-	vault: readonly Pick<CloudVaultEntry, "key" | "kind">[] = []
+	vault: readonly (Pick<CloudVaultEntry, "key" | "kind"> &
+		Partial<Pick<CloudVaultEntry, "domains">>)[] = []
 ): string | null {
 	const runtime = environment.runtime ?? DEFAULT_CLOUD_ENVIRONMENT_RUNTIME;
 	if (!CLOUD_ENVIRONMENT_BACKENDS.includes(runtime.backend)) {
@@ -225,12 +226,9 @@ export function cloudEnvironmentRuntimeIssue(
 	if (environment.tailscaleVaultKey) {
 		return "Fresh cloud boxes do not support Tailscale VPN. Remove the VPN key.";
 	}
-	const bound = new Set(environment.vaultKeys);
-	const secret = vault.find(
-		(entry) => entry.kind === "networkSecret" && bound.has(entry.key)
-	);
-	if (secret) {
-		return `Fresh cloud boxes do not support network secrets. Unselect ${secret.key}.`;
+	const secretIssue = boxNetworkSecretIssue(environment, vault);
+	if (secretIssue) {
+		return secretIssue;
 	}
 	const reserved = environment.vaultKeys.filter(isBoxReservedVariable);
 	if (reserved.length > 0) {
@@ -238,6 +236,54 @@ export function cloudEnvironmentRuntimeIssue(
 	}
 	if (environment.vaultKeys.length > MAX_BOX_VARIABLES) {
 		return `Fresh cloud boxes accept at most ${MAX_BOX_VARIABLES} variables. Unselect some.`;
+	}
+	return null;
+}
+
+/** Network secrets a Box's egress proxy substitutes (the Box service's limit). */
+const MAX_BOX_NETWORK_SECRETS = 16;
+const BOX_SECRET_DOMAIN =
+	/^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/u;
+
+function domainAllowed(allowed: readonly string[], domain: string): boolean {
+	return allowed.some(
+		(entry) =>
+			entry === domain ||
+			(entry.startsWith("*.") && domain.endsWith(entry.slice(1)))
+	);
+}
+
+/**
+ * A Box's egress proxy substitutes network secrets only for DNS host names it
+ * may reach. Core enforces the same rule, with the package-manager list too.
+ */
+function boxNetworkSecretIssue(
+	environment: Pick<CloudEnvironment, "internet" | "vaultKeys">,
+	vault: readonly (Pick<CloudVaultEntry, "key" | "kind"> &
+		Partial<Pick<CloudVaultEntry, "domains">>)[]
+): string | null {
+	const bound = new Set(environment.vaultKeys);
+	const secrets = vault.filter(
+		(entry) => entry.kind === "networkSecret" && bound.has(entry.key)
+	);
+	if (secrets.length > MAX_BOX_NETWORK_SECRETS) {
+		return `Fresh cloud boxes accept at most ${MAX_BOX_NETWORK_SECRETS} network secrets. Unselect some.`;
+	}
+	const { internet } = environment;
+	for (const secret of secrets) {
+		const domains = (secret.domains ?? []).map((domain) =>
+			domain.toLowerCase()
+		);
+		const notDns = domains.find((domain) => !BOX_SECRET_DOMAIN.test(domain));
+		if (notDns) {
+			return `Fresh cloud boxes substitute network secrets only for host names. Bind ${secret.key} to a host name instead of ${notDns}.`;
+		}
+		const blocked = domains.find(
+			(domain) => !domainAllowed(internet.allowedDomains, domain)
+		);
+		if (internet.enabled && internet.domainPolicy === "custom" && blocked) {
+			return `${secret.key} is bound to ${blocked}, which the allowed domains do not include. Add it.`;
+		}
 	}
 	return null;
 }

@@ -221,7 +221,7 @@ test("project exploration and runs persist live HTTP and separate agent evidence
 		"Trigger",
 		"Coverage",
 		"Evidence",
-		"Finished",
+		"Finished at",
 	]);
 	expect(
 		runHistoryHeaders.every(

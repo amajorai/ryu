@@ -1,3 +1,4 @@
+import { appendArgument } from "./format-bidi.ts";
 import { findClosingBrace, parseOptions, splitTopLevel } from "./icu-syntax.ts";
 import { type PluralSelector, pluralRules } from "./intl-guards.ts";
 import { DEFAULT_LOCALE, MAX_MESSAGE_LENGTH } from "./pack.ts";
@@ -154,7 +155,8 @@ function formatMessageValue(
 	message: string,
 	values: MessageValues,
 	locale: string,
-	hashValue?: number
+	hashValue?: number,
+	top = false
 ): string {
 	let output = "";
 	let cursor = 0;
@@ -183,7 +185,16 @@ function formatMessageValue(
 		const parts = splitTopLevel(expression, ",").map((part) => part.trim());
 		const name = parts[0] ?? "";
 		if (parts.length === 1) {
-			output += formatValue(values[name]);
+			// RTL locales isolate string values (format-bidi.ts).
+			const value = values[name];
+			const whole = top && open === 0 && close === message.length - 1;
+			output = appendArgument(
+				output,
+				formatValue(value),
+				typeof value === "string",
+				whole,
+				locale
+			);
 			cursor = close + 1;
 			continue;
 		}
@@ -253,6 +264,12 @@ export function formatMessage(
 	locale: string = DEFAULT_LOCALE
 ): string {
 	return isBoundedMessage(message)
-		? formatMessageValue(message, parseMessageValues(values), locale)
+		? formatMessageValue(
+				message,
+				parseMessageValues(values),
+				locale,
+				undefined,
+				true
+			)
 		: message;
 }

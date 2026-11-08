@@ -8,6 +8,7 @@ use super::*;
 pub async fn run_proactive_opening_text(
     conversation_id: String,
     agent_id: Option<String>,
+    agent_resource_authorization: Option<Arc<AgentResourceAuthorization>>,
     registry: Arc<AcpAgentRegistry>,
     conversations: ConversationStore,
     agent_store: AgentStore,
@@ -28,7 +29,8 @@ pub async fn run_proactive_opening_text(
             parts: vec![],
         }],
         agent_id,
-        agent_resource_authorization: None,
+        // Re-checked after handoffs and lane defaults settle the effective agent.
+        agent_resource_authorization,
         turn_context: None,
         turn_query_context: None,
         response_mode: RyuResponseMode::Everyday,

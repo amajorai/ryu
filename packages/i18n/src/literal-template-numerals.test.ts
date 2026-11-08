@@ -4,6 +4,10 @@ import {
 	formatCapturedNumeral,
 	isIdentifierArgument,
 } from "./literal-template-numerals.ts";
+import {
+	isLocaleGroupedInteger,
+	localeGroupSeparator,
+} from "./literal-template-numerals-grouping.ts";
 import { LiteralTemplateIndex } from "./literal-templates.ts";
 
 const RENDER_REVIEW = "Expected {expected} seconds; received {actual} seconds.";
@@ -171,5 +175,72 @@ describe("numbers captured by literal templates", () => {
 			"52,428,800"
 		);
 		expect(formatCapturedNumeral("seconds", "0.50", "en", TEXT)).toBe("0.50");
+	});
+});
+
+/** Locales that group thousands with `.`, as `formatCount` renders them. */
+const DOT_GROUPING_LOCALES = ["de", "es", "it", "pt-BR"] as const;
+const TOKENS = "{count} tokens";
+
+describe("numerals already grouped in the reader's locale", () => {
+	test("dot-grouping locales keep `32.768 tokens` as written", () => {
+		for (const locale of DOT_GROUPING_LOCALES) {
+			expect(localeGroupSeparator(locale)).toBe(".");
+			const index = new LiteralTemplateIndex({ [TOKENS]: "{count} Tokens" });
+			for (const value of [32_768, 131_072, 1500]) {
+				const grouped = new Intl.NumberFormat(locale).format(value);
+				expect(index.match(`${grouped} tokens`, locale)).toBe(
+					`${grouped} Tokens`
+				);
+				expect(formatCapturedNumeral("count", grouped, locale, TEXT)).toBe(
+					grouped
+				);
+			}
+		}
+	});
+
+	test("only one to three integer digits and full groups of three count", () => {
+		expect(isLocaleGroupedInteger("32.768", "de")).toBe(true);
+		expect(isLocaleGroupedInteger("-1.500", "de")).toBe(true);
+		expect(isLocaleGroupedInteger("12.50", "de")).toBe(false);
+		expect(isLocaleGroupedInteger("1234.567", "de")).toBe(false);
+		expect(isLocaleGroupedInteger("32.768", "en")).toBe(false);
+		expect(isLocaleGroupedInteger("32.768", "fr")).toBe(false);
+		// `toFixed(3)` decimals a grouped integer never looks like.
+		expect(isLocaleGroupedInteger("0.250", "de")).toBe(false);
+		expect(isLocaleGroupedInteger("1.234", "de", "percent")).toBe(false);
+		expect(isLocaleGroupedInteger("1.234", "de", "driftPercent")).toBe(false);
+		expect(isLocaleGroupedInteger("1.234", "de", "count")).toBe(true);
+		expect(formatCapturedNumeral("percent", "1.234", "de", TEXT)).toBe("1,234");
+		expect(formatCapturedNumeral("drift", "0.250", "de", TEXT)).toBe("0,250");
+	});
+
+	test("English decimals are still reformatted", () => {
+		const index = new LiteralTemplateIndex(GERMAN);
+		expect(
+			index.match("Expected 12.50 seconds; received 3.00 seconds.", "de")
+		).toBe("12,50 Sekunden erwartet; 3,00 Sekunden erhalten.");
+		expect(formatCapturedNumeral("seconds", "12.50", "en", TEXT)).toBe("12.50");
+		expect(formatCapturedNumeral("seconds", "12.50", "fr", TEXT)).toBe(
+			expectedIn("fr", 12.5, 2)
+		);
+		// Where `.` is the decimal point, a three-digit fraction stays a decimal.
+		expect(formatCapturedNumeral("count", "32.768", "fr", TEXT)).toBe(
+			expectedIn("fr", 32.768, 3)
+		);
+	});
+
+	test("comma-grouping locales such as ja and ar are unaffected", () => {
+		for (const locale of ["ja", "ar"]) {
+			expect(localeGroupSeparator(locale)).not.toBe(".");
+			expect(isLocaleGroupedInteger("32.768", locale)).toBe(false);
+			expect(formatCapturedNumeral("seconds", "12.50", locale, TEXT)).toBe(
+				expectedIn(locale, 12.5, 2)
+			);
+			const grouped = new Intl.NumberFormat(locale).format(32_768);
+			expect(formatCapturedNumeral("count", grouped, locale, TEXT)).toBe(
+				grouped
+			);
+		}
 	});
 });

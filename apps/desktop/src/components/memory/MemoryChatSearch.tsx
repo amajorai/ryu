@@ -11,7 +11,7 @@ import {
 	SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -66,10 +66,11 @@ function formatTimestamp(timestamp: number): string {
 
 function hitLabel(
 	hit: MessageSearchHit,
-	conversationTitle?: (conversationId: string) => string
+	conversationTitle: ((conversationId: string) => string) | undefined,
+	tl: LiteralMessage
 ): string {
 	const title = conversationTitle?.(hit.conversationId)?.trim();
-	return title || "Conversation";
+	return title || tl("Conversation");
 }
 
 function ChatSearchHitRow({
@@ -81,9 +82,9 @@ function ChatSearchHitRow({
 	hit: MessageSearchHit;
 	onOpen: (conversationId: string) => void;
 }) {
-	const title = hitLabel(hit, conversationTitle);
-	const relevance = Math.round(hit.score * 100);
 	const tl = useLiteralMessages();
+	const title = hitLabel(hit, conversationTitle, tl);
+	const relevance = Math.round(hit.score * 100);
 
 	return (
 		<li

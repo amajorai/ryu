@@ -20,7 +20,7 @@ fn keys(names: &[&str]) -> HashMap<String, String> {
 
 /// The order the overlay reports applied providers in. `keys` is a hash map,
 /// so this order comes from the overlay itself and must not depend on it.
-const OVERLAY_ORDER: [&str; 19] = [
+const OVERLAY_ORDER: [&str; 20] = [
     "openai",
     "anthropic",
     "openrouter",
@@ -37,6 +37,7 @@ const OVERLAY_ORDER: [&str; 19] = [
     "vertex",
     "openai_credits",
     "anthropic_credits",
+    "azure_credits",
     "composio",
     "treg",
     "modal",
@@ -49,6 +50,7 @@ fn every_vault_key_applies_in_the_overlay_order() {
         ("AWS_REGION", "us-east-1"),
         ("VERTEX_PROJECT_ID", "proj"),
         ("VERTEX_LOCATION", "europe-west4"),
+        ("AZURE_CREDITS_RESOURCE", "ryu-startups"),
         ("MODAL_BASE_URL", "https://modal.example/v1"),
     ]);
     let mut config = GatewayConfig::default();

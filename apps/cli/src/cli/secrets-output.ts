@@ -144,6 +144,7 @@ export async function exportResult(
 	format: VaultExportFormat
 ): Promise<VaultExportResult> {
 	const location: Pick<VaultExportInput, "environment" | "path"> = {};
+	const projectId = flag(args, "--org-project");
 	const environment = flag(args, "--env");
 	const path = flag(args, "--path");
 	if (environment) {
@@ -160,6 +161,11 @@ export async function exportResult(
 				"--k8s-name/--k8s-namespace are not supported with RYU_VAULT_TOKEN."
 			);
 		}
+		if (projectId) {
+			throw new UsageError(
+				"--org-project is not supported with RYU_VAULT_TOKEN."
+			);
+		}
 		return await vaultAgentExport(agent, { ...location, format, names });
 	}
 	const result = await withStepUpHint(() =>
@@ -167,6 +173,7 @@ export async function exportResult(
 			...location,
 			format,
 			names,
+			...(projectId ? { projectId } : {}),
 			k8sName: flag(args, "--k8s-name"),
 			k8sNamespace: flag(args, "--k8s-namespace"),
 		})

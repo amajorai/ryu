@@ -24,10 +24,12 @@ use async_trait::async_trait;
 use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
 
 mod suggestion;
+mod trigger_delivery;
 
 use suggestion::{
     build_connect_suggestion_prompt, connect_suggestion_payload, parse_connect_suggestion,
 };
+use trigger_delivery::{agent_may_receive_from, subscriber_may_run_agent};
 
 async fn publish_connect_suggestion(owner: &str, run_id: &str, output: Option<&str>) -> Result<()> {
     let Some(suggestion) = output.and_then(parse_connect_suggestion) else {
@@ -463,29 +465,14 @@ impl ryu_composio::ComposioHost for CoreComposioHost {
             account_entity,
         ))
     }
-}
 
-/// The delivery-time account check. A user account (`account_entity` empty)
-/// needs the agent's policy to allow it; an agent without a record keeps
-/// today's behaviour. An own-entity account must be exactly this agent's
-/// entity, and its record must exist and allow that account's events.
-fn agent_may_receive_from(
-    record: Option<&crate::agents::AgentRecord>,
-    agent_id: &str,
-    connected_account_id: &str,
-    account_entity: &str,
-) -> bool {
-    use crate::agent_access::AgentAccountPolicy;
-    if account_entity.is_empty() {
-        return record.is_none_or(|record| {
-            AgentAccountPolicy::from_record(record).allows_composio_account(connected_account_id)
-        });
+    async fn subscriber_may_run_agent(
+        &self,
+        subscriber_user_id: &str,
+        agent_id: &str,
+    ) -> Result<bool> {
+        Ok(subscriber_may_run_agent(subscriber_user_id, agent_id).await)
     }
-    AgentAccountPolicy::is_own_composio_entity(account_entity, agent_id)
-        && record.is_some_and(|record| {
-            AgentAccountPolicy::from_record(record)
-                .allows_own_composio_trigger(connected_account_id)
-        })
 }
 
 /// Install Core's host implementation. Called once at boot.

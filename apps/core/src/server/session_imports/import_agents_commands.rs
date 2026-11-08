@@ -28,14 +28,18 @@ pub(in crate::server) async fn import_agent_item(
         }
     };
     let Some(sub) = crate::import::parse_agent_item(root, &path, index) else {
-        return crate::import::ImportOutcome::failed(
+        return crate::import::ImportOutcome::failed_because(
             kind::AGENT,
             &selection.id,
             &selection.id,
-            "not a readable agent definition",
+            crate::i18n::messages::IMPORT_OUTCOME_UNREADABLE_AGENT_MESSAGE,
         );
     };
-    let title = format!("Agent '{}'", sub.name);
+    let title_msg = crate::import::named_title(
+        crate::i18n::messages::IMPORT_OUTCOME_AGENT_TITLE_MESSAGE,
+        &sub.name,
+    );
+    let title = crate::import::english(&title_msg);
     match state.agent_store.list().await {
         Ok(records) if records.iter().any(|r| r.name == sub.name) => {
             return crate::import::ImportOutcome::already(kind::AGENT, &selection.id, &title);
@@ -74,6 +78,7 @@ pub(in crate::server) async fn import_agent_item(
         Ok(_) => crate::import::ImportOutcome::ok(kind::AGENT, &selection.id, &title),
         Err(e) => {
             crate::import::ImportOutcome::failed(kind::AGENT, &selection.id, &title, &e.to_string())
+                .titled(title_msg)
         }
     }
 }
@@ -116,14 +121,18 @@ pub(in crate::server) async fn import_slash_command_item(
         }
     };
     let Some(prompt) = crate::import::parse_codex_prompt(&path) else {
-        return crate::import::ImportOutcome::failed(
+        return crate::import::ImportOutcome::failed_because(
             kind::SLASH_COMMAND,
             &selection.id,
             &selection.id,
-            "not a readable Codex prompt file",
+            crate::i18n::messages::IMPORT_OUTCOME_UNREADABLE_CODEX_COMMAND_MESSAGE,
         );
     };
-    let title = format!("Slash command '/{}'", prompt.name);
+    let title_msg = crate::import::named_title(
+        crate::i18n::messages::IMPORT_SLASH_COMMAND_TITLE_MESSAGE,
+        &prompt.name,
+    );
+    let title = crate::import::english(&title_msg);
     let command = format!("/{}", prompt.name);
     let mut entry = serde_json::json!({ "id": format!("user.{}", prompt.name), "command": command, "body": prompt.body });
     if let Some(desc) = prompt.description {
@@ -158,7 +167,8 @@ pub(in crate::server) async fn import_slash_command_item(
             &selection.id,
             &title,
             &e.to_string(),
-        ),
+        )
+        .titled(title_msg),
     }
 }
 

@@ -166,7 +166,7 @@ function inFlightRemark(
 	// The estimate leads, like every remark's actionable part, so a narrow
 	// board truncates the airborne time rather than the ETA.
 	if (etaAt < context.now) {
-		return [strong("Longer than usual"), airborne];
+		return [strong(tr("Longer than usual")), airborne];
 	}
 	return [strong(tr("ETA {time} est.", { time: boardTime(etaAt) })), airborne];
 }
@@ -217,7 +217,7 @@ function threadRemark(
 		case "boarding": {
 			if (thread.agentIds.length === 0) {
 				return [
-					strong("No gate assigned"),
+					strong(tr("No gate assigned")),
 					plain(tr("Since {date}", { date: shortDate(time) })),
 				];
 			}
@@ -231,15 +231,17 @@ function threadRemark(
 		case "delayed":
 			return [
 				strong(
-					thread.runState === "interrupted" ? "Run interrupted" : "Run failed"
+					thread.runState === "interrupted"
+						? tr("Run interrupted")
+						: tr("Run failed")
 				),
 			];
 		case "landed":
-			return [strong("Your turn"), plain(waited)];
+			return [strong(tr("Your turn")), plain(waited)];
 		case "at-gate":
 			return now - time < AT_GATE_WINDOW_MS
-				? [strong("Your turn"), plain(waited)]
-				: [plain("Reply waiting"), plain(waited)];
+				? [strong(tr("Your turn")), plain(waited)]
+				: [plain(tr("Reply waiting")), plain(waited)];
 		default:
 			return arrivedRemark(thread);
 	}

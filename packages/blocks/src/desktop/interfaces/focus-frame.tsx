@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -128,7 +129,7 @@ export function FocusFrame({
 					<div className="flex min-w-0 flex-1 items-center gap-2">
 						{item ? <BoardStatusDot status={item.status} /> : null}
 						<h2 className="truncate font-medium text-foreground text-sm">
-							{item?.thread.title ?? "New conversation"}
+							{item?.thread.title.trim() || tr("New conversation")}
 						</h2>
 					</div>
 					<span

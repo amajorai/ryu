@@ -6,7 +6,7 @@
 //!
 //! Memory touches the chat path in three separate places — the recency block
 //! (`assemble_long_term_system_message`), the semantic auto-recall
-//! (`run_auto_recall`), and the per-turn write (`memory.record_full`) — all inside
+//! (`run_auto_recall`), and the per-turn write (`record_turn_memory`) — all inside
 //! `sidecar::adapters::route_chat_stream`. Reading three preferences at three call
 //! sites is how the three drift apart: "recall is off" must mean BOTH recall paths,
 //! not whichever one the reader remembered. So the policy is resolved ONCE per turn
@@ -108,6 +108,17 @@ impl RecallBudget {
             Self::High => DEFAULT_LONG_TERM_LIMIT * 3,
         }
     }
+
+    /// Characters the injected recency block may spend on rendered notes per
+    /// turn. Recall stops adding notes once the next one would exceed it, so
+    /// long captured turns cannot crowd the prompt however many fit the count.
+    pub fn char_budget(self) -> usize {
+        match self {
+            Self::Low => 1_000,
+            Self::Mid => 2_500,
+            Self::High => 6_000,
+        }
+    }
 }
 
 /// When durable facts are captured from a turn.
@@ -120,12 +131,17 @@ pub enum WriteFrequency {
     /// Capture from each turn, as before.
     #[default]
     PerTurn,
+    /// Judgment-based writing: raw turns are not stored. Dream reads the saved
+    /// transcripts instead and proposes durable facts for the user to accept, so
+    /// this captures nothing unless Remember chats and Dream are both on.
+    Reviewed,
 }
 
 impl WriteFrequency {
     fn parse(raw: &str) -> Self {
         match raw.trim() {
             "never" => Self::Never,
+            "reviewed" => Self::Reviewed,
             _ => Self::PerTurn,
         }
     }
@@ -316,7 +332,7 @@ mod tests {
         // Privacy-by-default: no preference turns memory on for a caller that did
         // not ask for it.
         for mode in ["off", "manual", "auto"] {
-            for freq in ["never", "per_turn"] {
+            for freq in ["never", "per_turn", "reviewed"] {
                 let p = MemoryPolicy::from_raw(Some(mode), None, Some(freq));
                 assert!(!p.should_auto_recall(false), "{mode} widened recall");
                 assert!(!p.should_write(false), "{freq} widened writes");
@@ -349,6 +365,15 @@ mod tests {
     }
 
     #[test]
+    fn reviewed_stores_no_raw_turns_and_leaves_recall_alone() {
+        let p = MemoryPolicy::from_raw(None, None, Some("reviewed"));
+        assert_eq!(p.write_frequency, WriteFrequency::Reviewed);
+        assert!(!p.should_write(true));
+        assert!(p.should_auto_recall(true));
+        assert_eq!(WriteFrequency::default(), WriteFrequency::PerTurn);
+    }
+
+    #[test]
     fn temporary_context_requires_the_explicit_flag() {
         assert!(!MemoryPolicy::temporary_context_enabled(false, false));
         assert!(MemoryPolicy::temporary_context_enabled(false, true));
@@ -364,6 +389,17 @@ mod tests {
         assert!(
             RecallBudget::Low.long_term_limit() < RecallBudget::Mid.long_term_limit()
                 && RecallBudget::Mid.long_term_limit() < RecallBudget::High.long_term_limit()
+        );
+    }
+
+    #[test]
+    fn char_budget_scales_with_the_recall_budget() {
+        assert_eq!(RecallBudget::Low.char_budget(), 1_000);
+        assert_eq!(RecallBudget::Mid.char_budget(), 2_500);
+        assert_eq!(RecallBudget::High.char_budget(), 6_000);
+        assert_eq!(
+            MemoryPolicy::default().recall_budget.char_budget(),
+            RecallBudget::Mid.char_budget()
         );
     }
 

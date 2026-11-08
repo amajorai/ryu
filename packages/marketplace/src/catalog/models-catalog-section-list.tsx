@@ -175,7 +175,7 @@ export function ModelList({
 												<ModelDateLine
 													date={formatDate(m.lastModified)}
 													tooltipLabel="Updated"
-													value={`(updated ${updatedAgo})`}
+													value={tl("(updated {ago})", { ago: updatedAgo })}
 												/>
 											)}
 										</div>

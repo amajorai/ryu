@@ -41,6 +41,7 @@ import type {
 	ImportResult,
 	ObjectWithFields,
 } from "@/src/lib/api/crm.ts";
+import { importRowsLabel } from "./import-rows-label.ts";
 
 type Step = "apply" | "map" | "preview" | "upload";
 
@@ -378,11 +379,10 @@ export function ImportWizard({
 							<Button disabled={busy} onClick={() => void runApply()} size="sm">
 								{busy
 									? "Importing…"
-									: tl("Import {rowCount} rows", {
-											rowCount: String(
-												preview.create_count + preview.update_count
-											),
-										})}
+									: importRowsLabel(
+											tl,
+											preview.create_count + preview.update_count
+										)}
 							</Button>
 						</div>
 					</div>

@@ -1,6 +1,7 @@
-// Words the coded failures the file-resource, shell and update-scheduling
-// commands reject with (`src-tauri/src/file_resource_error.rs`,
-// `src-tauri/src/shell_exec_error.rs`, `src-tauri/src/update_schedule_error.rs`).
+// Words the coded failures the file-resource, shell, update-scheduling and
+// Core-lifecycle commands reject with (`src-tauri/src/file_resource_error.rs`,
+// `src-tauri/src/shell_exec_error.rs`, `src-tauri/src/update_schedule_error.rs`,
+// `src-tauri/src/core_lifecycle_error.rs`).
 // The native layer rejects with a plain `code[:detail]` string and never words
 // a sentence; each code maps to one whole translated sentence here. A folder
 // path is interpolated as a value; raw OS or decoder text stays a secondary
@@ -9,30 +10,42 @@
 import type { LiteralMessage } from "@ryu/i18n/react";
 
 export type DesktopCommandErrorCode =
+	| "core_binary_missing"
+	| "core_spawn_failed"
 	| "cwd_not_dir"
 	| "file_too_large"
+	| "installer_failed"
 	| "invalid_content"
 	| "invalid_cwd"
 	| "invalid_env_name"
 	| "invalid_request"
 	| "io"
 	| "no_config_dir"
+	| "release_metadata_unavailable"
+	| "release_validation_failed"
 	| "spawn_failed"
+	| "update_in_progress"
 	| "write_failed";
 
 /** The code a size-bounded file read or write rejects with. */
 export const FILE_TOO_LARGE_CODE = "file_too_large";
 
 const CODES: ReadonlySet<string> = new Set<DesktopCommandErrorCode>([
+	"core_binary_missing",
+	"core_spawn_failed",
 	"cwd_not_dir",
 	"file_too_large",
+	"installer_failed",
 	"invalid_content",
 	"invalid_cwd",
 	"invalid_env_name",
 	"invalid_request",
 	"io",
 	"no_config_dir",
+	"release_metadata_unavailable",
+	"release_validation_failed",
 	"spawn_failed",
+	"update_in_progress",
 	"write_failed",
 ]);
 
@@ -131,6 +144,55 @@ export function desktopCommandErrorText(
 			return {
 				message: tl(
 					"Ryu could not save the scheduled update. Check that its settings folder can be written to, then try again."
+				),
+				detail,
+			};
+		default:
+			return coreLifecycleErrorText(code, detail, tl);
+	}
+}
+
+/** The sentence for a code `ensure_core_installed`/`start_ryu_core` reject with. */
+function coreLifecycleErrorText(
+	code: DesktopCommandErrorCode,
+	detail: string | null,
+	tl: LiteralMessage
+): DesktopCommandErrorText | null {
+	switch (code) {
+		case "update_in_progress":
+			return {
+				message: tl(
+					"Ryu is installing an app update. The local runtime will start after Ryu restarts."
+				),
+				detail,
+			};
+		case "core_binary_missing":
+			return {
+				message: tl(
+					"Ryu could not find its local runtime. Reinstall Ryu, then try again."
+				),
+				detail,
+			};
+		case "core_spawn_failed":
+			return { message: tl("Ryu could not start its local runtime."), detail };
+		case "installer_failed":
+			return {
+				message: tl(
+					"Ryu could not install its local runtime. Check your internet connection and free disk space, then try again."
+				),
+				detail,
+			};
+		case "release_validation_failed":
+			return {
+				message: tl(
+					"The downloaded runtime did not match its published release, so Ryu did not run it."
+				),
+				detail,
+			};
+		case "release_metadata_unavailable":
+			return {
+				message: tl(
+					"Ryu could not verify the runtime release. Check your internet connection, then try again."
 				),
 				detail,
 			};

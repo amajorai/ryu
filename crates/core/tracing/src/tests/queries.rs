@@ -178,3 +178,53 @@ async fn v1_database_upgrades_in_place() {
     drop(store);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A sink that can decline spans; counts and records what it receives.
+struct GatedSink {
+    wants: std::sync::atomic::AtomicBool,
+    seen: std::sync::Mutex<Vec<Span>>,
+}
+
+impl SpanSink for GatedSink {
+    fn on_span_end(&self, span: &Span) {
+        self.seen.lock().unwrap().push(span.clone());
+    }
+
+    fn wants_spans(&self) -> bool {
+        self.wants.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[tokio::test]
+async fn sink_that_declines_spans_is_skipped_and_receives_them_once_enabled() {
+    let store = TraceStore::open_in_memory().unwrap();
+    let sink = Arc::new(GatedSink {
+        wants: std::sync::atomic::AtomicBool::new(false),
+        seen: std::sync::Mutex::new(Vec::new()),
+    });
+    store.set_sink(Some(sink.clone()));
+    let skipped = store
+        .start_span(SpanStart::new("conv-g", SpanKind::ToolCall, "skipped"))
+        .await
+        .unwrap();
+    store.end_span(&skipped.id, SpanEnd::ok()).await.unwrap();
+    assert!(sink.seen.lock().unwrap().is_empty());
+    // The span is still persisted even though the sink declined it.
+    let stored = store.get_span(&skipped.id).await.unwrap().unwrap();
+    assert_eq!(stored.status, SpanStatus::Ok);
+
+    sink.wants.store(true, std::sync::atomic::Ordering::SeqCst);
+    let exported = store
+        .start_span(SpanStart::new("conv-g", SpanKind::ToolCall, "exported"))
+        .await
+        .unwrap();
+    store
+        .end_span(&exported.id, SpanEnd::error("boom").attr("k", "v"))
+        .await
+        .unwrap();
+    let seen = sink.seen.lock().unwrap();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].name, "exported");
+    assert_eq!(seen[0].status, SpanStatus::Error);
+    assert_eq!(seen[0].attributes.get("k"), Some(&serde_json::json!("v")));
+}

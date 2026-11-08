@@ -155,6 +155,9 @@ impl StoreRecord {
 impl<'a> Session<'a> {
     /// Log in to `store` with its sealed credentials.
     pub async fn connect(store: &'a StoreRecord, credentials: &StoreCredentials) -> Result<Self> {
+        if store.kind.is_sync_target() {
+            bail!("{} stores are push-only", store.kind.as_str());
+        }
         let base = store.base_url()?;
         let http = net::guarded_client(&base, net::Egress::from_env()).await?;
         let mut session = Self {
@@ -245,6 +248,12 @@ impl<'a> Session<'a> {
                     .ok_or_else(|| anyhow!("store login returned no client token"))
             }
             (_, AuthMethod::UniversalAuth) => bail!("universal-auth is only for Infisical"),
+            (_, AuthMethod::AccessKey | AuthMethod::ServiceAccount) => {
+                bail!(
+                    "{} auth is only for secret-sync targets",
+                    self.store.auth_method.as_str()
+                )
+            }
         }
     }
 
@@ -276,7 +285,8 @@ impl<'a> Session<'a> {
     pub async fn check(&self) -> Result<()> {
         match self.store.kind {
             StoreKind::Infisical => self.infisical_read("").await.map(|_| ()),
-            StoreKind::Openbao | StoreKind::HashicorpVault => {
+            // `connect` refuses push-only targets, so this is Vault/OpenBao.
+            _ => {
                 let url = url_with(&self.base, &["v1", "auth", "token", "lookup-self"])?;
                 let response = self
                     .vault_request(reqwest::Method::GET, url)
@@ -296,7 +306,8 @@ impl<'a> Session<'a> {
     pub async fn read(&self, remote_path: &str) -> Result<RemoteFolder> {
         match self.store.kind {
             StoreKind::Infisical => self.infisical_read(remote_path).await,
-            StoreKind::Openbao | StoreKind::HashicorpVault => self.kv_read(remote_path).await,
+            // `connect` refuses push-only targets, so this is Vault/OpenBao.
+            _ => self.kv_read(remote_path).await,
         }
     }
 
@@ -306,9 +317,8 @@ impl<'a> Session<'a> {
     pub async fn write(&self, remote_path: &str, values: &BTreeMap<String, String>) -> Result<()> {
         match self.store.kind {
             StoreKind::Infisical => self.infisical_write(remote_path, values).await,
-            StoreKind::Openbao | StoreKind::HashicorpVault => {
-                self.kv_write(remote_path, values).await
-            }
+            // `connect` refuses push-only targets, so this is Vault/OpenBao.
+            _ => self.kv_write(remote_path, values).await,
         }
     }
 

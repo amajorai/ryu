@@ -55,6 +55,7 @@ export const responseCodec11 = z
 const fileIndexWireResponseCodec = z
 	.object({
 		message: z.union([z.string(), z.null()]).optional(),
+		reason_code: z.union([z.string(), z.null()]).optional(),
 		state: z.union([z.string(), z.null()]).optional(),
 		warnings: z.union([z.array(z.string()), z.null()]).optional(),
 	})

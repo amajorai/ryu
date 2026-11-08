@@ -1,6 +1,7 @@
 "use client";
 
 import { formatPercent as formatLocalePercent } from "@ryu/i18n/format-percent";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type ChartConfig,
 	ChartContainer,
@@ -25,7 +26,6 @@ import {
 import {
 	CHART_COLORS,
 	formatCompact,
-	LocalizedLiteral,
 	MetricTile,
 	TrendTooltipRow,
 } from "./usage-analytics-dashboard-shared.tsx";
@@ -47,6 +47,7 @@ export function formatPercent(value: number | null): string {
  * otherwise pin it at 100%.
  */
 export function PromptCacheTrend({ data }: { data: UsageAnalyticsData }) {
+	const tl = useLiteralMessages();
 	const points = useMemo(() => usageCacheSeries(data.buckets), [data.buckets]);
 	const { cacheReadTokens, cacheWriteTokens } = data.totals;
 	const reportsWrites = cacheWriteTokens > 0;
@@ -82,7 +83,7 @@ export function PromptCacheTrend({ data }: { data: UsageAnalyticsData }) {
 								{formatPercent(reuse)}
 							</span>
 							<span className="text-muted-foreground">
-								<LocalizedLiteral value="reads vs writes" />
+								{tl("reads vs writes")}
 							</span>
 						</span>
 					) : null

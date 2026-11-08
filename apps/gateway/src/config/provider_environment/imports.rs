@@ -37,6 +37,7 @@ pub(super) fn restore_closed_imports(
             "vertex" => connection!(vertex),
             "openai-credits" => connection!(openai_credits),
             "anthropic-credits" => connection!(anthropic_credits),
+            "azure-credits" => connection!(azure_credits),
             direct if ryu_gw_credentials::direct_compatible_provider_url(direct).is_some() => {
                 if !allowed {
                     match authored.compatible.get(direct) {

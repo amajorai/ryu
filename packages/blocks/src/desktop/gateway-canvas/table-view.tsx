@@ -22,8 +22,6 @@ import { useNodeCounters } from "./nodes.tsx";
 const CELL = "px-3 py-2 text-start align-middle";
 const HEAD = cn(CELL, "font-medium text-muted-foreground text-xs");
 
-const NOT_COUNTED = "Not counted";
-
 function NodeRow({
 	counted: feedCounted,
 	node,
@@ -40,6 +38,7 @@ function NodeRow({
 	const counters = useNodeCounters(store, node.id);
 	const counted = feedCounted && carriesRequests(node);
 	const tl = useLiteralMessages();
+	const notCounted = tl("Not counted");
 	return (
 		<tr
 			className={cn("border-border border-t", selected && "bg-muted/60")}
@@ -64,7 +63,7 @@ function NodeRow({
 					!counted && "text-muted-foreground"
 				)}
 			>
-				{counted ? formatCount(counters.requests) : NOT_COUNTED}
+				{counted ? formatCount(counters.requests) : notCounted}
 			</td>
 			<td
 				className={cn(
@@ -73,7 +72,7 @@ function NodeRow({
 					!counted && "text-muted-foreground"
 				)}
 			>
-				{counted ? formatCount(counters.blocked) : NOT_COUNTED}
+				{counted ? formatCount(counters.blocked) : notCounted}
 			</td>
 			<td className={cn(CELL, "text-muted-foreground")}>
 				{node.health ? HEALTH_LABELS[node.health] : "Unknown"}

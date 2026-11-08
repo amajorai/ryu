@@ -86,7 +86,12 @@ export interface BrowserDownloadHint {
 	browser: GuideBrowser;
 	/** Short name for headings ("Chrome", "your browser"). */
 	name: string;
-	/** Whether the download control sits in the toolbar's top-right corner, so an arrow can point at it. */
+	/**
+	 * Whether the download control sits in a top corner of the toolbar, so an
+	 * arrow can point at it. The corner follows the browser's own UI direction
+	 * (top-right, or top-left for an RTL browser; see download-guide-direction.ts),
+	 * so the copy in `where` never names a side.
+	 */
 	pointsTopRight: boolean;
 	/** Keyboard shortcut that opens the browser's downloads list, if any. */
 	shortcut: string | null;
@@ -118,7 +123,7 @@ export function browserDownloadHint(
 				browser,
 				name,
 				where:
-					"Click the downloads icon in the top-right corner of the toolbar, then click the Ryu installer.",
+					"Click the downloads icon in the browser toolbar, then click the Ryu installer.",
 				shortcut: chromiumShortcut(os),
 				pointsTopRight: true,
 			};
@@ -127,7 +132,7 @@ export function browserDownloadHint(
 				browser,
 				name,
 				where:
-					"Open the Downloads panel in the top-right corner of the toolbar, then click Open file under the Ryu installer.",
+					"Open the Downloads panel from the browser toolbar, then click Open file under the Ryu installer.",
 				shortcut: os === "macos" ? null : "Ctrl+J",
 				pointsTopRight: true,
 			};
@@ -136,7 +141,7 @@ export function browserDownloadHint(
 				browser,
 				name,
 				where:
-					"Click the downloads icon in the top-right corner, then click the Ryu installer.",
+					"Click the downloads icon in the browser toolbar, then click the Ryu installer.",
 				shortcut: os === "macos" ? null : "Ctrl+J",
 				pointsTopRight: true,
 			};
@@ -145,7 +150,7 @@ export function browserDownloadHint(
 				browser,
 				name,
 				where:
-					"Click the downloads arrow in the top-right corner of the toolbar, then click the Ryu installer.",
+					"Click the downloads arrow in the browser toolbar, then click the Ryu installer.",
 				// Firefox: ⌘J on macOS, Ctrl+J on Windows, Ctrl+Shift+Y on Linux
 				// (⌘⇧J is its Browser Console).
 				shortcut: firefoxShortcut(os),
@@ -156,7 +161,7 @@ export function browserDownloadHint(
 				browser,
 				name,
 				where:
-					"Click the downloads button in the top-right corner of the Safari toolbar, then double-click the Ryu installer.",
+					"Click the downloads button in the Safari toolbar, then double-click the Ryu installer.",
 				shortcut: "⌥⌘L",
 				pointsTopRight: true,
 			};

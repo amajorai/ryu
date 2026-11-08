@@ -115,6 +115,7 @@ pub(super) async fn load_turn_memory(
         memory_read_levels,
         memory_visibility,
         memory_policy.recall_budget.long_term_limit(),
+        memory_policy.recall_budget.char_budget(),
         memory_policy.include_sensitive_topics,
     )
     .await;

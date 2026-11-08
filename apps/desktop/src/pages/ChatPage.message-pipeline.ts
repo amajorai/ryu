@@ -20,6 +20,7 @@ import type { useChatConversationSync } from "./ChatPage.conversation-sync.ts";
 import type { useChatGoals } from "./ChatPage.goals.ts";
 import {
 	describeContextHandoff,
+	indexMessagesById,
 	messageAuthorId,
 	reuseUnchangedReadReceipts,
 } from "./ChatPage.helpers.ts";
@@ -162,10 +163,9 @@ export function useChatMessagePipeline({
 			});
 		}
 		const states = new Map<string, MessageReadReceiptState>();
+		const messagesById = indexMessagesById(renderedMessages);
 		for (const [messageId, records] of readReceiptsByMessage) {
-			const message = renderedMessages.find(
-				(candidate) => candidate.id === messageId
-			);
+			const message = messagesById.get(messageId);
 			const authorId = message ? messageAuthorId(message) : null;
 			const readers = records
 				.map((record) => {

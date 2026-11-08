@@ -118,11 +118,11 @@ export function ModelDefaultsFields({
 				const effortItems = [
 					{
 						value: INHERIT,
-						label: defaultLabel(effortLabel(below.effort)),
+						label: defaultLabel(effortLabel(below.effort, tl)),
 					},
 					...efforts.map((effort) => ({
 						value: effort,
-						label: effortLabel(effort),
+						label: effortLabel(effort, tl),
 					})),
 				];
 				return (

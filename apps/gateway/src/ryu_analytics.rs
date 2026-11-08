@@ -8,6 +8,7 @@
 
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -207,6 +208,14 @@ fn bounded(value: &str) -> String {
     value.trim().chars().take(MAX_FIELD_LENGTH).collect()
 }
 
+/// Process-wide relay client, so model-call facts reuse pooled keep-alive
+/// connections and one TLS configuration instead of a new client per call.
+/// The per-request timeout is set on each request builder.
+fn relay_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
+
 /// Emit a successful or failed model-call fact without awaiting the relay.
 /// `error_code` is a stable class only (never a provider message or response
 /// body) and is omitted for successful calls.
@@ -237,8 +246,7 @@ pub fn emit_model_call(
         service_version: env!("CARGO_PKG_VERSION"),
     };
     tokio::spawn(async move {
-        let client = reqwest::Client::new();
-        let mut request = client
+        let mut request = relay_client()
             .post(config.url)
             .timeout(REQUEST_TIMEOUT)
             .json(&RelayBody { events: [event] });
@@ -255,9 +263,22 @@ pub fn emit_model_call(
 #[cfg(test)]
 mod tests {
     use super::{
-        diagnostics_relay_enabled, endpoint, read_relay_token, read_relay_token_with, truthy,
-        GatewayAnalyticsRelayFile, ModelCallEvent,
+        diagnostics_relay_enabled, endpoint, read_relay_token, read_relay_token_with, relay_client,
+        truthy, GatewayAnalyticsRelayFile, ModelCallEvent,
     };
+
+    #[test]
+    fn relay_client_is_one_shared_instance() {
+        assert!(std::ptr::eq(relay_client(), relay_client()));
+        let from_other_thread =
+            std::thread::spawn(|| relay_client() as *const reqwest::Client as usize)
+                .join()
+                .expect("join relay client thread");
+        assert_eq!(
+            from_other_thread,
+            relay_client() as *const reqwest::Client as usize
+        );
+    }
 
     #[test]
     fn hosted_and_local_gates_parse_explicit_values() {

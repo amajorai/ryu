@@ -11,11 +11,11 @@ import { BoardStatusDot } from "./board-status.tsx";
 import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	countWord,
-	eventOutcome,
 	type WikiRoute,
 	wikiAgo,
 	wikiThreadTitle,
 } from "./wiki-model.ts";
+import { runOutcomeAgo } from "./wiki-model-words.ts";
 import { PROSE, WikiLink } from "./wiki-parts.tsx";
 
 export const LIST =
@@ -140,7 +140,7 @@ export function RunList({
 						&ndash;{" "}
 						{event.kind === "upcoming"
 							? tl("next run {ago}", { ago: wikiAgo(event.start, now) })
-							: `${eventOutcome(event)} ${wikiAgo(event.start, now)}`}
+							: runOutcomeAgo(event, wikiAgo(event.start, now), tl)}
 						{event.count && event.count > 1 ? (
 							<> {tl("({count} runs)", { count: String(event.count) })}</>
 						) : (

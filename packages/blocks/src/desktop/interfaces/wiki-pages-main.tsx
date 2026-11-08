@@ -8,7 +8,6 @@ import {
 	byRecency,
 	countWord,
 	didYouKnow,
-	eventOutcome,
 	eventsOnDay,
 	featuredAgent,
 	newsItem,
@@ -18,6 +17,7 @@ import {
 	wikiThreadTitle,
 	wikiTime,
 } from "./wiki-model.ts";
+import { bracketedRunOutcome } from "./wiki-model-words.ts";
 import { Dot, LIST } from "./wiki-pages-marks.tsx";
 import { TopicForm } from "./wiki-pages-talk.tsx";
 import {
@@ -189,7 +189,7 @@ export function MainPage({
 											bold
 											route={{ id: featured.agent.id, kind: "agent" }}
 										>
-											Full article&hellip;
+											{tl("Full article…")}
 										</WikiLink>
 										)
 									</p>
@@ -292,7 +292,7 @@ export function MainPage({
 											) : null}
 											<span className="text-muted-foreground">
 												{" "}
-												({eventOutcome(event)})
+												{bracketedRunOutcome(event, tl)}
 											</span>
 										</li>
 									))}

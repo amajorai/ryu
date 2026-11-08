@@ -1,4 +1,7 @@
 {
+  "Failed to send": "فشل الإرسال",
+  "Send failed": "فشل الإرسال",
+  "Send was interrupted; review and resend": "تمت مقاطعة الإرسال؛ راجع وأعد الإرسال",
   "Sending at a set time": "الإرسال في وقت محدد",
   "Sending at {when}": "الإرسال في {when}",
   "Waiting for agents to start, then finish": "في انتظار بدء الوكلاء ثم انتهائهم",

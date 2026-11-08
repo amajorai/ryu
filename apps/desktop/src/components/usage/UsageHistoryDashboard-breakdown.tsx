@@ -22,6 +22,7 @@ import {
 	type UsageHistoryReport,
 } from "@/src/lib/api/usage-history.ts";
 import { CounterCell, money } from "./UsageHistoryDashboard-shared.tsx";
+import { historySourceName } from "./usage-history-source-labels.ts";
 
 const HEAD = "h-10 px-2 font-normal text-muted-foreground text-xs";
 const CELL = "h-10 px-2 py-0";
@@ -92,8 +93,7 @@ export function Breakdown({
 								{kind === "model" ? (row.modelId ?? "Unknown model") : row.date}
 							</TableCell>
 							<TableCell className={cn(CELL, "text-muted-foreground")}>
-								{report.sources.find((source) => source.id === row.sourceId)
-									?.label ?? row.sourceId}
+								{historySourceName(report, row.sourceId, tl)}
 							</TableCell>
 							<TableCell className={cn(CELL, "text-end tabular-nums")}>
 								{scope === "unattributed" &&

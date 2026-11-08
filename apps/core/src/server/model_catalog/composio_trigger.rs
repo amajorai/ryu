@@ -81,6 +81,7 @@ pub(in crate::server) async fn composio_trigger_subscribe(
     }
     match store
         .subscribe(
+            caller.as_ref().map_or("", |c| c.user_id.as_str()),
             &body.agent_id,
             &body.toolkit,
             &body.trigger_slug,
@@ -135,6 +136,7 @@ pub(in crate::server) async fn composio_own_account_trigger_subscribe(
     }
     match store
         .subscribe_own_account(
+            caller.as_ref().map_or("", |c| c.user_id.as_str()),
             &body.agent_id,
             &entity,
             &body.toolkit,

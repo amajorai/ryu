@@ -191,8 +191,10 @@ pub(crate) fn precheck_static(provider: &StaticProvider) -> Result<()> {
         StaticProvider::Postgres { connection_url, .. }
         | StaticProvider::Redis { connection_url, .. } => precheck_url(connection_url, false),
         StaticProvider::Webhook { url, .. } => precheck_url(url, true),
-        // IAM calls go to the fixed AWS endpoint.
-        StaticProvider::AwsIam { .. } => Ok(()),
+        // IAM, OpenAI and Anthropic calls go to fixed provider endpoints.
+        StaticProvider::AwsIam { .. }
+        | StaticProvider::OpenAi { .. }
+        | StaticProvider::Anthropic { .. } => Ok(()),
     }
 }
 

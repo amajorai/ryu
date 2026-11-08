@@ -9,7 +9,10 @@ import {
 
 const routerSource = readFileSync(
 	fileURLToPath(
-		new URL("../../../../crates/gateway/router/src/lib.rs", import.meta.url)
+		new URL(
+			"../../../../crates/gateway/router/src/pool_routes.rs",
+			import.meta.url
+		)
 	),
 	"utf8"
 );

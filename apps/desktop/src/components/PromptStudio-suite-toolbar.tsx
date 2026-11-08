@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 import type { PromptSuiteState } from "./PromptStudio-suite-state.ts";
+import { VersionLabelOption } from "./versioning/VersionLabelOption.tsx";
 
 export function PromptSuiteToolbar({
 	agentId,
@@ -115,9 +116,12 @@ export function PromptSuiteToolbar({
 					>
 						<NativeSelectOption value="">Restore version…</NativeSelectOption>
 						{suiteVersions.map((version) => (
-							<NativeSelectOption key={version.id} value={version.id}>
-								{version.label || formatLocalDateTime(version.createdAt)}
-							</NativeSelectOption>
+							<VersionLabelOption
+								fallback={formatLocalDateTime(version.createdAt)}
+								key={version.id}
+								label={version.label}
+								value={version.id}
+							/>
 						))}
 					</NativeSelect>
 				) : null}

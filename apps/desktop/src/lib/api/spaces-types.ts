@@ -128,6 +128,9 @@ export interface SpaceDocument {
 	 * Core's own field doc says so, which is why this is safe to render.
 	 */
 	indexMessage: string | null;
+	/** Core's stable `FileIndexRecord.reason_code` behind {@link indexMessage}, so a
+	 *  row can word the failure in the reader's language. Absent from older nodes. */
+	indexReasonCode?: string | null;
 	/**
 	 * What happened to this file's **contents**, or `null` when the wire did not say.
 	 *
@@ -327,15 +330,17 @@ export function toDocumentKind(kind?: string): DocumentKind {
  * One document's content-index status — Core's `FileIndexRecord::to_json`, as it
  * arrives under `index` on a file row of `GET /api/spaces/:id/documents`.
  *
- * Only the three fields a user-facing surface can act on are read here;
- * `reason_code`, `backend_id`, `backend_version`, `chunk_count` and `updated_at` are
- * provenance for a future re-index and are deliberately left on the wire rather than
- * mirrored into a type nothing renders.
+ * Only the fields a user-facing surface can act on are read here (`reason_code`
+ * words a failed row in the reader's language). `backend_id`, `backend_version`,
+ * `chunk_count` and `updated_at` are provenance for a future re-index and are
+ * deliberately left on the wire rather than mirrored into a type nothing renders.
  */
 export interface SpaceFileIndex {
 	/** Human-readable detail behind {@link state}. Core guarantees this is never
 	 *  the document's contents, which is what makes it safe to render. */
 	message: string | null;
+	/** Core's stable code behind {@link message}; `null` when it sent none. */
+	reasonCode?: string | null;
 	/** `null` when Core answered with a state this build does not know. */
 	state: SpaceFileIndexState | null;
 	/** Non-fatal notes from a parse that DID work (lossy decode, missing OCR tool,

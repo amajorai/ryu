@@ -337,11 +337,15 @@
             "type": "select",
             "pref_key": "memory.write-frequency",
             "label": "Write frequency",
-            "description": "When new durable facts are captured from your turns. `Never` makes memory read-only: existing facts are still recalled, but nothing new is stored. This is independent of Recall mode — \"use what you know but learn nothing new\" is a real choice.",
+            "description": "When new durable facts are captured from your turns. `Reviewed` stores no raw turns; instead Dream proposes facts from your chats for you to accept, so it needs Remember chats and Dream turned on. `Never` makes memory read-only: existing facts are still recalled, but nothing new is stored. This is independent of Recall mode — \"use what you know but learn nothing new\" is a real choice.",
             "options": [
               {
                 "value": "per_turn",
                 "label": "Each turn (default)"
+              },
+              {
+                "value": "reviewed",
+                "label": "Reviewed — Dream suggests facts for you to accept"
               },
               {
                 "value": "never",

@@ -143,6 +143,7 @@
   "Starting workflow…": "ワークフローを開始しています…",
   "Submission moderation": "投稿のモデレーション",
   "Tell us more": "詳細を教えてください",
+  "The Feedback Board bridge is unavailable in this Ryu host.": "この Ryu ホストでは Feedback Board ブリッジを利用できません。",
   "The Ryu host bridge did not return a workspace.": "Ryu ホストブリッジからワークスペースが返されませんでした。",
   "The Ryu host bridge is unavailable.": "Ryu ホストブリッジを利用できません。",
   "The inbox is clear.": "受信トレイは空です。",

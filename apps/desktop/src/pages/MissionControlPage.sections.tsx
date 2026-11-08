@@ -265,13 +265,13 @@ export function SessionRow({
 					<div className="text-muted-foreground text-xs">
 						{digest.open_count > 0
 							? tl("{headline} · {turns} turns · {files} files · {open} open", {
-									headline: digest.headline ?? "No work recorded",
+									headline: digest.headline ?? tl("No work recorded"),
 									turns: formatCount(digest.totals.turns),
 									files: formatCount(digest.totals.writes),
 									open: formatCount(digest.open_count),
 								})
 							: tl("{headline} · {turns} turns · {files} files", {
-									headline: digest.headline ?? "No work recorded",
+									headline: digest.headline ?? tl("No work recorded"),
 									turns: formatCount(digest.totals.turns),
 									files: formatCount(digest.totals.writes),
 								})}

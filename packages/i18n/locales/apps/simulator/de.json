@@ -1,3 +1,7 @@
 {
-  "The iOS Simulator runs only on macOS; this node is not a Mac.": "Der iOS-Simulator läuft nur unter macOS; dieser Knoten ist kein Mac."
+  "The iOS Simulator runs only on macOS; this node is not a Mac.": "Der iOS-Simulator läuft nur unter macOS; dieser Knoten ist kein Mac.",
+  "iOS Simulator hardware keys need facebook/idb; not available via simctl.": "Hardwaretasten im iOS Simulator erfordern facebook/idb; über simctl nicht verfügbar.",
+  "iOS Simulator has no public coordinate swipe (simctl). Install facebook/idb to enable it.": "Der iOS Simulator bietet kein öffentliches Wischen per Koordinaten (simctl). facebook/idb installieren, um es zu aktivieren.",
+  "iOS Simulator has no public coordinate tap (simctl). Install facebook/idb to enable it.": "Der iOS Simulator bietet kein öffentliches Tippen per Koordinaten (simctl). facebook/idb installieren, um es zu aktivieren.",
+  "iOS Simulator text entry needs facebook/idb; not available via simctl.": "Texteingabe im iOS Simulator erfordert facebook/idb; über simctl nicht verfügbar."
 }

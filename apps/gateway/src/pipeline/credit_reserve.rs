@@ -99,27 +99,30 @@ pub(crate) fn credit_headroom_micro_usd(
 
 /// The caller's grant money a request routed to `pool` may spend.
 ///
-/// Ryu's own supply ([`crate::credit_pools::is_own_supply_pool`]) reaches the
-/// caller's free credit of EVERY pool — that is the free-credit rule, mirrored by
-/// `debitWallet` on the control plane, which draws grants of any pool for an
-/// own-supply debit. Anything else (the retail OpenRouter pass-through) reaches
-/// only grants of its own pool, exactly as before.
+/// SEPARATE POOLS: a grant pays only for its own pool's supply. Own-supply
+/// traffic served from `pool` reaches that pool's grants plus any retired
+/// pool's ([`crate::credit_pools::RETIRED_POOLS`]), whose holders were promised
+/// free credit before their supplier was retired. Anything else (the retail
+/// OpenRouter pass-through) reaches only its own pool's grants. Mirrored by
+/// `grantPoolsForServingPool` on the control plane. Negative remainders are
+/// clamped: they are not debt against another pool.
 pub(super) fn grant_money_reachable_from(ctx: &RequestContext, pool: &str) -> i64 {
+    let held = |id: &str| {
+        ctx.pool_budgets_micro_usd
+            .get(id)
+            .copied()
+            .unwrap_or_default()
+            .max(0)
+    };
     if crate::credit_pools::is_own_supply_pool(pool) {
-        return free_credit_micro_usd(ctx);
+        return crate::credit_pools::RETIRED_POOLS
+            .iter()
+            .fold(held(pool), |sum, retired| sum.saturating_add(held(retired)));
     }
     ctx.pool_budgets_micro_usd
         .get(pool)
         .copied()
         .unwrap_or_default()
-}
-
-/// The caller's free credit: every pool's remaining grant money (negative
-/// remainders are clamped, they are not debt against another pool).
-pub(super) fn free_credit_micro_usd(ctx: &RequestContext) -> i64 {
-    ctx.pool_budgets_micro_usd
-        .values()
-        .fold(0_i64, |sum, value| sum.saturating_add((*value).max(0)))
 }
 
 /// How much of the org's balance a debit newer than this request's resolve

@@ -141,6 +141,7 @@ pub mod app_notify;
 // grant-gated kernel capabilities a `core#run.failed` subscriber acts through.
 pub mod app_runs;
 // Safe Actions plan review for a Companion: bridge-only, under the verified user.
+pub(crate) mod app_chat_send;
 pub(crate) mod app_safe_actions;
 pub mod app_warmup;
 pub mod app_webhooks;

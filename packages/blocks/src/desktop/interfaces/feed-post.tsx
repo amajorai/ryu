@@ -38,6 +38,7 @@ import {
 	sameAuthor,
 } from "./feed-parts.tsx";
 import { agentById, compactAge } from "./interface-renderer.ts";
+import { untitledDisplayTitle } from "./thread-display-title.ts";
 
 /**
  * Status words read as part of the meta line: muted like the age beside
@@ -310,7 +311,7 @@ export function FeedPostRow({
 	const authorId = author.agent?.id;
 	const thread = feedThreadOf(snapshot, post.threadId);
 	const marker = feedStatusMarker(feedPostStatus(snapshot, post), thread);
-	const title = post.title || "Untitled";
+	const title = untitledDisplayTitle(post.title, tl);
 	const speaker = lastSpeaker(snapshot, thread);
 	const hasLatest = Boolean(post.excerpt) && post.excerpt !== post.title.trim();
 	// One post per thread, as X's timeline shows it: the author's own newest

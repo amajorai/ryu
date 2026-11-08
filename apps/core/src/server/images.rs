@@ -45,12 +45,18 @@ pub struct ImageResult {
     pub rights: String,
 }
 
-fn image_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent("ryu-core/0.1")
-        .timeout(Duration::from_secs(15))
-        .build()
-        .expect("reqwest client")
+/// Short-timeout client for the image search providers.
+///
+/// Shared process-wide so search-as-you-type reuses pooled TLS connections.
+fn image_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("ryu-core/0.1")
+            .timeout(Duration::from_secs(15))
+            .build()
+            .expect("reqwest client")
+    })
 }
 
 fn normalize_provider(provider: &str) -> &'static str {
@@ -330,6 +336,11 @@ pub async fn search(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_client_is_a_shared_singleton() {
+        assert!(std::ptr::eq(image_client(), image_client()));
+    }
     use serde_json::json;
 
     #[test]

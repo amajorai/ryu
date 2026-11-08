@@ -85,6 +85,7 @@ mod start_failures;
 mod tool_access;
 mod tool_events;
 mod turn_config;
+mod vault_broker;
 mod wire_types;
 
 pub use adapter::*;
@@ -126,6 +127,7 @@ pub(crate) use start_failures::*;
 pub use tool_access::*;
 use tool_events::*;
 pub use turn_config::*;
+use vault_broker::*;
 pub use wire_types::*;
 
 #[cfg(test)]

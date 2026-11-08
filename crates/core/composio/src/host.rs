@@ -52,6 +52,19 @@ pub trait ComposioHost: Send + Sync {
     ) -> Result<bool> {
         Ok(account_entity.is_empty())
     }
+
+    /// Whether the user who subscribed a legacy agent trigger may still run
+    /// the agent. Re-checked on every delivery, so revoking the subscriber's
+    /// `agent.run` or membership stops the trigger. `subscriber_user_id` is
+    /// empty for rows recorded before subscribers were stored. Hosts without
+    /// a principal model allow every delivery.
+    async fn subscriber_may_run_agent(
+        &self,
+        _subscriber_user_id: &str,
+        _agent_id: &str,
+    ) -> Result<bool> {
+        Ok(true)
+    }
 }
 
 /// Process-global host, installed once at boot by `apps/core`.

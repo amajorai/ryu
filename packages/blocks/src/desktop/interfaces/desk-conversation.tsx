@@ -129,7 +129,7 @@ export function DeskConversation({
 			aria-label={
 				row
 					? tl("Conversation: {title}", { title: row.title })
-					: "New conversation"
+					: tl("New conversation")
 			}
 			className="@container/conv relative flex min-h-0 min-w-0 flex-1 outline-none"
 			data-testid="desk-conversation"

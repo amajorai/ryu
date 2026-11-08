@@ -77,9 +77,9 @@ export function WidgetCard({
 				/>
 				<span
 					className="flex-1 truncate font-medium text-sm"
-					title={widget.title || "Untitled"}
+					title={widget.title || tl("Untitled")}
 				>
-					{widget.title || "Untitled"}
+					{widget.title || tl("Untitled")}
 				</span>
 				{/* `nodrag nopan` are React Flow's opt-out classes. In DashboardCanvas
 				    each card is a node, and without them d3-drag claims (and stops)
@@ -99,7 +99,7 @@ export function WidgetCard({
 						<DropdownMenuTrigger
 							aria-expanded={actionsOpen}
 							aria-label={tl("Widget actions for {widgetTitle}", {
-								widgetTitle: widget.title || "Untitled",
+								widgetTitle: widget.title || tl("Untitled"),
 							})}
 							onClick={() => setActionsOpen(true)}
 							onPointerDown={(event) => event.stopPropagation()}

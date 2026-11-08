@@ -96,7 +96,7 @@ impl TraceStore {
             .context("ending span")?
         };
         if changed > 0 {
-            if let Some(sink) = self.sink() {
+            if let Some(sink) = self.sink().filter(|sink| sink.wants_spans()) {
                 if let Some(span) = self.get_span(span_row_id).await? {
                     sink.on_span_end(&span);
                 }

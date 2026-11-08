@@ -141,11 +141,21 @@ pub(crate) fn launched_engine<'a>(
     if let Some(cmd) = engine.strip_prefix("acp-exec:") {
         let cmd = cmd.trim();
         if !cmd.is_empty() {
-            return Some((LaunchedEngine::AcpExec(cmd), "This custom agent".to_owned()));
+            return Some((
+                LaunchedEngine::AcpExec(cmd),
+                crate::i18n::messages::agent_launch_label(
+                    crate::i18n::messages::AGENT_LAUNCH_CUSTOM_AGENT_LABEL_MESSAGE,
+                ),
+            ));
         }
     }
     if sdk::is_sdk_app(engine) {
-        return Some((LaunchedEngine::SdkApp, "This SDK app".to_owned()));
+        return Some((
+            LaunchedEngine::SdkApp,
+            crate::i18n::messages::agent_launch_label(
+                crate::i18n::messages::AGENT_LAUNCH_SDK_APP_LABEL_MESSAGE,
+            ),
+        ));
     }
     let entry = acp_registry.find_by_prefix(engine)?;
     Some((

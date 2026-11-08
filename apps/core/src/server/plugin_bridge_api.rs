@@ -211,12 +211,15 @@ pub async fn plugin_bridge_dispatch(
     // caller, which their handlers check for its own permission.
     let webhook_secret_op = crate::server::app_webhooks::WebhookSecretOp::from_name(&body.method);
     let safe_actions_op = crate::server::app_safe_actions::SafeActionsOp::from_name(&body.method);
+    // App-authored chat turns: the shared app-send gates (`host_chat::submit`).
+    let chat_send_op = crate::server::app_chat_send::ChatSendOp::from_name(&body.method);
     let (bridge_path, required_grant) = if is_view_action {
         (None, "views:actions")
     } else if webhook_op.is_some()
         || warmup_op.is_some()
         || webhook_secret_op.is_some()
         || safe_actions_op.is_some()
+        || chat_send_op.is_some()
     {
         match required_grant_for(&body.method) {
             Some(grant) => (None, grant),
@@ -353,6 +356,10 @@ pub async fn plugin_bridge_dispatch(
     }
     if let Some(op) = safe_actions_op {
         let outcome = op.run(&state, &caller, &body.args).await;
+        return kernel_op_reply(&body.method, outcome);
+    }
+    if let Some(op) = chat_send_op {
+        let outcome = op.run(&state, &plugin_id, &caller, &body.args).await;
         return kernel_op_reply(&body.method, outcome);
     }
     // Every non-view.action method resolved a concrete bridge path above.

@@ -25,5 +25,9 @@ describe("BeforeAfterSummary", () => {
 		expect(html).toContain("$37.40");
 		expect(html).toContain("After top-up");
 		expect(html).toContain("Credits added");
+		// The English accessible name keeps its exact pre-catalog wording.
+		expect(html).toContain(
+			'aria-label="Current: Wallet balance, $12.40. After top-up: Wallet balance, $37.40."'
+		);
 	});
 });

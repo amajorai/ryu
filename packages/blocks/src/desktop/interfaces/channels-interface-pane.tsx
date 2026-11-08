@@ -1,5 +1,6 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
+import { HandleText } from "@ryu/ui/components/handle-text.tsx";
 import {
 	Tabs,
 	TabsContent,
@@ -118,14 +119,14 @@ export function ChannelPane({
 		recipient = (
 			<>
 				<ChannelsAvatar agent={dmAgent} name={label} size={16} />
-				<span className="truncate">@{label}</span>
+				<HandleText className="truncate" name={label} />
 			</>
 		);
 	} else if (!showPicker) {
 		recipient = (
 			<>
 				<Users aria-hidden="true" className="size-4 shrink-0" />
-				<span className="truncate">@{label}</span>
+				<HandleText className="truncate" name={label} />
 			</>
 		);
 	}

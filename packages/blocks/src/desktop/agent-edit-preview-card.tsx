@@ -142,8 +142,8 @@ export function AgentPreviewCard({
 					</div>
 				) : (
 					<p className="text-muted-foreground text-sm italic">
-						No instructions yet. Describe how this agent should behave on the
-						left.
+						No instructions yet. Describe how this agent should behave in the
+						Instructions field.
 					</p>
 				)}
 			</div>

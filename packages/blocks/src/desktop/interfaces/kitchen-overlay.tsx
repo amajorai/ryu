@@ -66,17 +66,17 @@ export function KitchenLine({
 							station.typicalMs,
 							now
 						);
-						let status = "Idle";
+						let status = tl("Idle");
 						let tone = "text-muted-foreground";
 						if (station.working) {
 							status = progress.over
-								? "Cooking, longer than usual"
+								? tl("Cooking, longer than usual")
 								: tl("Cooking, ~{percent}% (estimate)", {
 										percent: Math.round(progress.fraction * 100),
 									});
 							tone = STATE_TEXT.cooking;
 						} else if (station.burnt) {
-							status = "Burnt order";
+							status = tl("Burnt order");
 							tone = STATE_TEXT.burnt;
 						}
 						const act = actLayer?.acts.get(station.agent.id);

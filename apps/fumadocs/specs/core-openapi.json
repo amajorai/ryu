@@ -4578,7 +4578,7 @@
         "tags": [
           "Cloud environments"
         ],
-        "description": "Atomically replace this user's templates and vault metadata. schemaVersion must be 1; revision must equal the current revision. Omitted value preserves the sealed value for the same id/key/kind; removing an entry deletes its value. Values are write-only and sealed at rest. Maximum request 1 MiB, 100 templates/entries, 20 repositories per template, 64 KiB script/instructions/value. GatewayRoute and verified personal identity required; request retries must reload revision after 409. Optional runtime selects backend auto or box (a fresh disposable Ryu Box per conversation), executor ryu, claude-code, codex, opencode or cursor, and lifetimeMinutes 5-240 (honored only for box); omitted runtime reads as auto/ryu/30. Managed executors require the box backend and internet access; box rejects a Tailscale key and bound network secrets, and a restricted box allowlist must include archive.ubuntu.com, security.ubuntu.com and the agent's provider hosts (422 cloud_environment_policy_unavailable). This route does not start scripts or test VPN credentials.",
+        "description": "Atomically replace this user's templates and vault metadata. schemaVersion must be 1; revision must equal the current revision. Omitted value preserves the sealed value for the same id/key/kind; removing an entry deletes its value. Values are write-only and sealed at rest. Maximum request 1 MiB, 100 templates/entries, 20 repositories per template, 64 KiB script/instructions/value. GatewayRoute and verified personal identity required; request retries must reload revision after 409. Optional runtime selects backend auto or box (a fresh disposable Ryu Box per conversation), executor ryu, claude-code, codex, opencode or cursor, and lifetimeMinutes 5-240 (honored only for box); omitted runtime reads as auto/ryu/30. Managed executors require the box backend and internet access; box rejects a Tailscale key, its egress proxy substitutes bound network secrets only for DNS domains a restricted allowlist allows, and a restricted box allowlist must include archive.ubuntu.com, security.ubuntu.com and the agent's provider hosts (422 cloud_environment_policy_unavailable). This route does not start scripts or test VPN credentials.",
         "operationId": "put",
         "requestBody": {
           "content": {
@@ -22954,6 +22954,212 @@
         }
       }
     },
+    "/api/vault/access-policies": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Access policies: who approves requests under which paths",
+        "operationId": "list_access_policies",
+        "responses": {
+          "200": {
+            "description": "Access policies",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/access-policies/{name}": {
+      "put": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Write an access policy",
+        "operationId": "put_access_policy",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Policy name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored policy",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Delete an access policy",
+        "operationId": "delete_access_policy",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Policy name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/access-requests": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Access requests the caller opened or may approve",
+        "operationId": "list_access_requests",
+        "responses": {
+          "200": {
+            "description": "Requests",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Request time-bound access to a path",
+        "operationId": "create_access_request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Pending request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/access-requests/{id}": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "One access request",
+        "operationId": "get_access_request",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Request id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/access-requests/{id}/{action}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Approve, deny, cancel, or revoke an access request",
+        "operationId": "decide_access_request",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Request id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "description": "approve, deny, cancel, or revoke",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vault/agent-accounts": {
       "get": {
         "tags": [
@@ -23025,6 +23231,54 @@
                 "schema": {}
               }
             }
+          }
+        }
+      }
+    },
+    "/api/vault/agent-accounts/login-urls": {
+      "put": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Set or replace the login URLs of an agent's website account",
+        "description": "Login URLs decide where a session Box fill may submit the account's password. Validated like account create: https, the account's host, its www. variant or a subdomain, no user name, port, query or fragment, at most four. Audited with the URLs before and after.",
+        "operationId": "login_urls_set",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "description": "Agent that owns the account (set by Core)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The account (metadata only)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "A login URL breaks a rule"
+          },
+          "404": {
+            "description": "No such account for this agent"
+          },
+          "409": {
+            "description": "The account predates login URLs"
           }
         }
       }
@@ -24354,7 +24608,7 @@
         "tags": [
           "Vault"
         ],
-        "summary": "Set an environment's unmatched-host policy and agent skills (admin on sys/broker)",
+        "summary": "Set an environment's unmatched-host policy, agent-run opt-in and agent skills (admin on sys/broker)",
         "operationId": "broker_put_environment",
         "parameters": [
           {
@@ -25868,6 +26122,91 @@
         "responses": {
           "200": {
             "description": "Reachable",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/fill-sets": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "List active vault sets attached to agent browser sessions",
+        "operationId": "set_list",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "description": "Only this agent's set",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sets",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Attach vault items to one agent's browser session (immutable)",
+        "operationId": "set_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Attached (no value is returned)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/fill-sets/{id}": {
+      "delete": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Revoke a vault set attached to an agent browser session",
+        "operationId": "set_revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Fill set id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked",
             "content": {
               "application/json": {
                 "schema": {}

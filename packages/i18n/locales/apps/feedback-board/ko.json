@@ -143,6 +143,7 @@
   "Starting workflow…": "워크플로 시작 중…",
   "Submission moderation": "제출물 검토",
   "Tell us more": "자세히 알려 주세요",
+  "The Feedback Board bridge is unavailable in this Ryu host.": "이 Ryu 호스트에서는 Feedback Board 브리지를 사용할 수 없습니다.",
   "The Ryu host bridge did not return a workspace.": "Ryu 호스트 브리지가 워크스페이스를 반환하지 않았습니다.",
   "The Ryu host bridge is unavailable.": "Ryu 호스트 브리지를 사용할 수 없습니다.",
   "The inbox is clear.": "받은 편지함이 비어 있습니다.",

@@ -20,9 +20,12 @@ use crate::agents::AgentIdentityMode;
 use crate::identity_verify::VerifiedCaller;
 use crate::sidecar::adapters::AgentLaunchCheck;
 
-/// The route, merged into the agents router.
+/// The route, merged into the agents router. The per-agent egress allowlist
+/// routes ride along so they join the same router without a second merge.
 pub fn routes() -> Router<ServerState> {
-    Router::new().route("/api/agents/launch-check", post(agent_launch_check))
+    Router::new()
+        .route("/api/agents/launch-check", post(agent_launch_check))
+        .merge(crate::sidecar::ext_proxy::egress_policy::api::routes())
 }
 
 /// Body for `POST /api/agents/launch-check`.

@@ -79,7 +79,9 @@ export interface JobCompany {
 const PERSONAL: JobCompany = {
 	id: PERSONAL_COMPANY_ID,
 	kind: "personal",
-	name: "Personal",
+	get name() {
+		return tr("Personal");
+	},
 };
 
 /** The newest message, attributed, for the "Deliverable" excerpt. */

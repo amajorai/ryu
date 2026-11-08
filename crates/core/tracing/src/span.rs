@@ -211,6 +211,12 @@ impl SpanEnd {
 pub trait SpanSink: Send + Sync + 'static {
     /// Called once per ended span with the persisted row.
     fn on_span_end(&self, span: &Span);
+
+    /// Whether the sink currently wants ended spans. When `false` the store
+    /// skips re-reading (and decrypting) the row for it. Defaults to `true`.
+    fn wants_spans(&self) -> bool {
+        true
+    }
 }
 
 /// Filters for [`TraceStore::list_traces`](crate::TraceStore::list_traces).

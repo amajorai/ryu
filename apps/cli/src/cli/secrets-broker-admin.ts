@@ -17,6 +17,7 @@ import {
 	intFlag,
 	type SecretsArgs,
 } from "./secrets-args.ts";
+import { brokerAgentCommand } from "./secrets-broker-agent.ts";
 import { machineTarget, printJson } from "./secrets-output.ts";
 import { type CliContext, UsageError } from "./types.ts";
 
@@ -200,12 +201,16 @@ async function brokerCaCommand(ctx: CliContext): Promise<number> {
 }
 
 const BROKER_USAGE =
-	"Usage: ryu-cli secrets broker services|sessions [revoke ID]|logs|proposals [approve|reject ID]|ca";
+	"Usage: ryu-cli secrets broker services|sessions [revoke ID]|logs|proposals [approve|reject ID]|ca|discover|propose|proposal ID";
 
 export async function broker(
 	ctx: CliContext,
 	args: SecretsArgs
 ): Promise<number> {
+	const agentCommand = brokerAgentCommand(args.positional[1]);
+	if (agentCommand) {
+		return await agentCommand(ctx, args);
+	}
 	switch (args.positional[1]) {
 		case "services":
 			return await brokerServicesCommand(ctx, args);

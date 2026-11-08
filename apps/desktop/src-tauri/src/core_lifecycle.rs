@@ -5,6 +5,9 @@ use std::sync::Mutex;
 
 use tauri::Manager;
 
+#[path = "core_lifecycle_error.rs"]
+mod core_lifecycle_error;
+
 use crate::core::process::RyuCoreProcess;
 use crate::profile;
 #[cfg(debug_assertions)]
@@ -114,10 +117,7 @@ pub(crate) async fn start_ryu_core(
 ) -> Result<String, String> {
     let _operation = state.operation.lock().await;
     if crate::app_update::runtime_update_in_progress() {
-        return Err(
-            "Ryu is installing an app update; the local runtime will start after restart"
-                .to_owned(),
-        );
+        return Err(core_lifecycle_error::update_in_progress());
     }
     // Check if we already have a running process we own
     {
@@ -148,7 +148,7 @@ pub(crate) async fn start_ryu_core(
 
     let binary = match resolve_core_binary() {
         Some(p) => p,
-        None => return Err("Could not find ryu-core binary. Install it to ~/.ryu/bin/ or set RYU_CORE_BIN env var.".to_string()),
+        None => return Err(core_lifecycle_error::core_binary_missing()),
     };
 
     // Create new process manager
@@ -170,7 +170,7 @@ pub(crate) async fn start_ryu_core(
 
             Ok(message)
         }
-        Err(e) => Err(format!("Failed to start Ryu Core: {}", e)),
+        Err(e) => Err(core_lifecycle_error::core_spawn_failed(&e)),
     }
 }
 
@@ -179,7 +179,7 @@ pub(crate) async fn start_ryu_core(
 #[tauri::command]
 pub(crate) async fn ensure_core_installed(app: tauri::AppHandle) -> Result<String, String> {
     if crate::app_update::runtime_update_in_progress() {
-        return Err("Ryu is installing an app update; wait for the restart".to_owned());
+        return Err(core_lifecycle_error::update_in_progress());
     }
     #[cfg(debug_assertions)]
     {
@@ -192,7 +192,9 @@ pub(crate) async fn ensure_core_installed(app: tauri::AppHandle) -> Result<Strin
         // Desktop as well as headless users. It installs Core, Gateway, and CLI,
         // starts Core, and tells Core to begin its bundled defaults. Desktop then
         // keeps ownership of agent detection and the preferences below this step.
-        let p = crate::core::install::ensure_unified_installed(&app).await?;
+        let p = crate::core::install::ensure_unified_installed(&app)
+            .await
+            .map_err(|detail| core_lifecycle_error::installer_failure(&detail))?;
         Ok(p.to_string_lossy().to_string())
     }
 }

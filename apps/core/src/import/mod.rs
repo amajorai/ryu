@@ -33,6 +33,7 @@ pub mod frameworks;
 
 mod helpers;
 mod instructions;
+mod outcome_text;
 mod parse;
 mod resolve;
 mod scan_collect;
@@ -40,6 +41,7 @@ mod scan_text;
 
 pub(crate) use helpers::*;
 pub use instructions::*;
+pub use outcome_text::*;
 pub use parse::*;
 pub use resolve::*;
 use scan_collect::*;
@@ -158,11 +160,23 @@ pub struct ImportOutcome {
     pub kind: String,
     pub id: String,
     pub title: String,
+    /// `title` as a Core message, when Core built it from a template.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "scan_text::wire_message"
+    )]
+    pub title_i18n: Option<Message>,
     pub status: &'static str,
     #[serde(skip_serializing_if = "is_false")]
     pub already_exists: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// `detail` as Core messages; empty when it is a relayed error.
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "scan_text::wire_messages"
+    )]
+    pub detail_i18n: Vec<Message>,
     /// For `instructions` items, the containing folder the desktop should
     /// register as a workspace project.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -176,9 +190,11 @@ impl ImportOutcome {
             kind: kind.to_string(),
             id: id.to_string(),
             title: title.to_string(),
+            title_i18n: None,
             status: "imported",
             already_exists: false,
             detail: None,
+            detail_i18n: Vec::new(),
             folder_path: None,
         }
     }
@@ -189,9 +205,11 @@ impl ImportOutcome {
             kind: kind.to_string(),
             id: id.to_string(),
             title: title.to_string(),
+            title_i18n: None,
             status: "skipped",
             already_exists: false,
             detail: Some(reason.to_string()),
+            detail_i18n: Vec::new(),
             folder_path: None,
         }
     }
@@ -202,9 +220,11 @@ impl ImportOutcome {
             kind: kind.to_string(),
             id: id.to_string(),
             title: title.to_string(),
+            title_i18n: None,
             status: "failed",
             already_exists: false,
             detail: Some(err.to_string()),
+            detail_i18n: Vec::new(),
             folder_path: None,
         }
     }
@@ -215,9 +235,11 @@ impl ImportOutcome {
             kind: kind.to_string(),
             id: id.to_string(),
             title: title.to_string(),
+            title_i18n: None,
             status: "skipped",
             already_exists: true,
             detail: Some("already imported".to_string()),
+            detail_i18n: Vec::new(),
             folder_path: None,
         }
     }

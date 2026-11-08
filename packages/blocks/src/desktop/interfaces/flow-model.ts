@@ -8,6 +8,7 @@ import type {
 import { scopeFromNodeId } from "./flow-model-panel.ts";
 import { needsYouCount } from "./flow-model-threads.ts";
 import type { FlowNode, FlowTarget } from "./flow-model-types.ts";
+import { newConversationLabel } from "./thread-display-title.ts";
 
 /**
  * Flow lays the workspace out left to right, the way an infrastructure canvas
@@ -160,7 +161,7 @@ export function flowStartActions(
 						description: "Ask without picking an agent",
 						icon: "blank",
 						id: "blank",
-						target: { groupKey: "root", label: "New conversation" },
+						target: { groupKey: "root", label: newConversationLabel(tl) },
 						title: "Start a conversation",
 					},
 				]
@@ -245,7 +246,7 @@ export function connectSections(
 					icon: "blank" as const,
 					id: "new",
 					target: start,
-					title: "New conversation",
+					title: newConversationLabel(tl),
 				},
 			],
 			label: null,

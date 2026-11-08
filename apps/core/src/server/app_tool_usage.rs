@@ -4,7 +4,11 @@
 //! This handler authenticates the sidecar token, derives the organization from
 //! the registered managed node, and forwards only the descriptive charge facts
 //! to Gateway. A sidecar can therefore never choose which organization's wallet
-//! to debit.
+//! to debit, nor the ledger reference it is debited under: every report is keyed
+//! by its authenticated plugin id, and the provider's own transaction id is kept
+//! only as attribution. Composio receipts (`composio:<transaction>`, the key
+//! Connect settlement claims) are reported solely by Core's own Composio bridge
+//! with provider-verified usage, so this path refuses them.
 
 use axum::{
     extract::State,
@@ -72,7 +76,36 @@ impl ToolUsageBody {
         if self.tool_calls == 0 {
             return Err("tool_calls must be positive");
         }
+        if self.provider.trim() == "composio" || self.composio_usage.is_some() {
+            return Err("Composio usage is reported by Core, not by an app sidecar");
+        }
         Ok(())
+    }
+
+    /// The Gateway charge for this report, scoped to the authenticated plugin.
+    /// The request id is namespaced (`app:<plugin>:<request>`) and no
+    /// transaction id is forwarded, so the ledger reference is always
+    /// `app:<plugin>:<request>:<provider>` and can never claim a provider
+    /// receipt another surface settles.
+    fn into_charge(self, plugin_id: &str) -> ExternalToolCharge {
+        let task_label = match (self.task_label, self.transaction_id) {
+            (label, None) => label,
+            (None, Some(transaction)) => Some(format!("transaction {transaction}")),
+            (Some(label), Some(transaction)) => {
+                Some(format!("{label} (transaction {transaction})"))
+            }
+        };
+        ExternalToolCharge {
+            provider: self.provider,
+            tool_id: self.tool_id,
+            cost_micro_usd: self.cost_micro_usd,
+            estimated: self.estimated,
+            transaction_id: None,
+            request_id: format!("app:{plugin_id}:{}", self.request_id),
+            tool_calls: self.tool_calls,
+            task_label,
+            composio_usage: None,
+        }
     }
 }
 
@@ -91,9 +124,12 @@ pub(crate) async fn host_tool_usage_record(
             .into_response();
     }
 
-    if let Err((status, message)) = authenticate_sidecar(&state, &headers).await {
-        return (status, Json(json!({ "error": message }))).into_response();
-    }
+    let plugin_id = match authenticate_sidecar(&state, &headers).await {
+        Ok((plugin_id, _)) => plugin_id,
+        Err((status, message)) => {
+            return (status, Json(json!({ "error": message }))).into_response();
+        }
+    };
 
     let Some(org) = crate::sidecar::control_plane::registered_org() else {
         return Json(json!({
@@ -104,17 +140,7 @@ pub(crate) async fn host_tool_usage_record(
         .into_response();
     };
 
-    let charge = ExternalToolCharge {
-        provider: body.provider,
-        tool_id: body.tool_id,
-        cost_micro_usd: body.cost_micro_usd,
-        estimated: body.estimated,
-        transaction_id: body.transaction_id,
-        request_id: body.request_id,
-        tool_calls: body.tool_calls,
-        task_label: body.task_label,
-        composio_usage: body.composio_usage,
-    };
+    let charge = body.into_charge(&plugin_id);
 
     match crate::sidecar::gateway::record_external_tool_charge(&state.client, &org.id, charge).await
     {
@@ -161,5 +187,36 @@ mod tests {
         let mut long = valid_body();
         long.task_label = Some("x".repeat(MAX_TASK_LABEL_BYTES + 1));
         assert_eq!(long.validate(), Err("task_label is too long"));
+    }
+
+    #[test]
+    fn refuses_composio_reports_from_a_sidecar() {
+        let mut composio = valid_body();
+        composio.provider = "composio".to_owned();
+        composio.transaction_id = Some(format!("rnx_{}", "a".repeat(32)));
+        composio.cost_micro_usd = Some(1);
+        assert!(composio.validate().is_err());
+
+        let mut usage = valid_body();
+        usage.composio_usage = Some(Default::default());
+        assert!(usage.validate().is_err());
+    }
+
+    #[test]
+    fn charge_is_keyed_by_plugin_and_never_by_the_reported_transaction() {
+        let receipt = format!("rnx_{}", "a".repeat(32));
+        let mut body = valid_body();
+        body.transaction_id = Some(receipt.clone());
+        let charge = body.into_charge("@ryu/social");
+        assert_eq!(charge.transaction_id, None);
+        assert_eq!(charge.request_id, "app:@ryu/social:social:call-1");
+        assert_eq!(
+            charge.task_label.as_deref(),
+            Some(format!("Outpost X post (transaction {receipt})").as_str())
+        );
+        let ref_id = format!("{}:{}", charge.request_id, charge.provider);
+        assert!(ref_id.starts_with("app:@ryu/social:"));
+        assert!(!ref_id.starts_with("composio:"));
+        assert!(!ref_id.contains(&format!("treg:{receipt}")));
     }
 }

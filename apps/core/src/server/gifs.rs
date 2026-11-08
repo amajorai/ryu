@@ -53,12 +53,17 @@ pub struct GifResult {
 
 /// Short-timeout client for the GIF provider (a quick JSON lookup, unlike the
 /// minutes-long media generation client).
-fn gif_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent("ryu-core/0.1")
-        .timeout(Duration::from_secs(15))
-        .build()
-        .expect("reqwest client")
+///
+/// Shared process-wide so search-as-you-type reuses pooled TLS connections.
+fn gif_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("ryu-core/0.1")
+            .timeout(Duration::from_secs(15))
+            .build()
+            .expect("reqwest client")
+    })
 }
 
 /// Resolve the configured provider id (lowercased), defaulting to `klipy`.
@@ -338,6 +343,11 @@ fn str_num(v: &Value) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gif_client_is_a_shared_singleton() {
+        assert!(std::ptr::eq(gif_client(), gif_client()));
+    }
 
     /// `str_num` tolerates every dimension spelling providers use: Giphy's numeric
     /// strings, Tenor's raw integers, and rejects anything non-numeric.

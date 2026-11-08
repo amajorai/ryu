@@ -1,4 +1,5 @@
 import { AgentAccountAccessView } from "@ryu/blocks/desktop/agent-account-access.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	appUsesSavedKeys,
 	sourceReferencesSavedKey,
@@ -25,6 +26,7 @@ import {
 	showsNoSandboxNote,
 } from "@/src/components/agents/AgentLaunchWarning.tsx";
 import { savedModeHasOwnApps } from "@/src/components/agents/agent-account-keys.ts";
+import { mcpConnectionDetail } from "@/src/components/agents/agent-account-mcp-detail.ts";
 import { engineRefusedWhenLimited } from "@/src/components/agents/agent-provider-access.ts";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -137,6 +139,7 @@ export function AgentAccountAccessPanel({
 	savedIdentityMode?: AgentIdentityMode | null;
 	selectedIdentities: ReadonlySet<string>;
 }) {
+	const tl = useLiteralMessages();
 	const activeNode = useActiveNode();
 	const target = useMemo(() => toTarget(activeNode), [activeNode]);
 	const openTab = useTabSelector((state) => state.openTab);
@@ -207,9 +210,9 @@ export function AgentAccountAccessPanel({
 				detail: connection.id,
 				key: accountKey.composio(connection.id),
 				status: composioStatusLabel(connection.status, connection.active),
-				title: connection.toolkit || "Connected app",
+				title: connection.toolkit || tl("Connected app"),
 			})),
-		[composioConnections.data]
+		[composioConnections.data, tl]
 	);
 	const mcpRows = useMemo<AccountRow[]>(() => {
 		const rows: AccountRow[] = [];
@@ -217,9 +220,11 @@ export function AgentAccountAccessPanel({
 			for (const server of mcpQueries[index]?.data ?? []) {
 				for (const connection of server.connections) {
 					rows.push({
-						detail: [connection.accountLabel, `profile ${connection.profileId}`]
-							.filter(Boolean)
-							.join(" · "),
+						detail: mcpConnectionDetail(
+							connection.accountLabel,
+							connection.profileId,
+							tl
+						),
 						key: accountKey.mcp(
 							connection.profileId,
 							app.id,
@@ -235,7 +240,7 @@ export function AgentAccountAccessPanel({
 			}
 		}
 		return rows;
-	}, [mcpApps, mcpQueries]);
+	}, [mcpApps, mcpQueries, tl]);
 	const savedKeyAccountRows = useMemo<AccountRow[]>(
 		() => (showYours ? savedKeyRows(mcpServers.data ?? [], apps) : []),
 		[showYours, mcpServers.data, apps]
@@ -276,9 +281,9 @@ export function AgentAccountAccessPanel({
 				id: connection.id,
 				key: accountKey.agentComposio(connection.id),
 				status: composioStatusLabel(connection.status, connection.active),
-				title: connection.toolkit || "Connected app",
+				title: connection.toolkit || tl("Connected app"),
 			})),
-		[ownComposio.data]
+		[ownComposio.data, tl]
 	);
 
 	const limited = accountAccess !== null;

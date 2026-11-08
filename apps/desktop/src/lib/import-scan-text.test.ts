@@ -122,7 +122,7 @@ test("renders Arabic titles and warnings with Arabic digits", () => {
 		"ar"
 	);
 	expect(scanItemTitle(project, arabic)).toBe(
-		`المشروع 'g-p-1' من ChatGPT (${new Intl.NumberFormat("ar").format(3)} محادثات)`
+		`المشروع '\u2068g-p-1\u2069' من \u2068ChatGPT\u2069 (${new Intl.NumberFormat("ar").format(3)} محادثات)`
 	);
 	expect(
 		scanWarnings(

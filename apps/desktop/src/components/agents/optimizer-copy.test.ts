@@ -200,6 +200,6 @@ test("ja and ar render the locale's list and percent formats", () => {
 		"Replaying {count, plural, one {# recent request} other {# recent requests}}, {candidate} cost {savings} less than {current} and scored {candidateQuality} against the agent's production replies (current model: {currentQuality})."
 	] = "وفّر {candidate} {savings}.";
 	expect(recommendationSummary(modelRec, tl, locale)).toBe(
-		`وفّر small-model ${new Intl.NumberFormat("ar", { maximumFractionDigits: 0, style: "percent" }).format(0.755)}.`
+		`وفّر \u2068small-model\u2069 ${new Intl.NumberFormat("ar", { maximumFractionDigits: 0, style: "percent" }).format(0.755)}.`
 	);
 });

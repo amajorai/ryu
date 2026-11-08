@@ -156,14 +156,18 @@ function toDocument(d: DocumentWire): SpaceDocument {
 	};
 }
 
-/** The three document fields a {@link SpaceFileIndex} populates, so the list reader
+/** The document fields a {@link SpaceFileIndex} populates, so the list reader
  *  and the per-document fetch cannot fill them differently. */
 export function withFileIndex(
 	index: SpaceFileIndex
-): Pick<SpaceDocument, "indexMessage" | "indexState" | "indexWarnings"> {
+): Pick<
+	SpaceDocument,
+	"indexMessage" | "indexReasonCode" | "indexState" | "indexWarnings"
+> {
 	return {
 		indexState: index.state,
 		indexMessage: index.message,
+		indexReasonCode: index.reasonCode ?? null,
 		indexWarnings: index.warnings,
 	};
 }
@@ -425,6 +429,7 @@ export function toFileIndex(
 	return {
 		state: toFileIndexState(w?.state),
 		message: w?.message ?? null,
+		reasonCode: w?.reason_code ?? null,
 		warnings: w?.warnings ?? [],
 	};
 }

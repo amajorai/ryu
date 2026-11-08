@@ -293,6 +293,28 @@
       "addedOn": "2026-10-20"
     },
     {
+      "id": "browser.fill_credential",
+      "name": "Fill an account credential",
+      "description": "Fill one field of a vault account into a page element without exposing the value to the agent.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.fill_credential"],
+      "addedOn": "2026-11-07"
+    },
+    {
+      "id": "browser.list_credentials",
+      "name": "List fillable accounts",
+      "description": "List the account metadata an agent may fill, never a value.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.list_credentials"],
+      "addedOn": "2026-11-07"
+    },
+    {
       "id": "computer.capture",
       "name": "Capture the screen",
       "description": "Capture the screen with accessibility metadata for later targeting.",

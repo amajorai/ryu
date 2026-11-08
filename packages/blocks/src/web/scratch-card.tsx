@@ -1,6 +1,7 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { formatPercent } from "@ryu/i18n/format-percent";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { buttonVariants } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
 import { Check, Copy, Gift } from "lucide-react";
@@ -32,15 +33,24 @@ const TRANSPARENT_COLORS = new Set(["", "transparent", "rgba(0, 0, 0, 0)"]);
 /** Last-resort opaque base so a transparent theme never lets the code peek. */
 const FALLBACK_BASE = "rgb(128, 128, 128)";
 
-interface ScratchCardProps {
+/**
+ * The discount the card reveals: a 0-100 `discountPercent` formatted in the
+ * reader's number format ("30%", "30 %" in French), or a preformatted
+ * `discountLabel` that overrides it.
+ */
+type ScratchCardDiscount =
+	| { discountLabel?: string; discountPercent: number }
+	| { discountLabel: string; discountPercent?: number };
+
+type ScratchCardProps = ScratchCardDiscount & ScratchCardOptions;
+
+interface ScratchCardOptions {
 	ariaLabel?: string;
 	brushSize?: number;
 	/** Small print under the code, e.g. "Use at checkout — expires soon." */
 	caption?: string;
 	className?: string;
 	code: string;
-	/** Discount headline, e.g. "30%" (rendered as "30% off"). */
-	discountLabel: string;
 	/** The teaser line above the card. */
 	headline?: string;
 	onNeverShowAgain?: () => void;
@@ -88,7 +98,8 @@ export const rubMask = (
 
 export default function ScratchCard({
 	code,
-	discountLabel,
+	discountLabel: discountLabelOverride,
+	discountPercent,
 	headline = "I have a 30% discount. Just scratch this card!",
 	caption,
 	className,
@@ -104,6 +115,10 @@ export default function ScratchCard({
 	revealThreshold = REVEAL_THRESHOLD,
 }: ScratchCardProps) {
 	const tl = useLiteralMessages();
+	const formatLocale = useOptionalI18n()?.formatLocale;
+	const discountLabel =
+		discountLabelOverride ??
+		formatPercent((discountPercent ?? 0) / 100, 0, formatLocale);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const rewardRef = useRef<HTMLDivElement | null>(null);
 	const lastPointRef = useRef<Point | null>(null);

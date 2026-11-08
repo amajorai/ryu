@@ -67,6 +67,11 @@ test("marketing header renders Products, Resources, Enterprise, and Docs, with P
 			expect.objectContaining({ href: "/challenges", label: "Challenges" }),
 		])
 	);
+	expect(resourcesByCategory("Updates")).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({ href: "/wallpapers", label: "Wallpapers" }),
+		])
+	);
 });
 
 test("the Resources menu labels the community stats entry Stats", () => {

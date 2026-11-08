@@ -16,7 +16,7 @@ import {
 	SlotKeyLabel,
 	SlotStatus,
 } from "./world-2d-hud-slots.tsx";
-import { type VillagerStatus, villagerStatusSuffix } from "./world-2d-model.ts";
+import { type VillagerStatus, visitVillagerLabel } from "./world-2d-model.ts";
 import { SV_UI } from "./world-2d-palette.ts";
 import { PixelPortrait } from "./world-2d-portrait.tsx";
 
@@ -203,10 +203,7 @@ export function Hotbar({
 									}
 									aria-label={
 										agent.actLabel ??
-										tl("Visit {name}{suffix}", {
-											name: agent.name,
-											suffix: villagerStatusSuffix(agent.status),
-										})
+										visitVillagerLabel(agent.name, agent.status, tl)
 									}
 									className={cn(SLOT_BUTTON, "group block")}
 									data-act-agent={agent.actLabel ? agent.agentId : undefined}

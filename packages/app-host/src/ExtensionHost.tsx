@@ -76,10 +76,7 @@ export {
 import {
 	frameMessageSchema,
 	handshakeHostApiVersion,
-	SANDBOX_DOCUMENT_KIND,
-	type SandboxDocumentMessage,
 	sandboxForCompanion,
-	shouldSendSandboxDocument,
 	shouldTransferPort,
 } from "./extension-host-handshake.ts";
 
@@ -98,8 +95,15 @@ const useHandshakeEffect =
 
 export type { ExtensionHostProps } from "./extension-host-props.ts";
 
+import { createCallBudget } from "./call-budget.ts";
 import type { ExtensionHostProps } from "./extension-host-props.ts";
 import { createMcpAppBridge } from "./mcp-app-bridge.ts";
+import {
+	armNavigationTeardown,
+	sandboxFrameState,
+	sendSandboxDocument,
+} from "./sandbox-frame-guard.ts";
+import { createLivenessGate } from "./sandbox-liveness-gate.ts";
 
 export function ExtensionHost({
 	srcdoc,
@@ -163,29 +167,26 @@ export function ExtensionHost({
 		) {
 			return;
 		}
+		// Sandbox-page transport: per-ELEMENT state, so the document goes over once
+		// per iframe (not once per effect run) and a self-navigated frame, whose
+		// new document escapes `connect-src 'none'`, is never bridged again.
+		const frameState =
+			sandboxPage === undefined ? null : sandboxFrameState(iframe);
+		if (frameState?.navigated) {
+			return;
+		}
 		let port: MessagePort | null = null;
 		let disposed = false;
-		// Sandbox-page transport: the companion document is handed over once.
-		let documentSent = false;
 		// Active streaming calls (e.g. agent.run.stream), keyed by request id, so an
 		// `agent.cancel` can abort the matching in-flight stream and unmount can abort
 		// all of them.
 		const activeStreams = new Map<number, AbortController>();
-		// Every valid unary and streaming request consumes the same per-frame
-		// in-flight budget. This is intentionally owned by the host instance, so
-		// one app cannot turn a valid grant into unbounded promise/service work.
-		const MAX_IN_FLIGHT_CALLS = 32;
-		let inFlightCalls = 0;
-		const tryAcquireCall = (): boolean => {
-			if (inFlightCalls >= MAX_IN_FLIGHT_CALLS) {
-				return false;
-			}
-			inFlightCalls += 1;
-			return true;
-		};
-		const releaseCall = (): void => {
-			inFlightCalls = Math.max(0, inFlightCalls - 1);
-		};
+		// One per-frame in-flight budget for unary and streaming calls, so one app
+		// cannot turn a valid grant into unbounded promise/service work.
+		const { tryAcquireCall, releaseCall } = createCallBudget();
+		// Sandbox-page window traffic is delivered only once the realm holding the
+		// port acknowledges a probe (a self-navigated document cannot).
+		const liveness = frameState ? createLivenessGate() : null;
 		const readLifetime = new AbortController();
 		const mcpApp = createMcpAppBridge({
 			granted,
@@ -214,6 +215,9 @@ export function ExtensionHost({
 
 		// RPC handler over the channel port: validate envelope, gate-dispatch, reply.
 		const onPortMessage = (event: MessageEvent) => {
+			if (liveness?.handlePortMessage(event.data)) {
+				return;
+			}
 			const req = asRpcRequest(event.data);
 			if (!(req && port)) {
 				return;
@@ -336,31 +340,27 @@ export function ExtensionHost({
 			if (disposed) {
 				return;
 			}
-			if (
-				sandboxPage !== undefined &&
-				shouldSendSandboxDocument(event.data, {
-					alreadySent: documentSent,
-					fromThisFrame: event.source === iframe.contentWindow,
-				})
-			) {
-				documentSent = true;
-				const message: SandboxDocumentMessage = {
-					html: srcdoc,
-					kind: SANDBOX_DOCUMENT_KIND,
-					nonce,
-				};
-				// Opaque-origin page: "*" is unavoidable; the document carries no token.
-				iframe.contentWindow?.postMessage(message, "*");
+			// At most once per sandbox-page element, never on a handshake re-run.
+			if (sendSandboxDocument(frameState, event, iframe, { srcdoc, nonce })) {
 				return;
 			}
 			if (event.source === iframe.contentWindow) {
-				if (onMessageRef.current) {
-					const message = frameMessageSchema.safeParse(event.data);
-					if (message.success) {
-						onMessageRef.current(message.data);
+				const data: unknown = event.data;
+				const deliver = () => {
+					if (disposed) {
+						return;
 					}
+					const message = frameMessageSchema.safeParse(data);
+					if (message.success) {
+						onMessageRef.current?.(message.data);
+					}
+					void mcpApp.receive(data);
+				};
+				if (liveness) {
+					liveness.admit(deliver);
+				} else {
+					deliver();
 				}
-				void mcpApp.receive(event.data);
 			}
 			// The load-bearing decision, delegated to the pure predicate: correct
 			// nonce, from the window we created (`event.origin` is "null" here and
@@ -369,7 +369,8 @@ export function ExtensionHost({
 				!shouldTransferPort(event.data, {
 					expectedNonce: nonce,
 					fromThisFrame: event.source === iframe.contentWindow,
-					alreadyConnected: port !== null,
+					alreadyConnected:
+						port !== null || (frameState?.portTransferred ?? false),
 				})
 			) {
 				return;
@@ -382,6 +383,10 @@ export function ExtensionHost({
 			const channel = new MessageChannel();
 			port = channel.port1;
 			port.onmessage = onPortMessage;
+			if (frameState) {
+				frameState.portTransferred = true;
+			}
+			liveness?.attach(port);
 			iframe.contentWindow?.postMessage(
 				{
 					kind: "ryu-plugin-privacy",
@@ -403,9 +408,9 @@ export function ExtensionHost({
 			// `ryu-widget-set-globals` to the frame over the same live port.
 		};
 
-		window.addEventListener("message", onWindowMessage);
-		return () => {
+		const teardown = () => {
 			disposed = true;
+			liveness?.dispose();
 			readLifetime.abort();
 			window.removeEventListener("message", onWindowMessage);
 			const pushTarget = pushRefRef.current;
@@ -422,6 +427,12 @@ export function ExtensionHost({
 				port.close();
 				port = null;
 			}
+		};
+		window.addEventListener("message", onWindowMessage);
+		const disarm = armNavigationTeardown(frameState, iframe, teardown);
+		return () => {
+			disarm();
+			teardown();
 		};
 	}, [allowDownloads, allowForms, granted, nonce, sandboxPage, srcdoc]);
 

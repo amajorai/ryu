@@ -3,6 +3,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import {
+	VALUE_TYPE_COPY,
+	valueTypeOf,
+} from "@/src/components/vault/vault-value-type.ts";
 import { ROOT_FOLDER, STATUS_COPY } from "@/src/components/vault/vault-view.ts";
 import type { VaultSecret } from "@/src/lib/api/vault.ts";
 import {
@@ -30,6 +34,7 @@ export function SecretRow({
 	const statusCopy =
 		secret.status === "active" ? null : STATUS_COPY[secret.status];
 	const isDeleted = secret.status === "deleted";
+	const valueType = valueTypeOf(secret.metadata);
 	return (
 		<div className="flex items-center justify-between gap-4 p-4">
 			<button
@@ -58,6 +63,9 @@ export function SecretRow({
 						</Badge>
 					) : (
 						<Badge variant="outline">all MCP consumers</Badge>
+					)}
+					{valueType === "secret" ? null : (
+						<Badge variant="outline">{VALUE_TYPE_COPY[valueType].label}</Badge>
 					)}
 					{statusCopy ? (
 						<Badge variant={statusCopy.variant}>{statusCopy.label}</Badge>

@@ -9,6 +9,8 @@ import {
 	useFullAccessSelectionGuard,
 } from "@ryu/blocks/composer/full-access-warning.tsx";
 import { useChatDisplayPrefs } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
+import { formatList } from "@ryu/i18n";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -21,6 +23,7 @@ import {
 import { isNativeFunction } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { Fragment, type ReactNode, useState } from "react";
+import { effortLevelLabel } from "@/src/lib/effort-level-label.ts";
 import { EffortMeter } from "./composer-settings-effort-meter.tsx";
 import {
 	activeItem,
@@ -74,6 +77,7 @@ function ComposerSettingsMenuContent({
 	const [open, setOpen] = useState(false);
 	const selectionGuard = useFullAccessSelectionGuard();
 	const { animationsEnabled } = useChatDisplayPrefs();
+	const tl = useLiteralMessages();
 
 	// A section stays visible while its options are still being probed, even with
 	// no items yet — so an in-flight agent switch shows a loading row, not nothing.
@@ -99,7 +103,7 @@ function ComposerSettingsMenuContent({
 	const summary = visibleSections
 		.map((section) => {
 			const loading = isLoadingEmpty(section);
-			const name = loading ? "Detecting…" : activeItemName(section);
+			const name = loading ? tl("Detecting…") : activeItemName(section);
 			if (!name) {
 				return null;
 			}
@@ -136,12 +140,19 @@ function ComposerSettingsMenuContent({
 	);
 	// The mode's word is redundant beside its icon + colour, but it is also the
 	// only textual signal of the permission mode — keep it in the accessible name.
-	const triggerLabel = [
-		"Chat settings",
-		...segments.map((seg) =>
-			seg.effortName ? `${seg.name} ${seg.effortName}` : seg.name
-		),
-	].join(" · ");
+	const settingNames = segments.map((seg) =>
+		seg.effortName
+			? tl("{model} ({effort})", {
+					model: seg.name,
+					effort: effortLevelLabel(seg.effortName, tl),
+				})
+			: seg.name
+	);
+	const triggerLabel = settingNames.length
+		? tl("Chat settings: {settings}", {
+				settings: formatList(settingNames, "unit"),
+			})
+		: tl("Chat settings");
 	const sectionByKey = new Map(
 		visibleSections.map((section) => [section.key, section])
 	);

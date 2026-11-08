@@ -7,7 +7,6 @@ import type {
 import {
 	agentRevisions,
 	changesByDay,
-	eventOutcome,
 	threadRevisions,
 	type WikiRevision,
 	type WikiRoute,
@@ -20,6 +19,7 @@ import {
 	wikiThreadTitle,
 	wikiTime,
 } from "./wiki-model.ts";
+import { scheduledRunOutcome } from "./wiki-model-words.ts";
 import { PROSE, WikiFooter, WikiLink } from "./wiki-parts.tsx";
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ function RevisionRow({
 							: "text-muted-foreground"
 					)}
 				>
-					{tl("(scheduled run, {outcome})", { outcome: eventOutcome(event) })}
+					{scheduledRunOutcome(event, tl)}
 				</span>
 				{agent ? (
 					<>

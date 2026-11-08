@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -25,7 +26,7 @@ struct CachedMetas {
     metas: HashMap<String, ModelMeta>,
 }
 
-static CACHE: Mutex<Option<CachedMetas>> = Mutex::const_new(None);
+static CACHE: Mutex<Option<Arc<CachedMetas>>> = Mutex::const_new(None);
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -186,20 +187,20 @@ fn string_list(v: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-async fn load_metas() -> HashMap<String, ModelMeta> {
+async fn load_metas() -> Arc<CachedMetas> {
     let now = now_unix();
     let mut cache = CACHE.lock().await;
 
     if let Some(entry) = cache.as_ref() {
         if is_fresh(entry.fetched_at, now) {
-            return entry.metas.clone();
+            return Arc::clone(entry);
         }
     }
     if let Some(entry) = read_disk_cache() {
         if is_fresh(entry.fetched_at, now) {
-            let metas = entry.metas.clone();
-            *cache = Some(entry);
-            return metas;
+            let entry = Arc::new(entry);
+            *cache = Some(Arc::clone(&entry));
+            return entry;
         }
     }
 
@@ -207,13 +208,19 @@ async fn load_metas() -> HashMap<String, ModelMeta> {
         Some(metas) if !metas.is_empty() => {
             let entry = CachedMetas {
                 fetched_at: now,
-                metas: metas.clone(),
+                metas,
             };
             write_disk_cache(&entry);
-            *cache = Some(entry);
-            metas
+            let entry = Arc::new(entry);
+            *cache = Some(Arc::clone(&entry));
+            entry
         }
-        _ => cache.as_ref().map(|e| e.metas.clone()).unwrap_or_default(),
+        _ => cache.clone().unwrap_or_else(|| {
+            Arc::new(CachedMetas {
+                fetched_at: 0,
+                metas: HashMap::new(),
+            })
+        }),
     }
 }
 
@@ -248,8 +255,8 @@ fn match_meta(metas: &HashMap<String, ModelMeta>, model: &str) -> Option<ModelMe
 
 /// Best-effort OpenRouter metadata for a model id, or `None` when unknown.
 pub async fn meta_for(model: &str) -> Option<ModelMeta> {
-    let metas = load_metas().await;
-    match_meta(&metas, model)
+    let cached = load_metas().await;
+    match_meta(&cached.metas, model)
 }
 
 #[cfg(test)]
@@ -308,5 +315,45 @@ mod tests {
         assert_eq!(meta.cost_input_per_1m, Some(0.0));
         assert_eq!(meta.cost_output_per_1m, Some(15.0));
         assert_eq!(meta.cost_cache_read_per_1m, Some(0.0));
+    }
+
+    #[tokio::test]
+    async fn cached_meta_lookups_share_one_allocation() {
+        crate::ensure_test_host();
+        let payload = serde_json::json!({
+            "data": [{
+                "id": "anthropic/claude-opus-4-6",
+                "name": "Claude Opus 4.6",
+                "context_length": 1000000,
+                "pricing": { "prompt": "0.000005", "completion": "0.000025" }
+            }]
+        });
+        let entry = CachedMetas {
+            fetched_at: now_unix(),
+            metas: parse_metas(&payload),
+        };
+        let json = serde_json::to_string(&entry).expect("serialize");
+        let round_trip: CachedMetas = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round_trip.metas.len(), entry.metas.len());
+        {
+            let mut c = CACHE.lock().await;
+            *c = Some(Arc::new(entry));
+        }
+
+        let qualified = meta_for("anthropic/claude-opus-4-6")
+            .await
+            .expect("qualified");
+        let bare = meta_for("claude-opus-4-6").await.expect("bare");
+        assert_eq!(qualified.name, "Claude Opus 4.6");
+        assert_eq!(qualified.context, Some(1_000_000));
+        assert_eq!(bare.name, qualified.name);
+        assert_eq!(bare.cost_output_per_1m, qualified.cost_output_per_1m);
+
+        let first = load_metas().await;
+        let second = load_metas().await;
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "fresh lookups must share the cached metas instead of deep-cloning them"
+        );
     }
 }

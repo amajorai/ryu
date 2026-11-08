@@ -143,6 +143,7 @@
   "Starting workflow…": "Запуск рабочего процесса…",
   "Submission moderation": "Модерация заявок",
   "Tell us more": "Расскажите подробнее",
+  "The Feedback Board bridge is unavailable in this Ryu host.": "Мост Feedback Board недоступен на этом хосте Ryu.",
   "The Ryu host bridge did not return a workspace.": "Мост хоста Ryu не вернул рабочее пространство.",
   "The Ryu host bridge is unavailable.": "Мост хоста Ryu недоступен.",
   "The inbox is clear.": "Входящие пусты.",

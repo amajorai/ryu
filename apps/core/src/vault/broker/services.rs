@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -30,183 +30,10 @@ const MAX_HOST_LEN: usize = 253;
 const MAX_PATH_PREFIX_LEN: usize = 512;
 const MAX_DESCRIPTION_LEN: usize = 512;
 
-/// How the broker authenticates a matched request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ServiceAuth {
-    /// `Authorization: Bearer <token>`.
-    Bearer { token: String },
-    /// `Authorization: Basic base64(username:password)`; the username may be a
-    /// literal or a reference.
-    Basic { username: String, password: String },
-    /// `<header>: <prefix><value>`.
-    ApiKey {
-        header: String,
-        value: String,
-        #[serde(default)]
-        prefix: String,
-    },
-    /// Header templates with `{{secret:REF}}` tokens.
-    Custom { headers: BTreeMap<String, String> },
-    /// No injection; the request is forwarded as sent (placeholders still
-    /// substitute).
-    Passthrough,
-}
-
-impl ServiceAuth {
-    /// Short kind name for listings and discovery.
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Self::Bearer { .. } => "bearer",
-            Self::Basic { .. } => "basic",
-            Self::ApiKey { .. } => "api_key",
-            Self::Custom { .. } => "custom",
-            Self::Passthrough => "passthrough",
-        }
-    }
-
-    /// Every `secret:` reference the rule uses.
-    pub fn refs(&self) -> Vec<String> {
-        match self {
-            Self::Bearer { token } => vec![token.clone()],
-            Self::Basic { username, password } => {
-                let mut refs = vec![password.clone()];
-                if substitute::is_credential_ref(username) {
-                    refs.push(username.clone());
-                }
-                refs
-            }
-            Self::ApiKey { value, .. } => vec![value.clone()],
-            Self::Custom { headers } => headers
-                .values()
-                .flat_map(|template| substitute::parse_template(template).unwrap_or_default())
-                .filter_map(|segment| match segment {
-                    substitute::Segment::Ref(reference) => Some(reference),
-                    substitute::Segment::Literal(_) => None,
-                })
-                .collect(),
-            Self::Passthrough => Vec::new(),
-        }
-    }
-
-    /// Replace every reference that is a key of `map` with its value.
-    pub fn replace_refs(&mut self, map: &BTreeMap<String, String>) {
-        let swap = |reference: &mut String| {
-            if let Some(replacement) = map.get(reference.as_str()) {
-                reference.clone_from(replacement);
-            }
-        };
-        match self {
-            Self::Bearer { token } => swap(token),
-            Self::Basic { username, password } => {
-                swap(password);
-                if substitute::is_credential_ref(username) {
-                    swap(username);
-                }
-            }
-            Self::ApiKey { value, .. } => swap(value),
-            Self::Custom { headers } => {
-                for template in headers.values_mut() {
-                    let Ok(segments) = substitute::parse_template(template) else {
-                        continue;
-                    };
-                    if !segments.iter().any(|segment| {
-                        matches!(segment, substitute::Segment::Ref(r) if map.contains_key(r))
-                    }) {
-                        continue;
-                    }
-                    *template = segments
-                        .into_iter()
-                        .map(|segment| match segment {
-                            substitute::Segment::Literal(text) => text,
-                            substitute::Segment::Ref(reference) => {
-                                format!("{{{{{}}}}}", map.get(&reference).unwrap_or(&reference))
-                            }
-                        })
-                        .collect();
-                }
-            }
-            Self::Passthrough => {}
-        }
-    }
-
-    /// Header names this rule sets (lowercase).
-    pub fn header_names(&self) -> Vec<String> {
-        match self {
-            Self::Bearer { .. } | Self::Basic { .. } => vec!["authorization".to_owned()],
-            Self::ApiKey { header, .. } => vec![header.to_ascii_lowercase()],
-            Self::Custom { headers } => headers.keys().map(|h| h.to_ascii_lowercase()).collect(),
-            Self::Passthrough => Vec::new(),
-        }
-    }
-
-    fn validate(&self) -> Result<()> {
-        match self {
-            Self::Bearer { token } => substitute::validate_ref(token),
-            Self::Basic { username, password } => {
-                substitute::validate_ref(password)?;
-                if substitute::is_credential_ref(username) {
-                    substitute::validate_ref(username)
-                } else if username.contains(':') || !substitute::is_safe_header_value(username) {
-                    bail!("basic username must not contain `:` or control characters")
-                } else {
-                    Ok(())
-                }
-            }
-            Self::ApiKey {
-                header,
-                value,
-                prefix,
-            } => {
-                validate_header_name(header)?;
-                if !substitute::is_safe_header_value(prefix) || prefix.len() > 64 {
-                    bail!("api key prefix is invalid");
-                }
-                substitute::validate_ref(value)
-            }
-            Self::Custom { headers } => {
-                if headers.is_empty() || headers.len() > MAX_CUSTOM_HEADERS {
-                    bail!("custom auth needs 1-{MAX_CUSTOM_HEADERS} headers");
-                }
-                for (name, template) in headers {
-                    validate_header_name(name)?;
-                    if !substitute::is_safe_header_value(template) || template.len() > 1024 {
-                        bail!("header template for `{name}` is invalid");
-                    }
-                    substitute::parse_template(template)?;
-                }
-                Ok(())
-            }
-            Self::Passthrough => Ok(()),
-        }
-    }
-}
-
-/// Headers the broker owns or that are connection-scoped; a rule cannot set
-/// them.
-pub const RESERVED_HEADERS: &[&str] = &[
-    "host",
-    "connection",
-    "proxy-authorization",
-    "proxy-authenticate",
-    "proxy-connection",
-    "keep-alive",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-    "content-length",
-];
-
-fn validate_header_name(name: &str) -> Result<()> {
-    let lower = name.to_ascii_lowercase();
-    if hyper::header::HeaderName::from_bytes(lower.as_bytes()).is_err()
-        || RESERVED_HEADERS.contains(&lower.as_str())
-    {
-        bail!("header `{name}` cannot be set by a broker service");
-    }
-    Ok(())
-}
+mod auth;
+pub use auth::ServiceAuth;
+#[cfg(test)]
+mod tests;
 
 /// A placeholder the broker replaces with a credential.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,6 +67,10 @@ pub struct ServiceInput {
     /// never crosses the network unencrypted by accident.
     #[serde(default)]
     pub allow_insecure_http: bool,
+    /// Relay this service into cloud-task Boxes ([`super::box_relay`]). Off
+    /// by default: a Box reaches a service only once an admin marks it.
+    #[serde(default)]
+    pub box_relay: bool,
     #[serde(default)]
     pub description: String,
     /// Markdown instructions shown to agents through discovery.
@@ -355,6 +186,11 @@ impl ServiceInput {
         self.auth
             .validate()
             .map_err(|error| invalid(format!("{error:#}")))?;
+        if let Some(binding) = self.auth.oauth() {
+            binding
+                .validate_target(&self.host, self.port, self.allow_insecure_http)
+                .map_err(|error| invalid(format!("{error:#}")))?;
+        }
         if self.substitutions.len() > MAX_SUBSTITUTIONS {
             return Err(invalid(format!(
                 "at most {MAX_SUBSTITUTIONS} substitutions"
@@ -652,229 +488,8 @@ pub(crate) fn test_service(
         substitutions: Vec::new(),
         enabled: true,
         allow_insecure_http: false,
+        box_relay: false,
         description: String::new(),
         notes: String::new(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn stored(input: ServiceInput) -> BrokerService {
-        BrokerService {
-            input: input.normalize().unwrap(),
-            created_at: 0,
-            updated_at: 0,
-        }
-    }
-
-    fn name<'a>(outcome: MatchOutcome<'a>) -> &'a str {
-        match outcome {
-            MatchOutcome::Matched(service) => service.name(),
-            other => panic!("expected a match, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn host_patterns_are_validated() {
-        for ok in ["api.openai.com", "*.example.com", "localhost", "10.0.0.1"] {
-            assert!(is_valid_host_pattern(ok), "{ok}");
-        }
-        for bad in [
-            "", "*", "*.com", "a.*.com", "API.com", "a..b", "-a.com", "a b.com", "*.*.x.y",
-        ] {
-            assert!(!is_valid_host_pattern(bad), "{bad}");
-        }
-    }
-
-    #[test]
-    fn exact_beats_wildcard_beats_shorter_wildcard() {
-        let services = vec![
-            stored(test_service("wild", "*.example.com", None, "/")),
-            stored(test_service("deep", "*.api.example.com", None, "/")),
-            stored(test_service("exact", "v1.api.example.com", None, "/")),
-        ];
-        assert_eq!(
-            name(match_request(&services, "v1.api.example.com", 443, "/")),
-            "exact"
-        );
-        assert_eq!(
-            name(match_request(&services, "v2.api.example.com", 443, "/")),
-            "deep"
-        );
-        assert_eq!(
-            name(match_request(&services, "x.example.com", 443, "/")),
-            "wild"
-        );
-        assert_eq!(
-            match_request(&services, "example.com", 443, "/"),
-            MatchOutcome::Unmatched
-        );
-        assert_eq!(
-            match_request(&services, "evilexample.com", 443, "/"),
-            MatchOutcome::Unmatched
-        );
-    }
-
-    #[test]
-    fn port_and_longest_path_prefix_break_ties() {
-        let services = vec![
-            stored(test_service("any", "api.example.com", None, "/")),
-            stored(test_service("port", "api.example.com", Some(8443), "/")),
-            stored(test_service("v2", "api.example.com", None, "/v2")),
-        ];
-        assert_eq!(
-            name(match_request(&services, "api.example.com", 8443, "/v1")),
-            "port"
-        );
-        assert_eq!(
-            name(match_request(&services, "api.example.com", 443, "/v2/x")),
-            "v2"
-        );
-        assert_eq!(
-            name(match_request(&services, "api.example.com", 443, "/v2")),
-            "v2"
-        );
-        assert_eq!(
-            name(match_request(&services, "api.example.com", 443, "/v20")),
-            "any"
-        );
-        assert_eq!(
-            name(match_request(&services, "API.example.com.", 443, "/")),
-            "any"
-        );
-    }
-
-    #[test]
-    fn disabled_and_ambiguous_matches_are_reported() {
-        let mut disabled = test_service("off", "api.example.com", None, "/");
-        disabled.enabled = false;
-        let services = vec![stored(disabled)];
-        assert!(matches!(
-            match_request(&services, "api.example.com", 443, "/"),
-            MatchOutcome::Disabled(_)
-        ));
-        let mut b = test_service("b", "api.example.com", None, "/");
-        b.environment = "default".into();
-        let services = vec![
-            stored(test_service("a", "api.example.com", None, "/")),
-            stored(b),
-        ];
-        assert_eq!(
-            match_request(&services, "api.example.com", 443, "/"),
-            MatchOutcome::Ambiguous(vec!["a".into(), "b".into()])
-        );
-    }
-
-    #[test]
-    fn dot_segments_are_detected_raw_and_encoded() {
-        for bad in [
-            "/repos/acme/../../user/keys",
-            "/repos/acme/./x",
-            "/repos/acme/%2e%2e/user",
-            "/repos/acme/%2E%2e/user",
-            "/repos/acme/.%2E/user",
-            "/repos/acme/%2e/x",
-            "/repos/acme/..",
-            "/repos/acme\\..\\user",
-            "/repos/acme%5c..%5cuser",
-        ] {
-            assert!(has_dot_segment(bad), "{bad}");
-        }
-        for ok in [
-            "/",
-            "/repos/acme",
-            "/a/.well-known/x",
-            "/a/..b/c",
-            "/a/b..",
-            "/v1/file.txt",
-        ] {
-            assert!(!has_dot_segment(ok), "{ok}");
-        }
-    }
-
-    #[test]
-    fn connect_time_checks_ignore_the_path() {
-        let services = vec![stored(test_service("v2", "api.example.com", None, "/v2"))];
-        assert!(host_is_brokered(&services, "api.example.com", 443));
-        assert!(!host_is_brokered(&services, "other.example.com", 443));
-    }
-
-    #[test]
-    fn inputs_validate_auth_and_substitutions() {
-        let mut input = test_service("svc", "API.Example.com", None, "");
-        input.substitutions = vec![Substitution {
-            placeholder: "__KEY__".into(),
-            reference: "secret:prod:/db/KEY".into(),
-            surfaces: vec![Surface::Path, Surface::Header, Surface::Path],
-        }];
-        let normalized = input.clone().normalize().unwrap();
-        assert_eq!(normalized.host, "api.example.com");
-        assert_eq!(normalized.path_prefix, "/");
-        assert_eq!(
-            normalized.substitutions[0].surfaces,
-            vec![Surface::Header, Surface::Path]
-        );
-
-        let mut bad = input.clone();
-        bad.auth = ServiceAuth::Bearer {
-            token: "OPENAI_KEY".into(),
-        };
-        assert!(bad.normalize().is_err());
-        let mut bad = input.clone();
-        bad.auth = ServiceAuth::ApiKey {
-            header: "Host".into(),
-            value: "secret:K".into(),
-            prefix: String::new(),
-        };
-        assert!(bad.normalize().is_err());
-        let mut bad = input.clone();
-        bad.substitutions[0].placeholder = "KEY".into();
-        assert!(bad.normalize().is_err());
-        let mut bad = input;
-        bad.name = "Bad Name".into();
-        assert!(bad.normalize().is_err());
-    }
-
-    #[test]
-    fn refs_cover_auth_and_substitutions() {
-        let mut input = test_service("svc", "api.example.com", None, "/");
-        input.auth = ServiceAuth::Custom {
-            headers: [("x-sig".to_owned(), "{{secret:A}}:{{secret:B}}".to_owned())].into(),
-        };
-        input.substitutions = vec![Substitution {
-            placeholder: "__C__".into(),
-            reference: "secret:C".into(),
-            surfaces: vec![Surface::Query],
-        }];
-        let service = stored(input);
-        assert_eq!(service.refs(), vec!["secret:A", "secret:B", "secret:C"]);
-    }
-
-    #[tokio::test]
-    async fn crud_round_trips_and_rejects_duplicates() {
-        let store = crate::plugin_secrets::PluginSecretStore::in_memory().unwrap();
-        let conn = store.conn.lock().await;
-        let input = test_service("svc", "api.example.com", None, "/")
-            .normalize()
-            .unwrap();
-        insert(&conn, input.clone()).unwrap();
-        let error = insert(&conn, input.clone()).unwrap_err();
-        assert_eq!(
-            error.downcast_ref::<VaultError>().unwrap().code(),
-            "vault_conflict"
-        );
-        let mut same_route = test_service("other", "api.example.com", None, "/");
-        same_route = same_route.normalize().unwrap();
-        assert!(insert(&conn, same_route).is_err());
-        let mut changed = input.clone();
-        changed.enabled = false;
-        update(&conn, changed).unwrap();
-        assert!(!get(&conn, "svc").unwrap().unwrap().input.enabled);
-        assert_eq!(usage(&conn, "secret:API_TOKEN").unwrap().len(), 1);
-        assert_eq!(list(&conn, Some("prod")).unwrap().len(), 0);
-        assert!(delete(&conn, "svc").unwrap());
-        assert!(!delete(&conn, "svc").unwrap());
     }
 }

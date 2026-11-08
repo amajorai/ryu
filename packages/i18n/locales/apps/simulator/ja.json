@@ -1,3 +1,7 @@
 {
-  "The iOS Simulator runs only on macOS; this node is not a Mac.": "iOS シミュレータは macOS でのみ動作します。このノードは Mac ではありません。"
+  "The iOS Simulator runs only on macOS; this node is not a Mac.": "iOS シミュレータは macOS でのみ動作します。このノードは Mac ではありません。",
+  "iOS Simulator hardware keys need facebook/idb; not available via simctl.": "iOS Simulator のハードウェアキーには facebook/idb が必要です。simctl では利用できません。",
+  "iOS Simulator has no public coordinate swipe (simctl). Install facebook/idb to enable it.": "iOS Simulator には座標指定の公開スワイプ機能がありません（simctl）。有効にするには facebook/idb をインストールしてください。",
+  "iOS Simulator has no public coordinate tap (simctl). Install facebook/idb to enable it.": "iOS Simulator には座標指定の公開タップ機能がありません（simctl）。有効にするには facebook/idb をインストールしてください。",
+  "iOS Simulator text entry needs facebook/idb; not available via simctl.": "iOS Simulator のテキスト入力には facebook/idb が必要です。simctl では利用できません。"
 }

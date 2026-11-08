@@ -5,7 +5,7 @@ import type { IslandSurfaceWindowApi } from "../shared/screen-surface.ts";
 declare global {
 	interface Window {
 		island: IslandApi;
-		/** Only in the Island window (`preload/index.ts`): save a language choice. */
+		/** Only in the Island window (`preload/index.ts`): save a language choice and read the OS language list. */
 		islandLanguage?: IslandLanguageApi;
 		/** Only in the on-screen generative UI window (`preload/surface.ts`). */
 		islandSurface: IslandSurfaceWindowApi;

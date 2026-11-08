@@ -28,6 +28,10 @@ import {
 	TeamGlyph,
 } from "./flow-parts.tsx";
 import { threadStatusLabel } from "./interface-renderer.ts";
+import {
+	conversationLabel,
+	newConversationLabel,
+} from "./thread-display-title.ts";
 
 export {
 	ActivityChart,
@@ -345,7 +349,7 @@ export function FlowThreadPanel({
 	const status = thread ? threadStatus(thread) : null;
 	return (
 		<section
-			aria-label={thread?.title.trim() || "Conversation"}
+			aria-label={thread?.title.trim() || conversationLabel()}
 			className="flex h-full min-h-0 flex-col"
 		>
 			<PanelHeader
@@ -359,7 +363,7 @@ export function FlowThreadPanel({
 						</span>
 					) : undefined
 				}
-				title={thread?.title.trim() || "New conversation"}
+				title={thread?.title.trim() || newConversationLabel()}
 			/>
 			<div className="min-h-0 flex-1" data-flow-scroll="">
 				{threadView}

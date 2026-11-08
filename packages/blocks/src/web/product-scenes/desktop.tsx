@@ -1,5 +1,6 @@
 import styles from "./desktop.module.css";
 import { Label, type MotionStyle, SceneCanvas } from "./scene.tsx";
+import { SCENE_CHIP_LABELS } from "./scene-chip-labels.ts";
 
 /**
  * Homepage card scene for Ryu Desktop: one app for every agent and model. The
@@ -25,7 +26,7 @@ const PILL_X = 244;
 /** The model source each beat uses, in loop order from the still. */
 const SOURCES = [
 	{ className: styles.sourceA, label: "your key" },
-	{ className: styles.sourceB, label: "plan" },
+	{ className: styles.sourceB, label: SCENE_CHIP_LABELS.plan },
 	{ className: styles.sourceC, label: "local" },
 ] as const;
 

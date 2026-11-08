@@ -1,6 +1,7 @@
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { sileo } from "sileo";
@@ -17,18 +18,21 @@ import { AutoScrollText } from "./AutoScrollText.tsx";
 /** `4 vCPU · 16 GiB · H100` from a sandbox spec; omits fields the node didn't
  *  report, falling back to the guest OS (or a bare "sandbox") if it reported
  *  nothing quantitative. */
-function summarizeSandboxSpec(spec: SandboxSpec): string {
+export function summarizeSandboxSpec(
+	spec: SandboxSpec,
+	tl: LiteralMessage
+): string {
 	const parts: string[] = [];
 	if (spec.vcpu !== null) {
 		parts.push(`${spec.vcpu} vCPU`);
 	}
 	if (spec.memGib !== null) {
-		parts.push(`${spec.memGib} GiB`);
+		parts.push(`${formatNumber(spec.memGib)} GiB`);
 	}
 	if (spec.gpu) {
 		parts.push(spec.gpu);
 	}
-	return parts.join(" · ") || spec.os || "sandbox";
+	return parts.join(" · ") || spec.os || tl("Sandbox");
 }
 
 /** `mm:ss` elapsed from a whole-seconds duration (any hours fold into minutes). */
@@ -64,6 +68,7 @@ function SandboxRow({
 	run: SandboxRun;
 	onDestroyed: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const [stopping, setStopping] = useState(false);
 
 	const handleStop = async () => {
@@ -88,7 +93,7 @@ function SandboxRow({
 				className="flex-1 text-muted-foreground"
 				title={run.runId}
 			>
-				{summarizeSandboxSpec(run.spec)}
+				{summarizeSandboxSpec(run.spec, tl)}
 			</AutoScrollText>
 			{run.spec.gpu && (
 				<span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 font-medium text-accent-foreground text-xs">

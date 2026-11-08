@@ -43,6 +43,7 @@ const PROVIDER_LABELS = new Map<string, string>([
 	// mixed with the operator's `openai` key; name it apart from OpenAI here too
 	// (same text as the modality routing editor in GatewayDialog).
 	["openai-credits", "OpenAI (donated credits)"],
+	["azure-credits", "Azure OpenAI (Ryu credits)"],
 	["openrouter", "OpenRouter"],
 	["qwen", "Qwen"],
 	["together", "Together AI"],

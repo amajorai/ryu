@@ -38,6 +38,7 @@ import {
 import { formatHistoryTokens } from "./history-format.ts";
 import { COLORS, money } from "./UsageHistoryDashboard-shared.tsx";
 import { dayHeading, dayTick, forecastLabel } from "./usage-chart-format.ts";
+import { historySourceName } from "./usage-history-source-labels.ts";
 import usageVisualStyles from "./usage-visual-indicators.module.css";
 import type { UsageVisualStyle } from "./usage-visual-style.ts";
 
@@ -108,7 +109,7 @@ export function DailyChart({
 				label:
 					item.key === "total"
 						? tl("All sources")
-						: (report.sources.find((source) => source.id === id)?.label ?? id),
+						: historySourceName(report, id, tl),
 				color:
 					item.key === "total"
 						? "var(--chart-1)"

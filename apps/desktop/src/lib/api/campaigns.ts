@@ -45,6 +45,11 @@ import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
  */
 export interface CampaignPoolBalance {
 	expiresAt: string | null;
+	/**
+	 * The Ryu Router model ids this pool's grant pays for (separate pools).
+	 * Absent from an older control plane, which then means "not known".
+	 */
+	freeModelIds?: string[];
 	isFreeProvider: boolean;
 	poolLabel: string;
 	remainingMicroUsd: number;
@@ -102,6 +107,7 @@ const renderablePoolSchema = z.object({
 	remainingMicroUsd: z.number().finite(),
 	isFreeProvider: z.boolean().catch(false),
 	expiresAt: z.string().nullable().catch(null),
+	freeModelIds: z.array(z.string()).optional().catch(undefined),
 });
 const emptyPoolsSchema = z.null().optional();
 const campaignEnvelopeSchema = z.object({ pools: campaignPoolsInputSchema });
@@ -129,6 +135,7 @@ function normalizePools(input: CampaignPoolsInput): CampaignPoolBalance[] {
 			remainingMicroUsd: row.remainingMicroUsd,
 			isFreeProvider: row.isFreeProvider,
 			expiresAt: row.expiresAt,
+			...(row.freeModelIds ? { freeModelIds: row.freeModelIds } : {}),
 		});
 	}
 	return out;

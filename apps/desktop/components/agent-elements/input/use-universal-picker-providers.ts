@@ -6,7 +6,10 @@ import {
 	type CreditPoolId,
 } from "@ryu/auth/lib/credit-pools";
 import type { LiteralMessage } from "@ryu/i18n/react";
-import type { totalFreeCredit } from "@/components/agent-elements/input/free-model-tag.ts";
+import {
+	payableFreeModels,
+	type totalFreeCredit,
+} from "@/components/agent-elements/input/free-model-tag.ts";
 import { modelMenuItem } from "@/components/agent-elements/input/model-router.ts";
 import type { ProviderEntry } from "@/components/agent-elements/input/universal-picker-body.tsx";
 import type { usePiConfig } from "@/src/hooks/usePiConfig.ts";
@@ -205,11 +208,11 @@ export function buildProviderEntries({
 					? (freeCredit ?? undefined)
 					: undefined,
 			// "Free" tags come from Core's `freeModels` (the Gateway's own
-			// equivalence table) and show only while free credit remains.
-			freeModelIds:
-				isRyuRouter && freeCredit !== null && p.freeModels?.length
-					? new Set(p.freeModels)
-					: undefined,
+			// equivalence table), narrowed to the models the user's pools pay
+			// for (separate pools), and show only while free credit remains.
+			freeModelIds: isRyuRouter
+				? payableFreeModels(p.freeModels, freeCredit)
+				: undefined,
 			// Pooled capacity is Ryu's own, so there is no credential for a user
 			// to hold and a pool row is `configured` by definition — the wallet
 			// (and the pool's grant balance) is what gates it, at the Gateway.

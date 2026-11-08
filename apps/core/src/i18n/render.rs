@@ -8,7 +8,7 @@ use serde_json::{json, Map, Value};
 
 use chrono::NaiveDate;
 
-use super::{catalog, date, locale, number, relayed};
+use super::{bidi, catalog, date, locale, number, relayed};
 
 /// An English message template. Called with a placeholder echo it returns its
 /// ICU source (`"Unexpected HTTP {status}."`); written as `format!` with named
@@ -314,7 +314,14 @@ pub(super) fn substitute(pattern: &str, locale: &str, args: &[(String, Arg)]) ->
                     }
                 }
                 let (_, arg) = args.iter().find(|(key, _)| *key == name)?;
-                out.push_str(&arg.render(locale));
+                // RTL locales isolate Latin text arguments (`bidi.rs`).
+                match arg {
+                    Arg::Text(text) => {
+                        let whole = pattern.len() == name.len() + 2;
+                        bidi::push_text_arg(&mut out, text, locale, whole);
+                    }
+                    _ => out.push_str(&arg.render(locale)),
+                }
             }
             '}' => return None,
             other => out.push(other),

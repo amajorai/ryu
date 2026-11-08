@@ -28,9 +28,26 @@ const { Toaster, toast } = await import("@ryu/ui/components/sileo");
 const { useDesktopNotificationsStream } = await import(
 	"./useDesktopNotificationsStream.ts"
 );
-function Consumer() {
+const { TabsContext } = await import("@/src/contexts/TabsContext.tsx");
+const { clearVaultFocus, getVaultFocus } = await import(
+	"@/src/lib/vault-focus.ts"
+);
+let opened: { path: string; title?: string }[] = [];
+const tabs = {
+	openTab: (path: string, opts?: { title?: string }) => {
+		opened.push({ path, title: opts?.title });
+	},
+};
+function Hook() {
 	useDesktopNotificationsStream();
 	return <Toaster />;
+}
+function Consumer() {
+	return (
+		<TabsContext.Provider value={tabs as never}>
+			<Hook />
+		</TabsContext.Provider>
+	);
 }
 interface Connection {
 	closed: boolean;
@@ -65,6 +82,9 @@ class NativeNotificationBoundary {
 		permissionReads++;
 		return permission;
 	}
+	close() {
+		// The boundary has nothing to dismiss.
+	}
 	constructor(title: string, options?: NotificationOptions) {
 		const entry = {
 			title,
@@ -96,6 +116,8 @@ beforeEach(() => {
 	notices = [];
 	permission = "granted";
 	permissionReads = 0;
+	opened = [];
+	clearVaultFocus();
 	success = spyOn(toast, "success");
 	error = spyOn(toast, "error");
 	server = Bun.serve({
@@ -349,3 +371,40 @@ for (const field of ["token", "userJwt"] as const) {
 		expect(unexpected).toEqual([]);
 	});
 }
+test("a linked notification opens only its allowlisted route when tapped", async () => {
+	await render();
+	await until(() => connections.length === 1);
+	await emit(current(), {
+		title: "Broker proposal",
+		body: "An agent asked for api.linear.app.",
+		level: "info",
+		link: "/vault?tab=broker&proposal=prop_abc",
+	});
+	await until(() => notices.length === 1);
+	expect(success).toHaveBeenCalledWith(
+		expect.objectContaining({
+			title: "Broker proposal",
+			button: expect.objectContaining({ title: "Open" }),
+		})
+	);
+	notices[0]?.click?.();
+	expect(opened).toEqual([{ path: "/vault", title: "Vault" }]);
+	expect(getVaultFocus()).toMatchObject({
+		tab: "broker",
+		proposalId: "prop_abc",
+	});
+
+	await emit(current(), {
+		title: "Elsewhere",
+		body: "Not an allowed route.",
+		link: "https://example.com/phish",
+	});
+	await until(() => notices.length === 2);
+	notices[1]?.click?.();
+	expect(success).toHaveBeenLastCalledWith({
+		title: "Elsewhere",
+		description: "Not an allowed route.",
+	});
+	expect(opened).toHaveLength(1);
+	expect(unexpected).toEqual([]);
+});

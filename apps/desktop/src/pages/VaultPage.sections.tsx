@@ -15,6 +15,7 @@ import {
 	SettingsCard,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
+import { VaultValueTypeSelect } from "@/src/components/vault/VaultValueTypeSelect.tsx";
 import { vaultErrorMessage } from "@/src/components/vault/vault-errors.ts";
 import { secretKey } from "@/src/components/vault/vault-view.ts";
 import {
@@ -43,10 +44,12 @@ type VaultSecretFormInput = Pick<
 	| "setName"
 	| "setScopeId"
 	| "setValue"
+	| "setValueType"
 	| "sharedDisabled"
 	| "state"
 	| "teamIds"
 	| "value"
+	| "valueType"
 > & { tl: LiteralMessage };
 
 /** The add-or-rotate secret form. A plain render call, so the React tree is unchanged. */
@@ -66,11 +69,13 @@ export function renderVaultSecretForm({
 	setName,
 	setScopeId,
 	setValue,
+	setValueType,
 	sharedDisabled,
 	state,
 	teamIds,
 	tl,
 	value,
+	valueType,
 }: VaultSecretFormInput) {
 	return (
 		<SettingsSection
@@ -135,6 +140,12 @@ export function renderVaultSecretForm({
 						</SelectContent>
 					</Select>
 				</div>
+				<VaultValueTypeSelect
+					current={null}
+					id="vault-secret-type"
+					onChange={setValueType}
+					value={valueType}
+				/>
 				<div className="space-y-1.5">
 					<Label htmlFor="vault-secret-folder">
 						Folder <span className="text-muted-foreground">(optional)</span>

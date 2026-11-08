@@ -11,6 +11,7 @@ import {
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
 import { fullTimestamp } from "./interface-renderer.ts";
+import { newConversationLabel } from "./thread-display-title.ts";
 
 /** List order the user picked in the conversation list header. */
 export type DeskSort = "newest" | "oldest";
@@ -168,7 +169,7 @@ export function deskStartLabel(
 	if (view?.kind === "project") {
 		return tl("New conversation in {label}", { label: view.label });
 	}
-	return "New conversation";
+	return newConversationLabel(tl);
 }
 
 /** Plain-language reason a thread has its status, for the details pane. */

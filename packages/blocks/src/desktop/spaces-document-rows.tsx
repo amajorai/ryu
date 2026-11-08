@@ -11,7 +11,9 @@ import {
 	formatDocumentDate,
 	previewLines,
 } from "./spaces-document-format.ts";
-import { docIcon, indexBadgeLabel, rowDetail } from "./spaces-index-state.ts";
+import { rowDetailLines } from "./spaces-file-failure-message.ts";
+import { FileRawDetail } from "./spaces-file-raw-detail.tsx";
+import { docIcon, indexBadgeLabel } from "./spaces-index-state.ts";
 import type { SpaceDocumentRow } from "./spaces-types.ts";
 
 export function MarkdownThumbnail({
@@ -168,14 +170,14 @@ export function DocumentRow({
 	doc: SpaceDocumentRow;
 	onOpenDoc?: (docId: string, title: string) => void;
 }) {
-	const badge = indexBadgeLabel(doc.indexState);
-	const detail = rowDetail(doc);
 	const [friendly] = useFriendlyMode();
 	const tl = useLiteralMessages();
+	const badge = indexBadgeLabel(doc.indexState, tl);
+	const { message: detail, detail: rawDetail } = rowDetailLines(doc, tl);
 	return (
 		<li>
 			<button
-				aria-label={tl("Open {title}", { title: doc.title || "Untitled" })}
+				aria-label={tl("Open {title}", { title: doc.title || tl("Untitled") })}
 				className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-start hover:bg-accent/50"
 				onClick={() => onOpenDoc?.(doc.id, doc.title)}
 				type="button"
@@ -196,6 +198,7 @@ export function DocumentRow({
 							{detail}
 						</span>
 					) : null}
+					{rawDetail ? <FileRawDetail text={rawDetail} /> : null}
 				</span>
 				{badge === null ? (
 					// "Chunk" is the retrieval pipeline's word for a unit of embedded

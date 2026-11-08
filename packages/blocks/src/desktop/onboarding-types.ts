@@ -32,6 +32,14 @@ export interface OnboardingFeatureOption {
 	name: string;
 }
 
+/** Why the local path failed: one translated sentence, plus the raw technical
+ *  cause (installer or OS text) shown left-to-right under a "Details"
+ *  disclosure. */
+export interface OnboardingLocalError {
+	detail: string | null;
+	message: string;
+}
+
 /** Which step of the wizard to render. `installing`/`starting`/`finishing`/
  *  `done` all share the same shell with an indeterminate (or full) progress
  *  bar; `agents`, `skills`, `features`, and `mic` are the interactive steps. */
@@ -77,7 +85,7 @@ export interface OnboardingViewProps {
 	/** Why the local path failed, in the backend's own words. Shown in place of
 	 *  the generic copy on the unreachable card so a 404 on the release asset or a
 	 *  failed write names itself instead of reading as "something went wrong". */
-	localError?: string | null;
+	localError?: OnboardingLocalError | string | null;
 	/** The local path is unreachable: no Core answered on the local node, and (on
 	 *  desktop) starting one failed. On the webapp this swaps the local card for an
 	 *  install prompt so the user is never sent into an app whose backend does not

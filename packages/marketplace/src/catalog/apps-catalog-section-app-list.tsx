@@ -22,6 +22,7 @@ import {
 } from "./apps-catalog-section-card.tsx";
 import { CommunityShelf } from "./apps-catalog-section-community-shelf.tsx";
 import { groupByCatalogSource } from "./apps-catalog-section-filters.ts";
+import type { CatalogVariantMessages } from "./apps-catalog-section-variant-copy.ts";
 import { groupByCategory } from "./categories.ts";
 import InfiniteSentinel from "./chrome/infinite-sentinel.tsx";
 import StoreCatalogCard from "./chrome/store-catalog-card.tsx";
@@ -49,7 +50,6 @@ export function AppList({
 	canInstall,
 	fetchNextPage,
 	hasNextPage,
-	nounPlural,
 	fallbackIcon,
 	stabilityFiltered,
 	searching,
@@ -67,6 +67,7 @@ export function AppList({
 	onRetry,
 	settingsOpener,
 	groupBySource,
+	variantCopy,
 }: {
 	items: AppCatalogItem[];
 	/** Rows loaded from the feed BEFORE client-side filtering; its growth tells
@@ -85,7 +86,8 @@ export function AppList({
 	canInstall: boolean;
 	fetchNextPage: () => void;
 	hasNextPage: boolean;
-	nounPlural: string;
+	/** The tab's whole-sentence state titles (see {@link CatalogVariantMessages}). */
+	variantCopy: CatalogVariantMessages;
 	/** True when the stable-only predicate removed every candidate row. */
 	stabilityFiltered?: boolean;
 	/** Realm glyph shown when an item has no icon of its own (apps→grid,
@@ -266,9 +268,7 @@ export function AppList({
 						<EmptyMedia variant="icon">
 							<HugeiconsIcon icon={fallbackIcon} />
 						</EmptyMedia>
-						<EmptyTitle>
-							{tl("Couldn't load {nounPlural}", { nounPlural })}
-						</EmptyTitle>
+						<EmptyTitle>{variantCopy.loadError(tl)}</EmptyTitle>
 						<EmptyDescription>{STORE_LOAD_ERROR_SENTENCE}</EmptyDescription>
 					</EmptyHeader>
 					<EmptyContent>
@@ -297,7 +297,7 @@ export function AppList({
 							<EmptyTitle>
 								{stabilityFiltered
 									? "No stable releases found"
-									: tl("No {nounPlural} found", { nounPlural })}
+									: variantCopy.emptySearch(tl)}
 							</EmptyTitle>
 							<EmptyDescription>
 								{stabilityFiltered

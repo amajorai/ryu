@@ -1,4 +1,7 @@
 {
+  "Failed to send": "भेजना विफल रहा",
+  "Send failed": "भेजना विफल रहा",
+  "Send was interrupted; review and resend": "भेजना बाधित हुआ; समीक्षा करें और फिर से भेजें",
   "Sending at a set time": "निर्धारित समय पर भेजा जा रहा है",
   "Sending at {when}": "{when} पर भेजा जाएगा",
   "Waiting for agents to start, then finish": "एजेंट के शुरू होने और फिर पूरा होने की प्रतीक्षा की जा रही है",

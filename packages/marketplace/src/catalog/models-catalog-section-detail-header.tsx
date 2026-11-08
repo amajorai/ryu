@@ -168,6 +168,7 @@ export function ModelDetailHeader({
  * metadata. Renders nothing when the Hub reported none of these.
  */
 export function ModelSpecsRow({ card }: { card: ModelCard }) {
+	const tl = useLiteralMessages();
 	const ctx = formatContext(card.contextLength);
 	const params = formatParams(card.params);
 	const arch = card.architecture;
@@ -175,7 +176,13 @@ export function ModelSpecsRow({ card }: { card: ModelCard }) {
 	if (ctx) {
 		specs.push({
 			label: "Context window",
-			value: `${ctx} tokens`,
+			value: tl(
+				"{count, plural, one {{countText} token} other {{countText} tokens}}",
+				{
+					count: card.contextLength ?? 0,
+					countText: ctx,
+				}
+			),
 			title:
 				"The total tokens the model can read and write at once, shared by your prompt and its reply. GGUF models have one window, not separate input/output limits.",
 		});

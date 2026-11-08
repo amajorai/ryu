@@ -25,6 +25,12 @@ export const LOGIN_APPROVAL_SURFACE_LABELS = {
 export const LOGIN_APPROVAL_SCOPE = "openid profile email";
 export const LOGIN_APPROVAL_EXPIRES_IN_SECONDS = 5 * 60;
 export const LOGIN_APPROVAL_POLL_INTERVAL_SECONDS = 5;
+/**
+ * Length of the Better Auth user code. A pending approval never carries it:
+ * only the requesting device shows it, and the approver types it back (number
+ * matching), which proves they are looking at the device that asked.
+ */
+export const LOGIN_APPROVAL_USER_CODE_LENGTH = 8;
 
 export interface LoginApprovalStart {
 	deviceCode: string | null;
@@ -51,7 +57,6 @@ export interface LoginApprovalRequest {
 	status: "pending" | "approving" | "approved" | "denied";
 	surface: LoginApprovalSurface;
 	userAgent: string | null;
-	userCode: string;
 }
 
 export type LoginApprovalEvent =

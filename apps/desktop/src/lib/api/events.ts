@@ -14,6 +14,8 @@ import { streamChannel } from "./eventStream.ts";
 export interface DesktopNotification {
 	body?: string | null;
 	level?: string;
+	/** A desktop route the tap opens (see `notification-link.ts`). */
+	link?: string | null;
 	title: string;
 }
 
@@ -34,6 +36,7 @@ export function streamDesktopNotifications(
 		z.object({
 			body: z.string().nullish(),
 			level: z.string().optional(),
+			link: z.string().nullish(),
 			title: z.string(),
 		})
 	);

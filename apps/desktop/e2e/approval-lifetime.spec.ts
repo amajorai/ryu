@@ -56,7 +56,6 @@ test("account replacement cancels pending snapshots and unmount closes the strea
 					status: "pending",
 					surface: "desktop",
 					userAgent: "Performance test",
-					userCode: "ABCD2345",
 				},
 			],
 		},

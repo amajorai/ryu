@@ -357,7 +357,6 @@ pub(super) async fn authenticate_identity(
             Ok(context)
         }
         StaticOutcome::TryDynamic(token) => {
-            // Safe: `TryDynamic` is only produced when `resolve_cache` is `Some`.
             let cache = state
                 .resolve_cache
                 .as_ref()
@@ -374,11 +373,14 @@ pub(super) async fn authenticate_identity(
                     state.observe_platform_floor(&resolved);
                     // Bill/attribute to the org under a redacted label: the raw
                     // bearer would be written verbatim into every audit row.
+                    let proof_keys =
+                        agent_route_proof_keys(state, agent_proof.as_deref(), &resolved.org_id)
+                            .await?;
                     let dynamic_agent_id = resolved_dynamic_agent_id(
                         raw_api_key,
                         agent_id.as_deref(),
                         agent_proof.as_deref(),
-                        &core_proof_keys_for_org(Some(&resolved.org_id)),
+                        &proof_keys,
                     )?;
                     let api_key_label = format!("rgw_org:{}", resolved.org_id);
                     // The forwarded `x-ryu-user-id` is caller input and stays

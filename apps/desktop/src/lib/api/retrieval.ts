@@ -121,19 +121,22 @@ export async function indexChunk(
 export interface SpaceSummary {
 	id: string;
 	name: string;
+	/** A Core-seeded system Space; its seed name is shown localized. */
+	system?: boolean;
 }
 
 /** List Spaces (id + name) so the Memory view can offer them as search scopes. */
 export async function listSpaceSummaries(
 	target: ApiTarget
 ): Promise<SpaceSummary[]> {
-	const json = await request<{ spaces?: { id: string; name: string }[] }>(
-		target,
-		"/api/spaces",
-		undefined,
-		responseCodec3
-	);
-	return (json.spaces ?? []).map((s) => ({ id: s.id, name: s.name }));
+	const json = await request<{
+		spaces?: { id: string; name: string; system?: boolean }[];
+	}>(target, "/api/spaces", undefined, responseCodec3);
+	return (json.spaces ?? []).map((s) => ({
+		id: s.id,
+		name: s.name,
+		system: s.system === true,
+	}));
 }
 
 // Response codecs validate the consumed native DTO fields and retain JSON extension fields.
@@ -161,7 +164,11 @@ const responseCodec3 = z
 		spaces: z
 			.array(
 				z
-					.object({ id: z.string(), name: z.string() })
+					.object({
+						id: z.string(),
+						name: z.string(),
+						system: z.boolean().optional(),
+					})
 					.catchall(gatewayJsonValueSchema)
 			)
 			.optional(),

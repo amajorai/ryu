@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { GalleryCardSkeleton } from "./gallery-card.tsx";
 import { GalleryCover } from "./gallery-cover.tsx";
 import type { GalleryCoverSpec } from "./gallery-model.ts";
+import { newConversationLabel } from "./thread-display-title.ts";
 
 const SAMPLE: GalleryCoverSpec = {
 	author: null,
@@ -78,7 +79,7 @@ export function GalleryEmpty({
 				<Plus aria-hidden="true" data-icon="inline-start" />
 				{agentName
 					? tl("Message {agentName}", { agentName })
-					: "New conversation"}
+					: newConversationLabel(tl)}
 			</Button>
 		</div>
 	);

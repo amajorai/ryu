@@ -30,6 +30,7 @@ import {
 	DownloadCornerPointer,
 	ShortcutKeys,
 } from "./download-guide-browser.tsx";
+import { browserChromeDirection } from "./download-guide-direction.ts";
 import type { DownloadGuideOverlayProps } from "./download-guide-overlay.tsx";
 import { InstallSteps } from "./download-guide-steps.tsx";
 import { archLabel, detectDownloadOS, osName } from "./download-platform.ts";
@@ -55,6 +56,9 @@ export function DownloadGuidePanel({
 	// browsing on, which can differ from the installer they picked (a Mac
 	// visitor downloading the Linux .deb still presses ⌘J in Firefox).
 	const [visitorOs] = useState(() => detectDownloadOS());
+	// The browser's own UI direction: an RTL browser moves its download
+	// control to the top-left, whatever language Ryu is shown in.
+	const [chromeDir] = useState(() => browserChromeDirection());
 	// Focus lands on the heading, not a control: the first link re-triggers the
 	// download, and focusing the footer would scroll a tall dialog past its
 	// own header on short windows.
@@ -73,7 +77,7 @@ export function DownloadGuidePanel({
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			{open && hint.pointsTopRight ? (
-				<DownloadCornerPointer name={hint.name} />
+				<DownloadCornerPointer dir={chromeDir} name={hint.name} />
 			) : null}
 			<DialogContent
 				className="max-h-[calc(100dvh-2rem)] max-w-[calc(100%-2rem)] gap-0 overflow-y-auto bg-popover/95 p-0 sm:max-w-5xl"
@@ -114,6 +118,7 @@ export function DownloadGuidePanel({
 						className="grid items-center gap-6 rounded-3xl bg-muted/40 p-5 sm:p-6 md:grid-cols-[1.1fr_1fr]"
 					>
 						<BrowserToolbarMock
+							dir={chromeDir}
 							fileName={fileName}
 							hint={hint}
 							os={visitorOs}

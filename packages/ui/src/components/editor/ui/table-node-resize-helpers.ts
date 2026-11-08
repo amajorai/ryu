@@ -17,23 +17,32 @@ import { useEditorPlugin } from "platejs/react";
 import { type PointerEvent, type RefObject, useCallback, useRef } from "react";
 
 import type { TableResizeStartOptions } from "./table-node-resize-context.ts";
+import {
+	getHandleInlineOffset,
+	getTableInlineSign,
+} from "./table-node-resize-rtl.ts";
 
-function hideIndicator(indicator: HTMLDivElement | null) {
+export function hideIndicator(indicator: HTMLDivElement | null) {
 	if (!indicator) {
 		return;
 	}
 
 	indicator.style.display = "none";
-	indicator.style.removeProperty("left");
+	indicator.style.removeProperty("inset-inline-start");
 }
 
-function showIndicator(indicator: HTMLDivElement | null, offset: number) {
+// Offsets are measured from the table's inline start, so the indicator is
+// placed logically and lands on the correct side under RTL.
+export function showIndicator(
+	indicator: HTMLDivElement | null,
+	offset: number
+) {
 	if (!indicator) {
 		return;
 	}
 
 	indicator.style.display = "block";
-	indicator.style.left = `${offset}px`;
+	indicator.style.setProperty("inset-inline-start", `${offset}px`);
 }
 
 /** Show and hide the two boundary lines drawn over the table while resizing. */
@@ -87,8 +96,11 @@ export function useTableResizeIndicators({
 
 			const handleRect = event.currentTarget.getBoundingClientRect();
 			const wrapperRect = wrapper.getBoundingClientRect();
-			const boundaryOffset =
-				handleRect.left - wrapperRect.left + handleRect.width / 2;
+			const boundaryOffset = getHandleInlineOffset(
+				handleRect,
+				wrapperRect,
+				getTableInlineSign(wrapper)
+			);
 
 			showResizeIndicatorAtOffset(boundaryOffset);
 		},

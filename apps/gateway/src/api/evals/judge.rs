@@ -76,6 +76,7 @@ pub(super) fn judge_outcome(kind: &str, response: &Value) -> JudgeOutcome {
                 score: verdict.score,
                 detail: truncate_chars(text, 500),
                 executed: true,
+                ..Default::default()
             },
             explicit_score: verdict.explicit_score,
         },
@@ -125,6 +126,7 @@ pub(super) fn skipped_assertion_result(kind: &str, detail: &str) -> AssertionRes
         kind: kind.to_owned(),
         pass: false,
         score: 0.0,
+        ..Default::default()
     }
 }
 

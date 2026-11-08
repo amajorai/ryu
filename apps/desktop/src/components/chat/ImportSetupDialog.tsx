@@ -50,6 +50,7 @@ import {
 	scanWarnings,
 } from "@/src/lib/import-scan-text.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import { importOutcomeLine } from "./import-outcome-text.ts";
 import { NodeFolderBrowser } from "./NodeFolderBrowser.tsx";
 
 /** Common agent config roots offered as one-click scan targets. */
@@ -437,7 +438,7 @@ export function ImportSetupDialog({
 											className="text-status-destructive text-xs"
 											key={`${o.kind}:${o.id}`}
 										>
-											{o.title}: {o.detail}
+											{importOutcomeLine(o, tl)}
 										</p>
 									))}
 							</div>

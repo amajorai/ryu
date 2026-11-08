@@ -1,12 +1,19 @@
-use super::super::policy::{evaluate_with, CapabilitySet};
-// Each section's surface by its own path; `super::*` brings the shared
-// constants and helpers.
-use super::constraints::{check_parameters, validate_rule};
-use super::control_group_store::{authorize, constant_time_eq, create_request, redeem};
-use super::control_groups::{ControlGroupSpec, ControlGroupStatus};
-use super::templates::{expand, validate_template, TemplateContext};
+use super::super::policy::{evaluate_with, Capability, CapabilitySet, Policy, PolicyRule};
+use super::control_group_store::{
+    authorize, constant_time_eq, create_request, get_request, init_schema, prune, redeem,
+};
+use super::control_groups::{
+    control_group_for, read_gated_for_anyone, ControlGroupFactor, ControlGroupSpec,
+    ControlGroupStatus,
+};
+use super::parameters::{check_parameters, validate_rule};
+use super::templates::{
+    expand, is_safe_template_value, validate_template, Expansion, TemplateContext,
+};
 use super::*;
-use serde_json::json;
+use rusqlite::Connection;
+use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 fn subjects(list: &[&str]) -> Vec<String> {
     list.iter().map(|s| (*s).to_owned()).collect()
@@ -225,10 +232,10 @@ fn control_groups_require_distinct_non_requester_approvals_and_redeem_once() {
 
     // Wrong requester or tampered token: indistinguishable not-found.
     assert!(redeem(&conn, &token, "user:bob", now + 2).is_err());
-    // Change the secret's last hex digit to a different one: always writing
-    // `0` left the token intact whenever it already ended in `0` (1 in 16).
-    let (head, last) = token.split_at(token.len() - 1);
-    let tampered = format!("{head}{}", if last == "0" { "1" } else { "0" });
+    // Flip the last hex digit to one it cannot already be; a fixed
+    // replacement digit equals the real one 1 time in 16.
+    let last = if token.ends_with('0') { '1' } else { '0' };
+    let tampered = format!("{}{last}", &token[..token.len() - 1]);
     assert_ne!(tampered, token);
     assert!(redeem(&conn, &tampered, "user:alice", now + 2).is_err());
     assert!(redeem(&conn, "garbage", "user:alice", now + 2).is_err());

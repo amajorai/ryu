@@ -139,6 +139,13 @@ pub struct ProvidersConfig {
     /// Ryu's own allowance instead of OpenRouter credit bought at retail.
     #[serde(default)]
     pub anthropic_credits: Option<AnthropicProviderConfig>,
+    /// Ryu's Microsoft Azure (Azure OpenAI / AI Foundry) supply behind the
+    /// `azure-credits` credit pool, reached through Azure's OpenAI-compatible
+    /// v1 surface (`https://<resource>.openai.azure.com/openai/v1`). The
+    /// endpoint is resource-scoped, so the slot is absent unless a key and a
+    /// resource name (or an explicit base URL) are both set.
+    #[serde(default)]
+    pub azure_credits: Option<OpenAiProviderConfig>,
     /// Direct OpenAI-compatible upstreams whose endpoint and credential are
     /// explicitly configured. These are distinct provider IDs for routing,
     /// quota, audit, and cache isolation; no third-party router is involved.
@@ -265,6 +272,11 @@ impl ProvidersConfig {
                 .unwrap_or_default(),
             "anthropic-credits" => self
                 .anthropic_credits
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "azure-credits" => self
+                .azure_credits
                 .as_ref()
                 .map(|c| c.all_keys())
                 .unwrap_or_default(),

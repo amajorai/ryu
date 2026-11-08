@@ -1,3 +1,7 @@
 {
-  "The iOS Simulator runs only on macOS; this node is not a Mac.": "iOS 模拟器只能在 macOS 上运行；此节点不是 Mac。"
+  "The iOS Simulator runs only on macOS; this node is not a Mac.": "iOS 模拟器只能在 macOS 上运行；此节点不是 Mac。",
+  "iOS Simulator hardware keys need facebook/idb; not available via simctl.": "iOS Simulator 硬件按键需要 facebook/idb；无法通过 simctl 使用。",
+  "iOS Simulator has no public coordinate swipe (simctl). Install facebook/idb to enable it.": "iOS Simulator 没有公开的坐标滑动功能（simctl）。请安装 facebook/idb 以启用。",
+  "iOS Simulator has no public coordinate tap (simctl). Install facebook/idb to enable it.": "iOS Simulator 没有公开的坐标点按功能（simctl）。请安装 facebook/idb 以启用。",
+  "iOS Simulator text entry needs facebook/idb; not available via simctl.": "iOS Simulator 文本输入需要 facebook/idb；无法通过 simctl 使用。"
 }

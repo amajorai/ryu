@@ -34,6 +34,7 @@ import { DailyChart } from "./UsageHistoryDashboard-daily-chart.tsx";
 import { ImportReportCard } from "./UsageHistoryDashboard-import-report.tsx";
 import { OverviewStats } from "./UsageHistoryDashboard-overview-stats.tsx";
 import { COLORS, money, PERIODS } from "./UsageHistoryDashboard-shared.tsx";
+import { usageHistorySourceLabel } from "./usage-history-source-labels.ts";
 import usageVisualStyles from "./usage-visual-indicators.module.css";
 import type { UsageVisualStyle } from "./usage-visual-style.ts";
 
@@ -203,7 +204,7 @@ export function UsageHistoryView({
 											)
 										}
 									/>
-									{source.label}
+									{usageHistorySourceLabel(source, tl)}
 								</label>
 							}
 						/>
@@ -225,7 +226,7 @@ export function UsageHistoryView({
 							>
 								{customSources.map((source) => (
 									<option key={source.id} value={source.id}>
-										{source.label}
+										{usageHistorySourceLabel(source, tl)}
 									</option>
 								))}
 							</select>

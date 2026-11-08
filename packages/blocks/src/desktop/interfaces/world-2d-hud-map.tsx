@@ -9,7 +9,7 @@ import { insidePond, type TileRect } from "./world-2d-layout.ts";
 import {
 	needsYou,
 	type VillagerStatus,
-	villagerStatusSuffix,
+	visitVillagerLabel,
 } from "./world-2d-model.ts";
 import { type PixelScene, SV_MAP } from "./world-2d-palette.ts";
 import type { VillageLayout } from "./world-village.ts";
@@ -228,10 +228,7 @@ export function VillageMap({
 						const status = statuses.get(house.agentId) ?? "idle";
 						return (
 							<button
-								aria-label={tl("Visit {name}{suffix}", {
-									name,
-									suffix: villagerStatusSuffix(status),
-								})}
+								aria-label={visitVillagerLabel(name, status, tl)}
 								className="group absolute outline-none hover:shadow-[inset_0_0_0_2px_var(--sv-plank-ink)] focus-visible:shadow-[inset_0_0_0_2px_var(--sv-focus)]"
 								key={house.agentId}
 								onClick={() => onVisit(house.agentId)}

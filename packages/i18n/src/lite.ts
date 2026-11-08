@@ -15,6 +15,7 @@ export {
 	type LanguagePackInfo,
 } from "./built-in-pack-info.ts";
 export { formatMessage, type MessageValuesInput } from "./format.ts";
+export { isolateArg, isolateLtr, stripBidiIsolates } from "./format-bidi.ts";
 export {
 	type CompactAgeOptions,
 	type DateInput,

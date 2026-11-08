@@ -17,6 +17,7 @@ import {
 import { CARD_STOCK } from "./card-table-palette.ts";
 import { useThreadReading } from "./card-table-rows.tsx";
 import { agentById } from "./interface-renderer.ts";
+import { threadDisplayTitle } from "./thread-display-title.ts";
 
 /** Under this much showing face, a card drops the "+2" after the agent's name. */
 const AGE_MIN_EXPOSED = 100;
@@ -144,7 +145,7 @@ export function CardFace({
 }) {
 	const agent = agentById(snapshot, thread.agentIds[0]);
 	const extra = thread.agentIds.length - 1;
-	const title = thread.title.trim() || "Untitled thread";
+	const title = threadDisplayTitle(thread);
 	const metrics = cardFaceMetrics(width);
 	const { large, small } = metrics;
 	const narrow = exposed < AGE_MIN_EXPOSED;

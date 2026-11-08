@@ -77,7 +77,23 @@ export function languageSelectionKey(
 	return selection.mode === "auto" ? "auto" : `fixed:${selection.packId ?? ""}`;
 }
 
+const MAX_SYSTEM_LANGUAGES = 32;
+const MAX_LANGUAGE_TAG_LENGTH = 64;
+
+const systemLanguagesSchema = z
+	.array(z.string().min(1).max(MAX_LANGUAGE_TAG_LENGTH))
+	.min(1)
+	.max(MAX_SYSTEM_LANGUAGES);
+
+/** Validate the main process's OS language list; `null` means "use navigator". */
+export function parseSystemLanguages(value: unknown): string[] | null {
+	const parsed = systemLanguagesSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
+}
+
 /** Island bridge for saving a choice (`window.islandLanguage`). */
 export interface IslandLanguageApi {
 	select(packId: string | null): Promise<boolean>;
+	/** The OS's preferred languages from the main process (see `parseSystemLanguages`). */
+	systemLanguages?(): Promise<unknown>;
 }

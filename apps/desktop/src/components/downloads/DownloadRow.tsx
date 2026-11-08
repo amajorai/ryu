@@ -41,6 +41,7 @@ import {
 	resumeDownload,
 	retryDownload,
 } from "@/src/lib/api/downloads.ts";
+import { localizedDownloadLabel } from "@/src/lib/catalog/download-label-messages.ts";
 import {
 	downloadBadge,
 	stripRoleSuffix,
@@ -162,7 +163,9 @@ export function DownloadRow({
 	// parenthetical is stripped from the name; the raw label stays on hover.
 	const badge = downloadBadge(task.role, task.kind, task.label);
 	const displayLabel = stripRoleSuffix(
-		friendly ? friendlyDownloadLabel(task.label, task.kind) : task.label
+		friendly
+			? friendlyDownloadLabel(task.label, task.kind, tl)
+			: (localizedDownloadLabel(task.label, tl) ?? task.label)
 	);
 
 	const sizeText = task.total_bytes

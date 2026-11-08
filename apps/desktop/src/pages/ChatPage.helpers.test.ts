@@ -149,7 +149,7 @@ describe("context handoff notice", () => {
 			expect(text).not.toContain("summarized");
 			expect(text).not.toContain("→");
 		}
-		expect(results[1]).toContain("لـ gpt-5");
+		expect(results[1]).toContain("لـ \u2068gpt-5\u2069");
 		expect(results[3]).toContain("←");
 		expect(results[3]).not.toContain("128K");
 	});

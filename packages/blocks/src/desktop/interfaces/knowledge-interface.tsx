@@ -369,14 +369,14 @@ export function KnowledgeInterface({
 			settleLayout(layout, forcesRef.current, SETTLE_TICKS);
 		}
 		cameraApi.current?.reset();
-		setAnnouncement("Layout restarted");
+		setAnnouncement(tl("Layout restarted"));
 	};
 	const localTitle =
 		settings.mode === "local" && selectedNode
 			? tl("Local graph of {name}", { name: displayLabel(selectedNode) })
-			: "Knowledge graph";
+			: tl("Knowledge graph");
 	const sceneLabel = loading
-		? "Knowledge graph, loading"
+		? tl("Knowledge graph, loading")
 		: tl(
 				"{localTitle}: {nodes, plural, one {{nodeCount} node} other {{nodeCount} nodes}} and {links, plural, one {{linkCount} link} other {{linkCount} links}}. Arrow keys move between nodes, Enter opens one, plus and minus zoom, slash searches.",
 				{

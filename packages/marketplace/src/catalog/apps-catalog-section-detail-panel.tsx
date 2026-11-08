@@ -40,6 +40,7 @@ import {
 	AppSecondaryActions,
 	GrantList,
 } from "./apps-catalog-section-secondary-actions.tsx";
+import type { CatalogVariantMessages } from "./apps-catalog-section-variant-copy.ts";
 import CommunityTrustNotice from "./chrome/community-trust-notice.tsx";
 import DeprecationNotice from "./chrome/deprecation-notice.tsx";
 import { DEPRECATED_LABEL, resolveDeprecation } from "./deprecation.ts";
@@ -92,10 +93,10 @@ export function AppDetailPanel({
 	error,
 	installLayer,
 	installVersion,
-	noun,
 	renderAffordance,
 	settingsOpener,
 	switchChannel,
+	variantCopy,
 }: {
 	selectedId: string | null;
 	item: AppCatalogItem | null;
@@ -116,10 +117,11 @@ export function AppDetailPanel({
 	error: string | null;
 	installLayer: CatalogInstall | null;
 	installVersion?: (id: string, version: CatalogVersion) => Promise<void>;
-	noun: string;
 	renderAffordance: CatalogHost["renderAffordance"];
 	/** Resolves this listing to its "open settings" action (see the host seam). */
 	settingsOpener: PluginSettingsOpener;
+	/** The tab's whole-sentence no-selection copy. */
+	variantCopy: CatalogVariantMessages;
 }) {
 	const tl = useLiteralMessages();
 	const host = useCatalogHost();
@@ -178,13 +180,8 @@ export function AppDetailPanel({
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={GridIcon} />
 					</EmptyMedia>
-					<EmptyTitle>{tl("No {noun} selected", { noun })}</EmptyTitle>
-					<EmptyDescription>
-						{tl(
-							"Pick a {noun} on the left to read what it does, review its permissions, and install it.",
-							{ noun }
-						)}
-					</EmptyDescription>
+					<EmptyTitle>{variantCopy.noneSelected(tl)}</EmptyTitle>
+					<EmptyDescription>{variantCopy.pickHint(tl)}</EmptyDescription>
 				</EmptyHeader>
 			</Empty>
 		);

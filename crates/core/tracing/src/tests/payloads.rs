@@ -206,3 +206,61 @@ async fn content_is_dropped_unless_policy_captures() {
     store.set_content_policy_source(live);
     assert!(!store.captures_content());
 }
+
+#[tokio::test]
+async fn boot_seal_pass_counts_only_plaintext_values_in_a_mixed_store() {
+    let path = temp_db("mixed");
+    let store = TraceStore::open(path.clone()).unwrap();
+    store.set_content_policy(ContentPolicy::capture(4096));
+    store.set_content_sealer(Arc::new(TestSealer));
+    // Sealed on write: input and output.
+    let sealed = store
+        .start_span(
+            SpanStart::new("conv-x", SpanKind::ModelCall, "m").input(serde_json::json!("in-a")),
+        )
+        .await
+        .unwrap();
+    store
+        .end_span(&sealed.id, SpanEnd::ok().output(serde_json::json!("out-a")))
+        .await
+        .unwrap();
+    // Sealed input, plaintext output; and a fully plaintext legacy row.
+    let half = store
+        .start_span(
+            SpanStart::new("conv-x", SpanKind::ModelCall, "m").input(serde_json::json!("in-b")),
+        )
+        .await
+        .unwrap();
+    let legacy = store
+        .start_span(SpanStart::new("conv-x", SpanKind::ModelCall, "m"))
+        .await
+        .unwrap();
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE spans SET output = '\"out-b\"' WHERE id = ?1",
+            params![half.id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE spans SET input = '\"in-c\"', output = '\"out-c\"' WHERE id = ?1",
+            params![legacy.id],
+        )
+        .unwrap();
+    }
+    assert_eq!(store.seal_stored_payloads().await.unwrap(), 3);
+    for (id, input, output) in [
+        (&sealed.id, "in-a", "out-a"),
+        (&half.id, "in-b", "out-b"),
+        (&legacy.id, "in-c", "out-c"),
+    ] {
+        let (raw_in, raw_out) = raw_payloads(&path, id);
+        assert!(raw_in.unwrap().starts_with("sealed:"));
+        assert!(raw_out.unwrap().starts_with("sealed:"));
+        let span = store.get_span(id).await.unwrap().unwrap();
+        assert_eq!(span.input, Some(serde_json::json!(input)));
+        assert_eq!(span.output, Some(serde_json::json!(output)));
+    }
+    assert_eq!(store.seal_stored_payloads().await.unwrap(), 0);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

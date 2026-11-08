@@ -15,12 +15,12 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { format } from "date-fns";
 import { useEffect, useMemo, useRef } from "react";
 import {
 	eventTime,
 	eventTone,
 } from "@/src/components/calendar/event-display.tsx";
+import { formatGridHourLabel } from "@/src/components/calendar/TimeGridView-hour-label.ts";
 import { useCalendarLocale } from "@/src/components/calendar/use-calendar-locale.ts";
 import { formatCalendarDate } from "@/src/lib/calendar/date-labels.ts";
 import {
@@ -211,10 +211,8 @@ export function TimeGridView({
 								data-calendar-hour=""
 								key={hour}
 							>
-								<span className="absolute end-1.5 -top-2 text-muted-foreground/70 text-xs tabular-nums">
-									{hour === 0
-										? ""
-										: format(new Date(2000, 0, 1, hour), "HH:mm")}
+								<span className="absolute end-1.5 -top-2 whitespace-nowrap text-muted-foreground/70 text-xs tabular-nums">
+									{hour === 0 ? "" : formatGridHourLabel(hour, locale)}
 								</span>
 							</div>
 						))}

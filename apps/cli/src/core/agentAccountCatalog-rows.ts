@@ -8,6 +8,7 @@ import {
 	COMPATIBLE_CHAT_PROVIDERS,
 	engineModelProvider,
 } from "@ryuhq/core-client/agent-account-access";
+import { tf as cliTf } from "../i18n/translate.ts";
 import type { AvailableAccount } from "./agentAccountCatalog-types.ts";
 import {
 	connectionsSchema,
@@ -73,14 +74,18 @@ export function mcpOAuthApps(apps: readonly PluginWire[]): PluginWire[] {
 /** Rows for one app's MCP sign-ins (`GET /api/plugins/:id/auth`). */
 export function mcpSignInRows(
 	app: Pick<PluginWire, "id" | "name">,
-	json: unknown
+	json: unknown,
+	tf: typeof cliTf = cliTf
 ): AvailableAccount[] {
 	const parsed = mcpOAuthSchema.parse(json);
 	const rows: AvailableAccount[] = [];
 	for (const server of parsed.servers ?? []) {
 		for (const connection of server.connections ?? []) {
 			rows.push({
-				detail: [connection.account_label, `profile ${connection.profile_id}`]
+				detail: [
+					connection.account_label,
+					tf("Profile {id}", { id: connection.profile_id }),
+				]
 					.filter(Boolean)
 					.join(" · "),
 				key: accountKey.mcp(connection.profile_id, app.id, server.server_name),

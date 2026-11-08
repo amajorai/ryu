@@ -178,6 +178,16 @@ describe("host response projections", () => {
 		expect(
 			chatSendResultSchema.safeParse({ ...sent, status: "failed" }).success
 		).toBe(false);
+		const queued = {
+			approval_id: "ap_1",
+			conversation_id: "chat",
+			status: "pending_approval",
+		} satisfies ChatSendResult;
+		expect(chatSendResultSchema.parse(queued)).toBe(queued);
+		expect(
+			chatSendResultSchema.safeParse({ ...queued, approval_id: undefined })
+				.success
+		).toBe(false);
 	});
 	test("uploaded files preserve exact host URLs and bytes metadata", () => {
 		const uploaded = {

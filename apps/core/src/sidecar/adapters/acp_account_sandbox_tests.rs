@@ -425,3 +425,14 @@ fn a_working_folder_inside_the_keychain_is_not_kept() {
     assert!(!keep.contains(&inside));
     assert!(keep.contains(&cwd));
 }
+
+#[test]
+fn the_network_cut_relays_only_the_gateway_and_core() {
+    assert_eq!(
+        untrusted_loopback_ports(Some(4000), Some(3000)),
+        vec![3000, 4000]
+    );
+    assert_eq!(untrusted_loopback_ports(Some(4000), None), vec![4000]);
+    assert_eq!(untrusted_loopback_ports(Some(4000), Some(4000)), vec![4000]);
+    assert!(untrusted_loopback_ports(None, None).is_empty());
+}

@@ -83,7 +83,7 @@
   },
   "devDependencies": {
     "@types/bun": "catalog:",
-    "hono": "^4.8.2",
+    "hono": "^4.13.16",
     "tsup": "^8.5.0",
     "typescript": "^5"
   }

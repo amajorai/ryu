@@ -14,9 +14,11 @@
 // double, and a small integer (under 10,000), which reads the same in most
 // locales and is most often a count or a code. An argument the translation
 // formats itself (`{count, plural, …}`, `{size, number}`) keeps its raw value:
-// the message formatter parses it as a number.
+// the message formatter parses it as a number. A value already grouped in the
+// reader's locale (`32.768` in German) is kept as written.
 
 import { numberFormatter } from "./format-intl.ts";
+import { isLocaleGroupedInteger } from "./literal-template-numerals-grouping.ts";
 
 /** An optionally signed decimal written with ASCII digits and a `.`. */
 const PLAIN_DECIMAL = /^-?(\d+)(?:\.(\d+))?$/u;
@@ -87,7 +89,8 @@ export function formatCapturedNumeral(
 	if (
 		!parsed ||
 		isIdentifierArgument(name) ||
-		isTypedArgument(translation, name)
+		isTypedArgument(translation, name) ||
+		isLocaleGroupedInteger(value, locale, name)
 	) {
 		return value;
 	}

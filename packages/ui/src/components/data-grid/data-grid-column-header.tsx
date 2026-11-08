@@ -35,13 +35,12 @@ import {
 	FilterIcon,
 	FilterXIcon,
 	MoveHorizontalIcon,
-	PinIcon,
-	PinOffIcon,
 	Settings2Icon,
 	XIcon,
 } from "lucide-react";
 import { type ComponentProps, memo, useCallback, useMemo } from "react";
 import { isNativeText } from "../../lib/native-primitive-observation.ts";
+import { DataGridPinItems } from "./data-grid-pin-items.tsx";
 
 interface DataGridColumnHeaderProps<TData, TValue>
 	extends ComponentProps<typeof DropdownMenuTrigger> {
@@ -70,8 +69,6 @@ export function DataGridColumnHeader<TData, TValue>({
 	const columnVariant = getColumnVariant(cellVariant?.variant);
 
 	const pinnedPosition = column.getIsPinned();
-	const isPinnedLeft = pinnedPosition === "left";
-	const isPinnedRight = pinnedPosition === "right";
 
 	const onSortingChange = useCallback(
 		(direction: SortDirection) => {
@@ -234,40 +231,13 @@ export function DataGridColumnHeader<TData, TValue>({
 								<DropdownMenuSeparator />
 							)}
 
-							{isPinnedLeft ? (
-								<DropdownMenuItem
-									className="[&_svg]:text-muted-foreground"
-									onClick={onUnpin}
-								>
-									<PinOffIcon />
-									Unpin from left
-								</DropdownMenuItem>
-							) : (
-								<DropdownMenuItem
-									className="[&_svg]:text-muted-foreground"
-									onClick={onLeftPin}
-								>
-									<PinIcon />
-									Pin to left
-								</DropdownMenuItem>
-							)}
-							{isPinnedRight ? (
-								<DropdownMenuItem
-									className="[&_svg]:text-muted-foreground"
-									onClick={onUnpin}
-								>
-									<PinOffIcon />
-									Unpin from right
-								</DropdownMenuItem>
-							) : (
-								<DropdownMenuItem
-									className="[&_svg]:text-muted-foreground"
-									onClick={onRightPin}
-								>
-									<PinIcon />
-									Pin to right
-								</DropdownMenuItem>
-							)}
+							<DataGridPinItems
+								gridElement={table.options.meta?.dataGridRef?.current}
+								onLeftPin={onLeftPin}
+								onRightPin={onRightPin}
+								onUnpin={onUnpin}
+								pinnedPosition={pinnedPosition}
+							/>
 						</>
 					)}
 					{column.getCanResize() && table.options.meta?.onColumnAutoFit && (

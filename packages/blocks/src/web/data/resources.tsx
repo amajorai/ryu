@@ -9,6 +9,7 @@ import {
 	Scale,
 	Trophy,
 	Users,
+	Wallpaper,
 } from "lucide-react";
 import { COMPANY_ROUTES } from "./company.ts";
 
@@ -159,6 +160,13 @@ export const resources: Resource[] = [
 		description: "How people use Ryu, in their own words. Share yours.",
 		href: "/stories",
 		Icon: Quote,
+	},
+	{
+		category: "Updates",
+		label: "Wallpapers",
+		description: "Desktop and phone wallpapers from the p(doom) music video.",
+		href: "/wallpapers",
+		Icon: Wallpaper,
 	},
 
 	/* ============================ COMMUNITY ========================= */

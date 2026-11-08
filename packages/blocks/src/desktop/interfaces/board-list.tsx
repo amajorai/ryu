@@ -119,7 +119,7 @@ function BoardListRow({
 	const status = threadStatus(thread);
 	const agents = participants(snapshot, thread);
 	const group = rowGroup(snapshot, thread, groupedByProject);
-	const title = thread.title.trim() || "Untitled thread";
+	const title = thread.title.trim() || tl("Untitled thread");
 	const age = compactAge(thread.updatedAt, now);
 	const detailsId = `board-row-details-${thread.id}`;
 	const names = agents.map((agent) => agent.name).join(", ");

@@ -1,20 +1,34 @@
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useEffect, useMemo, useRef } from "react";
+import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type DesktopNotification,
 	streamDesktopNotifications,
 } from "@/src/lib/api/events.ts";
+import {
+	openNotificationLink,
+	parseNotificationLink,
+} from "@/src/lib/notifications/notification-link.ts";
 import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
 import { playSound } from "@/src/lib/sounds/play-sound.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
-/** Raise an OS notification (no-op when the user turned them off). */
-function osNotify(n: DesktopNotification, isCurrent: () => boolean): void {
+/** Raise an OS notification (no-op when the user turned them off). Tapping it
+ *  opens the notification's `link` when that is an allowlisted route. */
+function osNotify(
+	n: DesktopNotification,
+	isCurrent: () => boolean,
+	onOpen: () => void
+): void {
 	if (!isCurrent()) {
 		return;
 	}
-	showOsNotification({ title: n.title, body: n.body }).catch(() => undefined);
+	showOsNotification({
+		title: n.title,
+		body: n.body,
+		onClick: parseNotificationLink(n.link) ? onOpen : undefined,
+	}).catch(() => undefined);
 }
 
 /**
@@ -29,6 +43,7 @@ export function useDesktopNotificationsStream(): void {
 	const token = node.token ?? null;
 	const userJwt = node.userJwt ?? null;
 	const authority = useMemo(() => ({}), [url, token, userJwt]);
+	const { openTab } = useTabsContext();
 	const currentAuthority = useRef(authority);
 	currentAuthority.current = authority;
 
@@ -39,12 +54,22 @@ export function useDesktopNotificationsStream(): void {
 		const onNotification = (n: DesktopNotification) => {
 			const isAlert = n.level === "error" || n.level === "warning";
 			const notify = isAlert ? toast.error : toast.success;
-			notify({ title: n.title, description: n.body ?? undefined });
+			const open = () => {
+				openNotificationLink(n.link, openTab);
+			};
+			notify({
+				title: n.title,
+				description: n.body ?? undefined,
+				...(parseNotificationLink(n.link)
+					? { button: { title: "Open", onClick: open } }
+					: {}),
+			});
 			playSound(isAlert ? "alert" : "message", { source: "stream" });
 			osNotify(
 				n,
 				() =>
-					currentAuthority.current === authority && !controller.signal.aborted
+					currentAuthority.current === authority && !controller.signal.aborted,
+				open
 			);
 		};
 
@@ -56,5 +81,5 @@ export function useDesktopNotificationsStream(): void {
 		return () => {
 			controller.abort();
 		};
-	}, [url, token, userJwt, authority]);
+	}, [url, token, userJwt, authority, openTab]);
 }

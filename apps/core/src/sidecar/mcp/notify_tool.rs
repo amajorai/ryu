@@ -78,6 +78,7 @@ pub async fn dispatch(tool: &str, arguments: Value) -> Result<Value> {
                 target_user_id: None,
                 notification_id: None,
                 source_app_id: None,
+                link: None,
             });
             Ok(json!({ "ok": true, "delivered": true, "title": title }))
         }

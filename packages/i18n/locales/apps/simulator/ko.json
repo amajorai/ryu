@@ -1,3 +1,7 @@
 {
-  "The iOS Simulator runs only on macOS; this node is not a Mac.": "iOS 시뮬레이터는 macOS에서만 실행됩니다. 이 노드는 Mac이 아닙니다."
+  "The iOS Simulator runs only on macOS; this node is not a Mac.": "iOS 시뮬레이터는 macOS에서만 실행됩니다. 이 노드는 Mac이 아닙니다.",
+  "iOS Simulator hardware keys need facebook/idb; not available via simctl.": "iOS Simulator 하드웨어 키에는 facebook/idb가 필요합니다. simctl로는 사용할 수 없습니다.",
+  "iOS Simulator has no public coordinate swipe (simctl). Install facebook/idb to enable it.": "iOS Simulator에는 좌표 기반 공개 스와이프 기능이 없습니다(simctl). 사용하려면 facebook/idb를 설치하세요.",
+  "iOS Simulator has no public coordinate tap (simctl). Install facebook/idb to enable it.": "iOS Simulator에는 좌표 기반 공개 탭 기능이 없습니다(simctl). 사용하려면 facebook/idb를 설치하세요.",
+  "iOS Simulator text entry needs facebook/idb; not available via simctl.": "iOS Simulator 텍스트 입력에는 facebook/idb가 필요합니다. simctl로는 사용할 수 없습니다."
 }

@@ -141,7 +141,7 @@ export function WorkbenchTabMenu({
 					}
 				}}
 			>
-				Close to the Right
+				Close Tabs After This One
 			</ContextMenuItem>
 		</ContextMenuContent>
 	);

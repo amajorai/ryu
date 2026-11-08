@@ -110,14 +110,16 @@ async fn assemble_long_term_context(
         &[],
         MemoryVisibility::unrestricted(),
         limit,
+        crate::memory_policy::RecallBudget::default().char_budget(),
         true,
     )
     .await
 }
 
 /// Build the recency block for the server-resolved owner and sensitive-topic
-/// consent of the current turn. The legacy wrapper above remains for pure tests
-/// and callers on an unbound personal node.
+/// consent of the current turn: at most `limit` notes, rendered within
+/// `char_budget` characters (see [`render_recency_notes`]). The legacy wrapper
+/// above remains for pure tests and callers on an unbound personal node.
 pub(crate) async fn assemble_long_term_context_for_user(
     memory: &MemoryStore,
     enabled: bool,
@@ -127,6 +129,7 @@ pub(crate) async fn assemble_long_term_context_for_user(
     read_levels: &[String],
     visibility: MemoryVisibility<'_>,
     limit: usize,
+    char_budget: usize,
     include_sensitive: bool,
 ) -> LongTermMemoryContext {
     if !enabled {
@@ -157,12 +160,9 @@ pub(crate) async fn assemble_long_term_context_for_user(
     if entries.is_empty() {
         return LongTermMemoryContext::default();
     }
-    // Render oldest-first so the model reads facts in the order learned.
-    let mut facts = String::new();
-    for entry in entries.iter().rev() {
-        facts.push_str("- ");
-        facts.push_str(entry.content.trim());
-        facts.push('\n');
+    let (facts, included) = render_recency_notes(&entries, char_budget);
+    if included.is_empty() {
+        return LongTermMemoryContext::default();
     }
     // Recalled memory is STORED text: a fact captured from an earlier turn can
     // carry whatever untrusted content that turn contained (pasted web text,
@@ -176,12 +176,9 @@ pub(crate) async fn assemble_long_term_context_for_user(
         facts
     };
     LongTermMemoryContext {
-        system: Some(format!(
-			"The following are durable facts remembered about the user from previous sessions:\n{facts}",
-		)),
-        citations: entries
+        system: Some(format!("{RECENCY_NOTES_HEADER}\n{facts}")),
+        citations: included
             .iter()
-            .rev()
             .filter_map(|entry| {
                 let content = truncate_snippet(&entry.content);
                 (!content.is_empty()).then(|| MemoryCitation {
@@ -190,8 +187,95 @@ pub(crate) async fn assemble_long_term_context_for_user(
                 })
             })
             .collect(),
-        recency_ids: entries.into_iter().map(|entry| entry.id).collect(),
+        recency_ids: included.iter().map(|entry| entry.id.clone()).collect(),
     }
+}
+
+/// Characters of one note's content that reach the prompt. A captured turn can
+/// be arbitrarily long; the rest stays in the Memory Library.
+pub(crate) const RECENCY_FACT_CHAR_CAP: usize = 500;
+/// Characters of a note's "use when" hint that reach the prompt.
+const RECENCY_WHEN_TO_USE_CHAR_CAP: usize = 160;
+
+/// Purpose framing for the recency block: these are leads from earlier
+/// sessions, not ground truth, so the model is told how to treat, check and
+/// correct them. Tool names are deliberately not named; the hints say "if
+/// available" because the tool set differs per agent and surface.
+pub(crate) const RECENCY_NOTES_HEADER: &str = "Notes saved from earlier sessions with this user, \
+most important first. Each is labelled [category · date saved · source]. They may be out of \
+date or wrong. When one matters to your answer, check it against the current conversation, or \
+search past chats if a tool for that is available. If a note proves wrong, say so and correct it \
+with the memory tool if one is available.";
+
+/// Collapse a stored note to one line and cap it at `max` characters, cutting
+/// on a char boundary and marking the cut with an ellipsis.
+fn one_line_capped(text: &str, max: usize) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= max {
+        return collapsed;
+    }
+    let mut capped: String = collapsed.chars().take(max).collect();
+    capped.push('…');
+    capped
+}
+
+/// `YYYY-MM-DD` (UTC) for a stored Unix-millisecond timestamp.
+fn note_date(created_at_ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(created_at_ms)
+        .map(|at| at.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "unknown date".to_owned())
+}
+
+/// One rendered recency line, or `None` for a note with no content.
+fn render_recency_line(entry: &crate::server::memory::LongTermEntry) -> Option<String> {
+    let content = one_line_capped(&entry.content, RECENCY_FACT_CHAR_CAP);
+    if content.is_empty() {
+        return None;
+    }
+    let mut line = format!(
+        "- [{} · {} · {}] {content}",
+        entry.category.as_str(),
+        note_date(entry.created_at),
+        entry.provenance.source.as_str(),
+    );
+    let when = entry
+        .when_to_use
+        .as_deref()
+        .map(|hint| one_line_capped(hint, RECENCY_WHEN_TO_USE_CHAR_CAP))
+        .filter(|hint| !hint.is_empty());
+    if let Some(when) = when {
+        line.push_str(" (use when: ");
+        line.push_str(&when);
+        line.push(')');
+    }
+    line.push('\n');
+    Some(line)
+}
+
+/// Render recalled notes in recall order (most important, then newest) until
+/// the next line would exceed `char_budget`. Returns the block and the notes
+/// that made it in, so citations and auto-recall dedup describe exactly what
+/// the model saw.
+pub(crate) fn render_recency_notes(
+    entries: &[crate::server::memory::LongTermEntry],
+    char_budget: usize,
+) -> (String, Vec<&crate::server::memory::LongTermEntry>) {
+    let mut facts = String::new();
+    let mut used = 0usize;
+    let mut included = Vec::new();
+    for entry in entries {
+        let Some(line) = render_recency_line(entry) else {
+            continue;
+        };
+        let cost = line.chars().count();
+        if used + cost > char_budget {
+            break;
+        }
+        used += cost;
+        facts.push_str(&line);
+        included.push(entry);
+    }
+    (facts, included)
 }
 
 /// Build only the legacy system-message half for callers and tests that do not
@@ -215,3 +299,7 @@ pub(crate) async fn assemble_long_term_system_message(
 pub(crate) fn forward_via_gateway(via_gateway: bool, gateway_healthy: bool) -> bool {
     via_gateway && gateway_healthy
 }
+
+#[cfg(test)]
+#[path = "long_term_memory_tests.rs"]
+mod tests;

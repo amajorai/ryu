@@ -1,6 +1,15 @@
-//! Control-group policy types: factors, specs, requests (see the parent module docs).
+//! Control-group specs, approvals, and request types.
 
+use std::collections::{BTreeMap, BTreeSet};
+
+use anyhow::{bail, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use super::super::policy::{glob_matches, is_valid_subject, Capability, Policy};
 use super::*;
+
+// ── Control groups ────────────────────────────────────────────────────────
 
 /// One approval factor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

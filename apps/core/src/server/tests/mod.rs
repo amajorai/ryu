@@ -19,6 +19,12 @@ mod usage_history_authority_tests;
 mod local_egress_route_policy_tests;
 
 #[cfg(test)]
+mod security_key_route_policy_tests;
+
+#[cfg(test)]
+mod user_personalization_route_policy_tests;
+
+#[cfg(test)]
 mod voice_route_policy_tests;
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-import { useRichLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -13,6 +13,7 @@ import { Label } from "@ryu/ui/components/label.tsx";
 import { type SubmitEvent, useEffect, useId, useState } from "react";
 import { ErrorLine } from "@/src/components/agents/shared/error-line.tsx";
 import type { Space } from "@/src/lib/api/spaces.ts";
+import { spaceDisplayName } from "@/src/lib/spaces/system-space-label.ts";
 
 /** Rename a user-created Space without leaving the sidebar. */
 export function RenameSpaceDialog({
@@ -26,6 +27,7 @@ export function RenameSpaceDialog({
 	open: boolean;
 	space: Space;
 }) {
+	const tl = useLiteralMessages();
 	const tlRich = useRichLiteralMessages();
 	const inputId = useId();
 	const [name, setName] = useState(space.name);
@@ -75,7 +77,7 @@ export function RenameSpaceDialog({
 						<DialogDescription>
 							{tlRich(
 								"Choose a new name for <strong>{spaceName}</strong>.",
-								{ spaceName: space.name },
+								{ spaceName: spaceDisplayName(space, tl) },
 								{ strong: (children) => <strong>{children}</strong> }
 							)}
 						</DialogDescription>
