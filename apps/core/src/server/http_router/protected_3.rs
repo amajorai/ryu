@@ -204,6 +204,10 @@ pub(in crate::server) fn protected_routes_3(state: &ServerState) -> Router<Serve
         .route("/api/data/clear", post(data_admin::data_clear))
         .route("/api/data/purge-user", post(data_user_purge::purge_user))
         .route("/api/app-delegations", post(app_route_delegation_api::mint))
+        .route(
+            "/api/app-delegations/revoke",
+            post(app_route_revocation_api::revoke),
+        )
         // Full node wipe → fresh state (arms a marker; wipe runs on next boot).
         .route("/api/node/reset", post(data_admin::node_reset))
         .route("/api/conversations", get(list_conversations))

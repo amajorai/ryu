@@ -43,7 +43,6 @@
   "Search…": "搜索…",
   "Space starts or pauses. Arrow keys move 5 or 15 words. Home goes back to the start. Escape returns to the editor. Click a word to jump to it.": "Space 开始或暂停。方向键移动 5 或 15 个词。Home 回到开头。Escape 返回编辑器。点击某个词可跳转到该处。",
   "Speech recognition isn't available here. Turn on the Voice app in Ryu, or switch to auto-scroll.": "此处无法使用语音识别。请在 Ryu 中开启 Voice 应用，或切换到自动滚动。",
-  "Start": "启动",
   "Start (Space)": "开始 (Space)",
   "Start prompter": "启动提词器",
   "Starting microphone…": "正在启动麦克风…",

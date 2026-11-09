@@ -102,6 +102,8 @@ export const recapSettingsSchema = z.looseObject({
 		.optional(),
 	digest_notify: z.boolean(),
 	digest_time: z.string(),
+	/** Opt-in rolling summaries while recording (off by default). */
+	interim: z.boolean().default(false),
 	people: z.boolean(),
 	retention: z.object({
 		audio_days: z.number(),
@@ -151,6 +153,19 @@ export const searchSchema = z.object({
 	),
 });
 export const okSchema = z.looseObject({});
+/** `GET /recaps/:id/interim`: a rolling summary held only while recording. */
+export const recapInterimSchema = z.object({
+	generated_at: z.string(),
+	key_points: z.array(z.string()).default([]),
+	speech_ms: z.number(),
+	summary: z.string(),
+});
+export const interimViewSchema = z.object({
+	interim: recapInterimSchema.nullable(),
+	next_at_speech_ms: z.number(),
+	refreshed: z.boolean(),
+	speech_ms: z.number(),
+});
 
 export type Recap = z.infer<typeof recapSchema>;
 export type RecapNotes = z.infer<typeof recapNotesSchema>;
@@ -160,3 +175,5 @@ export type RecapSettingsView = z.infer<typeof settingsViewSchema>;
 export type RecapDigest = z.infer<typeof recapDigestSchema>;
 export type RecapSearchResult = z.infer<typeof searchSchema>["results"][number];
 export type RecapChunkResult = z.infer<typeof chunkResultSchema>;
+export type RecapInterim = z.infer<typeof recapInterimSchema>;
+export type RecapInterimView = z.infer<typeof interimViewSchema>;

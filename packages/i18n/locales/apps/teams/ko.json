@@ -43,7 +43,6 @@
   "No agents in this group yet.": "이 그룹에 아직 에이전트가 없습니다.",
   "Open table": "빈 테이블",
   "Order matters when the group responds round robin.": "그룹이 라운드 로빈으로 응답할 때는 순서가 중요합니다.",
-  "Remove {name}": "{name} 제거",
   "Review its agents and decide how they should answer together.": "에이전트를 검토하고 함께 어떻게 답변할지 정하세요.",
   "Round robin": "라운드 로빈",
   "Round-robin": "라운드 로빈",

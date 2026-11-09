@@ -3334,6 +3334,22 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Open Ryu on your phone to continue.",
+        &[
+            ("ar", "افتح Ryu على هاتفك للمتابعة."),
+            ("de", "Öffnen Sie Ryu auf Ihrem Telefon, um fortzufahren."),
+            ("es", "Abre Ryu en tu teléfono para continuar."),
+            ("fr", "Ouvrez Ryu sur votre téléphone pour continuer."),
+            ("hi", "जारी रखने के लिए अपने फ़ोन पर Ryu खोलें।"),
+            ("it", "Apri Ryu sul telefono per continuare."),
+            ("ja", "続けるには電話で Ryu を開いてください。"),
+            ("ko", "계속하려면 휴대폰에서 Ryu를 여세요."),
+            ("pt-BR", "Abra o Ryu no seu telefone para continuar."),
+            ("ru", "Откройте Ryu на телефоне, чтобы продолжить."),
+            ("zh-CN", "请在手机上打开 Ryu 以继续。"),
+        ],
+    ),
+    (
         "Open Ryu to read it.",
         &[
             ("ar", "افتح Ryu لقراءته."),
@@ -4467,6 +4483,22 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
             ("pt-BR", "Os widgets de métricas do Ryu ainda não estão disponíveis: os apps não podem ler as métricas internas do Ryu e nenhum recurso do host as expõe. Use uma fonte http, composio ou estática."),
             ("ru", "Виджеты метрик Ryu пока недоступны: приложения не могут читать внутренние метрики Ryu, и ни одна возможность хоста их не предоставляет. Используйте вместо этого источник http, composio или статический."),
             ("zh-CN", "Ryu 指标小组件尚不可用：应用无法读取 Ryu 的内部指标，也没有主机功能公开这些指标。请改用 http、composio 或静态数据源。"),
+        ],
+    ),
+    (
+        "Ryu needs your phone",
+        &[
+            ("ar", "يحتاج Ryu إلى هاتفك"),
+            ("de", "Ryu benötigt Ihr Telefon"),
+            ("es", "Ryu necesita tu teléfono"),
+            ("fr", "Ryu a besoin de votre téléphone"),
+            ("hi", "Ryu को आपके फ़ोन की ज़रूरत है"),
+            ("it", "Ryu ha bisogno del tuo telefono"),
+            ("ja", "Ryu が電話を必要としています"),
+            ("ko", "Ryu에 휴대폰이 필요합니다"),
+            ("pt-BR", "O Ryu precisa do seu telefone"),
+            ("ru", "Ryu нужен ваш телефон"),
+            ("zh-CN", "Ryu 需要你的手机"),
         ],
     ),
     (

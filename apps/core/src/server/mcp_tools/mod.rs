@@ -6,6 +6,8 @@ mod mcp_entry;
 pub(in crate::server) use mcp_entry::*;
 mod call_tool;
 pub(crate) use call_tool::*;
+mod gateway_turn_sender;
+pub(crate) use gateway_turn_sender::*;
 mod host_conversation;
 pub(crate) use host_conversation::*;
 mod mcp_tool_call;

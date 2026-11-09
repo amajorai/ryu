@@ -70,6 +70,12 @@ pub const APPROVAL_NEEDED_TITLE_MESSAGE: Template = |_| format!("Approval needed
 pub const APPROVAL_WAITING_BODY_MESSAGE: Template =
     |_| format!("A request is waiting for a decision. Open Ryu to review it.");
 
+// ---- device tools waiting for a phone (mobile push) -----------------------
+
+pub const DEVICE_WAITING_TITLE_MESSAGE: Template = |_| format!("Ryu needs your phone");
+pub const DEVICE_WAITING_BODY_MESSAGE: Template =
+    |_| format!("Open Ryu on your phone to continue.");
+
 // ---- finished runs (mobile push) ------------------------------------------
 
 pub const RUN_FAILED_BODY_MESSAGE: Template =
@@ -267,6 +273,8 @@ pub const OAUTH_CONFIRM_DETAIL_MESSAGE: Template = |_| {
 const ALL: &[Template] = &[
     APPROVAL_NEEDED_TITLE_MESSAGE,
     APPROVAL_WAITING_BODY_MESSAGE,
+    DEVICE_WAITING_TITLE_MESSAGE,
+    DEVICE_WAITING_BODY_MESSAGE,
     RUN_FAILED_BODY_MESSAGE,
     RUN_FINISHED_BODY_MESSAGE,
     POLICY_BUDGET_TITLE_MESSAGE,

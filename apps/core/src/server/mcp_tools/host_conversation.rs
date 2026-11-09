@@ -192,11 +192,15 @@ pub(crate) fn host_conversation_proof(conversation_id: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest.finalize())
 }
 
+/// Accepts the bare proof and the turn-bound `<proof>.<turn_token>` form
+/// (`gateway_turn_sender`). Only the base part is checked here; base64url
+/// never contains '.', so the split is unambiguous.
 pub(in crate::server) fn host_conversation_proof_is_valid(
     conversation_id: &str,
     proof: &str,
 ) -> bool {
-    ct_eq(proof, &host_conversation_proof(conversation_id))
+    let base = proof.split_once('.').map_or(proof, |(base, _)| base);
+    ct_eq(base, &host_conversation_proof(conversation_id))
 }
 
 pub(in crate::server) fn caller_owns_host_conversation(

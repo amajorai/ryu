@@ -499,3 +499,20 @@ async fn push_token_locale_is_owner_scoped_and_validated() {
         None
     );
 }
+
+#[tokio::test]
+async fn unowned_push_targets_exclude_member_devices() {
+    let store = temp_store();
+    store
+        .register_push_token("tok-alice", Some("ios"), Some("alice"))
+        .await
+        .unwrap();
+    store
+        .register_push_token("tok-solo", Some("android"), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        tokens(store.push_targets_unowned().await.unwrap()),
+        vec!["tok-solo".to_owned()]
+    );
+}

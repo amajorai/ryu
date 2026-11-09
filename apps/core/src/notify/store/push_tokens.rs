@@ -128,6 +128,16 @@ impl NotifyStore {
             .await
     }
 
+    /// The devices registered without a member id: the owner of an unbound
+    /// personal node. Never a verified member's device.
+    pub async fn push_targets_unowned(&self) -> Result<Vec<PushTarget>> {
+        self.select_targets(
+            "SELECT token, user_id, locale FROM push_tokens WHERE user_id IS NULL",
+            None,
+        )
+        .await
+    }
+
     /// The devices a specific member registered. Used to push a user-targeted
     /// notification to just that person rather than the whole-node broadcast.
     pub async fn push_targets_for_user(&self, user_id: &str) -> Result<Vec<PushTarget>> {

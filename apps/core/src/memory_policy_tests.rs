@@ -179,3 +179,72 @@ fn recall_min_relevance_levels_parse_and_ascend() {
     assert!(scores.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(scores.iter().all(|score| (0.0..1.0).contains(score)));
 }
+
+#[test]
+fn recall_levels_sit_above_the_embedders_unrelated_baseline() {
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-6;
+    // A hosted embedder that scores unrelated text at 0.6 needs a higher cut
+    // than the raw level, or Low would keep everything.
+    assert!(close(RecallMinRelevance::Low.min_score_above(0.6), 0.68));
+    assert!(close(RecallMinRelevance::Medium.min_score_above(0.6), 0.74));
+    assert!(close(RecallMinRelevance::High.min_score_above(0.6), 0.8));
+    // A zero baseline reproduces the raw levels.
+    for level in [
+        RecallMinRelevance::Low,
+        RecallMinRelevance::Medium,
+        RecallMinRelevance::High,
+    ] {
+        assert!(close(level.min_score_above(0.0), level.min_score()));
+        assert!(level.min_score_above(0.6) > 0.6);
+    }
+    // Off never filters; a broken or out-of-range baseline cannot push a level
+    // past what any match can reach.
+    assert_eq!(RecallMinRelevance::Off.min_score_above(0.6), 0.0);
+    assert!(close(
+        RecallMinRelevance::Low.min_score_above(f32::NAN),
+        RecallMinRelevance::Low.min_score()
+    ));
+    assert!(close(RecallMinRelevance::Low.min_score_above(-3.0), 0.2));
+    assert!(RecallMinRelevance::High.min_score_above(5.0) < 1.0);
+}
+
+fn retrieval_with(embedder: ryu_rag::Embedder) -> ryu_rag::RetrievalStore {
+    ryu_rag::RetrievalStore::open_in_memory_with_embedder(
+        embedder,
+        crate::registry::DEFAULT_RERANKER_MODEL.to_owned(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn the_calibrated_floor_uses_the_local_baseline_and_fails_open() {
+    let local = retrieval_with(ryu_rag::Embedder::Local {
+        dims: crate::registry::DEFAULT_EMBED_DIMS,
+    });
+    assert_eq!(
+        RecallMinRelevance::Medium
+            .calibrated_min_score(&local)
+            .await,
+        RecallMinRelevance::Medium.min_score()
+    );
+
+    let unreachable = retrieval_with(ryu_rag::Embedder::remote(
+        "http://127.0.0.1:1",
+        "recall-floor-unreachable",
+        8,
+        None,
+    ));
+    assert_eq!(
+        RecallMinRelevance::Off
+            .calibrated_min_score(&unreachable)
+            .await,
+        0.0
+    );
+    assert_eq!(
+        RecallMinRelevance::High
+            .calibrated_min_score(&unreachable)
+            .await,
+        0.0,
+        "an embedder that cannot be measured must not hide memories"
+    );
+}

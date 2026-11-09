@@ -219,6 +219,11 @@ pub(in crate::server) fn credential_route_policy(
     has_verified_caller: bool,
 ) -> crate::authorization::RoutePolicy {
     use crate::authorization::{Capability, CredentialKind, RoutePolicy};
+    // The control plane's purge delegation reaches `POST /api/data/purge-user`
+    // and nothing else, whatever scopes it carries.
+    if crate::server::data_purge_delegation::is_purge_delegation(context) {
+        return crate::server::data_purge_delegation::purge_delegation_policy(method, path);
+    }
     // Managed identities still reach the exact agent ACL, which can grant edit
     // through custom roles or resource overwrites absent from their base role.
     // Paired credentials must carry management authority independently of that
@@ -295,10 +300,13 @@ pub(in crate::server) fn credential_route_policy(
     if path_has_prefix(path, "/api/device-tools") && !is_owner_or_member_session(context) {
         return RoutePolicy::OwnerOnly;
     }
-    // Minting an app route delegation or purging a member's app data is the
-    // user's own session or the owner token: a delegation must never mint a
-    // longer-lived one, and no OAuth scope covers deleting a person's data.
-    if (path == "/api/app-delegations" || path == "/api/data/purge-user")
+    // Minting or revoking app route delegations, or purging a member's app
+    // data, is the user's own session or the owner token: a delegation must
+    // never mint a longer-lived one, and no OAuth scope covers deleting a
+    // person's data.
+    if (path == "/api/app-delegations"
+        || path == "/api/app-delegations/revoke"
+        || path == "/api/data/purge-user")
         && !is_owner_or_member_session(context)
     {
         return RoutePolicy::OwnerOnly;

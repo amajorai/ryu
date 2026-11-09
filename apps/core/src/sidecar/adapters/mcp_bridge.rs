@@ -279,6 +279,7 @@ mod jsonrpc;
 mod permissions;
 mod result_bound;
 mod tool_defs;
+mod turn_sender;
 mod widget;
 
 #[cfg(test)]

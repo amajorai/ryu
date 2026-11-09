@@ -125,6 +125,42 @@ pub(crate) fn turn_author_owns_host_conversation(
     }
 }
 
+/// The conversation the Gateway's tool loop may act for on one turn. For a
+/// verified author it also holds that turn's registration
+/// (`crate::server::GatewayTurnToken`), so the relayed proof names the turn's
+/// sender; the turn's stream owns this value, and dropping it ends the turn.
+pub(crate) struct GatewayHostConversation {
+    id: String,
+    turn: Option<crate::server::GatewayTurnToken>,
+}
+
+impl GatewayHostConversation {
+    /// `None` for an id Core's tool route rejects (it would fail every call).
+    /// The caller must have checked that `author` owns the conversation.
+    pub(crate) fn new(
+        id: &str,
+        author: Option<&crate::identity_verify::VerifiedCaller>,
+    ) -> Option<Self> {
+        acp::is_safe_host_conversation_id(id).then(|| Self {
+            id: id.to_owned(),
+            turn: author.map(|author| {
+                crate::server::register_gateway_turn_sender(id, std::sync::Arc::new(author.clone()))
+            }),
+        })
+    }
+
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn proof(&self) -> String {
+        self.turn.as_ref().map_or_else(
+            || crate::server::host_conversation_proof(&self.id),
+            crate::server::GatewayTurnToken::host_conversation_proof,
+        )
+    }
+}
+
 /// The conversation the Gateway's tool loop may carry to Core for this turn:
 /// the turn's conversation when its author owns it
 /// ([`turn_author_owns_host_conversation`]), otherwise `None`.
@@ -132,38 +168,34 @@ pub(crate) async fn gateway_host_conversation_for_turn(
     conversations: &ConversationStore,
     conversation_id: Option<&str>,
     author: Option<&crate::identity_verify::VerifiedCaller>,
-) -> Option<String> {
+) -> Option<GatewayHostConversation> {
     let id = conversation_id.filter(|id| acp::is_safe_host_conversation_id(id))?;
     let meta = conversations.get_access_meta(id).await.ok()??;
     let node_org = crate::sidecar::control_plane::registered_org().map(|org| org.id);
     let node_bound = node_org.is_some() || crate::sidecar::control_plane::is_managed_node();
-    turn_author_owns_host_conversation(&meta, author, node_org.as_deref(), node_bound)
-        .then(|| id.to_owned())
+    if !turn_author_owns_host_conversation(&meta, author, node_org.as_deref(), node_bound) {
+        return None;
+    }
+    GatewayHostConversation::new(id, author)
 }
 
 /// The host-conversation headers for the configured Gateway hop: the turn's
 /// conversation id and Core's process-local proof for it. The Gateway relays
 /// both on each tool call of its unified loop, so `/api/mcp/tools/call` resolves
 /// the turn's owner and applies that member's own tool rules, the same as the
-/// exec plane. The caller passes an id only when the turn's author owns it
-/// ([`gateway_host_conversation_for_turn`]). Never sent to a raw provider, and
-/// only for an id Core's tool route accepts (an unsafe id would fail every
-/// tool call instead).
+/// exec plane. The caller passes a conversation only when the turn's author
+/// owns it ([`gateway_host_conversation_for_turn`]). Never sent to a raw
+/// provider.
 pub(crate) fn host_conversation_headers(
     gateway_hop: bool,
-    conversation_id: Option<&str>,
+    host: Option<&GatewayHostConversation>,
 ) -> Vec<(&'static str, String)> {
-    let Some(id) =
-        conversation_id.filter(|id| gateway_hop && acp::is_safe_host_conversation_id(id))
-    else {
+    let Some(host) = host.filter(|_| gateway_hop) else {
         return Vec::new();
     };
     vec![
-        ("x-ryu-host-conversation-id", id.to_owned()),
-        (
-            "x-ryu-host-conversation-proof",
-            crate::server::host_conversation_proof(id),
-        ),
+        ("x-ryu-host-conversation-id", host.id.clone()),
+        ("x-ryu-host-conversation-proof", host.proof()),
     ]
 }
 

@@ -43,6 +43,7 @@ import { ConnectDeviceQR } from "@/src/components/devices/ConnectDeviceQR.tsx";
 import { CloudSyncSection } from "@/src/components/settings/CloudSyncSection.tsx";
 import { NodeAccessSettings } from "@/src/components/settings/NodeAccessSettings.tsx";
 import { ConnectedDevicesSection } from "./ConnectionsTab-connected-devices.tsx";
+import { PairedPhonesSection } from "./ConnectionsTab-paired-phones.tsx";
 import { RemoteNodesSection } from "./ConnectionsTab-remote-nodes.tsx";
 import { RowTitle } from "./ConnectionsTab-row-title.tsx";
 import { SshConnectionsSection } from "./ConnectionsTab-ssh.tsx";
@@ -298,6 +299,7 @@ export function ConnectionsTab() {
 							<ConnectDeviceQR />
 						</SettingsCard>
 					</SettingsSection>
+					<PairedPhonesSection />
 					<CloudSyncSection />
 				</TabsContent>
 				<TabsContent spacing="comfortable" value="other-devices">

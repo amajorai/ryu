@@ -20,14 +20,18 @@
 //!
 //! # Revocation
 //!
-//! A delegation is not revoked one by one. Membership itself is not re-checked
-//! here: the token's `org` claim stands for the member's organization until it
-//! expires, so a removed member keeps whatever the per-route check (with its
-//! cached or fallback permissions while the control plane is unreachable)
-//! still grants them, for at most [`MAX_TTL_SECONDS`]. Rotating the node token
-//! revokes every outstanding delegation at once, and also signs every device
-//! out. Clients should therefore mint delegations as short as their work
-//! allows.
+//! Every use checks the member's revocation epoch
+//! ([`super::app_route_revocation`]): a delegation issued to a member at or
+//! before their epoch is refused. The epoch is bumped when the member's data
+//! is purged because they left the organization or deleted their account, and
+//! by the node owner or an organization admin for one member
+//! (`POST /api/app-delegations/revoke`). Membership itself is not re-checked
+//! here otherwise, so a removed member whose removal has not reached this node
+//! keeps whatever the per-route check still grants them, for at most
+//! [`MAX_TTL_SECONDS`]. Rotating the node token revokes every outstanding
+//! delegation at once (the only revocation for the owner of an unbound node),
+//! and also signs every device out. Clients should therefore mint delegations
+//! as short as their work allows.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, Mac};
@@ -74,6 +78,8 @@ pub(crate) enum DelegationRefusal {
     Expired,
     OutsidePrefix,
     MethodNotAllowed,
+    /// The member's delegations were revoked after this one was issued.
+    Revoked,
 }
 
 /// This node, as delegations bind it.
@@ -234,6 +240,9 @@ pub(crate) fn verify_request(
         org.as_deref(),
         crate::pairing::now_secs(),
     )?;
+    if super::app_route_revocation::is_revoked(claims.user.as_deref(), claims.iat) {
+        return Err(DelegationRefusal::Revoked);
+    }
     Ok(claims
         .user
         .map(|user_id| crate::identity_verify::VerifiedCaller {

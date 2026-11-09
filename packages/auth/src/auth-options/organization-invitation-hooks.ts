@@ -4,6 +4,7 @@ import { OrganizationSeatReservation } from "@ryu/db/models/organization-seat-re
 import { APIError } from "better-auth/api";
 import type { OrganizationOptions } from "better-auth/plugins";
 import { invitationEmailNotSentError } from "../lib/invitation-email-delivery.ts";
+import { cancelMemberDataPurgeOnRejoin } from "../lib/member-data-purge.ts";
 import { clearPriorMembershipGrants } from "../lib/membership-grant-cleanup.ts";
 import {
 	normalizeInvitationEmail,
@@ -134,6 +135,12 @@ export const organizationInvitationHooks = {
 		await organizationAdmission.afterMemberAdmitted({
 			actor: "self",
 			memberId: String(member.id),
+			organizationId: invitation.organizationId,
+			userId: String(member.userId),
+		});
+		// A rejoining member keeps what they create from now on: cancel the
+		// node purge still pending from their removal. Never rejects.
+		await cancelMemberDataPurgeOnRejoin({
 			organizationId: invitation.organizationId,
 			userId: String(member.userId),
 		});

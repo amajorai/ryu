@@ -53,7 +53,7 @@ pub(crate) async fn connect_with_fallback(
     // Endpoint kind of the primary hop. The fallback leg is always a provider.
     stream_hop: StreamHop,
     // Author-owned host conversation for the primary Gateway attempt only.
-    host_conversation_id: Option<&str>,
+    host_conversation: Option<&GatewayHostConversation>,
 ) -> Result<reqwest::Response, acp::AcpFailure> {
     match connect_openai(
         messages,
@@ -79,7 +79,7 @@ pub(crate) async fn connect_with_fallback(
         reasoning_control,
         untrusted_caller,
         stream_hop,
-        host_conversation_id,
+        host_conversation,
     )
     .await
     {

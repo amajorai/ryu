@@ -2,6 +2,10 @@ import { revokeOrganizationRoleAssignments } from "@ryu/db/organization-role-ass
 import type { OrganizationOptions } from "better-auth/plugins";
 import { rememberMemberRoleBeforeUpdate } from "../lib/control-audit-recorder.ts";
 import { disableFamilyBotGrantsOnMemberExit } from "../lib/family-bot-grants.ts";
+import {
+	cancelMemberDataPurgeOnRejoin,
+	scheduleMemberDataPurge,
+} from "../lib/member-data-purge.ts";
 import { clearPriorMembershipGrants } from "../lib/membership-grant-cleanup.ts";
 import {
 	retireBoxProofKeyOnDemotion,
@@ -48,6 +52,12 @@ export const organizationMemberHooks = {
 		await organizationAdmission.afterMemberAdmitted({
 			actor: "other",
 			memberId: String(member.id),
+			organizationId: member.organizationId,
+			userId: String(member.userId),
+		});
+		// A member re-added before their removal's node purge was delivered
+		// keeps what they create from now on. Never rejects.
+		await cancelMemberDataPurgeOnRejoin({
 			organizationId: member.organizationId,
 			userId: String(member.userId),
 		});
@@ -135,6 +145,14 @@ export const organizationMemberHooks = {
 		});
 		await organizationAdmission.releaseMemberFamilyPlace({
 			organizationId: member.organizationId,
+			userId: String(member.userId),
+		});
+		// Purge the member's app data on the organization's nodes, which also
+		// revokes their app route delegations there. Never rejects: an offline
+		// node is queued and replayed, never a reason to fail the removal.
+		await scheduleMemberDataPurge({
+			organizationId: member.organizationId,
+			reason: "member_removed",
 			userId: String(member.userId),
 		});
 		await notifyOrganizationHookActivity({

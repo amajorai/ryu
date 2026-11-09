@@ -196,6 +196,7 @@ async fn a_blank_user_id_is_refused() {
     let (status, _) = purge_user(
         State(state),
         Extension(None),
+        None,
         Json(PurgeUserRequest {
             user_id: "  ".to_owned(),
             reason: None,
@@ -203,4 +204,93 @@ async fn a_blank_user_id_is_refused() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+fn purge_delegation(subject: &str) -> Extension<ResolvedAuthorization> {
+    use crate::authorization::{
+        AuthorizationContext, CapabilitySet, CredentialKind, GrantConstraints, Principal,
+        RequestBindings,
+    };
+    Extension(ResolvedAuthorization {
+        context: AuthorizationContext {
+            credential: CredentialKind::ManagedDelegation,
+            principal: Principal::User {
+                subject_id: subject.to_owned(),
+            },
+            capabilities: CapabilitySet::new(std::iter::empty()),
+            constraints: GrantConstraints {
+                subject_id: Some(subject.to_owned()),
+                client_id: Some(crate::authorization::delegation::DATA_PURGE_CLIENT_ID.to_owned()),
+                ..GrantConstraints::default()
+            },
+            issued_at: 0,
+            expires_at: Some(60),
+        },
+        bindings: RequestBindings::default(),
+        caller: Some(member(subject, Some("org-1"), OrgRole::Member)),
+        verified_user_jwt: None,
+    })
+}
+
+async fn purge_as_control_plane(
+    state: ServerState,
+    subject: &str,
+    user_id: &str,
+    reason: Option<&str>,
+) -> StatusCode {
+    purge_user(
+        State(state),
+        Extension(Some(member(subject, Some("org-1"), OrgRole::Member))),
+        Some(purge_delegation(subject)),
+        Json(PurgeUserRequest {
+            user_id: user_id.to_owned(),
+            reason: reason.map(str::to_owned),
+        }),
+    )
+    .await
+    .0
+}
+
+#[tokio::test]
+async fn a_purge_delegation_purges_only_its_member_for_a_departure() {
+    let directory = tempfile::tempdir().unwrap();
+    let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+    let subject = format!("purged-{}", uuid::Uuid::new_v4().simple());
+    for (user_id, reason) in [
+        ("someone-else", Some("member_removed")),
+        (subject.as_str(), Some("self")),
+        (subject.as_str(), Some("other")),
+        (subject.as_str(), None),
+    ] {
+        assert_eq!(
+            purge_as_control_plane(state.clone(), &subject, user_id, reason).await,
+            StatusCode::FORBIDDEN,
+            "{user_id} {reason:?}"
+        );
+    }
+    // No refused purge recorded an epoch for the member. (A process-wide
+    // all-members epoch from another test may exist, so check the member's own.)
+    assert_eq!(
+        crate::server::app_route_revocation::user_epoch(&subject),
+        None
+    );
+    // Captured before the purge: the epoch is the second it runs, which may
+    // be a later second than an `iat` read after it returns.
+    let before = crate::pairing::now_secs();
+    assert_eq!(
+        purge_as_control_plane(state, &subject, &subject, Some("member_removed")).await,
+        StatusCode::OK
+    );
+    // The departure also revoked the member's app route delegations, and only
+    // those issued up to it.
+    assert!(crate::server::app_route_revocation::user_epoch(&subject)
+        .is_some_and(|epoch| epoch >= before));
+    assert!(crate::server::app_route_revocation::is_revoked(
+        Some(&subject),
+        before
+    ));
+    assert!(!crate::server::app_route_revocation::is_revoked(
+        Some(&subject),
+        before + 10_000
+    ));
 }

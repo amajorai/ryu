@@ -9,6 +9,7 @@ use crate::server::conversations::{ConversationStore, Tenancy};
 use crate::sidecar::control_plane::{
     with_test_node_binding, NodeScope, RegisteredNode, RegisteredOrg,
 };
+use crate::sidecar::mcp::search_conversations::with_turn_sender;
 use crate::sidecar::mcp::{with_verified_tool_caller, ToolPrincipal};
 
 const ORG: &str = "org1";
@@ -175,6 +176,58 @@ async fn a_chat_agent_principal_does_not_inherit_team_visibility() {
         dispatch("search", args, &store, &principal).await.unwrap()
     })
     .await;
+    assert_eq!(conversations(&out), vec!["bob-chat"]);
+}
+
+/// Search as an in-chat agent whose principal is `owner` (the host
+/// conversation's owner) while `sender`, if any, sent the live turn.
+async fn search_in_chat(
+    store: &ConversationStore,
+    owner: &str,
+    sender: Option<&VerifiedCaller>,
+) -> Value {
+    let principal = ToolPrincipal::Owned {
+        user_id: owner.to_owned(),
+        org_id: Some(ORG.to_owned()),
+    };
+    let args = json!({ "query": "zebracorn", "mode": "exact" });
+    let search = async { dispatch("search", args, store, &principal).await.unwrap() };
+    with_test_node_binding(true, org_node(), async {
+        match sender {
+            Some(sender) => with_turn_sender(sender, search).await,
+            None => search.await,
+        }
+    })
+    .await
+}
+
+#[tokio::test]
+async fn the_owners_own_turn_finds_the_team_shared_chat() {
+    let store = seeded_store().await;
+    let bob = member("bob", &[TEAM]);
+    let out = search_in_chat(&store, "bob", Some(&bob)).await;
+    assert_eq!(conversations(&out), vec!["bob-chat", "team-chat"]);
+}
+
+#[tokio::test]
+async fn a_collaborators_turn_keeps_the_owner_only_filter() {
+    // Bob (a team member) sends a turn in Carol's chat: the principal stays
+    // Carol and neither Bob's nor anyone's team memberships apply.
+    let store = seeded_store().await;
+    let out = search_in_chat(&store, "carol", Some(&member("bob", &[TEAM]))).await;
+    assert_eq!(out["count"], json!(0), "{out}");
+
+    // Same user in another org is not the owner either.
+    let mut other_org = member("bob", &[TEAM]);
+    other_org.org_id = Some("org2".to_owned());
+    let out = search_in_chat(&store, "bob", Some(&other_org)).await;
+    assert_eq!(conversations(&out), vec!["bob-chat"]);
+}
+
+#[tokio::test]
+async fn a_turn_without_a_bound_sender_keeps_the_owner_only_filter() {
+    let store = seeded_store().await;
+    let out = search_in_chat(&store, "bob", None).await;
     assert_eq!(conversations(&out), vec!["bob-chat"]);
 }
 

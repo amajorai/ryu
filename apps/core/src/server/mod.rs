@@ -140,8 +140,13 @@ pub mod app_notify;
 // Short-lived, path-scoped delegations to one app's routes (C3).
 pub(crate) mod app_route_delegation;
 pub(crate) mod app_route_delegation_api;
+// Per-member revocation of app route delegations (member removal, owner).
+pub(crate) mod app_route_revocation;
+pub(crate) mod app_route_revocation_api;
 // Per-member app data purge fan-out (account deletion, member removal).
 pub(crate) mod data_user_purge;
+// The control plane's purge delegation, admitted on the purge route only.
+pub(crate) mod data_purge_delegation;
 // Run recovery (`approvals.request`, `runs.rerunAgent`, `workflows.rerun`): the
 // grant-gated kernel capabilities a `core#run.failed` subscriber acts through.
 pub mod app_runs;

@@ -128,13 +128,15 @@ impl RecallBudget {
 ///
 /// Without a floor the retrieval path returns the `top_k` nearest facts however
 /// far they are, so a turn with nothing relevant still spends prompt space on
-/// unrelated memories. The floor is a raw similarity score: cosine similarity
-/// under the configured embedder, plus a small importance nudge (see
-/// `ryu_rag::RetrievalOptions::min_score`). Its scale depends on that embedder:
-/// the built-in hashing embedder scores unrelated text near zero, while many
-/// hosted embedding models score unrelated text well above it. That is why the
-/// default is `Off` and the levels are coarse: no single non-zero cut is safe
-/// for every embedder, so filtering is something the user opts into.
+/// unrelated memories. Retrieval scores are cosine similarity under the
+/// configured embedder, plus a small importance nudge (see
+/// `ryu_rag::RetrievalOptions::min_score`), and their scale depends on that
+/// embedder: the built-in hashing embedder scores unrelated text near zero,
+/// while many hosted models score it well above that. So each level is a share
+/// of the range ABOVE the embedder's own unrelated-text baseline
+/// ([`Self::min_score_above`], measured by
+/// `RetrievalStore::unrelated_similarity_baseline`), not one raw cut for every
+/// embedder. The default stays `Off`: filtering is something the user opts into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RecallMinRelevance {
     /// Inject the nearest facts regardless of score. The pre-existing behaviour.
@@ -160,8 +162,9 @@ impl RecallMinRelevance {
         }
     }
 
-    /// The `RetrievalOptions::min_score` auto-recall passes to retrieval. `Off`
-    /// is exactly `0.0`, the retrieval default, so an unconfigured node is
+    /// The floor for an embedder that scores unrelated text at zero, which is
+    /// also the level's share of the range above any other embedder's baseline.
+    /// `Off` is exactly `0.0`, the retrieval default, so an unconfigured node is
     /// unchanged.
     pub fn min_score(self) -> f32 {
         match self {
@@ -171,7 +174,44 @@ impl RecallMinRelevance {
             Self::High => 0.5,
         }
     }
+
+    /// The floor for an embedder whose unrelated text scores up to `baseline`:
+    /// the baseline plus this level's share of the range above it. `Off` stays
+    /// `0.0` whatever the baseline; an unusable baseline counts as zero.
+    pub fn min_score_above(self, baseline: f32) -> f32 {
+        let share = self.min_score();
+        if share == 0.0 {
+            return 0.0;
+        }
+        let baseline = if baseline.is_finite() {
+            baseline.clamp(0.0, MAX_RECALL_BASELINE)
+        } else {
+            0.0
+        };
+        baseline + share * (1.0 - baseline)
+    }
+
+    /// The floor auto-recall passes to retrieval for `retrieval`'s current
+    /// embedder. `Off` never measures anything. If the baseline cannot be
+    /// measured (the embedder is unreachable), the floor is `0.0`: a measurement
+    /// failure must never silently hide memories.
+    pub async fn calibrated_min_score(self, retrieval: &ryu_rag::RetrievalStore) -> f32 {
+        if self == Self::Off {
+            return 0.0;
+        }
+        match retrieval.unrelated_similarity_baseline().await {
+            Ok(baseline) => self.min_score_above(baseline),
+            Err(error) => {
+                tracing::warn!(%error, "could not measure the embedder's recall baseline; recall is unfiltered this turn");
+                0.0
+            }
+        }
+    }
 }
+
+/// The highest baseline [`RecallMinRelevance::min_score_above`] accepts, so
+/// every level keeps some range between matches and noise.
+const MAX_RECALL_BASELINE: f32 = 0.9;
 
 /// When durable facts are captured from a turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -178,8 +178,9 @@ mod untrusted_caller_policy_tests {
     /// never sees the proof, and an id Core's tool route rejects is not sent.
     #[test]
     fn host_conversation_headers_ride_only_the_gateway_hop() {
+        let host = GatewayHostConversation::new("conv-1", None);
         assert_eq!(
-            host_conversation_headers(true, Some("conv-1")),
+            host_conversation_headers(true, host.as_ref()),
             vec![
                 ("x-ryu-host-conversation-id", "conv-1".to_owned()),
                 (
@@ -188,10 +189,31 @@ mod untrusted_caller_policy_tests {
                 ),
             ]
         );
-        assert!(host_conversation_headers(false, Some("conv-1")).is_empty());
+        assert!(host_conversation_headers(false, host.as_ref()).is_empty());
         assert!(host_conversation_headers(true, None).is_empty());
-        assert!(host_conversation_headers(true, Some("")).is_empty());
-        assert!(host_conversation_headers(true, Some("../conv")).is_empty());
+        assert!(GatewayHostConversation::new("", None).is_none());
+        assert!(GatewayHostConversation::new("../conv", None).is_none());
+    }
+
+    /// A verified owner's turn relays a proof bound to that turn: Core's base
+    /// proof plus a per-turn token, distinct for each turn.
+    #[test]
+    fn a_verified_owners_turn_relays_a_turn_bound_proof() {
+        let alice = member("alice", "org_1");
+        let proof_of = |host: &GatewayHostConversation| {
+            host_conversation_headers(true, Some(host))
+                .into_iter()
+                .find(|(name, _)| *name == "x-ryu-host-conversation-proof")
+                .map(|(_, proof)| proof)
+                .unwrap()
+        };
+        let first = GatewayHostConversation::new("cpt-conv-1", Some(&alice)).unwrap();
+        let second = GatewayHostConversation::new("cpt-conv-1", Some(&alice)).unwrap();
+        let proof = proof_of(&first);
+        let (base, token) = proof.split_once('.').expect("turn-bound proof");
+        assert_eq!(base, crate::server::host_conversation_proof("cpt-conv-1"));
+        assert!(!token.is_empty());
+        assert_ne!(proof, proof_of(&second));
     }
 
     fn member(user_id: &str, org_id: &str) -> crate::identity_verify::VerifiedCaller {
@@ -315,15 +337,13 @@ mod untrusted_caller_policy_tests {
             // proof for his turn, so it stays unresolved instead of Alice.
             let meta = conversations.get_access_meta("alice-shared").await.unwrap();
             assert!(crate::server::require_resource_write(Ok(meta), Some(&bob), "missing").is_ok());
-            assert_eq!(
-                gateway_host_conversation_for_turn(
-                    &conversations,
-                    Some("alice-shared"),
-                    Some(&bob)
-                )
-                .await,
-                None
-            );
+            assert!(gateway_host_conversation_for_turn(
+                &conversations,
+                Some("alice-shared"),
+                Some(&bob)
+            )
+            .await
+            .is_none());
             assert_eq!(
                 gateway_host_conversation_for_turn(
                     &conversations,
@@ -331,19 +351,22 @@ mod untrusted_caller_policy_tests {
                     Some(&alice)
                 )
                 .await
-                .as_deref(),
+                .as_ref()
+                .map(GatewayHostConversation::id),
                 Some("alice-shared")
             );
-            assert_eq!(
+            assert!(
                 gateway_host_conversation_for_turn(&conversations, Some("alice-shared"), None)
-                    .await,
-                None
+                    .await
+                    .is_none()
             );
-            assert_eq!(
-                gateway_host_conversation_for_turn(&conversations, Some("missing"), Some(&alice))
-                    .await,
-                None
-            );
+            assert!(gateway_host_conversation_for_turn(
+                &conversations,
+                Some("missing"),
+                Some(&alice)
+            )
+            .await
+            .is_none());
         })
         .await;
     }

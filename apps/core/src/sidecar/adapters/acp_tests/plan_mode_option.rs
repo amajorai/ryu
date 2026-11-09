@@ -180,6 +180,7 @@ fn plan_mode_id_coexists_with_the_model_config_option() {
         agent_effort: None,
         interactive: true,
         device_offer: None,
+        turn_sender: None,
     };
     assert!(
         turn.config_options

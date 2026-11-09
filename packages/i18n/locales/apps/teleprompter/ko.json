@@ -43,7 +43,6 @@
   "Search…": "검색…",
   "Space starts or pauses. Arrow keys move 5 or 15 words. Home goes back to the start. Escape returns to the editor. Click a word to jump to it.": "Space로 시작하거나 일시정지합니다. 화살표 키로 5단어 또는 15단어씩 이동합니다. Home은 처음으로 돌아갑니다. Escape는 편집기로 돌아갑니다. 단어를 클릭하면 해당 위치로 이동합니다.",
   "Speech recognition isn't available here. Turn on the Voice app in Ryu, or switch to auto-scroll.": "여기서는 음성 인식을 사용할 수 없습니다. Ryu에서 Voice 앱을 켜거나 자동 스크롤로 전환하세요.",
-  "Start": "시작",
   "Start (Space)": "시작 (Space)",
   "Start prompter": "프롬프터 시작",
   "Starting microphone…": "마이크 시작 중…",

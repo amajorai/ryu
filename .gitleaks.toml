@@ -32,6 +32,9 @@ regexes = [
   '''AKIABEZHIKMNOPTYXSJC''',
 ]
 paths = [
+  # Cargo lockfiles hold only crate names, versions and registry checksums, never
+  # a credential; generic-api-key matches crate names such as "crypto_secretbox".
+  '''(^|/)Cargo\.lock$''',
   # Vendored single-file plugin-UI fixtures: minified/bundled third-party web apps
   # (e.g. the Excalidraw-style whiteboard) shipped verbatim as Core manifest fixtures.
   # They embed public client identifiers (a Firebase web apiKey — a project id, not a

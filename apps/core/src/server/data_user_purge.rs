@@ -35,18 +35,24 @@
 //!   the token is shared by every device, so it counts only from a trusted
 //!   local peer, as the Danger Zone refuses unscoped node-token deletes there.
 //!
+//! - The control plane's purge delegation
+//!   ([`super::data_purge_delegation`]), for the member it names only and only
+//!   for `account_deleted` or `member_removed`: how the cloud's
+//!   account-deletion job and member-removal hooks reach this node.
+//!
 //! The route is not in the OpenAPI document, so no agent tool can reach it.
-//! Scoped credentials (OAuth, MCP, paired devices) are kept out by
-//! `credential_route_policy`. No control-plane credential reaches it yet: the
-//! cloud's account-deletion job and member-removal hooks run without the
-//! member's session, so they need a purge-scoped control-plane delegation (or
-//! a Core pull of pending purges) before they can call it.
+//! Other scoped credentials (OAuth, MCP, paired devices) are kept out by
+//! `credential_route_policy`.
+//!
+//! A purge for `account_deleted` or `member_removed` also revokes that
+//! member's outstanding app route delegations
+//! ([`super::app_route_revocation`]) before any app is asked.
 
 use axum::{extract::State, http::StatusCode, Extension, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::ServerState;
+use super::{ResolvedAuthorization, ServerState};
 use crate::identity_verify::{OrgRole, VerifiedCaller};
 use crate::plugin_manifest::PluginManifest;
 use crate::sidecar::capability_consumer::CapabilityConsumer;
@@ -277,6 +283,7 @@ pub(crate) fn purge_report_status(report: &Value) -> StatusCode {
 pub async fn purge_user(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
+    auth: Option<Extension<ResolvedAuthorization>>,
     Json(request): Json<PurgeUserRequest>,
 ) -> (StatusCode, Json<Value>) {
     let user_id = request.user_id.trim();
@@ -285,6 +292,24 @@ pub async fn purge_user(
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "user_id is required" })),
         );
+    }
+    let reason = request.reason.as_deref().map(PurgeReason::parse);
+    let purge_delegation = auth
+        .as_ref()
+        .filter(|auth| super::data_purge_delegation::is_purge_delegation(&auth.0.context));
+    if let Some(Extension(auth)) = purge_delegation {
+        let subject = auth.context.constraints.subject_id.as_deref().unwrap_or("");
+        let admitted = reason.is_some_and(|reason| {
+            super::data_purge_delegation::purge_delegation_admits(subject, user_id, reason)
+        });
+        if !admitted {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(
+                    json!({ "error": "forbidden: a purge delegation purges only its own member, for account_deleted or member_removed" }),
+                ),
+            );
+        }
     }
     let owner_token = if !crate::server::request_presents_owner_token() {
         OwnerToken::Absent
@@ -302,13 +327,17 @@ pub async fn purge_user(
             ),
         );
     }
+    if matches!(
+        reason,
+        Some(PurgeReason::AccountDeleted | PurgeReason::MemberRemoved)
+    ) {
+        super::app_route_revocation::revoke_user(user_id, crate::pairing::now_secs());
+    }
     let report = purge_user_app_data(&state, user_id).await;
     let status = purge_report_status(&report);
     tracing::info!(
-        reason = request
-            .reason
-            .as_deref()
-            .map_or("unspecified", |text| PurgeReason::parse(text).as_str()),
+        reason = reason.map_or("unspecified", PurgeReason::as_str),
+        via_control_plane = purge_delegation.is_some(),
         removed = report["removed"].as_u64().unwrap_or(0),
         complete = report["complete"].as_bool().unwrap_or(false),
         status = status.as_u16(),

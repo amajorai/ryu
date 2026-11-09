@@ -165,6 +165,8 @@ pub(super) async fn route_or_wait(
         }
         if !announced {
             announced = true;
+            // A content-free "Ryu needs your phone" push, once per call.
+            super::waiting_push::notify_waiting(&call.offer.principal, call.tool_call_id);
             let app_name = app_name(call);
             call.emit(frames::status_frame_about(
                 call.tool_call_id,

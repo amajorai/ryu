@@ -83,7 +83,16 @@ pub(super) async fn load_turn_memory(
         && memory_principal_available
         && (req.persist || temporary_context_flag_enabled)
     {
-        recall.map(|cfg| cfg.with_min_score(memory_policy.recall_min_relevance.min_score()))
+        match recall {
+            Some(cfg) => {
+                let floor = memory_policy
+                    .recall_min_relevance
+                    .calibrated_min_score(&cfg.retrieval)
+                    .await;
+                Some(cfg.with_min_score(floor))
+            }
+            None => None,
+        }
     } else {
         None
     };

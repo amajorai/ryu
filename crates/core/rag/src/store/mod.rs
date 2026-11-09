@@ -10,6 +10,7 @@ mod okf;
 mod okf_rows;
 mod open;
 mod reindex;
+mod relevance_baseline;
 mod remove;
 mod retrieve;
 mod scorer;

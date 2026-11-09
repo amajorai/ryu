@@ -43,7 +43,6 @@
   "No agents in this group yet.": "В этой группе пока нет агентов.",
   "Open table": "Свободный стол",
   "Order matters when the group responds round robin.": "Порядок важен, когда группа отвечает по очереди.",
-  "Remove {name}": "Удалить {name}",
   "Review its agents and decide how they should answer together.": "Проверьте агентов и решите, как они должны отвечать вместе.",
   "Round robin": "Циклически",
   "Round-robin": "По очереди",

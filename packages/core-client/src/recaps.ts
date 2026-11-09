@@ -31,6 +31,7 @@ import {
 	detailSchema,
 	digestEnvelopeSchema,
 	envelopeSchema,
+	interimViewSchema,
 	listSchema,
 	okSchema,
 	searchSchema,
@@ -42,6 +43,8 @@ export type {
 	Recap,
 	RecapChunkResult,
 	RecapDigest,
+	RecapInterim,
+	RecapInterimView,
 	RecapNotes,
 	RecapSearchResult,
 	RecapSettings,
@@ -52,6 +55,7 @@ export type {
 export {
 	recapActionItemSchema,
 	recapDigestSchema,
+	recapInterimSchema,
 	recapMetaSchema,
 	recapNotesSchema,
 	recapSchema,
@@ -228,6 +232,26 @@ export async function finalizeRecap(
 		kind: "accepted",
 		recap: envelopeSchema.parse(JSON.parse(text)).recap,
 	};
+}
+
+/**
+ * The opt-in rolling summary of a recap that is still recording. `interim` is
+ * null until enough speech was captured. The server keeps it in memory only and
+ * drops it on finalize or delete. Errors carry `interim_disabled` (403, the
+ * member's `interim` setting is off), `recap_not_recording` (409),
+ * `consent_required` (409) or `rate_limited` (429) as {@link recapErrorCode}.
+ */
+export function getRecapInterim(target: ApiTarget, id: string) {
+	return request(target, itemPath(id, "/interim"), {}, interimViewSchema);
+}
+
+/**
+ * Whether a recap call failed because Core refused the caller's credential
+ * (401): an expired session or an app-route delegation revoked after the member
+ * was removed. Sign in again; do not retry with the same credential.
+ */
+export function recapNeedsSignIn(error: unknown): boolean {
+	return error instanceof ApiError && error.status === 401;
 }
 
 export interface ListRecapsQuery {

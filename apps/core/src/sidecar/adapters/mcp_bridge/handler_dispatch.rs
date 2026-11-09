@@ -212,9 +212,9 @@ impl RyuMcpHandler {
             // allowlist is enforced inside `call_tool` (no direct-egress path).
             // The Identity Vault consult (epic #517) runs first inside
             // `call_tool_with_identity` for the agent's bound profiles.
-            _ => self
-                .mcp
-                .call_tool_with_identity_scoped_authorized(
+            _ => {
+                let identity_profiles = self.current_identity_profiles().await?;
+                let call = self.mcp.call_tool_with_identity_scoped_authorized(
                     // The calling agent, so its configured `approval_tools`
                     // (policy Layer A) feed the approval gate.
                     Some(&self.agent_id),
@@ -222,7 +222,7 @@ impl RyuMcpHandler {
                     args,
                     self.allowlist.as_deref(),
                     None,
-                    &self.current_identity_profiles().await?,
+                    &identity_profiles,
                     // Reuse the server-derived conversation id as the ACP
                     // session marker. The registry uses this to notify the
                     // Gateway when a Composio action executes inside the
@@ -246,11 +246,19 @@ impl RyuMcpHandler {
                     self.composio_connection_scope.as_deref(),
                     self.conversation_scope.as_deref(),
                     configure_approved,
-                )
-                .await
-                .map_err(|e| {
+                );
+                // Awaited in this task so the registry's tools see the sender.
+                let outcome = match self.live_turn_sender() {
+                    Some(sender) => {
+                        crate::sidecar::mcp::search_conversations::with_turn_sender(&sender, call)
+                            .await
+                    }
+                    None => call.await,
+                };
+                outcome.map_err(|e| {
                     McpError::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
-                })?,
+                })?
+            }
         };
 
         // Widget emit (D1): the MCP bridge is the single choke point for both

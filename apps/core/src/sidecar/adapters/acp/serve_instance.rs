@@ -141,10 +141,12 @@ pub(super) async fn serve_acp_instance(
                         images,
                         turn,
                         events: tx,
+                        permission_scope_id: turn_conversation,
                         // `mcp`/`allowlist`/`composio_actions`/`agent_id`/
                         // `identity_profile_ids`/`permission_scope_id` are consumed
                         // once from the first turn to build the fixed bridge above;
-                        // per-turn copies are ignored (the session is immutable).
+                        // per-turn copies are ignored (the session is immutable),
+                        // except that the turn's conversation gates its sender.
                         ..
                     }) = next_turn(&mut pending_first, &activity, turns_rx).await
                     else {
@@ -168,6 +170,24 @@ pub(super) async fn serve_acp_instance(
                         .map(|offer| {
                             crate::device_tools::offer::register_turn_context(
                                 offer,
+                                &_instance_tx,
+                                &widget_agent_id,
+                            )
+                        });
+                    // Its verified sender, bound the same way for the turn's
+                    // lifetime (`acp::turn_sender`).
+                    let _turn_sender = turn
+                        .turn_sender
+                        .clone()
+                        .filter(|_| {
+                            !instance_conversation.is_empty()
+                                && turn_conversation.as_deref()
+                                    == Some(instance_conversation.as_str())
+                        })
+                        .map(|sender| {
+                            super::turn_sender::register_turn_sender(
+                                &instance_conversation,
+                                sender,
                                 &_instance_tx,
                                 &widget_agent_id,
                             )

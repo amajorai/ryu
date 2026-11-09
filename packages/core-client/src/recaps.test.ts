@@ -5,17 +5,19 @@ import {
 	exportRecaps,
 	finalizeRecap,
 	getDailyRecap,
+	getRecapInterim,
 	listRecaps,
 	markRecapChunkSilent,
 	RECAPS_BASE,
 	recapErrorCode,
+	recapNeedsSignIn,
 	searchRecaps,
 	setRecapsAvailability,
 	startRecap,
 	uploadRecapChunk,
 	withdrawRecapConsent,
 } from "./recaps.ts";
-import { recapSchema } from "./recaps-schemas.ts";
+import { recapSchema, recapSettingsSchema } from "./recaps-schemas.ts";
 import { createFetchFixture } from "./test-support/http-fixture.ts";
 
 const realFetch = globalThis.fetch;
@@ -214,5 +216,59 @@ describe("recaps client", () => {
 	test("a malformed recap is rejected rather than trusted", async () => {
 		serve(200, { next_cursor: null, recaps: [{ ...RECAP, kind: "meeting" }] });
 		await expect(listRecaps(target)).rejects.toThrow();
+	});
+
+	test("interim reads the rolling summary and reports the opt-in as a code", async () => {
+		const seen = serve(200, {
+			interim: {
+				generated_at: "2026-11-08T10:05:00Z",
+				speech_ms: 300_000,
+				summary: "So far: budget.",
+			},
+			next_at_speech_ms: 600_000,
+			refreshed: true,
+			speech_ms: 310_000,
+		});
+		const view = await getRecapInterim(target, "rcp 1");
+		expect(seen[0]?.url).toBe(
+			`http://127.0.0.1:7980${RECAPS_BASE}/rcp%201/interim`
+		);
+		expect(view.interim?.summary).toBe("So far: budget.");
+		expect(view.interim?.key_points).toEqual([]);
+		serve(200, {
+			interim: null,
+			next_at_speech_ms: 300_000,
+			refreshed: false,
+			speech_ms: 0,
+		});
+		expect((await getRecapInterim(target, "rcp_1")).interim).toBeNull();
+		serve(403, { error: "interim_disabled" });
+		const error = await getRecapInterim(target, "rcp_1").catch(
+			(caught: unknown) => caught
+		);
+		expect(recapErrorCode(error)).toBe("interim_disabled");
+		expect(recapNeedsSignIn(error)).toBe(false);
+	});
+
+	test("a revoked delegation (401) asks for sign-in", async () => {
+		serve(401, { error: "unauthorized" });
+		const error = await listRecaps(target).catch((caught: unknown) => caught);
+		expect(recapNeedsSignIn(error)).toBe(true);
+		expect(recapNeedsSignIn(new Error("401"))).toBe(false);
+	});
+
+	test("settings default the interim opt-in to off", () => {
+		const parsed = recapSettingsSchema.parse({
+			digest_notify: true,
+			digest_time: "21:00",
+			people: false,
+			retention: {
+				audio_days: 7,
+				digests_days: 30,
+				notes_days: 30,
+				segments_days: 7,
+			},
+		});
+		expect(parsed.interim).toBe(false);
 	});
 });

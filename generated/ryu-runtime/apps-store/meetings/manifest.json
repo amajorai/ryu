@@ -161,6 +161,11 @@
             "method": "GET",
             "permission": "meetings.view"
           },
+          {
+            "path": "/recaps/:id/interim",
+            "method": "GET",
+            "permission": "recaps.record"
+          },
           { "path": "/stream", "permission": "meetings.view" },
           { "path": "/detect", "permission": "meetings.record" },
           {

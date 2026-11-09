@@ -271,6 +271,7 @@ pub(crate) fn acp_turn_config(req: &ChatStreamRequest) -> acp::AcpTurnConfig {
             .and_then(|control| control.requested_effort.clone()),
         interactive: true,
         device_offer: req.device.device_tools_offer.clone(),
+        turn_sender: req.verified_caller.clone().map(std::sync::Arc::new),
     }
 }
 

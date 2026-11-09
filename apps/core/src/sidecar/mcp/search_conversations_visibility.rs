@@ -4,7 +4,9 @@
 //! org-bound node reads through the SAME function the REST conversation search
 //! uses ([`crate::server::visible_conversation_ids_for_caller`]), so a team
 //! member's agent finds the team-shared chats that member already sees in the
-//! UI, and never more. Every other principal keeps the principal-only filter.
+//! UI, and never more. An in-chat agent gets the same view only on its owner's
+//! own turn (the turn's verified sender is the conversation owner). Every other
+//! principal keeps the principal-only filter.
 
 use anyhow::Result;
 use serde_json::Value;
@@ -65,12 +67,14 @@ pub(super) async fn resolve_conversation_ids(
 
 /// The principal's readable conversation ids.
 ///
-/// Team memberships are only trusted from a verified bearer whose principal this
-/// is: a chat agent's principal is its host conversation's OWNER, and any
-/// collaborator or team member who may write to that conversation can drive the
-/// turn, so the owner's teams are not the turn sender's. On an unbound node the
-/// verified caller carries no org or teams, and REST's unbound view would add
-/// untenanted legacy rows, so that case keeps the principal-only filter.
+/// Team memberships are only trusted from a verified human whose principal this
+/// is: a verified bearer, or the verified sender of the live chat turn. A chat
+/// agent's principal is its host conversation's OWNER, and any collaborator or
+/// team member who may write to that conversation can drive the turn, so the
+/// owner's teams apply only to the owner's own turn (sender == principal). On an
+/// unbound node the verified caller carries no org or teams, and REST's unbound
+/// view would add untenanted legacy rows, so that case keeps the principal-only
+/// filter.
 async fn visible_ids(store: &ConversationStore, principal: &ToolPrincipal) -> Result<Vec<String>> {
     if crate::server::node_org_id().is_some() {
         if let Some(caller) = verified_caller_for(principal) {
@@ -81,14 +85,15 @@ async fn visible_ids(store: &ConversationStore, principal: &ToolPrincipal) -> Re
     store.visible_conversation_ids(uid, org, bound).await
 }
 
-/// The verified caller in scope, only when `principal` is exactly the principal
-/// that caller yields (same user and org). Never pairs a principal with someone
-/// else's team memberships.
+/// The verified caller (or else the live turn's verified sender) in scope, only
+/// when `principal` is exactly the principal that human yields (same user and
+/// org). Never pairs a principal with someone else's team memberships.
 fn verified_caller_for(principal: &ToolPrincipal) -> Option<VerifiedCaller> {
     let ToolPrincipal::Owned { user_id, org_id } = principal else {
         return None;
     };
     authenticated_scope::current_verified_caller()
+        .or_else(authenticated_scope::current_turn_sender)
         .filter(|caller| &caller.user_id == user_id && &caller.org_id == org_id)
 }
 

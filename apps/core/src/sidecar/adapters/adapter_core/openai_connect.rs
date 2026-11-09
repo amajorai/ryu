@@ -85,7 +85,7 @@ pub(crate) async fn connect_openai(
     // The conversation the Gateway's tool loop may act for, already checked to
     // be owned by the turn's author (`gateway_host_conversation_for_turn`).
     // Sent with its proof on the Gateway hop only.
-    host_conversation_id: Option<&str>,
+    host_conversation: Option<&GatewayHostConversation>,
 ) -> Result<reqwest::Response, acp::AcpFailure> {
     let mut payload_map = serde_json::Map::new();
     payload_map.insert("model".to_owned(), Value::String(model.to_owned()));
@@ -192,7 +192,7 @@ pub(crate) async fn connect_openai(
     if let Some(sid) = session_id.filter(|s| !s.is_empty()) {
         builder = builder.header("x-ryu-session-id", sid);
     }
-    for (name, value) in host_conversation_headers(gateway_hop, host_conversation_id) {
+    for (name, value) in host_conversation_headers(gateway_hop, host_conversation) {
         builder = builder.header(name, value);
     }
     // Provider prompt caching: the user's node-level preference, forwarded as

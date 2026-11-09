@@ -85,6 +85,7 @@ mod start_failures;
 mod tool_access;
 mod tool_events;
 mod turn_config;
+pub(crate) mod turn_sender;
 mod vault_broker;
 mod wire_types;
 

@@ -28,6 +28,10 @@ use serde_json::{json, Value};
 use super::{RegistryTool, ToolPrincipal};
 use crate::server::conversations::{ConversationStore, MessageSearchHit};
 
+/// The live turn's verified sender only ever widens this tool's read filter
+/// (see `visibility::visible_ids`), so the binding is exported from here.
+pub(crate) use super::authenticated_scope::with_turn_sender;
+
 /// Reserved registry server name for the built-in conversation-search provider.
 pub const SERVER_NAME: &str = "search_conversations";
 

@@ -61,6 +61,7 @@ export const harness = {
 	container: document.createElement("div"),
 	nativeDefault: "local",
 	nativeNodes: [] as NativeNode[],
+	pairedPhones: [] as Record<string, unknown>[],
 	presence: [] as Presence[],
 	presenceStatus: 200,
 };
@@ -113,6 +114,11 @@ const node = Bun.serve({
 				});
 			case "GET /api/auth/status":
 				return NativeResponse.json({ authenticated: false });
+			case "GET /api/device-tools/devices":
+				return NativeResponse.json({
+					devices: harness.pairedPhones,
+					principal_id: "owner:local",
+				});
 			default:
 				unexpected.push(`node ${route}`);
 				return NativeResponse.json({ error: "undeclared" }, { status: 404 });
@@ -132,6 +138,9 @@ const controlPlane = Bun.serve({
 		}
 		if (route === "GET /api/auth/list-accounts") {
 			return NativeResponse.json([]);
+		}
+		if (route === "GET /api/auth/get-session") {
+			return NativeResponse.json(null);
 		}
 		if (route === "GET /api/auth/token") {
 			// The signed-in member's short-lived JWT that Core requests carry.
@@ -438,6 +447,7 @@ export function registerConnectionsCoverageHooks() {
 		harness.armedIpcFailure = null;
 		ipc.length = 0;
 		harness.presence = [];
+		harness.pairedPhones = [];
 		harness.presenceStatus = 200;
 		presenceRequests.length = 0;
 		nodeCalls.length = 0;

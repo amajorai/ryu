@@ -75,6 +75,10 @@ pub struct AcpTurnConfig {
     /// registers it against its own bridge channel and agent id, so no other
     /// instance on the same conversation can serve it (`device_tools::turn_context`).
     pub(crate) device_offer: Option<std::sync::Arc<crate::device_tools::DeviceOffer>>,
+    /// The verified human who sent this turn, stamped only by the chat-stream
+    /// handler. Bound to the admitting instance like `device_offer`
+    /// (`acp::turn_sender`) so only that instance's tool calls see it.
+    pub(crate) turn_sender: Option<std::sync::Arc<crate::identity_verify::VerifiedCaller>>,
 }
 
 /// `ConfigWarning::field` Ryu uses when it refuses a session setting because the

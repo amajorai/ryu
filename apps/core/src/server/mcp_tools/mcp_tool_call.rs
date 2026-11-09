@@ -13,11 +13,33 @@ pub(in crate::server) async fn call_mcp_tool_inner(
     body: CallToolBody,
 ) -> axum::response::Response {
     let scoped = conversationless_caller(caller.as_ref(), &body);
+    let turn_sender = relayed_turn_sender(caller.as_ref(), &body);
     let dispatch = Box::pin(dispatch_mcp_tool_call(state, caller, bound_agent_id, body));
-    match scoped {
-        Some(caller) => crate::sidecar::mcp::with_verified_tool_caller(&caller, dispatch).await,
-        None => dispatch.await,
+    match (scoped, turn_sender) {
+        (Some(caller), _) => {
+            crate::sidecar::mcp::with_verified_tool_caller(&caller, dispatch).await
+        }
+        (None, Some(sender)) => {
+            crate::sidecar::mcp::search_conversations::with_turn_sender(&sender, dispatch).await
+        }
+        (None, None) => dispatch.await,
     }
+}
+
+/// The live turn's verified sender for an anonymous Gateway relay whose proof
+/// carries that turn's token for this same host conversation. A call with a
+/// verified caller never uses it.
+fn relayed_turn_sender(
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    body: &CallToolBody,
+) -> Option<std::sync::Arc<crate::identity_verify::VerifiedCaller>> {
+    if caller.is_some() {
+        return None;
+    }
+    gateway_turn_sender(
+        body.host_conversation_id.as_deref()?,
+        body.host_conversation_proof.as_deref()?,
+    )
 }
 
 /// The verified caller to bind as the tool principal: only when the body names
@@ -398,5 +420,27 @@ mod tests {
         let caller = bob();
         assert!(conversationless_caller(Some(&caller), &body(Some("conv-1"))).is_none());
         assert!(conversationless_caller(None, &body(None)).is_none());
+    }
+
+    #[test]
+    fn only_an_anonymous_relay_of_the_live_turn_token_binds_its_sender() {
+        let turn = register_gateway_turn_sender("mtc-conv-1", std::sync::Arc::new(bob()));
+        let relay = |conversation: &str, proof: String| {
+            let mut call = body(Some(conversation));
+            call.host_conversation_proof = Some(proof);
+            call
+        };
+        let live = relay("mtc-conv-1", turn.host_conversation_proof());
+        let sender = relayed_turn_sender(None, &live).map(|sender| sender.user_id.clone());
+        assert_eq!(sender.as_deref(), Some("bob"));
+
+        // A verified caller, the bare proof, or no proof binds nothing.
+        assert!(relayed_turn_sender(Some(&bob()), &live).is_none());
+        let bare = relay("mtc-conv-1", host_conversation_proof("mtc-conv-1"));
+        assert!(relayed_turn_sender(None, &bare).is_none());
+        assert!(relayed_turn_sender(None, &body(Some("mtc-conv-1"))).is_none());
+
+        drop(turn);
+        assert!(relayed_turn_sender(None, &live).is_none());
     }
 }

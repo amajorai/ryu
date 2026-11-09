@@ -25,6 +25,12 @@ const AUDIENCE_PREFIX: &str = "urn:ryu:node:";
 /// delegation carries that client's own id and only the scopes its user
 /// consented to.
 pub(crate) const NODE_LIST_CLIENT_ID: &str = "ryu-control-plane:nodes";
+/// Client id of the purge delegation the control plane mints when a member is
+/// removed from this node's organization or deletes their account. Its subject
+/// is the member whose app data is purged. Core admits it on
+/// `POST /api/data/purge-user` for that member only (see
+/// `server::data_purge_delegation`); every other route refuses it.
+pub(crate) const DATA_PURGE_CLIENT_ID: &str = "ryu-control-plane:data-purge";
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Header {

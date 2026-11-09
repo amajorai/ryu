@@ -337,7 +337,7 @@
             "type": "select",
             "pref_key": "memory.recall-min-relevance",
             "label": "Minimum relevance",
-            "description": "How closely a remembered fact must match your message before automatic recall adds it. `Off` (the default) always adds the closest facts, even when none is really related. A higher level saves prompt space on unrelated turns, but may skip a fact that was worded differently. How strict each level is depends on your embedding model, so raise it one step at a time. Facts matched by keyword and snippets from past chats are not affected.",
+            "description": "How closely a remembered fact must match your message before automatic recall adds it. `Off` (the default) always adds the closest facts, even when none is really related. A higher level saves prompt space on unrelated turns, but may skip a fact that was worded differently. Each level is measured against how your embedding model scores unrelated text, so a level is about as strict with a hosted embedding model as with the built-in one. Facts matched by keyword and snippets from past chats are not affected.",
             "options": [
               {
                 "value": "off",

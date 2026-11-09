@@ -89,7 +89,7 @@ pub(crate) async fn route_openai_stream<F, Fut>(
     // (`gateway_host_conversation_for_turn`). `Some` only on the
     // gateway-forward path; relayed by the Gateway's tool loop so Core applies
     // the author's own tool rules.
-    gateway_host_conversation: Option<String>,
+    gateway_host_conversation: Option<GatewayHostConversation>,
     // How this turn ended, for the reactive failover wrapper. Disarmed on every
     // path but the interactive chat one.
     watch: crate::routing_policy::reactive::TurnWatch,
@@ -251,7 +251,7 @@ where
                 native_reasoning_control,
                 untrusted_caller,
                 stream_hop,
-                gateway_host_conversation.as_deref(),
+                gateway_host_conversation.as_ref(),
             )
             .await
             {

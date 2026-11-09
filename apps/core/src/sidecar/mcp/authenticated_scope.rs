@@ -14,6 +14,25 @@ struct VerifiedToolScope {
 
 tokio::task_local! {
     static VERIFIED_TOOL_SCOPE: VerifiedToolScope;
+    /// The verified human who sent the live chat turn this dispatch serves.
+    /// Kept apart from `VERIFIED_TOOL_SCOPE` so it never changes the principal
+    /// or the vault's secret owner; it only feeds a principal-matched read
+    /// filter (`search_conversations` team visibility).
+    static TURN_SENDER: VerifiedCaller;
+}
+
+/// Run `future` knowing who sent the turn it serves. Callers bind the sender
+/// only to a dispatch provably serving that sender's live turn.
+pub(crate) async fn with_turn_sender<T>(
+    sender: &VerifiedCaller,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    TURN_SENDER.scope(sender.clone(), future).await
+}
+
+/// The live turn's verified sender, if one was bound for this dispatch.
+pub(super) fn current_turn_sender() -> Option<VerifiedCaller> {
+    TURN_SENDER.try_with(Clone::clone).ok()
 }
 
 pub(super) fn current_principal() -> Option<ToolPrincipal> {
@@ -193,6 +212,59 @@ mod tests {
             assert!(matches!(current_principal(), Some(ToolPrincipal::Owned { user_id, .. }) if user_id == "alice"));
         }).await;
         assert!(current_principal().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_turn_sender_is_scoped_and_nests() {
+        assert!(current_turn_sender().is_none());
+        with_turn_sender(&caller("alice"), async {
+            assert_eq!(
+                current_turn_sender().map(|c| c.user_id),
+                Some("alice".into())
+            );
+            with_turn_sender(&caller("bob"), async {
+                assert_eq!(current_turn_sender().map(|c| c.user_id), Some("bob".into()));
+            })
+            .await;
+            assert_eq!(
+                current_turn_sender().map(|c| c.user_id),
+                Some("alice".into())
+            );
+        })
+        .await;
+        assert!(current_turn_sender().is_none());
+    }
+
+    #[tokio::test]
+    async fn background_tasks_do_not_inherit_the_turn_sender() {
+        with_turn_sender(&caller("alice"), async {
+            assert!(current_turn_sender().is_some());
+            assert!(tokio::spawn(async { current_turn_sender().is_none() })
+                .await
+                .unwrap());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_turn_sender_changes_neither_principal_nor_secret_owner() {
+        let (principal, verified, owner) = with_turn_sender(&caller("alice"), async {
+            (
+                current_principal(),
+                current_verified_caller(),
+                secret_owner_without_conversation(Some("workspace")),
+            )
+        })
+        .await;
+        assert!(principal.is_none());
+        assert!(verified.is_none());
+        assert_eq!(owner, SecretOwnerFallback::NoCaller);
+
+        let bob = with_verified_tool_caller(&caller("bob"), async {
+            with_turn_sender(&caller("alice"), async { current_principal() }).await
+        })
+        .await;
+        assert!(matches!(bob, Some(ToolPrincipal::Owned { user_id, .. }) if user_id == "bob"));
     }
 
     #[tokio::test]

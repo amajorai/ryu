@@ -54,6 +54,7 @@ pub(crate) mod routing;
 pub(crate) mod taint;
 pub(crate) mod turn_context;
 pub(crate) mod validate;
+pub(crate) mod waiting_push;
 
 #[cfg(test)]
 mod agent_events_tests;
