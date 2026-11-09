@@ -81,4 +81,36 @@ fn init_schema_migrates_a_legacy_table_and_is_idempotent() {
         )
         .unwrap();
     assert_eq!(proposal_and_setting_tables, 2);
+    // Dream's archive lookups go by target and by event age.
+    let archive_indexes: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'index'
+               AND name IN ('idx_memory_proposals_target', 'idx_memory_category_age')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archive_indexes, 2);
+
+    // A legacy row gains the access-tracking columns as never recalled.
+    let access: (Option<i64>, Option<i64>) = conn
+        .query_row(
+            "SELECT recall_count, last_recalled_at FROM memory_entries WHERE id = 'legacy'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(access, (Some(0), None));
+
+    // ...and the database records when tracking began, so Dream does not read
+    // the legacy row's zero count as "never used".
+    let started: String = conn
+        .query_row(
+            "SELECT value FROM memory_meta WHERE key = 'access_tracking_started_at'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(started.parse::<i64>().unwrap() > 7);
 }

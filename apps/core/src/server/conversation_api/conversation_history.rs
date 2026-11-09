@@ -146,17 +146,7 @@ pub(in crate::server) async fn search_conversations_handler(
     // `search_messages` already accepts. On an unbound node the id list is every
     // conversation (unchanged behaviour); on a bound node an anonymous caller gets
     // an empty set and therefore no hits, never a node-wide dump.
-    let (user_id, org_id, team_ids_json, node_bound) = tenancy_filter_args(&caller);
-    let visible = match state
-        .conversations
-        .visible_conversation_ids_for_teams(
-            user_id.as_deref(),
-            org_id.as_deref(),
-            node_bound,
-            team_ids_json.as_deref(),
-        )
-        .await
-    {
+    let visible = match visible_conversation_ids_for_caller(&state.conversations, &caller).await {
         Ok(ids) => ids,
         Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     };

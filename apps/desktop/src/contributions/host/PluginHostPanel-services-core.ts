@@ -161,15 +161,15 @@ export function buildPluginHostCoreServices({
 			}
 			useAssistantStore.getState().open(mode);
 			if (prompt) {
-				// Asking on the user's behalf is a real turn on their budget, and it
-				// lands in the thread looking exactly like something they typed. So
-				// the question is ATTRIBUTED here, by the shell, from the companion's
-				// real name — the same rule the context path follows, applied to the
-				// higher-power half. `assistant.open()` with no prompt just shows the
-				// panel and writes nothing.
+				// App-authored text is PRE-FILL ONLY. Auto-sending it would run a
+				// persisted turn as the user that skips the app-send firewall, exec
+				// scan, ask-before-send approval and shared-node refusal `chat.send`
+				// passes. So it lands in the composer, attributed by the shell from
+				// the companion's real name, and the user decides whether to send.
+				// `assistant.open()` with no prompt just shows the panel.
 				useAssistantStore
 					.getState()
-					.setPendingPrompt(`[asked by ${companion.name}] ${prompt}`);
+					.setPendingDraft(`[asked by ${companion.name}] ${prompt}`);
 			}
 		},
 		listAgents: async () => {

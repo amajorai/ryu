@@ -178,7 +178,6 @@
   "I've saved them": "Коды сохранены",
   "I've scanned it": "QR-код отсканирован",
   "Import browser bookmarks": "Импортировать закладки браузера",
-  "Imported {imported} bookmarks": "Импортировано закладок: {imported}",
   "Importing bookmarks…": "Импорт закладок…",
   "Improve writing": "Улучшить текст",
   "In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.": "В приложении-аутентификаторе выберите <strong>Ввести ключ настройки</strong> и вставьте этот ключ.",
@@ -371,8 +370,9 @@
   "plugin bundle does not export activate(context)": "бандл плагина не экспортирует activate(context)",
   "{current} of {total}": "{current} из {total}",
   "{current} of {total}: {match}": "{current} из {total}: {match}",
+  "{imported, plural, one {Imported # bookmark} other {Imported # bookmarks}}": "{imported, plural, one {Импортирована # закладка} few {Импортированы # закладки} many {Импортировано # закладок} other {Импортировано # закладки}}",
   "{ipAddress} · Created {createdAgo}": "{ipAddress} · Создан {createdAgo}",
   "{label} will be signed out and must sign in again to use your account.": "Будет выполнен выход для {label}: для использования вашей учётной записи потребуется войти снова.",
   "{matchCount, plural, one {# local result} other {# local results}}": "{matchCount, plural, one {# локальный результат} few {# локальных результата} many {# локальных результатов} other {# локального результата}}",
-  "{skipped} duplicate links skipped": "Пропущено повторяющихся ссылок: {skipped}"
+  "{skipped, plural, one {# duplicate link skipped} other {# duplicate links skipped}}": "{skipped, plural, one {Пропущена # повторяющаяся ссылка} few {Пропущены # повторяющиеся ссылки} many {Пропущено # повторяющихся ссылок} other {Пропущено # повторяющейся ссылки}}"
 }

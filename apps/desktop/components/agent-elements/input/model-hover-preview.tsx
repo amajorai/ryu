@@ -59,15 +59,19 @@ function ScoreBar({
 	score: number | null | undefined;
 	hint?: string | null;
 }) {
+	const tl = useLiteralMessages();
 	const value =
 		isNativeNumber(score) && Number.isFinite(score) && score >= 1
 			? Math.min(score, 5)
 			: null;
 	const filledPips = value === null ? 0 : Math.round(value);
-	const scoreLabel =
-		value === null
-			? `${label}: unknown`
-			: `${label}: ${formatScore(value)} of 5${hint ? `, ${hint}` : ""}`;
+	let scoreLabel = tl("{label}: unknown", { label });
+	if (value !== null) {
+		const score = formatScore(value);
+		scoreLabel = hint
+			? tl("{label}: {score} of 5, {hint}", { hint, label, score })
+			: tl("{label}: {score} of 5", { label, score });
+	}
 	return (
 		<div className="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3">
 			<span className="flex min-w-0 items-center gap-1 font-medium text-muted-foreground text-xs">
@@ -198,21 +202,25 @@ export function ModelHoverPreview({ insight }: { insight: ModelInsight }) {
 			</div>
 
 			<div className="flex flex-col gap-2.5 border-border border-t pt-3">
-				<ScoreBar hint={speedHint} label="Speed" score={insight.scoreSpeed} />
+				<ScoreBar
+					hint={speedHint}
+					label={tl("Speed")}
+					score={insight.scoreSpeed}
+				/>
 				<ScoreBar
 					hint={intelHint}
-					label="Intelligence"
+					label={tl("Intelligence")}
 					score={insight.scoreIntelligence}
 				/>
 				<ScoreBar
 					hint={costHint}
 					icon={DollarCircleIcon}
-					label="Cost"
+					label={tl("Cost")}
 					score={insight.scoreCost}
 				/>
 				<ScoreBar
 					hint={contextHint}
-					label="Context"
+					label={tl("Context")}
 					score={insight.scoreContext}
 				/>
 			</div>

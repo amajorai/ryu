@@ -35,7 +35,7 @@ use utoipa::OpenApi;
         crate::server::sandbox_enable,
         crate::server::sandbox_disable,
         crate::server::sandbox_status,
-        crate::server::chat_stream,
+        crate::server::chat_stream_http,
         crate::server::chat_cancel,
         crate::server::chat_control,
         crate::server::channel_run,

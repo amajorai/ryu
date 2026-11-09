@@ -53,20 +53,32 @@ pub(super) fn cited_sources<'a>(
 
 /// Dream's provenance for a proposal backed by `cited`, or `None` when it
 /// cites nothing that was sent. `memory_ids` names existing memories the
-/// proposal revises.
+/// proposal revises. `message_ids` keeps every cited id, including a
+/// working-memory document's synthetic `working:<id>@v<version>`;
+/// `conversation_id` is the first cited chat, so it is `None` when only
+/// working memory backs the proposal.
 pub(super) fn consolidation_provenance(
     cited: &[&DreamSource],
     memory_ids: Vec<String>,
     confidence: Option<f32>,
 ) -> Option<memory::MemoryProvenance> {
-    let first_source = cited.first()?;
+    if cited.is_empty() {
+        return None;
+    }
     Some(memory::MemoryProvenance {
         source: memory::MemorySource::Consolidation,
-        conversation_id: Some(first_source.conversation_id.clone()),
+        conversation_id: first_conversation(cited),
         message_ids: cited.iter().map(|s| s.message_id.clone()).collect(),
         memory_ids,
         confidence,
     })
+}
+
+/// The conversation of the first cited chat message, skipping working memory.
+pub(super) fn first_conversation(cited: &[&DreamSource]) -> Option<String> {
+    cited
+        .iter()
+        .find_map(|source| source.conversation_id.clone())
 }
 
 /// Short excerpts of the cited messages, kept with the proposal as evidence.
@@ -75,7 +87,7 @@ pub(super) fn source_excerpts(cited: &[&DreamSource]) -> Vec<memory::MemoryPropo
         .iter()
         .map(|source| memory::MemoryProposalSource {
             message_id: source.message_id.clone(),
-            conversation_id: Some(source.conversation_id.clone()),
+            conversation_id: source.conversation_id.clone(),
             excerpt: bounded_text(&source.content, DREAM_SOURCE_EXCERPT_CHARS).unwrap_or_default(),
         })
         .collect()

@@ -38,7 +38,7 @@ export function EngineAccelerationSection() {
 		acceleration;
 	const hardware = (() => {
 		if (!hasGpu) {
-			return "No usable graphics card detected on this device.";
+			return tl("No usable graphics card detected on this device.");
 		}
 		if (gpuName && vram) {
 			return tl("Graphics card detected: {gpuName} ({vram}).", {

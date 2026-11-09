@@ -602,3 +602,7 @@ mod tests {
         assert!(err.to_string().contains("unknown workflow_builder tool"));
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_builder_org_gate_test.rs"]
+mod org_gate_tests;

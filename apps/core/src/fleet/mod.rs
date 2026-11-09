@@ -367,6 +367,13 @@ pub fn has_enrolled_node_bundle() -> bool {
     enrolled_bundle_path().exists()
 }
 
+/// Whether this node holds any persisted org enrollment: a v2 bundle (pending or
+/// acknowledged) or the fleet identity it produced. Reachability of the control
+/// plane never changes this answer; see `sidecar::node_binding`.
+pub fn has_persisted_enrollment() -> bool {
+    has_enrolled_node_bundle() || identity_path().exists()
+}
+
 /// Whether startup should wait for the Fleet reconciler to finish a saved v2
 /// enrollment before deciding this is an unbound local node.
 pub fn enrollment_recovery_pending() -> bool {

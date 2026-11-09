@@ -188,6 +188,15 @@ pub enum AcpEvent {
         tool_call_id: String,
         input: serde_json::Value,
     },
+    /// A Core-authored AI SDK data part (`data-<name>` with a stable `id`)
+    /// raised by an in-process bridge tool, such as the phone device-tool
+    /// request and status frames. Rendered with its id so
+    /// `/api/chat/stream/resume` replays the latest state.
+    UiData {
+        name: String,
+        id: String,
+        data: serde_json::Value,
+    },
     /// Token / context-window usage for the turn (ACP `SessionUpdate::UsageUpdate`
     /// and, behind `unstable_end_turn_token_usage`, `PromptResponse.usage`).
     /// Carries whatever the agent reported as a loosely-typed object — a live

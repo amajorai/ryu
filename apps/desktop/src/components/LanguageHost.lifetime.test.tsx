@@ -230,6 +230,10 @@ let streamId = 0;
 const snapshots: I18nHostSnapshot[] = [];
 const results: Array<{ id: number; result: unknown }> = [];
 function receive(event: MessageEvent) {
+	if (event.data?.kind === "ryu-plugin-liveness") {
+		peer?.postMessage({ kind: "ryu-plugin-liveness-ack", id: event.data.id });
+		return;
+	}
 	const parsed = replySchema.safeParse(event.data);
 	if (!parsed.success) {
 		unexpected.push(`invalid native RPC reply ${JSON.stringify(event.data)}`);

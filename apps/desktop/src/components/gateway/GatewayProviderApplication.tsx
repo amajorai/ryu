@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useState } from "react";
 import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
@@ -31,19 +32,22 @@ export function GatewayProviderApplication({
 	managed: boolean;
 	onRefresh: () => Promise<void>;
 }) {
+	const tl = useLiteralMessages();
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	if (managed || !revision || appliedRevision === undefined) {
 		return null;
 	}
 	const active = appliedRevision === revision;
-	let status =
-		"Stored settings differ from the last applied provider revision.";
+	let status = tl(
+		"Stored settings differ from the last applied provider revision."
+	);
 	if (active) {
-		status = "Saved provider settings are active.";
+		status = tl("Saved provider settings are active.");
 	} else if (appliedRevision === null) {
-		status =
-			"The running Gateway has not confirmed the saved provider revision.";
+		status = tl(
+			"The running Gateway has not confirmed the saved provider revision."
+		);
 	}
 	const apply = async () => {
 		setBusy(true);

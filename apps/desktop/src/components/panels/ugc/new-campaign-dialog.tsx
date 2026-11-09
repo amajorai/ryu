@@ -148,7 +148,7 @@ export function NewCampaignDialog({
 						/>
 					</div>
 					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="ugc-campaign-brief">Brief</Label>
+						<Label htmlFor="ugc-campaign-brief">Campaign brief</Label>
 						<Textarea
 							id="ugc-campaign-brief"
 							onChange={(e) => setBrief(e.target.value)}

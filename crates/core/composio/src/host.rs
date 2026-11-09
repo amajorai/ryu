@@ -65,6 +65,21 @@ pub trait ComposioHost: Send + Sync {
     ) -> Result<bool> {
         Ok(true)
     }
+
+    /// Whether the user who subscribed a legacy workflow trigger may still
+    /// receive `connected_account_id`'s events into `workflow_id`: they may
+    /// still run the workflow and still own the account. Re-checked on every
+    /// delivery. `subscriber_user_id` is empty for rows recorded before
+    /// subscribers were stored. Hosts without a principal model allow every
+    /// delivery.
+    async fn subscriber_may_run_workflow(
+        &self,
+        _subscriber_user_id: &str,
+        _workflow_id: &str,
+        _connected_account_id: &str,
+    ) -> Result<bool> {
+        Ok(true)
+    }
 }
 
 /// Process-global host, installed once at boot by `apps/core`.

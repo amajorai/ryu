@@ -269,7 +269,8 @@ pub(in crate::server) async fn create_workflow(
     // identically. A DAG-validation failure surfaces as a 400; any other error
     // (e.g. a disk write failure) as a 500.
     let workflow_id_for_conflict = workflow.id.clone();
-    match crate::workflow::persist_workflow_guarded(workflow).await {
+    let saver = caller.as_ref().map(|caller| caller.user_id.as_str());
+    match crate::workflow::persist_workflow_guarded_as(workflow, saver).await {
         Ok(workflow) => (
             StatusCode::OK,
             Json(
@@ -293,6 +294,7 @@ pub(in crate::server) async fn create_workflow(
                 || e.contains("unknown node")
                 || e.contains("duplicate node")
                 || e.contains("sent a redacted")
+                || e.contains("Composio trigger")
             {
                 StatusCode::BAD_REQUEST
             } else {

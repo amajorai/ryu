@@ -52,6 +52,7 @@ function runCommand(state: WorkbenchState, id: string): WorkbenchState {
 		next = reduceWorkbench(next, action);
 	};
 	const command = workbenchLayoutCommands({
+		dir: "ltr",
 		dispatch,
 		movableRegions: DESKTOP_SHELL_REGIONS,
 		state,
@@ -69,6 +70,7 @@ function runCommand(state: WorkbenchState, id: string): WorkbenchState {
 
 function commandById(state: WorkbenchState, id: string) {
 	return workbenchLayoutCommands({
+		dir: "ltr",
 		dispatch: () => undefined,
 		movableRegions: DESKTOP_SHELL_REGIONS,
 		state,
@@ -102,6 +104,7 @@ describe("workbenchLayoutCommands", () => {
 
 	test("offers no Left move while the Desktop shell keeps Left for navigation", () => {
 		const ids = workbenchLayoutCommands({
+			dir: "ltr",
 			dispatch: () => undefined,
 			movableRegions: DESKTOP_SHELL_REGIONS,
 			state: fixture(),
@@ -199,6 +202,7 @@ describe("bottom alignment titles", () => {
 		const japanese: LiteralMessage = (source, values) =>
 			formatMessage(catalog[source] ?? source, values);
 		const titles = workbenchLayoutCommands({
+			dir: "ltr",
 			dispatch: () => undefined,
 			movableRegions: DESKTOP_SHELL_REGIONS,
 			state: fixture(),
@@ -212,5 +216,96 @@ describe("bottom alignment titles", () => {
 			"workbench-align-bottom-left": "下部ペインを揃える: 左",
 			"workbench-align-bottom-right": "下部ペインを揃える: 右",
 		});
+	});
+});
+
+function titlesUnder(
+	dir: "ltr" | "rtl",
+	translate: LiteralMessage,
+	state: WorkbenchState = fixture()
+): Record<string, string> {
+	return Object.fromEntries(
+		workbenchLayoutCommands({
+			dir,
+			dispatch: () => undefined,
+			movableRegions: DESKTOP_SHELL_REGIONS,
+			state,
+			tl: translate,
+		}).map((command) => [command.id, command.title])
+	);
+}
+
+describe("right-to-left titles", () => {
+	test("rtl: commands name the side a pane is drawn on, not its stored id", () => {
+		const titles = titlesUnder("rtl", tl);
+		// The persisted `right` region is drawn on screen-left under RTL.
+		expect(titles["workbench-toggle-right"]).toBe("Show Left Pane");
+		expect(titles["workbench-move-to-right"]).toBe("Move Tab to Left Pane");
+		expect(titles["workbench-align-bottom-left"]).toBe(
+			"Align Bottom Pane: Right"
+		);
+		expect(titles["workbench-align-bottom-right"]).toBe(
+			"Align Bottom Pane: Left"
+		);
+		// Navigation sits in `left` (screen-right), so its move goes to screen-left.
+		expect(titles["workbench-navigation-right"]).toBe(
+			"Move Navigation to Left"
+		);
+	});
+
+	test("ltr: titles keep the stored side", () => {
+		const titles = titlesUnder("ltr", tl);
+		expect(titles["workbench-toggle-right"]).toBe("Show Right Pane");
+		expect(titles["workbench-navigation-right"]).toBe(
+			"Move Navigation to Right"
+		);
+	});
+
+	test("rtl: the dispatched region is still the stored one", () => {
+		let next = fixture();
+		const command = workbenchLayoutCommands({
+			dir: "rtl",
+			dispatch: (action) => {
+				next = reduceWorkbench(next, action);
+			},
+			movableRegions: DESKTOP_SHELL_REGIONS,
+			state: next,
+			tl,
+		}).find((candidate) => candidate.id === "workbench-move-to-right");
+		command?.run();
+		expect(
+			next.groups.find((group) => group.region === "right")?.itemIds
+		).toEqual(["c"]);
+	});
+
+	test("ar: every layout title is one translated message with no English", () => {
+		const catalog: Record<string, string> = {
+			Bottom: "أسفل",
+			Center: "الوسط",
+			"Equalize Center Panes": "مساواة الأجزاء الوسطى",
+			"Focus Next Pane": "التركيز على الجزء التالي",
+			"Focus Previous Pane": "التركيز على الجزء السابق",
+			"Hide {name} Pane": "إخفاء الجزء {name}",
+			"Join Center Panes": "دمج الأجزاء الوسطى",
+			Left: "يسار",
+			"Move Navigation to Left": "نقل التنقل إلى اليسار",
+			"Move Tab to {name} Pane": "نقل علامة التبويب إلى الجزء {name}",
+			"Reset Layout": "إعادة تعيين التخطيط",
+			Right: "يمين",
+			"Show {name} Pane": "إظهار الجزء {name}",
+			"Align Bottom Pane: Center": "محاذاة الجزء السفلي: الوسط",
+			"Align Bottom Pane: Full width": "محاذاة الجزء السفلي: العرض الكامل",
+			"Align Bottom Pane: Left": "محاذاة الجزء السفلي: يسار",
+			"Align Bottom Pane: Right": "محاذاة الجزء السفلي: يمين",
+		};
+		const arabic: LiteralMessage = (source, values) =>
+			formatMessage(catalog[source] ?? source, values);
+		const titles = titlesUnder("rtl", arabic);
+		expect(titles["workbench-toggle-right"]).toBe("إظهار الجزء يسار");
+		expect(titles["workbench-navigation-right"]).toBe("نقل التنقل إلى اليسار");
+		expect(titles["workbench-reset-layout"]).toBe("إعادة تعيين التخطيط");
+		for (const title of Object.values(titles)) {
+			expect(title).not.toMatch(/[A-Za-z]/);
+		}
 	});
 });

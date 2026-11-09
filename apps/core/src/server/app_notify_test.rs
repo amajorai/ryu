@@ -332,3 +332,41 @@ fn an_event_notify_hint_renders_in_the_recipient_locale() {
     );
     assert_eq!(grouped.body.as_deref(), Some("Unexpected HTTP 12,345."));
 }
+
+#[tokio::test]
+async fn a_link_outside_the_calling_app_is_refused_before_delivery() {
+    let grants = std::collections::HashSet::new();
+    for link in [
+        "https://evil.example/",
+        "ryu://apps/@ryu/other/x",
+        "ryu://apps/@ryu/caller/../other",
+    ] {
+        let refused = deliver_for_app_localized(
+            &reqwest::Client::new(),
+            "@ryu/caller",
+            &grants,
+            None,
+            "Ready",
+            "",
+            None,
+            None,
+            Some(link),
+        )
+        .await
+        .expect_err(link);
+        assert_eq!(refused.0, StatusCode::BAD_REQUEST, "{link}");
+        assert!(refused.1.contains("deep link"), "{}", refused.1);
+    }
+}
+
+#[test]
+fn notify_deliver_accepts_an_optional_link() {
+    let body: DeliverBody = serde_json::from_value(serde_json::json!({
+        "title": "Ready",
+        "link": "ryu://apps/@ryu/caller/items/1",
+    }))
+    .unwrap();
+    assert_eq!(body.link.as_deref(), Some("ryu://apps/@ryu/caller/items/1"));
+    let plain: DeliverBody = serde_json::from_value(serde_json::json!({ "title": "x" })).unwrap();
+    assert_eq!(plain.link, None);
+}

@@ -61,6 +61,18 @@ pub(super) fn forwarded_cookie_header(
     reqwest::header::HeaderValue::from_str(&pairs.join("; ")).ok()
 }
 
+/// Proofs only Core mints and only Core reads: the self-API acting-user
+/// headers. An app never receives them, so it can never replay one to act as
+/// a member.
+pub(super) fn is_core_principal_proof(name: &str) -> bool {
+    [
+        crate::self_api::SELF_CALL_PROOF_HEADER,
+        crate::self_api::SELF_CALL_USER_HEADER,
+    ]
+    .iter()
+    .any(|header| name.eq_ignore_ascii_case(header))
+}
+
 pub(super) fn copy_headers(
     src: &HeaderMap,
     dst: &mut reqwest::header::HeaderMap,
@@ -93,6 +105,7 @@ pub(super) fn copy_headers(
             || name.as_str().eq_ignore_ascii_case(HDR_WEB_DELEGATION)
             || name.as_str().eq_ignore_ascii_case(HDR_APP_CALLER)
             || name.as_str().eq_ignore_ascii_case(HDR_EVENT_DELIVERY)
+            || is_core_principal_proof(name.as_str())
         {
             continue;
         }

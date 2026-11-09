@@ -7,6 +7,7 @@ import { shouldSendSandboxDocument } from "./ExtensionHost.tsx";
 import {
 	armNavigationTeardown,
 	SANDBOX_PAGE_EXPECTED_LOADS,
+	SRCDOC_EXPECTED_LOADS,
 	sandboxFrameState,
 	sendSandboxDocument,
 } from "./sandbox-frame-guard.ts";
@@ -66,8 +67,14 @@ class FakeFrame extends EventTarget {
 			this.posted.push(message);
 		},
 	};
+	srcdoc: string | null = null;
 	setAttribute(_name: string, value: string) {
 		this.src = value;
+	}
+	removeAttribute(name: string) {
+		if (name === "srcdoc") {
+			this.srcdoc = null;
+		}
 	}
 }
 
@@ -148,5 +155,26 @@ describe("armNavigationTeardown", () => {
 		fireLoads(frame, SANDBOX_PAGE_EXPECTED_LOADS + 1);
 		expect(teardowns).toBe(0);
 		expect(frame.src).toBe("page");
+	});
+});
+
+describe("srcdoc transport navigation guard", () => {
+	test("the companion's own load keeps the bridge; the next load tears it down", () => {
+		const frame = new FakeFrame();
+		frame.srcdoc = "<p>companion</p>";
+		const state = sandboxFrameState(frame, SRCDOC_EXPECTED_LOADS);
+		let teardowns = 0;
+		armNavigationTeardown(state, frame as unknown as Element, () => {
+			teardowns += 1;
+		});
+		fireLoads(frame, SRCDOC_EXPECTED_LOADS);
+		expect(teardowns).toBe(0);
+		expect(frame.srcdoc).toBe("<p>companion</p>");
+		fireLoads(frame, 1);
+		expect(teardowns).toBe(1);
+		expect(state.navigated).toBe(true);
+		// `srcdoc` wins over `src`, so it must go for the blank to take effect.
+		expect(frame.srcdoc).toBeNull();
+		expect(frame.src).toBe("about:blank");
 	});
 });

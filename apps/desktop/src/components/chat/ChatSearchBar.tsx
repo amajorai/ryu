@@ -62,11 +62,11 @@ export function ChatSearchBar({
 							current: activeMatchIndex + 1,
 							total: matches.length,
 						})
-					: "No matches"
-				: "Search messages"
+					: tl("No matches")
+				: tl("Search messages")
 			: folderAvailable
-				? "Search project files"
-				: "No project folder";
+				? tl("Search project files")
+				: tl("No project folder");
 
 	const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
 		if (event.key === "Escape") {

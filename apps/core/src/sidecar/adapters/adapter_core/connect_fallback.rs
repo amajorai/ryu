@@ -93,6 +93,9 @@ pub(crate) async fn connect_with_fallback(
             // fallback provider may not support the same slots; the gateway's own
             // fallback chain and modality_map take over from here.
             let fallback = &fallback_chain[0];
+            // A raw provider offers no tools, so the memory guide that named
+            // the primary hop's tools does not go with the turn.
+            let fallback_messages = messages_without_memory_usage_hint(messages);
             tracing::warn!(
                 primary_base_url = %primary_base_url,
                 fallback_base_url = %fallback.base_url,
@@ -100,7 +103,7 @@ pub(crate) async fn connect_with_fallback(
                 "ryu-agent: primary provider failed; attempting fallback recovery"
             );
             match connect_openai(
-                messages,
+                &fallback_messages,
                 &fallback.base_url,
                 &fallback.model,
                 fallback.api_key.as_deref(),

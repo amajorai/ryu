@@ -48,6 +48,8 @@ pub(crate) async fn route_acp_stream(
     subscription_costs: Option<crate::server::subscription_costs::SubscriptionCostStore>,
     sdk_turn_selection: Option<SdkTurnSelection>,
     account_confinement: crate::agent_access::AccountConfinement,
+    // Paid by the completion task only when the turn completes.
+    recall_marks: TurnRecallMarks,
 ) -> Response {
     // The composer's plan-mode pill, materialized into the message. Applied here,
     // above BOTH consumers, because the same string is sent two ways: as the tail
@@ -175,6 +177,7 @@ pub(crate) async fn route_acp_stream(
     // task outlives this function, and a `message_end` hook reads its own composer
     // flag to decide whether to act this turn.
     let plugin_flags = req.plugin_flags.clone();
+    let device_offer = req.device.device_tools_offer.clone();
     let agent_control_applied = req.agent_control_applied.clone();
     let harness_session_id = req.session_id.clone();
     tokio::spawn(run_acp_completion(AcpCompletionCtx {
@@ -200,6 +203,8 @@ pub(crate) async fn route_acp_stream(
         cost_attribution,
         plugin_flags,
         worktree_diffs,
+        recall_marks,
+        device_offer,
     }));
 
     // SSE generator — forwards pre-rendered frames from the completion task.

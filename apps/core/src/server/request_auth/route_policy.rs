@@ -24,6 +24,13 @@ pub(in crate::server) fn route_policy(
     if path == "/api/ws/ticket" {
         return RoutePolicy::Authenticated;
     }
+    // App route delegations and the per-member data purge: their handlers bind
+    // the delegation to the caller and allow a purge only of the caller's own
+    // data (or by an organization admin). `credential_route_policy` keeps
+    // scoped credentials out of both.
+    if path == "/api/app-delegations" || path == "/api/data/purge-user" {
+        return RoutePolicy::Authenticated;
+    }
     if path_has_prefix(path, "/api/local-content") {
         // Seals local clients' own files (CLI history) with this node's key:
         // the owner only, and the handlers also require a loopback peer.
@@ -63,6 +70,7 @@ pub(in crate::server) fn route_policy(
         return RoutePolicy::OwnerOnly;
     }
     if path_has_prefix(path, "/api/chat")
+        || path_has_prefix(path, "/api/device-tools")
         || path_has_prefix(path, "/api/conversations")
         || path_has_prefix(path, "/api/proactive")
         || path_has_prefix(path, "/api/channels/run")

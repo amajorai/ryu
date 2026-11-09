@@ -8,6 +8,7 @@ import { controlPlaneRefusalMessage } from "@/src/lib/access-refusal.ts";
 import { ApiError } from "@/src/lib/api/client.ts";
 
 const CODE_PREFIX = /^vault_[a-z_]+:\s*/;
+const ICU_SYNTAX = /[{}]/;
 
 export function vaultErrorMessage<TError>(
 	error: TError,
@@ -20,8 +21,14 @@ export function vaultErrorMessage<TError>(
 			return refusal;
 		}
 		if (error.serverMessage) {
-			const text = error.serverMessage.replace(CODE_PREFIX, "");
-			return text.charAt(0).toUpperCase() + text.slice(1);
+			const stripped = error.serverMessage.replace(CODE_PREFIX, "");
+			const text = stripped.charAt(0).toUpperCase() + stripped.slice(1);
+			// The extractor catalogs this exact sentence (core-rust-vault.mjs);
+			// translate it here so toasts and attributes, which the DOM localizer
+			// never sees, are localized too. A brace would make a relayed sentence
+			// parse as a message, so that stays as sent; apostrophes are literal
+			// in @ryu/i18n's formatter ("the agent's settings" is a catalog key).
+			return ICU_SYNTAX.test(text) ? text : tl(text);
 		}
 		if (error.status === 403) {
 			return tl("You do not have access to do that.");

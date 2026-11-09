@@ -230,7 +230,7 @@ export function AgentTriggersPanel({
 										</SelectContent>
 									</Select>
 								}
-								title="Day"
+								title="Day of week"
 							/>
 						) : null}
 						{scheduleEnabled && schedulePhrase === "weekly" ? (

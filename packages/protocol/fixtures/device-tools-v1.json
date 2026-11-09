@@ -1,0 +1,470 @@
+{
+  "$comment": "Closed device-tool catalog. Core compiles this file in (apps/core/src/device_tools/catalog.rs); clients copy it byte for byte. Edit here only.",
+  "version": 1,
+  "apps": [
+    {
+      "id": "calendar",
+      "name": "Calendar",
+      "platforms": ["ios", "android"],
+      "status": "available"
+    },
+    {
+      "id": "contacts",
+      "name": "Contacts",
+      "platforms": ["ios", "android"],
+      "status": "available"
+    },
+    {
+      "id": "location",
+      "name": "Location",
+      "platforms": ["ios", "android"],
+      "status": "available"
+    },
+    {
+      "id": "alarms",
+      "name": "Alarms and timers",
+      "platforms": ["ios", "android"],
+      "status": "available"
+    },
+    {
+      "id": "reminders",
+      "name": "Reminders",
+      "platforms": ["ios"],
+      "status": "available"
+    },
+    {
+      "id": "home",
+      "name": "Home",
+      "platforms": ["ios"],
+      "status": "available"
+    }
+  ],
+  "tools": [
+    {
+      "id": "device.calendar.search",
+      "alias": "device_calendar_search",
+      "app": "calendar",
+      "verb": "read",
+      "status": "available",
+      "description": "Search events in the calendar on the user's phone between two times (at most 14 days apart). Returns titles, times and calendar names; never notes or attendees.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "At most 14 days after start."
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          }
+        },
+        "required": ["start", "end"]
+      }
+    },
+    {
+      "id": "device.calendar.get_notes",
+      "alias": "device_calendar_get_notes",
+      "app": "calendar",
+      "verb": "read",
+      "status": "available",
+      "description": "Read the notes of one calendar event on the user's phone. Links are removed.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "device.calendar.create",
+      "alias": "device_calendar_create",
+      "app": "calendar",
+      "verb": "write",
+      "status": "available",
+      "description": "Add an event to the primary calendar on the user's phone. Cannot invite attendees or repeat.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "all_day": {
+            "type": "boolean"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "alert_minutes_before": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10080
+            }
+          }
+        },
+        "required": ["title", "start", "end"]
+      }
+    },
+    {
+      "id": "device.calendar.update",
+      "alias": "device_calendar_update",
+      "app": "calendar",
+      "verb": "write",
+      "status": "available",
+      "description": "Change one non-recurring event without attendees on the user's phone.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "device.calendar.delete",
+      "alias": "device_calendar_delete",
+      "app": "calendar",
+      "verb": "delete",
+      "status": "available",
+      "description": "Delete one non-recurring event without attendees from the user's phone. Always asks the user.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "device.contacts.search",
+      "alias": "device_contacts_search",
+      "app": "contacts",
+      "verb": "read",
+      "status": "available",
+      "description": "Look up contacts on the user's phone by name (at least 2 characters, no wildcards). Returns names, plus only the fields requested.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "fields": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "enum": ["phones", "emails", "postal", "birthday", "organization"]
+            }
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "id": "device.location.current",
+      "alias": "device_location_current",
+      "app": "location",
+      "verb": "read",
+      "status": "available",
+      "description": "Get the phone's current location. Approximate (about 1 km) by default; precise always asks the user.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accuracy": {
+            "type": "string",
+            "enum": ["approximate", "precise"]
+          }
+        }
+      }
+    },
+    {
+      "id": "device.alarm.set",
+      "alias": "device_alarm_set",
+      "app": "alarms",
+      "verb": "write",
+      "status": "available",
+      "description": "Set a one-time alarm on the user's phone within the next 24 hours.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "required": ["at"]
+      }
+    },
+    {
+      "id": "device.timer.set",
+      "alias": "device_timer_set",
+      "app": "alarms",
+      "verb": "write",
+      "status": "available",
+      "description": "Start a timer on the user's phone (1 second to 24 hours).",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "duration_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "required": ["duration_seconds"]
+      }
+    },
+    {
+      "id": "device.reminders.list",
+      "alias": "device_reminders_list",
+      "app": "reminders",
+      "verb": "read",
+      "status": "available",
+      "description": "List reminders in the default list on the user's iPhone.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "include_completed": {
+            "type": "boolean"
+          },
+          "due_before": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          }
+        }
+      }
+    },
+    {
+      "id": "device.reminders.create",
+      "alias": "device_reminders_create",
+      "app": "reminders",
+      "verb": "write",
+      "status": "available",
+      "description": "Add a reminder to the default list on the user's iPhone.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "due": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9
+          }
+        },
+        "required": ["title"]
+      }
+    },
+    {
+      "id": "device.reminders.update",
+      "alias": "device_reminders_update",
+      "app": "reminders",
+      "verb": "write",
+      "status": "available",
+      "description": "Change one non-recurring reminder on the user's iPhone.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "due": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "completed": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "device.reminders.delete",
+      "alias": "device_reminders_delete",
+      "app": "reminders",
+      "verb": "delete",
+      "status": "available",
+      "description": "Delete one reminder from the user's iPhone. Always asks the user.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "device.home.list",
+      "alias": "device_home_list",
+      "app": "home",
+      "verb": "read",
+      "status": "available",
+      "description": "List the user's Home accessories and their writable controls.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "home_id": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    {
+      "id": "device.home.set",
+      "alias": "device_home_set",
+      "app": "home",
+      "verb": "write",
+      "status": "available",
+      "description": "Change one Home accessory control. Always asks the user; locks, doors and alarms must be confirmed on the phone.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accessory_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "characteristic_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "value": {
+            "type": ["boolean", "number", "string"]
+          }
+        },
+        "required": ["accessory_id", "characteristic_id", "value"]
+      },
+      "security_class_possible": true
+    }
+  ]
+}

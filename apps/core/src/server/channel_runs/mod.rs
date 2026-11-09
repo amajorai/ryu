@@ -18,3 +18,5 @@ pub(in crate::server) use worktree_diff::*;
 mod assistant_first_opening_tests;
 #[cfg(test)]
 mod opening_agent_gate_tests;
+#[cfg(test)]
+mod channel_run_binding_tests;

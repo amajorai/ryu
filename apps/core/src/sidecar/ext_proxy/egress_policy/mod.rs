@@ -180,9 +180,7 @@ pub fn forget_agent_in(store: &store::AllowlistStore, agent_id: &str) -> anyhow:
 /// every path that deletes an agent row.
 pub fn forget_deleted_agent(agent_id: &str) {
     if let Err(error) = forget_agent_in(global(), agent_id) {
-        tracing::warn!(
-            "egress allowlist of deleted agent '{agent_id}' was not removed: {error:#}"
-        );
+        tracing::warn!("egress allowlist of deleted agent '{agent_id}' was not removed: {error:#}");
     }
 }
 

@@ -16,6 +16,7 @@
   "A preset needs a voice.": "प्रीसेट के लिए एक आवाज़ चाहिए।",
   "A profile with samples needs exactly one primary sample.": "सैंपल वाली प्रोफ़ाइल में ठीक एक प्राथमिक सैंपल होना चाहिए।",
   "A saved sample is used only when the selected model supports cloning.": "सहेजा गया सैंपल तभी इस्तेमाल होता है जब चुना गया मॉडल क्लोनिंग का समर्थन करता है।",
+  "A voice can keep up to {MAX_PROFILE_SAMPLES} samples. Remove one first.": "एक आवाज़ में अधिकतम {MAX_PROFILE_SAMPLES} सैंपल रखे जा सकते हैं। पहले एक हटाएँ।",
   "A voice sample needs a consent record.": "वॉइस सैंपल के लिए सहमति रिकॉर्ड चाहिए।",
   "AM-radio band with heavy compression.": "भारी कंप्रेशन के साथ AM-रेडियो बैंड।",
   "Add": "जोड़ें",

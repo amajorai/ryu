@@ -246,6 +246,7 @@ async fn run_text_turn_in_with_metadata(
         client_tools: Vec::new(),
         browser_context_consent: false,
         browser_surface: None,
+        device: Default::default(),
         target_agent_id: None,
         team_id: None,
         workflow_id: None,

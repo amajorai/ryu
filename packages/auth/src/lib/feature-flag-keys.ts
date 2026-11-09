@@ -213,3 +213,12 @@ export const ABUSE_JOBS_FLAG = "abuse.jobs" as const;
  * surface. Surface stamping and the usage summary run regardless of the flag.
  */
 export const AUTH_DEVICE_LIMITS_FLAG = "auth.device_limits" as const;
+
+/**
+ * Stable key for phone app tools ("let Ryu use apps on this phone";
+ * `docs/device-tools.md`). Client-exposed and carried to Core in the signed
+ * `ryu_flags` claim, default off: off, Core never offers a device tool and
+ * refuses the device lane for that caller, and the phone apps hide Connect
+ * apps. Org admins cap each app further through `policy.rules.deviceToolCaps`.
+ */
+export const MOBILE_DEVICE_TOOLS_FLAG = "mobile.device_tools" as const;

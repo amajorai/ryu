@@ -39,8 +39,11 @@ pub use hierarchy::*;
 mod scope_guidance;
 pub use scope_guidance::*;
 
+// The keyword index (kind 1) also reads the sealed `parts`, for tool-call text;
+// a value over 8 MiB is left out like the usage reader does.
 const MESSAGE_SEARCH_BATCH_SQL: &str =
-    "SELECT p.revision, m.id, m.conversation_id, m.role, m.content, m.created_at, p.dirty
+    "SELECT p.revision, m.id, m.conversation_id, m.role, m.content, m.created_at, p.dirty,
+            CASE WHEN p.kind = 1 AND length(m.parts) <= 8388608 THEN m.parts END
      FROM message_search_pending p JOIN messages m ON m.id = p.message_id
      WHERE p.kind = ?1 AND p.revision > ?2 AND p.revision <= ?3
      ORDER BY p.revision LIMIT 128";
@@ -68,6 +71,8 @@ mod listing;
 mod message_pages;
 mod message_reads;
 mod message_types;
+mod message_window;
+mod message_window_flat;
 mod model_change_types;
 mod participants;
 mod reactions;
@@ -87,6 +92,7 @@ mod sync_messages;
 mod tenancy;
 mod text_helpers;
 mod titles_models;
+mod tool_part_index;
 mod version_tree;
 mod version_types;
 
@@ -96,6 +102,7 @@ pub use clearing::*;
 pub use conversation_rows::ChannelAttachRefused;
 pub use harness_rows::*;
 pub use message_types::*;
+pub use message_window::MessageWindow;
 pub use model_change_types::*;
 pub use reactions::*;
 pub(crate) use row_writes::*;

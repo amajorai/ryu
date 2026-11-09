@@ -13,6 +13,7 @@ pub(in crate::server) use import_items::*;
 mod import_export;
 pub(in crate::server) use import_export::*;
 mod import_agents_commands;
+mod import_export_text;
 pub(in crate::server) use import_agents_commands::*;
 #[cfg(test)]
 mod import_provenance_tests;

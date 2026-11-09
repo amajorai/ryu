@@ -16,6 +16,7 @@
   "A preset needs a voice.": "Uma predefinição precisa de uma voz.",
   "A profile with samples needs exactly one primary sample.": "Um perfil com amostras precisa de exatamente uma amostra principal.",
   "A saved sample is used only when the selected model supports cloning.": "Uma amostra salva só é usada quando o modelo selecionado oferece suporte a clonagem.",
+  "A voice can keep up to {MAX_PROFILE_SAMPLES} samples. Remove one first.": "Uma voz pode manter até {MAX_PROFILE_SAMPLES} amostras. Remova uma primeiro.",
   "A voice sample needs a consent record.": "Uma amostra de voz precisa de um registro de consentimento.",
   "AM-radio band with heavy compression.": "Banda de rádio AM com compressão pesada.",
   "Add": "Adicionar",

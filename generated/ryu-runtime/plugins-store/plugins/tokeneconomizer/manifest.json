@@ -1,0 +1,84 @@
+{
+  "tags": ["tokens", "cost", "developer", "pi"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/tokeneconomizer",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/tokeneconomizer",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/tokeneconomizer",
+  "name": "TokenEconomizer",
+  "version": "0.1.14",
+  "stability": "experimental",
+  "category": "Developer Tools",
+  "description": "Runs your own TokenEconomizer install inside the managed Pi agent: it learns from earlier sessions in a repository, adds the facts it has confirmed at session start, and redirects a turn that keeps hitting the same failures. BYO: needs a TokenEconomizer clone and Python 3.10+.",
+  "tagline": "Learn from past sessions to cut repeat agent cost",
+  "keywords": ["tokens", "cost", "developer", "pi"],
+  "icon": "money-03",
+  "iconDither": { "from": 150, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "limited" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "activation_events": ["*"],
+  "contributes": {
+    "pi_extensions": [
+      {
+        "id": "tokeneconomizer",
+        "file": "pi-extensions/ryu-tokeneconomizer.ts",
+        "description": "Connects the managed Pi agent to your TokenEconomizer install."
+      }
+    ],
+    "settings_tabs": [
+      {
+        "id": "tokeneconomizer.settings",
+        "title": "TokenEconomizer",
+        "fields": [
+          {
+            "type": "text",
+            "pref_key": "tokeneconomizer-folder",
+            "label": "TokenEconomizer folder",
+            "description": "The absolute path of your TokenEconomizer clone (or its plugin folder). Leave empty to turn the plugin off. Takes effect in a new chat.",
+            "placeholder": "/home/you/src/TokenEconomizer",
+            "default": ""
+          },
+          {
+            "type": "select",
+            "pref_key": "tokeneconomizer-microskills",
+            "label": "Micro-skills",
+            "description": "Learn facts about each repository and add them at session start. Full mode makes extra model calls.",
+            "default": "default",
+            "options": [
+              { "value": "default", "label": "Use TokenEconomizer's setting" },
+              { "value": "off", "label": "Off" },
+              {
+                "value": "envfacts",
+                "label": "From repeated failures only (no model calls)"
+              },
+              { "value": "on", "label": "On" }
+            ]
+          },
+          {
+            "type": "select",
+            "pref_key": "tokeneconomizer-loopguard",
+            "label": "Loop guard",
+            "description": "When a turn keeps hitting the same failures, ask a judge model whether it is stuck and redirect it once.",
+            "default": "default",
+            "options": [
+              { "value": "default", "label": "Use TokenEconomizer's setting" },
+              { "value": "on", "label": "On" },
+              { "value": "off", "label": "Off" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

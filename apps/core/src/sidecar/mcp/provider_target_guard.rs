@@ -44,7 +44,10 @@ impl McpRegistry {
             .lock()
             .map(|tools| tools.iter().any(|t| t.id == target))
             .unwrap_or(false);
-        if is_app_tool {
+        // Mirror dispatch: a registered app tool that yields to a same-named MCP
+        // server it does not own is judged on the server lane.
+        let server = Self::split_tool_id(&target).map_or("", |(server, _)| server);
+        if is_app_tool && self.native_app_tool_may_claim(server, &target).await {
             let owner = self
                 .resolve_app_tool_backend(&target)
                 .await

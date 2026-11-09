@@ -269,7 +269,7 @@ export function NewAutomationDialog({
 					{phrase === "weekly" && (
 						<div className="flex gap-3">
 							<div className="flex flex-1 flex-col gap-1.5">
-								<Label htmlFor="automation-weekly-day">Day</Label>
+								<Label htmlFor="automation-weekly-day">Day of week</Label>
 								<NativeSelect
 									className="w-full"
 									id="automation-weekly-day"

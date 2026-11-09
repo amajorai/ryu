@@ -16,6 +16,7 @@
   "A preset needs a voice.": "预设需要一个声音。",
   "A profile with samples needs exactly one primary sample.": "包含样本的配置文件必须恰好有一个主样本。",
   "A saved sample is used only when the selected model supports cloning.": "仅当所选模型支持克隆时，才会使用已保存的样本。",
+  "A voice can keep up to {MAX_PROFILE_SAMPLES} samples. Remove one first.": "一个语音最多可保留 {MAX_PROFILE_SAMPLES} 个样本。请先删除一个。",
   "A voice sample needs a consent record.": "语音样本需要同意记录。",
   "AM-radio band with heavy compression.": "AM 广播频段，压缩强烈。",
   "Add": "添加",

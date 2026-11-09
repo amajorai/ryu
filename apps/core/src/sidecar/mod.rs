@@ -23,6 +23,7 @@ pub mod install_state;
 pub mod manager;
 pub mod manifest_sidecar;
 pub mod mcp;
+pub mod node_binding;
 pub mod node_screener;
 pub mod onboarding;
 pub mod opentunnel;

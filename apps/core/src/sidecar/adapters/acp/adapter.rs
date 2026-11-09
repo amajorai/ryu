@@ -131,7 +131,8 @@ impl AgentAdapter for AcpAdapter {
                     | AcpEvent::SessionInfo(_)
                     | AcpEvent::AuthNeeded { .. }
                     | AcpEvent::PermissionRequest { .. }
-                    | AcpEvent::QuestionRequest { .. } => {}
+                    | AcpEvent::QuestionRequest { .. }
+                    | AcpEvent::UiData { .. } => {}
                 }
             }
             chunks.push(ChatChunk {

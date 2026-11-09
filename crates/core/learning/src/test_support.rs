@@ -14,6 +14,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::engine::{LearnedSkill, SkillsDir};
 use crate::host::{ConvMeta, LearningHost, Msg, QueuedApproval};
 
 /// A fully in-memory [`LearningHost`]. Build with [`MockHost::new`] then chain the
@@ -51,6 +52,14 @@ pub struct MockHost {
     pub side_inputs: std::sync::Arc<Mutex<Vec<(String, String)>>>,
     pub default_prm: String,
     pub default_synth: String,
+    /// The learned skills `learned_skills` reports (canned; never the real disk).
+    pub learned: Vec<LearnedSkill>,
+    /// Every `(slug, skill_md)` handed to `queue_skill_approval`, in order.
+    pub queued: std::sync::Arc<Mutex<Vec<(String, String)>>>,
+    /// The skills folder `skills_dir` hands out. Unset by default, and a test
+    /// that reaches the folder without setting it panics instead of touching the
+    /// real skills library.
+    pub skills: Option<SkillsDir>,
 }
 
 impl MockHost {
@@ -73,7 +82,18 @@ impl MockHost {
             side_inputs: std::sync::Arc::new(Mutex::new(Vec::new())),
             default_prm: "default-prm-model".to_string(),
             default_synth: "default-synth-model".to_string(),
+            learned: Vec::new(),
+            queued: std::sync::Arc::new(Mutex::new(Vec::new())),
+            skills: None,
         }
+    }
+
+    /// Write and activate skills in `skills` (an isolated folder), and report
+    /// the learned skills already there.
+    pub fn with_skills_dir(mut self, skills: SkillsDir) -> Self {
+        self.learned = skills.learned_skills();
+        self.skills = Some(skills);
+        self
     }
 
     /// Set a preference (raw value, exactly as the pref store would hold it).
@@ -127,6 +147,16 @@ impl MockHost {
             })
             .collect();
         self.messages.insert(conversation_id.to_string(), msgs);
+        self
+    }
+
+    /// Add an existing learned skill to the canned library.
+    pub fn with_learned_skill(mut self, slug: &str, name: &str, description: &str) -> Self {
+        self.learned.push(LearnedSkill {
+            slug: slug.to_string(),
+            name: name.to_string(),
+            description: description.to_string(),
+        });
         self
     }
 
@@ -208,20 +238,33 @@ impl LearningHost for MockHost {
 
     async fn queue_skill_approval(
         &self,
-        _slug: &str,
+        slug: &str,
         _name: &str,
         _description: &str,
         _conversation_id: &str,
-        _skill_md: String,
+        skill_md: String,
     ) -> anyhow::Result<QueuedApproval> {
         if self.queue_bail {
             anyhow::bail!("queue failed");
+        }
+        if let Ok(mut queued) = self.queued.lock() {
+            queued.push((slug.to_string(), skill_md));
         }
         Ok(self.queue)
     }
 
     fn reload_skills(&self) {
         self.reloaded.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn skills_dir(&self) -> SkillsDir {
+        self.skills
+            .clone()
+            .expect("this test reached the skills folder; give the MockHost with_skills_dir")
+    }
+
+    fn learned_skills(&self) -> Vec<LearnedSkill> {
+        self.learned.clone()
     }
 
     async fn dispatch_finetune(&self, body: Value) -> Result<Value, String> {

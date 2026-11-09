@@ -8,7 +8,7 @@ import {
 	type Node,
 	ReactFlow,
 } from "@xyflow/react";
-import type { MemoryGraphSnapshot } from "@/src/lib/api/memory.ts";
+import type { MemoryGraphSnapshot } from "@/src/lib/api/memory-graph.ts";
 import { layoutForceGraph } from "@/src/lib/force-directed-graph.ts";
 
 const NODE_COLORS = {

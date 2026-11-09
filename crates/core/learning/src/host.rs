@@ -13,6 +13,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::engine::{LearnedSkill, SkillsDir};
+
 /// A lightweight conversation summary — the subset of Core's `ConversationSummary`
 /// the sweep / skills pass reads. `updated_at` is carried verbatim (Unix millis in
 /// Core today); the engine only compares it against its own persisted watermark, so
@@ -99,6 +101,21 @@ pub trait LearningHost: Send + Sync {
 
     /// Hot-reload the skills registry after a skill was written + activated.
     fn reload_skills(&self);
+
+    /// The skills folder synthesis writes to when it activates a skill outside
+    /// the approval inbox. Defaults to the node's skills library, which needs no
+    /// Core subsystem.
+    fn skills_dir(&self) -> SkillsDir {
+        SkillsDir::library()
+    }
+
+    /// The learned skills already in the library, so synthesis can revise one
+    /// instead of duplicating it and never silently replace one. Defaults to an
+    /// on-disk scan of [`Self::skills_dir`] (for the node's library, the same
+    /// scan of the standard skills roots the registry loads from).
+    fn learned_skills(&self) -> Vec<LearnedSkill> {
+        self.skills_dir().learned_skills()
+    }
 
     /// Dispatch a fine-tune job (the reward-filtered retrain) through Core's
     /// fine-tune path. Returns the sidecar's JSON response or an error string.

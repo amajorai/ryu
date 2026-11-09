@@ -13,6 +13,10 @@ import type {
 	WorkbenchState,
 } from "@ryu/workbench/model";
 import type { WorkbenchAction } from "@ryu/workbench/reducer";
+import {
+	physicalSide,
+	type WorkbenchDirection,
+} from "./workbench-direction.ts";
 
 const REGION_NAMES = {
 	bottom: "Bottom",
@@ -159,14 +163,18 @@ export function joinCenterActions(tree: WorkbenchSplitNode): WorkbenchAction[] {
 /**
  * Layout commands for the command palette. Pure: it reads the current state
  * and returns commands whose `run` dispatches reducer actions, so the palette,
- * hotkeys, and tests share one definition.
+ * hotkeys, and tests share one definition. Titles name the side a region is
+ * drawn on (`dir` mirrors the grid under RTL); ids and dispatched values keep
+ * the persisted region ids.
  */
 export function workbenchLayoutCommands({
+	dir,
 	dispatch,
 	movableRegions,
 	state,
 	tl,
 }: {
+	dir: WorkbenchDirection;
 	dispatch: (action: WorkbenchAction) => void;
 	movableRegions: readonly WorkbenchRegion[];
 	state: WorkbenchState;
@@ -175,7 +183,7 @@ export function workbenchLayoutCommands({
 	const commands: WorkbenchCommand[] = [];
 	for (const region of ["right", "bottom"] as const) {
 		const open = state.openRegions[region];
-		const name = tl(REGION_NAMES[region]);
+		const name = tl(REGION_NAMES[physicalSide(region, dir)]);
 		commands.push({
 			disabled: !regionHasTabs(state, region),
 			icon: region === "right" ? LayoutRightIcon : LayoutBottomIcon,
@@ -201,7 +209,7 @@ export function workbenchLayoutCommands({
 		if (region === "left") {
 			continue;
 		}
-		const name = tl(REGION_NAMES[region]);
+		const name = tl(REGION_NAMES[physicalSide(region, dir)]);
 		commands.push({
 			disabled: !activeItemId || focusedGroup?.region === region,
 			icon: region === "bottom" ? LayoutBottomIcon : LayoutRightIcon,
@@ -231,7 +239,7 @@ export function workbenchLayoutCommands({
 			id: `workbench-align-bottom-${alignment}`,
 			keywords: `align bottom pane panel width ${label.toLowerCase()} layout`,
 			run: () => dispatch({ type: "bottom/align", alignment }),
-			title: bottomAlignmentTitle(alignment, tl),
+			title: bottomAlignmentTitle(physicalSide(alignment, dir), tl),
 		});
 	}
 
@@ -247,7 +255,7 @@ export function workbenchLayoutCommands({
 					dispatch(action);
 				}
 			},
-			title: "Equalize Center Panes",
+			title: tl("Equalize Center Panes"),
 		},
 		{
 			disabled: !multipleCenterPanes,
@@ -259,7 +267,7 @@ export function workbenchLayoutCommands({
 					dispatch(action);
 				}
 			},
-			title: "Join Center Panes",
+			title: tl("Join Center Panes"),
 		}
 	);
 
@@ -291,9 +299,8 @@ export function workbenchLayoutCommands({
 	);
 	if (navigation && navigationGroup) {
 		const atLeft = navigationGroup.region === "left";
-		const target = atLeft
-			? state.groups.find((group) => group.region === "right")
-			: state.groups.find((group) => group.region === "left");
+		const targetRegion = atLeft ? "right" : "left";
+		const target = state.groups.find((group) => group.region === targetRegion);
 		commands.push({
 			disabled: !target,
 			icon: atLeft ? LayoutRightIcon : LayoutGridIcon,
@@ -308,7 +315,10 @@ export function workbenchLayoutCommands({
 					});
 				}
 			},
-			title: atLeft ? "Move Navigation to Right" : "Move Navigation to Left",
+			title:
+				physicalSide(targetRegion, dir) === "right"
+					? tl("Move Navigation to Right")
+					: tl("Move Navigation to Left"),
 		});
 	}
 
@@ -317,7 +327,7 @@ export function workbenchLayoutCommands({
 		id: "workbench-reset-layout",
 		keywords: "reset layout panes regions default restore",
 		run: () => dispatch({ type: "layout/reset" }),
-		title: "Reset Layout",
+		title: tl("Reset Layout"),
 	});
 	return commands;
 }

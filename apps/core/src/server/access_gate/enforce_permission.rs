@@ -12,7 +12,9 @@ pub(crate) async fn enforce_permission_or_unavailable(
     caller: &Option<crate::identity_verify::VerifiedCaller>,
     perm: &str,
 ) -> Result<(), StatusCode> {
-    let managed_node = crate::sidecar::control_plane::is_managed_node();
+    // An enrolled node whose registration is pending, failed or revoked is not
+    // an unbound personal node: it fails closed like a managed one.
+    let managed_node = crate::sidecar::node_binding::node_expects_binding();
     let node_org = crate::sidecar::control_plane::registered_org().map(|o| o.id);
 
     match caller {
@@ -236,7 +238,9 @@ pub(in crate::server) async fn enforce_app_lifecycle_permission(
     caller: &Option<crate::identity_verify::VerifiedCaller>,
     permission: &str,
 ) -> Result<(), axum::response::Response> {
-    let managed_node = crate::sidecar::control_plane::is_managed_node();
+    // An enrolled node whose registration is pending, failed or revoked is not
+    // an unbound personal node: it fails closed like a managed one.
+    let managed_node = crate::sidecar::node_binding::node_expects_binding();
     let node = crate::sidecar::control_plane::registered_node();
     let Some(node) = node.as_ref() else {
         // A managed node is not temporarily local while registration is still

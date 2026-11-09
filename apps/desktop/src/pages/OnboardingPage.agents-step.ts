@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/lite";
 import { useCallback } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { installAndLaunchIsland } from "@/src/lib/api/island.ts";
@@ -152,7 +153,7 @@ export function useOnboardingAgentsStep({
 			return;
 		}
 
-		localReport.status("Looking for agents on your system…", STAGE_AGENTS);
+		localReport.status(tl("Looking for agents on your system…"), STAGE_AGENTS);
 		// Re-resolve once more: `waitForLocalStack` can run for 45s, and on a first
 		// run the token may only have appeared inside that window.
 		const detectNode = await refreshLocalNode();

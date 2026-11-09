@@ -302,7 +302,12 @@ mod tests {
     async fn broker_session_proofs_use_their_own_domain_and_key() {
         let core = addr("127.0.0.1:7980");
         let key = "aa".repeat(32);
-        let response = respond_as(ProofKind::BrokerSession, Some(key.clone()), Some(core), Some(NONCE));
+        let response = respond_as(
+            ProofKind::BrokerSession,
+            Some(key.clone()),
+            Some(core),
+            Some(NONCE),
+        );
         assert_eq!(response.status(), StatusCode::OK);
         let proof = body(response).await["proof"].as_str().unwrap().to_string();
         assert_eq!(proof, broker_identity_proof(&key, core, NONCE));

@@ -12,6 +12,7 @@ import {
 import { CommandPalette as SharedCommandPalette } from "@ryu/command/CommandPalette";
 import type { CommandAction, CommandPaletteTab } from "@ryu/command/types";
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useTheme } from "next-themes";
@@ -342,6 +343,7 @@ export function CommandPalette({
 	// latest conversation list, theme, and sign-out state.
 	// assembles many independent, flat action groups (chats, nav, theme, account); splitting would scatter one cohesive list.
 	const workbench = useOptionalDesktopWorkbench();
+	const direction = useDirection();
 	const workbenchTools = useWorkbenchToolsContext();
 	const buildActions = (): CommandAction[] =>
 		buildCommandPaletteActions({
@@ -350,6 +352,7 @@ export function CommandPalette({
 			computeShareEnabled,
 			contributedButtons,
 			contributedSectionItems,
+			direction,
 			handleImportSetup,
 			handleImportThread,
 			handleNavigate,

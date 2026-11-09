@@ -95,6 +95,7 @@ impl ConversationStore {
     /// channel session is never converted: that would let anyone with Write on a
     /// human conversation widen its ACL to every channel writer, permanently.
     /// Such a call fails with [`ChannelAttachRefused`] and leaves the row as is.
+    /// With an `org_id` (bound node) every existing non-channel row is refused.
     pub async fn ensure_channel_conversation(
         &self,
         conversation_id: &str,
@@ -115,7 +116,13 @@ impl ConversationStore {
             )
             .optional()
             .context("checking existing conversation before channel attach")?;
-        if let Some((None, true)) = existing {
+        // On an org-bound node (`org_id` set) no existing non-channel row is ever
+        // re-stamped, tenanted or not: stamping an untenanted row would set its
+        // org while keeping it private and ownerless, which locks the owner out
+        // (boot backfill only reclaims rows with no owner AND no org). A personal
+        // node keeps every row untenanted, so marking a legacy bot row there only
+        // sets `channel_id`.
+        if matches!(existing, Some((None, tenanted)) if tenanted || org_id.is_some()) {
             return Err(ChannelAttachRefused.into());
         }
         upsert_conversation_row(

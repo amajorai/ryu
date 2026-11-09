@@ -28,6 +28,7 @@ import {
 	type WorkbenchTools,
 } from "@/src/workbench/workbench-chrome.tsx";
 import { workbenchLayoutCommands } from "@/src/workbench/workbench-commands.ts";
+import type { WorkbenchDirection } from "@/src/workbench/workbench-direction.ts";
 import {
 	pushLibraryAndCoreActions,
 	pushSecondaryNavActions,
@@ -51,6 +52,8 @@ export interface CommandPaletteActionContext {
 	computeShareEnabled: boolean;
 	contributedButtons: PluginContributions["sidebar_buttons"];
 	contributedSectionItems: ContributedSectionItems[];
+	/** Reading direction; layout commands name the side a pane is drawn on. */
+	direction: WorkbenchDirection;
 	handleImportSetup: () => void;
 	handleImportThread: () => void;
 	handleNavigate: (to: string, title?: string) => void;
@@ -102,6 +105,7 @@ export function buildCommandPaletteActions(
 		computeShareEnabled,
 		contributedButtons,
 		contributedSectionItems,
+		direction,
 		handleNavigate,
 		handleOpenCapture,
 		handleRunPluginCommand,
@@ -274,6 +278,7 @@ export function buildCommandPaletteActions(
 	}
 	if (workbench) {
 		for (const command of workbenchLayoutCommands({
+			dir: direction,
 			dispatch: workbench.dispatch,
 			movableRegions: DESKTOP_SHELL_REGIONS,
 			state: workbench.state,

@@ -1,6 +1,7 @@
 //! User-facing controls over how long-term memory behaves in chat — the
-//! Hermes/Honcho-style knobs (`recall_mode`, `recall_budget`, `write_frequency`)
-//! surfaced as plugin settings on `@ryu/memory`.
+//! Hermes/Honcho-style knobs (`recall_mode`, `recall_budget`,
+//! `recall_min_relevance`, `write_frequency`) surfaced as plugin settings on
+//! `@ryu/memory`.
 //!
 //! ## Why this is a policy object and not three scattered reads
 //!
@@ -24,8 +25,8 @@
 //! ## Defaults preserve existing behaviour exactly
 //!
 //! Every default here reproduces the pre-policy behaviour byte-for-byte
-//! ([`RecallMode::Auto`], [`DEFAULT_LONG_TERM_LIMIT`], [`WriteFrequency::PerTurn`]),
-//! so a node that never opens the settings sees no change.
+//! ([`RecallMode::Auto`], [`DEFAULT_LONG_TERM_LIMIT`], [`RecallMinRelevance::Off`],
+//! [`WriteFrequency::PerTurn`]), so a node that never opens the settings sees no change.
 
 use ryu_memory::DEFAULT_LONG_TERM_LIMIT;
 
@@ -33,6 +34,8 @@ use ryu_memory::DEFAULT_LONG_TERM_LIMIT;
 pub const RECALL_MODE_KEY: &str = "memory.recall-mode";
 /// Preference key: how much memory a turn may recall.
 pub const RECALL_BUDGET_KEY: &str = "memory.recall-budget";
+/// Preference key: how relevant a fact must be before auto-recall injects it.
+pub const RECALL_MIN_RELEVANCE_KEY: &str = "memory.recall-min-relevance";
 /// Preference key: when durable facts are written.
 pub const WRITE_FREQUENCY_KEY: &str = "memory.write-frequency";
 /// Preference key: echo built-in writes to the selected external provider.
@@ -121,6 +124,55 @@ impl RecallBudget {
     }
 }
 
+/// How relevant a long-term fact must be before semantic auto-recall injects it.
+///
+/// Without a floor the retrieval path returns the `top_k` nearest facts however
+/// far they are, so a turn with nothing relevant still spends prompt space on
+/// unrelated memories. The floor is a raw similarity score: cosine similarity
+/// under the configured embedder, plus a small importance nudge (see
+/// `ryu_rag::RetrievalOptions::min_score`). Its scale depends on that embedder:
+/// the built-in hashing embedder scores unrelated text near zero, while many
+/// hosted embedding models score unrelated text well above it. That is why the
+/// default is `Off` and the levels are coarse: no single non-zero cut is safe
+/// for every embedder, so filtering is something the user opts into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RecallMinRelevance {
+    /// Inject the nearest facts regardless of score. The pre-existing behaviour.
+    #[default]
+    Off,
+    /// Drop only clearly unrelated facts.
+    Low,
+    /// Keep facts with a moderate match.
+    Medium,
+    /// Keep only close matches; recall more often injects nothing.
+    High,
+}
+
+impl RecallMinRelevance {
+    /// Parse a stored preference. Absent or unrecognised values keep `Off`, so a
+    /// garbled preference can never silently hide memories.
+    pub fn from_pref(raw: Option<&str>) -> Self {
+        match raw.map(str::trim) {
+            Some("low") => Self::Low,
+            Some("medium") => Self::Medium,
+            Some("high") => Self::High,
+            _ => Self::Off,
+        }
+    }
+
+    /// The `RetrievalOptions::min_score` auto-recall passes to retrieval. `Off`
+    /// is exactly `0.0`, the retrieval default, so an unconfigured node is
+    /// unchanged.
+    pub fn min_score(self) -> f32 {
+        match self {
+            Self::Off => 0.0,
+            Self::Low => 0.2,
+            Self::Medium => 0.35,
+            Self::High => 0.5,
+        }
+    }
+}
+
 /// When durable facts are captured from a turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WriteFrequency {
@@ -157,6 +209,8 @@ impl WriteFrequency {
 pub struct MemoryPolicy {
     pub recall_mode: RecallMode,
     pub recall_budget: RecallBudget,
+    /// Minimum relevance for semantically auto-recalled facts.
+    pub recall_min_relevance: RecallMinRelevance,
     pub write_frequency: WriteFrequency,
     /// Echo each fact the built-in store records to the selected external provider,
     /// so the two do not drift. Inert while the built-in is the selected provider.
@@ -180,6 +234,7 @@ impl Default for MemoryPolicy {
         Self {
             recall_mode: RecallMode::default(),
             recall_budget: RecallBudget::default(),
+            recall_min_relevance: RecallMinRelevance::default(),
             write_frequency: WriteFrequency::default(),
             // Mirroring ON: once a user has deliberately selected an external
             // provider, a built-in write that never reaches it is the surprising
@@ -238,12 +293,14 @@ impl MemoryPolicy {
     pub async fn load(prefs: &crate::server::preferences::PreferencesStore) -> Self {
         let recall_mode = prefs.get(RECALL_MODE_KEY).await.ok().flatten();
         let recall_budget = prefs.get(RECALL_BUDGET_KEY).await.ok().flatten();
+        let min_relevance = prefs.get(RECALL_MIN_RELEVANCE_KEY).await.ok().flatten();
         let write_frequency = prefs.get(WRITE_FREQUENCY_KEY).await.ok().flatten();
         let mirror = prefs.get(MIRROR_BUILTIN_KEY).await.ok().flatten();
         let sync = prefs.get(SYNC_TURNS_KEY).await.ok().flatten();
         let provider_context = prefs.get(PROVIDER_CONTEXT_KEY).await.ok().flatten();
         let defaults = Self::default();
         Self {
+            recall_min_relevance: RecallMinRelevance::from_pref(min_relevance.as_deref()),
             mirror_builtin: Self::parse_flag(mirror.as_deref(), defaults.mirror_builtin),
             sync_turns: Self::parse_flag(sync.as_deref(), defaults.sync_turns),
             provider_context: Self::parse_flag(
@@ -294,145 +351,5 @@ impl MemoryPolicy {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn defaults_reproduce_pre_policy_behaviour() {
-        let p = MemoryPolicy::default();
-        assert!(p.should_auto_recall(true));
-        assert!(p.should_write(true));
-        assert!(!p.include_sensitive_topics);
-        assert_eq!(p.recall_budget.long_term_limit(), DEFAULT_LONG_TERM_LIMIT);
-    }
-
-    #[test]
-    fn per_user_sensitive_consent_is_an_explicit_overlay() {
-        let policy = MemoryPolicy::default().with_sensitive_topics(true);
-        assert!(policy.include_sensitive_topics);
-        assert_eq!(
-            MemoryPolicy::default().with_sensitive_topics(false),
-            MemoryPolicy::default()
-        );
-    }
-
-    #[test]
-    fn absent_or_garbled_preferences_fall_back_to_the_defaults() {
-        assert_eq!(
-            MemoryPolicy::from_raw(None, None, None),
-            MemoryPolicy::default()
-        );
-        // A typo must not silently disable someone's memory.
-        let p = MemoryPolicy::from_raw(Some("of"), Some("huge"), Some("newer"));
-        assert_eq!(p, MemoryPolicy::default());
-    }
-
-    #[test]
-    fn the_request_opt_in_can_only_be_narrowed_never_widened() {
-        // Privacy-by-default: no preference turns memory on for a caller that did
-        // not ask for it.
-        for mode in ["off", "manual", "auto"] {
-            for freq in ["never", "per_turn", "reviewed"] {
-                let p = MemoryPolicy::from_raw(Some(mode), None, Some(freq));
-                assert!(!p.should_auto_recall(false), "{mode} widened recall");
-                assert!(!p.should_write(false), "{freq} widened writes");
-            }
-        }
-    }
-
-    #[test]
-    fn recall_off_stops_automatic_injection_but_write_is_independent() {
-        let p = MemoryPolicy::from_raw(Some("off"), None, None);
-        assert!(!p.should_auto_recall(true));
-        // "Stop reading my memory" is not "stop recording" — they are separate knobs.
-        assert!(p.should_write(true));
-    }
-
-    #[test]
-    fn manual_mode_also_stops_automatic_injection() {
-        // Manual differs from Off in intent (tools stay useful) but both must stop
-        // the un-asked-for injection; a reader that only special-cased Off would
-        // leak memory into every prompt in manual mode.
-        let p = MemoryPolicy::from_raw(Some("manual"), None, None);
-        assert!(!p.should_auto_recall(true));
-    }
-
-    #[test]
-    fn write_never_stops_capture_while_recall_keeps_working() {
-        let p = MemoryPolicy::from_raw(None, None, Some("never"));
-        assert!(!p.should_write(true));
-        assert!(p.should_auto_recall(true));
-    }
-
-    #[test]
-    fn reviewed_stores_no_raw_turns_and_leaves_recall_alone() {
-        let p = MemoryPolicy::from_raw(None, None, Some("reviewed"));
-        assert_eq!(p.write_frequency, WriteFrequency::Reviewed);
-        assert!(!p.should_write(true));
-        assert!(p.should_auto_recall(true));
-        assert_eq!(WriteFrequency::default(), WriteFrequency::PerTurn);
-    }
-
-    #[test]
-    fn temporary_context_requires_the_explicit_flag() {
-        assert!(!MemoryPolicy::temporary_context_enabled(false, false));
-        assert!(MemoryPolicy::temporary_context_enabled(false, true));
-        assert!(!MemoryPolicy::temporary_context_enabled(true, true));
-        assert!(!MemoryPolicy::context_enabled(true, false, false));
-        assert!(MemoryPolicy::context_enabled(true, false, true));
-        assert!(MemoryPolicy::context_enabled(true, true, false));
-        assert!(!MemoryPolicy::context_enabled(false, true, false));
-    }
-
-    #[test]
-    fn budget_maps_to_distinct_ascending_limits() {
-        assert!(
-            RecallBudget::Low.long_term_limit() < RecallBudget::Mid.long_term_limit()
-                && RecallBudget::Mid.long_term_limit() < RecallBudget::High.long_term_limit()
-        );
-    }
-
-    #[test]
-    fn char_budget_scales_with_the_recall_budget() {
-        assert_eq!(RecallBudget::Low.char_budget(), 1_000);
-        assert_eq!(RecallBudget::Mid.char_budget(), 2_500);
-        assert_eq!(RecallBudget::High.char_budget(), 6_000);
-        assert_eq!(
-            MemoryPolicy::default().recall_budget.char_budget(),
-            RecallBudget::Mid.char_budget()
-        );
-    }
-
-    #[test]
-    fn the_external_bridges_have_deliberate_and_asymmetric_defaults() {
-        let p = MemoryPolicy::default();
-        // Mirroring on: having chosen an external provider, a built-in write that
-        // never reaches it is the surprising outcome.
-        assert!(p.mirror_builtin);
-        // Sync off: raw turns leaving the node must be asked for.
-        assert!(!p.sync_turns);
-        // Context off: it spends prompt space on EVERY turn.
-        assert!(!p.provider_context);
-    }
-
-    #[test]
-    fn a_garbled_toggle_keeps_its_default_rather_than_flipping() {
-        assert!(MemoryPolicy::parse_flag(Some("yes"), true));
-        assert!(!MemoryPolicy::parse_flag(Some("yes"), false));
-        assert!(MemoryPolicy::parse_flag(None, true));
-        // Only the exact stored spellings move a bridge.
-        assert!(!MemoryPolicy::parse_flag(Some("false"), true));
-        assert!(MemoryPolicy::parse_flag(Some("true"), false));
-    }
-
-    #[test]
-    fn from_raw_leaves_the_bridge_toggles_at_their_defaults() {
-        // `from_raw` covers only the three recall/write knobs; the bridges are read
-        // separately in `load`. If it ever zeroed them, mirroring would silently turn
-        // itself off for every caller of this constructor.
-        let p = MemoryPolicy::from_raw(Some("off"), Some("high"), Some("never"));
-        assert_eq!(p.mirror_builtin, MemoryPolicy::default().mirror_builtin);
-        assert_eq!(p.sync_turns, MemoryPolicy::default().sync_turns);
-        assert_eq!(p.provider_context, MemoryPolicy::default().provider_context);
-    }
-}
+#[path = "memory_policy_tests.rs"]
+mod tests;

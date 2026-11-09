@@ -20,6 +20,26 @@ pub(crate) fn tenancy_filter_args(
     (user_id, org_id, team_ids_json, node_bound)
 }
 
+/// The ids of every conversation `caller` may READ: [`tenancy_filter_args`] fed to
+/// `ConversationStore::visible_conversation_ids_for_teams`, so verified team
+/// memberships (narrowed to this node's org) reach the same SQL predicate as the
+/// sidebar list. The one visibility function REST conversation search and the
+/// `search_conversations` agent tool share for a verified caller.
+pub(crate) async fn visible_conversation_ids_for_caller(
+    store: &conversations::ConversationStore,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+) -> anyhow::Result<Vec<String>> {
+    let (user_id, org_id, team_ids_json, node_bound) = tenancy_filter_args(caller);
+    store
+        .visible_conversation_ids_for_teams(
+            user_id.as_deref(),
+            org_id.as_deref(),
+            node_bound,
+            team_ids_json.as_deref(),
+        )
+        .await
+}
+
 /// `GET /api/connections` — the clients currently connected to THIS node.
 ///
 /// Presence/attribution only: identities are self-declared behind the shared

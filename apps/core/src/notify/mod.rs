@@ -19,8 +19,10 @@
 //! [`crate::server::app_notify`], which calls [`notify_all`] (and records the activity
 //! item).
 
+mod app_linked;
 mod connect_suggestion;
 pub mod delivery_view;
+mod linked;
 pub mod run_push;
 pub mod store;
 mod streaming_privacy;
@@ -29,7 +31,9 @@ mod tests;
 
 use std::sync::OnceLock;
 
+pub use app_linked::{deliver_app_notification_linked, deliver_localized_app_notification_linked};
 pub use connect_suggestion::deliver_connect_suggestion;
+pub use linked::deliver_linked_notification;
 pub use ryu_notify::NotifyTarget;
 
 /// Inbox source used for private suggestions produced by Connect agent triggers.
@@ -193,24 +197,6 @@ pub async fn deliver_user_notification(
         node_id,
         ack_required,
         source_app_id,
-        link: None,
-    };
-    deliver_routed(store, user_id, title, body, level, route).await
-}
-
-/// Deliver a Core-raised notification whose tap opens `link`, a desktop route
-/// (see [`crate::events::DesktopNotification::link`]), on every surface: the
-/// inbox row, the user-scoped toast, and the mobile push `data`.
-pub async fn deliver_linked_notification(
-    store: &NotifyStore,
-    user_id: &str,
-    title: &str,
-    body: &str,
-    level: &str,
-    link: &str,
-) -> Result<String, String> {
-    let route = DeliveryRoute {
-        link: Some(link),
         ..DeliveryRoute::default()
     };
     deliver_routed(store, user_id, title, body, level, route).await
@@ -224,6 +210,8 @@ struct DeliveryRoute<'a> {
     ack_required: bool,
     source_app_id: Option<&'a str>,
     link: Option<&'a str>,
+    /// Localizable text: the push is rendered per device locale.
+    push_text: Option<&'a crate::i18n::AlertText>,
 }
 
 async fn deliver_routed(
@@ -234,45 +222,17 @@ async fn deliver_routed(
     level: &str,
     route: DeliveryRoute<'_>,
 ) -> Result<String, String> {
+    let id = format!("ntf_{}", uuid::Uuid::new_v4().simple());
+    // 1. App inbox (persisted — the one channel that must succeed), then
+    // 2. the desktop OS toast, scoped to the target member.
+    app_linked::persist_and_toast_routed(store, &id, user_id, title, body, level, &route).await?;
     let DeliveryRoute {
         workflow_run_id,
-        node_id,
         ack_required,
-        source_app_id,
         link,
+        push_text,
+        ..
     } = route;
-    let id = format!("ntf_{}", uuid::Uuid::new_v4().simple());
-    let row = NotificationRow {
-        id: id.clone(),
-        user_id: Some(user_id.to_owned()),
-        title: title.to_owned(),
-        body: (!body.is_empty()).then(|| body.to_owned()),
-        level: level.to_owned(),
-        workflow_run_id: workflow_run_id.map(|s| s.to_owned()),
-        node_id: node_id.map(|s| s.to_owned()),
-        ack_required,
-        acked: false,
-        read_at: None,
-        created_at: chrono::Utc::now().to_rfc3339(),
-        source_app_id: source_app_id.map(|s| s.to_owned()),
-        archived_at: None,
-    };
-    // 1. App inbox (persisted — the one channel that must succeed).
-    store
-        .insert_notification(&row)
-        .await
-        .map_err(|e| format!("failed to persist notification: {e}"))?;
-
-    // 2. Desktop OS toast, scoped to the target member.
-    crate::events::publish(crate::events::DesktopNotification {
-        title: title.to_owned(),
-        body: (!body.is_empty()).then(|| body.to_owned()),
-        level: level.to_owned(),
-        target_user_id: Some(user_id.to_owned()),
-        notification_id: Some(id.clone()),
-        source_app_id: source_app_id.map(|s| s.to_owned()),
-        link: link.map(str::to_owned),
-    });
 
     // 3. Mobile push to the member's registered devices.
     let data = serde_json::json!({
@@ -281,14 +241,8 @@ async fn deliver_routed(
         "ack_required": ack_required,
         "link": link,
     });
-    push_to_user(
-        store,
-        user_id,
-        false,
-        &|_| (title.to_owned(), body.to_owned()),
-        data,
-    )
-    .await;
+    let render = linked::push_render(push_text, title, body);
+    push_to_user(store, user_id, push_text.is_some(), &render, data).await;
     Ok(id)
 }
 
@@ -391,25 +345,8 @@ pub async fn deliver_localized_user_notification(
     source_app_id: Option<&str>,
     clip: fn(String, String) -> (String, String),
 ) -> Result<String, String> {
-    let node_locale = crate::i18n::locale::node_locale().await;
-    let (title, body) = {
-        let (title, body) = text.render(node_locale);
-        clip(title, body)
-    };
-    let id = format!("ntf_{}", uuid::Uuid::new_v4().simple());
-    persist_and_toast(store, &id, user_id, &title, &body, level, source_app_id).await?;
-    let data = serde_json::json!({
-        "notification_id": id,
-        "workflow_run_id": serde_json::Value::Null,
-        "ack_required": false,
-    });
-    // Each push is clipped like the inbox row: a translation may run longer.
-    let render = |locale: &str| {
-        let (title, body) = text.render(locale);
-        clip(title, body)
-    };
-    push_to_user(store, user_id, true, &render, data).await;
-    Ok(id)
+    app_linked::deliver_localized_routed(store, user_id, text, level, source_app_id, None, clip)
+        .await
 }
 
 /// Steps 1 and 2 of a plain app notification: the inbox row and the toast.
@@ -424,35 +361,11 @@ pub(crate) async fn persist_and_toast(
     level: &str,
     source_app_id: Option<&str>,
 ) -> Result<(), String> {
-    let row = NotificationRow {
-        id: id.to_owned(),
-        user_id: Some(user_id.to_owned()),
-        title: title.to_owned(),
-        body: (!body.is_empty()).then(|| body.to_owned()),
-        level: level.to_owned(),
-        workflow_run_id: None,
-        node_id: None,
-        ack_required: false,
-        acked: false,
-        read_at: None,
-        created_at: chrono::Utc::now().to_rfc3339(),
-        source_app_id: source_app_id.map(str::to_owned),
-        archived_at: None,
+    let route = DeliveryRoute {
+        source_app_id,
+        ..DeliveryRoute::default()
     };
-    store
-        .insert_notification(&row)
-        .await
-        .map_err(|e| format!("failed to persist notification: {e}"))?;
-    crate::events::publish(crate::events::DesktopNotification {
-        title: row.title,
-        body: row.body,
-        level: row.level,
-        target_user_id: row.user_id,
-        notification_id: Some(row.id),
-        source_app_id: row.source_app_id,
-        link: None,
-    });
-    Ok(())
+    app_linked::persist_and_toast_routed(store, id, user_id, title, body, level, &route).await
 }
 
 /// Send a single-recipient alert email over the shared BYO SMTP transport.
@@ -479,7 +392,3 @@ fn fire_notification_hooks(alert_json: serde_json::Value) {
         let _ = crate::plugin_host::dispatch_global(crate::plugin_host::ON_NOTIFICATION, ctx).await;
     });
 }
-
-#[cfg(test)]
-#[path = "linked_tests.rs"]
-mod linked_tests;

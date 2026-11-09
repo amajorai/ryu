@@ -406,19 +406,16 @@ pub fn runtime_subject(mcp_id: &str, owner: &str) -> Option<String> {
 
 /// A consumer subject in words, for approval requests.
 pub fn describe_subject(subject: &str) -> String {
-    if let Some(minter) = subject.strip_prefix("broker:") {
-        return format!("A broker session minted by {minter}");
+    match ConsumerSubject::parse(subject) {
+        ConsumerSubject::BrokerSession { minter } => {
+            format!("A broker session minted by {minter}")
+        }
+        ConsumerSubject::ExplicitRead { principal } => format!("{principal} (explicit read)"),
+        ConsumerSubject::Runtime { mcp, owner } => {
+            format!("MCP server or plugin `{mcp}` running for {owner}")
+        }
+        ConsumerSubject::Other(subject) => subject.to_owned(),
     }
-    if let Some(principal) = subject.strip_prefix("read:") {
-        return format!("{principal} (explicit read)");
-    }
-    if let Some((mcp, owner)) = subject
-        .strip_prefix("runtime:")
-        .and_then(|rest| rest.split_once(':'))
-    {
-        return format!("MCP server or plugin `{mcp}` running for {owner}");
-    }
-    subject.to_owned()
 }
 
 /// Who is using a reference, for grant lookup and the approval request.

@@ -110,7 +110,7 @@ export function LaunchContextHardwareGroup({
 									hint={
 										ollamaEngine ? "Modelfile PARAMETER num_thread" : undefined
 									}
-									label="Threads"
+									label="CPU threads"
 									onChange={(v) => setNumber("threads", v)}
 									step={1}
 									value={num("threads")}
@@ -149,7 +149,7 @@ export function LaunchContextHardwareGroup({
 						) : null}
 						{whisperEngine ? (
 							<NumberField
-								label="Threads"
+								label="CPU threads"
 								onChange={(v) => setNumber("threads", v)}
 								step={1}
 								value={num("threads")}

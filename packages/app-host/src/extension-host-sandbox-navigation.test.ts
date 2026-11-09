@@ -41,7 +41,13 @@ mock.module("react", () => ({
 	},
 }));
 
-const { ExtensionHost } = await import("./ExtensionHost.tsx");
+// Other suites in this process load ExtensionHost with the real React first, and
+// `mock.module` does not rebind a module that is already evaluated. A query
+// suffix gives this file its own instance, evaluated against the stub above.
+const extensionHostModule: string = "./ExtensionHost.tsx?sandbox-navigation";
+const { ExtensionHost } = (await import(
+	extensionHostModule
+)) as typeof import("./ExtensionHost.tsx");
 
 const SANDBOX_PAGE = "chrome-extension://ryu/sandbox.html";
 const SRCDOC = "<!doctype html><title>companion</title>";
@@ -82,6 +88,9 @@ class FakeIframe extends EventTarget {
 	}
 	setAttribute(name: string, value: string) {
 		this.attributes.set(name, value);
+	}
+	removeAttribute(name: string) {
+		this.attributes.delete(name);
 	}
 }
 

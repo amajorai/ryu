@@ -48,6 +48,7 @@ import {
 	formatDate as formatDateInZone,
 	formatDateTime as formatDateTimeInZone,
 } from "@/src/lib/timezone.ts";
+import { CrmSelectOption } from "./crm-label.tsx";
 import { currencyInputValue, parseCurrencyCents } from "./currency-input.ts";
 
 /** Shown wherever a value is absent. One constant so an empty cell, an empty
@@ -316,9 +317,11 @@ export function FieldEditor({
 				>
 					<NativeSelectOption value="">{EMPTY}</NativeSelectOption>
 					{(field.config?.options ?? []).map((option) => (
-						<NativeSelectOption key={option.id} value={option.id}>
-							{option.label}
-						</NativeSelectOption>
+						<CrmSelectOption
+							key={option.id}
+							label={option.label}
+							value={option.id}
+						/>
 					))}
 				</NativeSelect>
 			);

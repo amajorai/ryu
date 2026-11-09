@@ -25,6 +25,7 @@
 // is that this view no longer shares its markup with the storyboard block.
 
 import { ServerStack01Icon, Wrench01Icon } from "@hugeicons/core-free-icons";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import StoreCatalogLayout from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -93,6 +94,7 @@ export default function ToolsLibrary() {
 	} = useMcp();
 	const { apps } = useApps();
 	const identities = useIdentities();
+	const tl = useLiteralMessages();
 	const profileIds = Array.from(
 		new Set(["personal", ...identities.profileIds])
 	).sort();
@@ -211,9 +213,9 @@ export default function ToolsLibrary() {
 	}
 
 	const toolsStatus = toolsLoading
-		? "Loading tools…"
+		? tl("Loading tools…")
 		: toolsError
-			? "Tool discovery failed. Refresh to try again."
+			? tl("Tool discovery failed. Refresh to try again.")
 			: null;
 	const hasNothing = servers.length === 0 && tools.length === 0 && !toolsStatus;
 

@@ -7,7 +7,7 @@
 //! fails when a template breaks that shape or the extractor would skip it.
 //! Topic-specific templates live in the sibling modules (`agent_launch`, `approvals`, `acp`,
 //! `chat_turns`, `cloud_tasks`, `consent`, `notifications`, `context`, `gateway_failures`, `import`, `providers`, `routing`, `update`,
-//! `voice`) and are re-exported here.
+//! `vault_broker`, `voice`) and are re-exported here.
 //! Every message is a whole sentence; never assemble one from fragments.
 #![allow(clippy::useless_format)]
 
@@ -27,6 +27,7 @@ mod notifications;
 mod providers;
 mod routing;
 mod update;
+mod vault_broker;
 mod voice;
 
 // A topic module may still be empty, so its glob re-export imports nothing.
@@ -58,6 +59,8 @@ pub use providers::*;
 pub use routing::*;
 #[allow(unused_imports)]
 pub use update::*;
+#[allow(unused_imports)]
+pub use vault_broker::*;
 #[allow(unused_imports)]
 pub use voice::*;
 
@@ -332,6 +335,7 @@ pub(super) fn all() -> impl Iterator<Item = &'static Template> {
         notifications::ALL,
         providers::ALL,
         routing::ALL,
+        vault_broker::ALL,
         voice::ALL,
     ]
     .into_iter()

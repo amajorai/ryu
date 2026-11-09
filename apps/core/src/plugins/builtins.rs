@@ -767,6 +767,10 @@ pub const CORE_PLUGINS: &[&str] = &[
     // so the managed Pi agent never has to retype what it relocates. Core-tier
     // for the same `may_ship_pi_extensions` reason as its siblings.
     "@ryu/pi-copy",
+    // The TokenEconomizer bridge: a Pi extension that runs the user's own
+    // TokenEconomizer install. Core-tier for the same `may_ship_pi_extensions`
+    // reason; deliberately NOT in `CORE_PREINSTALLED` (BYO, and it spends tokens).
+    "@ryu/tokeneconomizer",
     // Workspace real-Chromium browser sidecar — core built-in, installable from the
     // Store but NOT pre-installed (no publishable sidecar asset; see `CORE_PREINSTALLED`).
     BROWSER_PLUGIN_ID,

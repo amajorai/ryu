@@ -7,6 +7,7 @@ import {
 import {
 	deleteWorkingMemory,
 	getWorkingMemory,
+	getWorkingMemoryHistory,
 	updateWorkingMemory,
 } from "./working-memory.ts";
 
@@ -140,6 +141,61 @@ describe("working memory client", () => {
 			{ data: { name: null }, expectedVersion: 1 }
 		);
 		await expect(failure).rejects.toBeInstanceOf(ApiError);
+	});
+
+	test("reads the version history newest first", async () => {
+		const seen: string[] = [];
+		globalThis.fetch = createFetchFixture((url, init) => {
+			seen.push(`${init.method} ${url}`);
+			return Promise.resolve(
+				Response.json({
+					scope: "thread",
+					id: "conv-1",
+					versions: [
+						{
+							version: 3,
+							mode: "template",
+							updated_at: 30,
+							content: "# Notes\n- goal: ship",
+						},
+						{ version: 2, mode: "schema", updated_at: 20, data: { a: 1 } },
+					],
+				})
+			);
+		});
+		const versions = await getWorkingMemoryHistory(
+			target,
+			{ scope: "thread", id: "conv-1" },
+			5
+		);
+		expect(seen).toEqual([
+			"GET http://127.0.0.1:7980/api/memory/working/history?scope=thread&id=conv-1&limit=5",
+		]);
+		expect(versions).toEqual([
+			{
+				version: 3,
+				mode: "template",
+				updatedAt: 30,
+				content: "# Notes\n- goal: ship",
+			},
+			{ version: 2, mode: "schema", updatedAt: 20, data: { a: 1 } },
+		]);
+	});
+
+	test("omits the history limit unless one is given", async () => {
+		let requested = "";
+		globalThis.fetch = createFetchFixture((url) => {
+			requested = url;
+			return Promise.resolve(
+				Response.json({ scope: "resource", id: "user-1", versions: [] })
+			);
+		});
+		expect(
+			await getWorkingMemoryHistory(target, { scope: "resource", id: "user-1" })
+		).toEqual([]);
+		expect(requested).toBe(
+			"http://127.0.0.1:7980/api/memory/working/history?scope=resource&id=user-1"
+		);
 	});
 
 	test("deletes a document", async () => {

@@ -240,6 +240,7 @@ impl ConversationStore {
                  DELETE FROM message_search_pending WHERE kind = 1 AND message_id = OLD.id;
              END;",
         )?;
+        Self::init_tool_part_search(conn)?;
         Ok(())
     }
 }

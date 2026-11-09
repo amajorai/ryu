@@ -8,8 +8,6 @@ pub(super) async fn dispatch_acp_plane<F>(
 ) -> Response {
     let TurnPlane {
         mut req,
-        registry,
-        agent_store,
         manager,
         worktree_diffs,
         mcp,
@@ -29,7 +27,7 @@ pub(super) async fn dispatch_acp_plane<F>(
         project_instructions,
         project_rules,
         memory_citations,
-        working_memory_tool_withheld,
+        tool_allowlist,
         account_confinement,
         short_term,
         requested_environment,
@@ -40,6 +38,7 @@ pub(super) async fn dispatch_acp_plane<F>(
         conversation_id_for_persist,
         persist_agent_id,
         persist_store_for_acp,
+        recall_marks,
         ..
     } = plane;
     // Fresh-node degradation guard (zero-setup first run). The flagship
@@ -162,30 +161,13 @@ pub(super) async fn dispatch_acp_plane<F>(
             .await;
     }
     let conversation_id = req.conversation_id.clone();
-    // Resolve the per-agent allowlist so the MCP bridge only offers the
-    // tools the agent is permitted to call (AC3 governance). Use the
-    // effective agent id so target_agent_id routing gets the correct allowlist.
-    let allowlist = resolve_agent_tool_allowlist(
-        effective_agent_id.as_deref(),
-        registry.as_ref(),
-        &agent_store,
-    )
-    .await;
-    let allowlist = match req.public_agent_policy.as_ref() {
-        Some(policy) => {
-            Some(restrict_public_agent_tool_allowlist(mcp.as_ref(), allowlist, policy).await)
-        }
-        None => allowlist,
-    };
-    // Unverified callers are moved off ACP routes before dispatch; narrow
-    // the bridge here as well so the MCP call gate would still hold if a
-    // future route change reached this plane.
-    let allowlist = caller_scoped_tool_allowlist(req.untrusted_caller, mcp.as_ref(), allowlist);
-    let allowlist = if working_memory_tool_withheld {
-        Some(withhold_working_memory_tool_allowlist(mcp.as_ref(), allowlist).await)
-    } else {
-        allowlist
-    };
+    // The per-agent allowlist, resolved once per turn (`turn_tool_allowlist`),
+    // so the MCP bridge only offers the tools the agent is permitted to call
+    // (AC3 governance): the effective agent id's list, narrowed for public and
+    // unverified callers (unverified callers are moved off ACP routes before
+    // dispatch; the narrowing keeps the MCP call gate holding regardless) and
+    // for a withheld working-memory tool.
+    let allowlist = tool_allowlist;
     // Effective agent id for the MCP bridge (PTC scoping). Falls back to
     // the ACP transport id form when no agent id is set.
     // Make the per-agent skill allowlist real on the ACP plane. ACP
@@ -276,6 +258,9 @@ pub(super) async fn dispatch_acp_plane<F>(
 
     // The plane owns the run trace from here and finishes it at turn end.
     handoff_run_trace(run_trace);
+    // The device offer rides on the turn config (`acp_turn_config`); the ACP
+    // instance that admits this turn binds it to its own bridge channel and
+    // agent (`device_tools::turn_context`), never by conversation id alone.
     route_acp_stream(
         req,
         user_message,
@@ -313,6 +298,7 @@ pub(super) async fn dispatch_acp_plane<F>(
         subscription_costs,
         sdk_turn_selection,
         account_confinement,
+        recall_marks,
     )
     .await
 }

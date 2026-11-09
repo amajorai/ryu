@@ -200,7 +200,20 @@ impl rmcp::ServerHandler for RyuMcpHandler {
             .clone()
             .map(Value::Object)
             .unwrap_or(Value::Null);
-        let text = self.dispatch_tool(request.name.as_ref(), args).await?;
+        // After a device read in this turn, later egress is held by the
+        // exfiltration guard; any other tool result is untrusted input, so
+        // later device calls in the turn ask.
+        let device_offer = self.device_turn_offer();
+        let text = crate::device_tools::taint::with_device_read_scope(
+            device_offer.as_ref(),
+            self.dispatch_tool(request.name.as_ref(), args),
+        )
+        .await?;
+        if let Some(offer) = device_offer.as_ref() {
+            if !crate::device_tools::catalog::is_device_tool_name(request.name.as_ref()) {
+                offer.mark_tainted_input();
+            }
+        }
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 }

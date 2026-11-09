@@ -32,6 +32,7 @@ import type {
 	ImageEditorTool,
 	ImageMarkup,
 } from "./ImageEditorDialog-types.ts";
+import { imageLoadErrorText } from "./image-editor-load-error.ts";
 import {
 	fetchEditableImage,
 	type NormalizedImagePoint,
@@ -155,11 +156,7 @@ export function useImageEditorState({
 			})
 			.catch((loadError) => {
 				if (!cancelled) {
-					setError(
-						loadError instanceof Error
-							? loadError.message
-							: "Could not open this image in the editor."
-					);
+					setError(imageLoadErrorText(tlRef.current, loadError));
 				}
 			})
 			.finally(() => {

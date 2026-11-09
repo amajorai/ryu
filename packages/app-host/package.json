@@ -29,6 +29,7 @@
     "./third-party-plugin": "./src/third-party-plugin.ts",
     "./widget-bootstrap": "./src/widget-bootstrap.ts",
     "./widget-state-store": "./src/widget-state-store.ts",
+    "./workflow-authoring-guard": "./src/workflow-authoring-guard.ts",
     "./model-context": "./src/model-context.ts",
     "./toast-host": "./src/toast-host.ts",
     "./example-plugin": "./src/example-plugin.ts",

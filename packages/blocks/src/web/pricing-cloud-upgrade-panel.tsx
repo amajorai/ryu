@@ -4,6 +4,8 @@ import { useLiteralMessages } from "@ryu/i18n/react";
 import { ChevronDown, Cloud, Cpu, Loader2, Server } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
+import { ENGLISH_PRICING_FORMAT } from "./data/standalone-pricing-locale.ts";
+import { usePricingFormat } from "./pricing-card-copy.tsx";
 import {
 	ALWAYS_ON_SERVER_COPY,
 	type CloudHostingTier,
@@ -30,6 +32,7 @@ export function CloudUpgradePanel({
 	onCheckout: (slug: PricingPlanSlug) => void;
 }) {
 	const tl = useLiteralMessages();
+	const format = usePricingFormat();
 	const [expanded, setExpanded] = useState(false);
 
 	if (tiers.length === 0) {
@@ -70,7 +73,14 @@ export function CloudUpgradePanel({
 						transition={{ duration: 0.24, ease: "easeOut" }}
 					>
 						{tiers.map((tier) => {
-							const specs = `${tier.cores} vCPU, ${tier.memoryGb} GB RAM, and ${tier.diskGb} GB SSD`;
+							const specs = tl(
+								"{cores} vCPU, {memoryGb} GB RAM, and {diskGb} GB SSD",
+								{
+									cores: tier.cores,
+									diskGb: tier.diskGb,
+									memoryGb: tier.memoryGb,
+								}
+							);
 							// BASE ships free with the plan: shown, never a checkout. Its
 							// shape is resolved per plan and region and can change without
 							// a pricing change, so the included row names no figures; only
@@ -83,7 +93,10 @@ export function CloudUpgradePanel({
 											<Cloud className="size-4 shrink-0 text-primary" />
 											<span className="flex-1">
 												<span className="block font-medium text-sm">
-													{tier.name} is {tier.perfLabel}
+													{tl("{name} is {perf}", {
+														name: tier.name,
+														perf: tier.perfLabel,
+													})}
 												</span>
 												<span className="block text-muted-foreground text-xs">
 													{ALWAYS_ON_SERVER_COPY}
@@ -97,6 +110,11 @@ export function CloudUpgradePanel({
 								);
 							}
 							const isLoading = loadingPlan === tier.slug;
+							// The English terms keep their published "US$" figure.
+							const termsPrice =
+								format === ENGLISH_PRICING_FORMAT
+									? `US$${tier.monthlyAddUsd}`
+									: format.price(tier.monthlyAddUsd);
 							return (
 								<li key={tier.slug}>
 									<SubscriptionAgreement
@@ -104,7 +122,7 @@ export function CloudUpgradePanel({
 										offerKey={`${tier.slug}:${tier.monthlyAddUsd}`}
 										terms={tl(
 											"Renews automatically at an additional {price} every month, plus applicable taxes, until canceled.",
-											{ price: `US$${tier.monthlyAddUsd}` }
+											{ price: termsPrice }
 										)}
 									>
 										{(canContinue) => (
@@ -117,7 +135,10 @@ export function CloudUpgradePanel({
 												<Cpu className="size-4 shrink-0 text-primary" />
 												<span className="flex-1">
 													<span className="block font-medium text-sm">
-														{tier.name} is {tier.perfLabel}
+														{tl("{name} is {perf}", {
+															name: tier.name,
+															perf: tier.perfLabel,
+														})}
 													</span>
 													<span className="block text-muted-foreground text-xs">
 														{specs}
@@ -128,7 +149,9 @@ export function CloudUpgradePanel({
 														<Loader2 className="size-4 animate-spin" />
 													) : (
 														<span className="font-heading font-medium text-sm tabular-nums">
-															${tier.monthlyAddUsd} per month
+															{tl("{amount} per month", {
+																amount: format.price(tier.monthlyAddUsd),
+															})}
 														</span>
 													)}
 												</span>

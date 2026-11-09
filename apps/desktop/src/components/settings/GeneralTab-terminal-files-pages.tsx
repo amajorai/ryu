@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import {
 	Select,
 	SelectContent,
@@ -15,6 +16,7 @@ import {
 	useTerminalPanelLocation,
 } from "@/src/hooks/useTerminalPanelLocation.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import { physicalSide } from "@/src/workbench/workbench-direction.ts";
 import {
 	DEFAULT_FILE_OPENER_OPTIONS,
 	FILE_MANAGER_NAME,
@@ -29,6 +31,8 @@ import {
 
 /** General → Terminal. */
 export function GeneralTabTerminalPage() {
+	const tl = useLiteralMessages();
+	const dir = useDirection();
 	const terminalShell = useWorkspaceStore((s) => s.terminalShell);
 	const setTerminalShell = useWorkspaceStore((s) => s.setTerminalShell);
 	const [terminalPanelLocation, setTerminalPanelLocationPreference] =
@@ -54,7 +58,11 @@ export function GeneralTabTerminalPage() {
 						>
 							{TERMINAL_PANEL_LOCATION_VALUES.map((value) => (
 								<ToggleGroupItem density="segmented" key={value} value={value}>
-									{TERMINAL_LOCATION_LABELS[value]}
+									{tl(
+										TERMINAL_LOCATION_LABELS[
+											physicalSide<"bottom" | "left" | "right">(value, dir)
+										]
+									)}
 								</ToggleGroupItem>
 							))}
 						</ToggleGroup>

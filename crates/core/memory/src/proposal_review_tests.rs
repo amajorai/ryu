@@ -1,0 +1,496 @@
+//! Reviewing proposals: reject, idempotent re-review, approval of a create or
+//! a revision, approval-time guards, and rollback.
+
+use super::*;
+use crate::proposal_tests::{draft, proposal, propose_revision, record_target, tamper_draft};
+
+#[tokio::test]
+async fn rejecting_marks_rejected_with_reviewer_and_creates_no_memory() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let id = store
+        .create_proposal(proposal(
+            LOCAL_USER,
+            None,
+            MemoryProposalOperation::Create,
+            "User likes jazz",
+        ))
+        .await
+        .unwrap();
+
+    let reviewed = store
+        .review_proposal(&id, false, Some("reviewer-1"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reviewed.status, MemoryProposalStatus::Rejected);
+    assert_eq!(reviewed.reviewed_by.as_deref(), Some("reviewer-1"));
+    assert!(reviewed.reviewed_at.is_some());
+    assert!(reviewed.applied_memory_id.is_none());
+    assert_eq!(store.count().await.unwrap(), 0);
+
+    // A later approval of the already-rejected row is a no-op.
+    let again = store
+        .review_proposal(&id, true, Some("reviewer-2"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(again.status, MemoryProposalStatus::Rejected);
+    assert_eq!(again.reviewed_by.as_deref(), Some("reviewer-1"));
+    assert_eq!(store.count().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn reviewing_an_unknown_proposal_returns_none() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    assert!(store
+        .review_proposal("missing", true, None)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(store
+        .rollback_proposal("missing", None)
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn approving_a_revision_supersedes_the_target_and_is_idempotent() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let id = propose_revision(&store, &target).await;
+
+    let applied = store
+        .review_proposal(&id, true, Some("reviewer-1"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(applied.status, MemoryProposalStatus::Applied);
+    assert_eq!(applied.reviewed_by.as_deref(), Some("reviewer-1"));
+    let new_id = applied
+        .applied_memory_id
+        .clone()
+        .expect("applied memory id");
+    assert_ne!(new_id, target);
+
+    let revision = store.get(&new_id).await.unwrap().unwrap();
+    assert_eq!(revision.content, "User prefers green tea");
+    assert_eq!(revision.lifecycle, MemoryLifecycle::Active);
+    assert_eq!(revision.supersedes_id.as_deref(), Some(target.as_str()));
+    assert_eq!(revision.owner_user_id.as_deref(), Some(LOCAL_USER));
+    assert_eq!(revision.tags, vec!["dream".to_owned()]);
+    let old = store.get(&target).await.unwrap().unwrap();
+    assert_eq!(old.lifecycle, MemoryLifecycle::Superseded);
+
+    // Only the revision is recalled now.
+    let recalled = store.recall(LOCAL_USER, "agent-a", 10).await.unwrap();
+    assert_eq!(recalled.len(), 1);
+    assert_eq!(recalled[0].id, new_id);
+
+    // A second review neither inserts another row nor changes the outcome.
+    let again = store
+        .review_proposal(&id, true, Some("reviewer-2"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(again.status, MemoryProposalStatus::Applied);
+    assert_eq!(again.applied_memory_id.as_deref(), Some(new_id.as_str()));
+    assert_eq!(again.reviewed_by.as_deref(), Some("reviewer-1"));
+    let rejected_late = store
+        .review_proposal(&id, false, Some("reviewer-3"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rejected_late.status, MemoryProposalStatus::Applied);
+    assert_eq!(store.count().await.unwrap(), 2);
+}
+
+#[tokio::test]
+async fn approving_a_create_inserts_an_active_entry_without_supersedes() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let mut new = proposal(LOCAL_USER, None, MemoryProposalOperation::Create, " Ship ");
+    new.draft.scope = MemoryScope::Project;
+    new.draft.scope_id = Some("/r".to_owned());
+    new.draft.category = MemoryCategory::ProjectContext;
+    new.draft.importance = 9;
+    new.draft.when_to_use = Some(" ci ".to_owned());
+    let id = store.create_proposal(new).await.unwrap();
+    let applied = store
+        .review_proposal(&id, true, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(applied.status, MemoryProposalStatus::Applied);
+    let entry = store
+        .get(applied.applied_memory_id.as_deref().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.content, "Ship");
+    assert_eq!(entry.scope_id.as_deref(), Some("/r"));
+    assert_eq!(entry.scope, MemoryScope::Project);
+    assert_eq!(entry.category, MemoryCategory::ProjectContext);
+    assert_eq!(entry.importance, 5);
+    assert_eq!(entry.when_to_use.as_deref(), Some("ci"));
+    assert_eq!(entry.lifecycle, MemoryLifecycle::Active);
+    assert!(entry.supersedes_id.is_none());
+}
+
+#[tokio::test]
+async fn approval_fails_when_the_target_row_is_missing() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let id = propose_revision(&store, &target).await;
+    // A row removed without the delete path's proposal cleanup.
+    store
+        .conn
+        .lock()
+        .await
+        .execute(
+            "DELETE FROM memory_entries WHERE id = ?1",
+            rusqlite::params![&target],
+        )
+        .unwrap();
+
+    let err = store.review_proposal(&id, true, None).await.unwrap_err();
+    assert!(err.to_string().contains("no longer exists"), "{err}");
+    let still = store.get_proposal(&id).await.unwrap().unwrap();
+    assert_eq!(still.status, MemoryProposalStatus::Pending);
+    assert_eq!(store.count().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn approval_fails_when_the_target_is_no_longer_active() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let first = propose_revision(&store, &target).await;
+    let second = propose_revision(&store, &target).await;
+    store.review_proposal(&first, true, None).await.unwrap();
+
+    let err = store
+        .review_proposal(&second, true, None)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("no longer active"), "{err}");
+    let still = store.get_proposal(&second).await.unwrap().unwrap();
+    assert_eq!(still.status, MemoryProposalStatus::Pending);
+    assert!(still.applied_memory_id.is_none());
+    // Only the original and the first revision exist.
+    assert_eq!(store.count().await.unwrap(), 2);
+}
+
+#[tokio::test]
+async fn approval_rejects_a_scoped_draft_without_scope_id() {
+    for scope in [MemoryScope::Agent, MemoryScope::Project, MemoryScope::Org] {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let id = store
+            .create_proposal(proposal(
+                LOCAL_USER,
+                None,
+                MemoryProposalOperation::Create,
+                "Deploys go through staging first",
+            ))
+            .await
+            .unwrap();
+        let mut bad = draft("Deploys go through staging first");
+        bad.scope = scope;
+        bad.scope_id = Some("   ".to_owned());
+        tamper_draft(&store, &id, bad).await;
+
+        let err = store.review_proposal(&id, true, None).await.unwrap_err();
+        assert!(
+            err.to_string().contains("requires a scope id"),
+            "{scope:?}: {err}"
+        );
+        assert_eq!(store.count().await.unwrap(), 0, "{scope:?}");
+        let still = store.get_proposal(&id).await.unwrap().unwrap();
+        assert_eq!(still.status, MemoryProposalStatus::Pending, "{scope:?}");
+    }
+}
+
+#[tokio::test]
+async fn approval_rejects_sensitive_content_outside_user_scope() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    // Creation already refuses sensitive non-user drafts.
+    let mut create_bad = proposal(
+        LOCAL_USER,
+        None,
+        MemoryProposalOperation::Create,
+        "User takes medication for a disease",
+    );
+    create_bad.draft.scope = MemoryScope::Project;
+    create_bad.draft.scope_id = Some("/repo".to_owned());
+    assert!(store.create_proposal(create_bad).await.is_err());
+
+    let id = store
+        .create_proposal(proposal(
+            LOCAL_USER,
+            None,
+            MemoryProposalOperation::Create,
+            "Neutral fact",
+        ))
+        .await
+        .unwrap();
+    let mut bad = draft("User takes medication for a disease");
+    bad.scope = MemoryScope::Project;
+    bad.scope_id = Some("/repo".to_owned());
+    tamper_draft(&store, &id, bad).await;
+
+    let err = store.review_proposal(&id, true, None).await.unwrap_err();
+    assert!(err.to_string().contains("sensitive memory"), "{err}");
+    assert_eq!(store.count().await.unwrap(), 0);
+
+    // The same sensitive content at user scope is approvable.
+    tamper_draft(&store, &id, draft("User takes medication for a disease")).await;
+    let applied = store
+        .review_proposal(&id, true, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(applied.status, MemoryProposalStatus::Applied);
+    assert_eq!(store.count().await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn rollback_retracts_the_revision_and_reactivates_the_target() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let id = propose_revision(&store, &target).await;
+
+    // Rolling back a pending proposal is a no-op.
+    let pending = store
+        .rollback_proposal(&id, Some("reviewer-1"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pending.status, MemoryProposalStatus::Pending);
+
+    let applied = store
+        .review_proposal(&id, true, None)
+        .await
+        .unwrap()
+        .unwrap();
+    let new_id = applied.applied_memory_id.unwrap();
+
+    let rolled = store
+        .rollback_proposal(&id, Some("reviewer-2"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rolled.status, MemoryProposalStatus::RolledBack);
+    assert_eq!(rolled.reviewed_by.as_deref(), Some("reviewer-2"));
+    // The audit trail keeps the applied revision id.
+    assert_eq!(rolled.applied_memory_id.as_deref(), Some(new_id.as_str()));
+
+    let revision = store.get(&new_id).await.unwrap().unwrap();
+    assert_eq!(revision.lifecycle, MemoryLifecycle::Retracted);
+    let original = store.get(&target).await.unwrap().unwrap();
+    assert_eq!(original.lifecycle, MemoryLifecycle::Active);
+    let recalled = store.recall(LOCAL_USER, "agent-a", 10).await.unwrap();
+    assert_eq!(recalled.len(), 1);
+    assert_eq!(recalled[0].id, target);
+
+    // A second rollback and a late re-review leave it rolled back.
+    let again = store.rollback_proposal(&id, None).await.unwrap().unwrap();
+    assert_eq!(again.status, MemoryProposalStatus::RolledBack);
+    let review = store
+        .review_proposal(&id, true, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(review.status, MemoryProposalStatus::RolledBack);
+    assert_eq!(store.count().await.unwrap(), 2);
+}
+
+/// An archive proposal as Dream builds it: empty draft content, the target's
+/// classification.
+fn archive_proposal(target: &str) -> NewMemoryProposal {
+    let mut archive = proposal(
+        LOCAL_USER,
+        Some(target),
+        MemoryProposalOperation::Archive,
+        "",
+    );
+    archive.rationale = "the trip is over".to_owned();
+    archive
+}
+
+#[tokio::test]
+async fn an_archive_proposal_needs_a_target_but_no_content() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let id = store
+        .create_proposal(archive_proposal(&target))
+        .await
+        .unwrap();
+    let stored = store.get_proposal(&id).await.unwrap().unwrap();
+    assert_eq!(stored.operation, MemoryProposalOperation::Archive);
+    assert_eq!(stored.target_memory_id.as_deref(), Some(target.as_str()));
+    assert_eq!(stored.draft.content, "");
+
+    for missing in [None, Some("  ")] {
+        let mut untargeted = archive_proposal("ignored");
+        untargeted.target_memory_id = missing.map(str::to_owned);
+        let error = store.create_proposal(untargeted).await.unwrap_err();
+        assert!(error.to_string().contains("requires a target"), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn approving_an_archive_retires_the_target_from_recall() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let id = store
+        .create_proposal(archive_proposal(&target))
+        .await
+        .unwrap();
+
+    let reviewed = store
+        .review_proposal(&id, true, Some("reviewer-1"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reviewed.status, MemoryProposalStatus::Applied);
+    assert_eq!(reviewed.applied_memory_id.as_deref(), Some(target.as_str()));
+    assert_eq!(reviewed.reviewed_by.as_deref(), Some("reviewer-1"));
+
+    // Archived, not deleted: the row stays for audit, nothing new is written,
+    // and recall no longer returns it.
+    let entry = store.get(&target).await.unwrap().unwrap();
+    assert_eq!(entry.lifecycle, MemoryLifecycle::Archived);
+    assert_eq!(entry.content, "User prefers tea");
+    assert_eq!(store.count().await.unwrap(), 1);
+    assert!(store
+        .recall(LOCAL_USER, "agent-a", 10)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Approving again is a no-op.
+    let again = store
+        .review_proposal(&id, true, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(again.reviewed_by.as_deref(), Some("reviewer-1"));
+}
+
+#[tokio::test]
+async fn an_archive_of_a_target_that_left_active_applies_nothing() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let archive = store
+        .create_proposal(archive_proposal(&target))
+        .await
+        .unwrap();
+    // A revision of the same target lands first.
+    let revision = propose_revision(&store, &target).await;
+    store
+        .review_proposal(&revision, true, None)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let error = store
+        .review_proposal(&archive, true, None)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("no longer active"), "{error}");
+    let still = store.get_proposal(&archive).await.unwrap().unwrap();
+    assert_eq!(still.status, MemoryProposalStatus::Pending);
+    assert_eq!(
+        store.get(&target).await.unwrap().unwrap().lifecycle,
+        MemoryLifecycle::Superseded
+    );
+
+    // A target row that is missing (removed without the delete path, which
+    // would have rejected the proposal) is reported as gone.
+    let other = store
+        .record(LOCAL_USER, "agent-a", "Trip to Lisbon in May")
+        .await
+        .unwrap()
+        .unwrap();
+    let orphan = store
+        .create_proposal(archive_proposal(&other))
+        .await
+        .unwrap();
+    store
+        .conn
+        .lock()
+        .await
+        .execute(
+            "DELETE FROM memory_entries WHERE id = ?1",
+            rusqlite::params![&other],
+        )
+        .unwrap();
+    let error = store
+        .review_proposal(&orphan, true, None)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("no longer exists"), "{error}");
+}
+
+#[tokio::test]
+async fn rejecting_an_archive_keeps_the_target_active() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let id = store
+        .create_proposal(archive_proposal(&target))
+        .await
+        .unwrap();
+    let reviewed = store
+        .review_proposal(&id, false, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reviewed.status, MemoryProposalStatus::Rejected);
+    assert_eq!(
+        store.get(&target).await.unwrap().unwrap().lifecycle,
+        MemoryLifecycle::Active
+    );
+}
+
+#[tokio::test]
+async fn rolling_back_an_archive_restores_the_target() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let id = store
+        .create_proposal(archive_proposal(&target))
+        .await
+        .unwrap();
+    store.review_proposal(&id, true, None).await.unwrap();
+
+    let rolled = store
+        .rollback_proposal(&id, Some("reviewer-2"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rolled.status, MemoryProposalStatus::RolledBack);
+    let entry = store.get(&target).await.unwrap().unwrap();
+    assert_eq!(entry.lifecycle, MemoryLifecycle::Active);
+    assert_eq!(
+        store.recall(LOCAL_USER, "agent-a", 10).await.unwrap().len(),
+        1
+    );
+
+    // Repeating the rollback reports the result without changing anything.
+    let again = store.rollback_proposal(&id, None).await.unwrap().unwrap();
+    assert_eq!(again.status, MemoryProposalStatus::RolledBack);
+}
+
+#[tokio::test]
+async fn rolling_back_an_archive_whose_row_is_gone_is_refused() {
+    let store = MemoryStore::open_in_memory().unwrap();
+    let target = record_target(&store).await;
+    let id = store
+        .create_proposal(archive_proposal(&target))
+        .await
+        .unwrap();
+    store.review_proposal(&id, true, None).await.unwrap();
+    store.delete(&target).await.unwrap();
+
+    let error = store.rollback_proposal(&id, None).await.unwrap_err();
+    assert!(error.to_string().contains("no longer exists"), "{error}");
+    let still = store.get_proposal(&id).await.unwrap().unwrap();
+    assert_eq!(still.status, MemoryProposalStatus::Applied);
+}

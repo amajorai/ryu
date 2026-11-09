@@ -81,7 +81,7 @@ const LAUNCH_NUMBER_RULES = new Map<Key, LaunchNumberRule>([
 	["n_cpu_moe", { integer: true, label: "CPU MoE layers", min: 0 }],
 	["parallel", { integer: true, label: "Parallel slots", min: 1 }],
 	["tensor_parallel", { integer: true, label: "Tensor parallel", min: 0 }],
-	["threads", { integer: true, label: "Threads" }],
+	["threads", { integer: true, label: "CPU threads" }],
 	["ubatch_size", { integer: true, label: "uBatch size", min: 0 }],
 ]);
 
@@ -92,7 +92,9 @@ export function launchNumberError(
 	tl: LiteralMessage
 ): string | null {
 	const rule = { ...LAUNCH_NUMBER_RULES.get(key), ...ruleOverride };
-	const label = rule.label ?? key;
+	// The table labels are extracted copy; translate them so the sentence does
+	// not carry an English field name. A raw config key stays as written.
+	const label = rule.label ? tl(rule.label) : key;
 	if (!Number.isFinite(value)) {
 		return tl("{label} must be a finite number.", { label });
 	}

@@ -14,7 +14,8 @@
 //! The text is built from structured fields only: the environment, service
 //! names and hosts, credential reference names, and for a credential use the
 //! account and reference. The agent's free-text message is never sent (a push
-//! leaves the device), and no value is ever part of a proposal.
+//! leaves the device), and no value is ever part of a proposal. The text is a
+//! localizable [`AlertText`]: each surface renders it in its own language.
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::OnceLock;
@@ -22,23 +23,24 @@ use std::sync::OnceLock;
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-use super::proposals::{self, Proposal, ProposalStatus};
+use super::proposals::{self, CredentialUse, Proposal, ProposalStatus};
 use super::sessions::{self, BrokerSession};
+use crate::i18n::{messages, AlertText, Join, Message, Template};
 use crate::plugin_secrets::PluginSecretStore;
 use crate::vault::audit::AuditRow;
+use crate::vault::password_managers::ConsumerSubject;
 
 /// Proposal ids remembered so a repeated pending use notifies once.
 const REMEMBERED: usize = 512;
-/// Hosts or references named in one notification before "and N more".
+/// Hosts or references named in one notification before "+N".
 const LISTED: usize = 3;
 /// Longest host or reference shown.
 const MAX_ITEM_LEN: usize = 80;
 
 /// A notification ready to deliver.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Notice {
-    pub title: String,
-    pub body: String,
+    pub text: AlertText,
     pub link: String,
 }
 
@@ -85,64 +87,110 @@ fn clip(text: &str) -> String {
 fn listing(items: &[String]) -> String {
     let mut shown: Vec<String> = items.iter().take(LISTED).map(|item| clip(item)).collect();
     if items.len() > LISTED {
-        shown.push(format!("{} more", items.len() - LISTED));
+        shown.push(format!("+{}", items.len() - LISTED));
     }
     shown.join(", ")
 }
 
-fn plural(count: usize, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
+/// `one` for a count of 1, else `many`, with `{count}` set.
+fn counted(count: usize, one: Template, many: Template) -> Message {
+    Message::new(if count == 1 { one } else { many }).number("count", count as f64, 0, 0)
+}
+
+/// The sentence for a credential use, worded for the consumer's channel.
+fn credential_use_body(credential_use: &CredentialUse) -> Message {
+    let message = match ConsumerSubject::parse(&credential_use.subject) {
+        ConsumerSubject::BrokerSession { minter } => {
+            Message::new(messages::VAULT_BROKER_USE_BY_BROKER_SESSION_MESSAGE)
+                .text("minter", minter)
+        }
+        ConsumerSubject::ExplicitRead { principal } => {
+            Message::new(messages::VAULT_BROKER_USE_BY_EXPLICIT_READ_MESSAGE)
+                .text("principal", principal)
+        }
+        ConsumerSubject::Runtime { mcp, owner } => {
+            Message::new(messages::VAULT_BROKER_USE_BY_RUNTIME_MESSAGE)
+                .text("mcp", mcp)
+                .text("owner", owner)
+        }
+        ConsumerSubject::Other(subject) => {
+            Message::new(messages::VAULT_BROKER_USE_BY_SUBJECT_MESSAGE).text("subject", subject)
+        }
+    };
+    message
+        .text("reference", clip(&credential_use.reference))
+        .text("account", clip(&credential_use.account))
+}
+
+/// The sentences for an agent proposal: the services, then the credentials
+/// (`It also asks…` after services), or the broker change when it names none.
+fn proposal_body(proposal: &Proposal) -> Vec<Message> {
+    let environment = proposal.environment.as_str();
+    let hosts: Vec<String> = proposal
+        .services
+        .iter()
+        .map(|service| service.host.clone())
+        .collect();
+    let references: Vec<String> = proposal
+        .credentials
+        .iter()
+        .map(|credential| credential.reference.clone())
+        .collect();
+    let mut body = Vec::new();
+    if !hosts.is_empty() {
+        body.push(
+            counted(
+                hosts.len(),
+                messages::VAULT_BROKER_SERVICES_ONE_MESSAGE,
+                messages::VAULT_BROKER_SERVICES_MESSAGE,
+            )
+            .text("environment", environment)
+            .text("hosts", listing(&hosts)),
+        );
+    }
+    if !references.is_empty() {
+        let sentence = if hosts.is_empty() {
+            counted(
+                references.len(),
+                messages::VAULT_BROKER_CREDENTIALS_ONE_MESSAGE,
+                messages::VAULT_BROKER_CREDENTIALS_MESSAGE,
+            )
+            .text("environment", environment)
+        } else {
+            counted(
+                references.len(),
+                messages::VAULT_BROKER_ALSO_CREDENTIALS_ONE_MESSAGE,
+                messages::VAULT_BROKER_ALSO_CREDENTIALS_MESSAGE,
+            )
+        };
+        body.push(sentence.text("references", listing(&references)));
+    }
+    if body.is_empty() {
+        body.push(
+            Message::new(messages::VAULT_BROKER_BROKER_CHANGE_MESSAGE)
+                .text("environment", environment),
+        );
+    }
+    body
 }
 
 /// The notification for one pending proposal.
 pub fn notice(proposal: &Proposal) -> Notice {
-    let link = approval_link(&proposal.id);
-    if let Some(credential_use) = &proposal.credential_use {
-        return Notice {
-            title: "Credential use waiting for approval".to_owned(),
-            body: format!(
-                "{} asks to use {} from the {} account.",
-                crate::vault::password_managers::describe_subject(&credential_use.subject),
-                clip(&credential_use.reference),
-                clip(&credential_use.account),
-            ),
-            link,
-        };
-    }
-    let mut parts = Vec::new();
-    if !proposal.services.is_empty() {
-        let hosts: Vec<String> = proposal
-            .services
-            .iter()
-            .map(|service| service.host.clone())
-            .collect();
-        parts.push(format!(
-            "{} ({})",
-            plural(proposal.services.len(), "service", "services"),
-            listing(&hosts)
-        ));
-    }
-    if !proposal.credentials.is_empty() {
-        let references: Vec<String> = proposal
-            .credentials
-            .iter()
-            .map(|credential| credential.reference.clone())
-            .collect();
-        parts.push(format!(
-            "{} ({})",
-            plural(proposal.credentials.len(), "credential", "credentials"),
-            listing(&references)
-        ));
-    }
-    let asks = if parts.is_empty() {
-        "a broker change".to_owned()
-    } else {
-        parts.join(" and ")
+    let text = match &proposal.credential_use {
+        Some(credential_use) => AlertText::new(
+            Message::new(messages::VAULT_BROKER_CREDENTIAL_USE_TITLE_MESSAGE),
+            vec![credential_use_body(credential_use)],
+            Join::Sentences,
+        ),
+        None => AlertText::new(
+            Message::new(messages::VAULT_BROKER_PROPOSAL_TITLE_MESSAGE),
+            proposal_body(proposal),
+            Join::Sentences,
+        ),
     };
     Notice {
-        title: "Agent proposal waiting for approval".to_owned(),
-        body: format!("An agent asks for {asks} in {}.", proposal.environment),
-        link,
+        text,
+        link: approval_link(&proposal.id),
     }
 }
 
@@ -210,15 +258,15 @@ async fn load(
     Ok(Some((proposal, session)))
 }
 
-/// Deliver `notice` to `user` (inbox, toast, push), or broadcast a toast.
+/// Deliver `notice` to `user` (inbox, toast, push), or broadcast a toast in
+/// the node's language.
 async fn deliver(notice: &Notice, user: Option<String>) {
     let user = user.or_else(|| crate::auth::load_accounts().active_user_id);
     if let (Some(user), Some(store)) = (user.as_deref(), crate::notify::global_store()) {
         match crate::notify::deliver_linked_notification(
             &store,
             user,
-            &notice.title,
-            &notice.body,
+            &notice.text,
             "warning",
             &notice.link,
         )
@@ -228,9 +276,11 @@ async fn deliver(notice: &Notice, user: Option<String>) {
             Err(error) => tracing::warn!("broker proposal notification failed: {error}"),
         }
     }
+    let locale = crate::i18n::locale::node_locale().await;
+    let (title, body) = notice.text.render(locale);
     crate::events::publish(crate::events::DesktopNotification {
-        title: notice.title.clone(),
-        body: Some(notice.body.clone()),
+        title,
+        body: Some(crate::i18n::bidi::rtl_body(body, locale)),
         level: "warning".to_owned(),
         target_user_id: user,
         notification_id: None,

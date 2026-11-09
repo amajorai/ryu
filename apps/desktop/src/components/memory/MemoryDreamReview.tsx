@@ -1,28 +1,17 @@
-import {
-	ArrowRight02Icon,
-	Cancel01Icon,
-	Clock01Icon,
-	Refresh01Icon,
-	SparklesIcon,
-	Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import { Refresh01Icon, SparklesIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
-import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Card, CardContent, CardHeader } from "@ryu/ui/components/card.tsx";
-import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Empty,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
-import { Label } from "@ryu/ui/components/label.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
-import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useCallback, useEffect, useState } from "react";
+import { useRememberChats } from "@/src/hooks/useRememberChats.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { ApiError } from "@/src/lib/api/client.ts";
 import {
@@ -33,11 +22,25 @@ import {
 	getDreamSettings,
 	type MemoryProposal,
 	rejectMemoryProposal,
+	rollbackMemoryProposal,
 	runDreamReview,
 	updateDreamSettings,
-} from "@/src/lib/api/memory.ts";
+} from "@/src/lib/api/memory-dream.ts";
+import { fetchOrgFeatures } from "@/src/lib/api/org-features.ts";
 import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
-import { dreamReason, dreamSource, dreamSummary } from "./memory-dream-copy.ts";
+import { ProposalCard } from "./MemoryDreamProposalCard.tsx";
+import { MemoryDreamRecent } from "./MemoryDreamRecent.tsx";
+import { MemoryDreamSchedule } from "./MemoryDreamSchedule.tsx";
+import {
+	MemoryRememberChatsCard,
+	MemoryRememberChatsPrompt,
+} from "./MemoryRememberChats.tsx";
+import {
+	dreamSummary,
+	type ReviewConflictKind,
+	reviewConflictKind,
+	undoConflictKind,
+} from "./memory-dream-copy.ts";
 
 function formatReviewDate(timestamp: number): string {
 	if (!timestamp) {
@@ -46,107 +49,21 @@ function formatReviewDate(timestamp: number): string {
 	return formatLocalDateTime(timestamp);
 }
 
-function ProposalDiff({ proposal }: { proposal: MemoryProposal }) {
-	const previous = proposal.current?.content ?? null;
-	const next = proposal.proposed.content;
-	const tl = useLiteralMessages();
-	return (
-		<div className="flex flex-col gap-2">
-			<div className="flex items-center gap-2 text-muted-foreground text-xs">
-				<span>{previous ? "Update" : "New memory"}</span>
-				<DirectionalIcon className="size-3.5" icon={ArrowRight02Icon} />
-				<span>{proposal.proposed.category.replaceAll("_", " ")}</span>
-			</div>
-			{previous ? (
-				<div className="grid gap-2 md:grid-cols-2">
-					<div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3">
-						<div className="mb-1 font-medium text-status-destructive text-xs">
-							Before
-						</div>
-						<p className="whitespace-pre-wrap text-sm leading-relaxed">
-							{previous}
-						</p>
-					</div>
-					<div className="rounded-lg border border-success/25 bg-success/5 p-3">
-						<div className="mb-1 font-medium text-status-success text-xs">
-							Proposed
-						</div>
-						<p className="whitespace-pre-wrap text-sm leading-relaxed">
-							{next}
-						</p>
-					</div>
-				</div>
-			) : (
-				<div className="rounded-lg border border-success/25 bg-success/5 p-3">
-					<p className="whitespace-pre-wrap text-sm leading-relaxed">{next}</p>
-				</div>
-			)}
-			<div className="flex flex-wrap gap-1.5">
-				<Badge variant="secondary">{proposal.proposed.scope}</Badge>
-				<Badge variant="outline">
-					{tl("Importance {importance}", {
-						importance: String(proposal.proposed.importance),
-					})}
-				</Badge>
-				{proposal.proposed.tags.map((tag) => (
-					<Badge key={tag} variant="outline">
-						#{tag}
-					</Badge>
-				))}
-			</div>
-		</div>
-	);
-}
-
-function ProposalCard({
-	busy,
-	onAccept,
-	onReject,
-	proposal,
-}: {
-	busy: boolean;
-	onAccept: (proposal: MemoryProposal) => void;
-	onReject: (proposal: MemoryProposal) => void;
-	proposal: MemoryProposal;
-}) {
-	const tl = useLiteralMessages();
-	const source = dreamSource(proposal.source, tl);
-	const reason = dreamReason(proposal.reason, tl);
-	return (
-		<Card borderTone="muted" data-testid="dream-proposal" elevation="flat">
-			<CardHeader appearance="dream-proposal">
-				<div className="flex items-start justify-between gap-4">
-					<div className="min-w-0">
-						<div className="flex flex-wrap items-center gap-2">
-							<h2 className="font-medium text-sm">Proposed memory</h2>
-							{source ? <Badge variant="secondary">{source}</Badge> : null}
-						</div>
-						{reason ? (
-							<p className="mt-1 text-muted-foreground text-xs">{reason}</p>
-						) : null}
-					</div>
-					<Badge variant="outline">Needs review</Badge>
-				</div>
-			</CardHeader>
-			<CardContent layout="spaced-stack" topSpacing="comfortable">
-				<ProposalDiff proposal={proposal} />
-				<div className="flex flex-wrap justify-end gap-2 border-border border-t pt-3">
-					<Button
-						disabled={busy}
-						onClick={() => onReject(proposal)}
-						variant="ghost"
-					>
-						<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
-						Reject
-					</Button>
-					<Button disabled={busy} onClick={() => onAccept(proposal)}>
-						<HugeiconsIcon className="size-4" icon={Tick02Icon} />
-						Accept memory
-					</Button>
-				</div>
-			</CardContent>
-		</Card>
-	);
+function reviewConflictDescription(kind: ReviewConflictKind): string {
+	switch (kind) {
+		case "already_accepted":
+			return "It was already accepted elsewhere.";
+		case "already_rejected":
+			return "It was already rejected elsewhere.";
+		case "already_undone":
+			return "It was accepted and then undone elsewhere.";
+		case "target_deleted":
+			return "The memory it changes was deleted, so it was closed automatically.";
+		case "target_changed":
+			return "The memory it changes was edited or archived since. Reject it, or run Dream again.";
+		default:
+			return "It was already handled elsewhere.";
+	}
 }
 
 export function MemoryDreamReview({ target }: { target: ApiTarget }) {
@@ -163,14 +80,23 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 	const [busyProposal, setBusyProposal] = useState<string | null>(null);
 	const [error, setError] = useState<unknown>(null);
 	const [settingsError, setSettingsError] = useState(false);
+	// Core never runs automatic review on an organization-bound node.
+	const [managed, setManaged] = useState(false);
+	const chats = useRememberChats(target);
+	// Core refused the last run (409) because Remember chats is off.
+	const [chatsRequired, setChatsRequired] = useState(false);
+	const showChatsPrompt = chatsRequired && chats.enabled !== true;
 
 	const load = useCallback(async () => {
 		setLoading(true);
 		setError(null);
-		const [reviewResult, settingsResult] = await Promise.allSettled([
+		const [reviewResult, settingsResult, orgResult] = await Promise.allSettled([
 			getDreamReview(target),
 			getDreamSettings(target),
+			fetchOrgFeatures(target),
 		]);
+		// An older Core without the route is an unbound node.
+		setManaged(orgResult.status === "fulfilled" && orgResult.value.managed);
 		if (reviewResult.status === "fulfilled") {
 			setReview(reviewResult.value);
 		} else {
@@ -192,16 +118,26 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 	const run = async () => {
 		setRunning(true);
 		try {
-			setReview(
-				await runDreamReview(
-					target,
-					settings.automatic ? "automatic" : "manual"
-				)
+			const next = await runDreamReview(
+				target,
+				settings.automatic ? "automatic" : "manual"
 			);
+			setChatsRequired(false);
+			// A run lists new proposals only; keep the undoable ones.
+			setReview((current) => ({ ...next, recent: current?.recent ?? [] }));
 			toast.success("Dream review ready", {
 				description: "Review the proposed memories below before saving them.",
 			});
 		} catch (nextError) {
+			if (nextError instanceof ApiError && nextError.status === 409) {
+				// Core's gate is the truth: re-read the opt-in, which may have
+				// been turned off from another window, so the prompt can show.
+				setChatsRequired(true);
+				if ((await chats.reload()) !== false) {
+					toast.error("Dream needs Remember chats");
+				}
+				return;
+			}
 			setError(nextError);
 			toast.error("Dream review couldn't run", {
 				description: "Check that this node supports Dream and try again.",
@@ -211,16 +147,68 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 		}
 	};
 
-	const toggleAutomatic = async (automatic: boolean) => {
+	const enableChats = async () => {
+		if (await chats.setEnabled(true)) {
+			setChatsRequired(false);
+			toast.success("Remember chats is on", {
+				description: "Run Dream now to review your recent conversations.",
+			});
+		} else {
+			toast.error("Couldn't turn on Remember chats");
+		}
+	};
+
+	const saveSettings = async (patch: Partial<DreamSettings>) => {
 		const previous = settings;
-		setSettings((current) => ({ ...current, automatic }));
+		setSettings((current) => ({ ...current, ...patch }));
 		try {
-			setSettings(await updateDreamSettings(target, { automatic }));
+			setSettings(await updateDreamSettings(target, patch));
 		} catch {
 			setSettings(previous);
 			setSettingsError(true);
-			toast.error("Automatic Dream review couldn't be saved");
+			toast.error(
+				patch.automatic === undefined
+					? "Dream quiet hours couldn't be saved"
+					: "Automatic Dream review couldn't be saved"
+			);
 		}
+	};
+
+	// Core refused an Accept or Reject (409): the proposal was handled
+	// elsewhere, or the memory it changes was deleted or edited since. Take
+	// Core's current queue so the list matches it, and say which.
+	const explainReviewConflict = async (
+		proposal: MemoryProposal,
+		conflict: ApiError,
+		action: "accept" | "reject"
+	) => {
+		const kind = reviewConflictKind(conflict.code);
+		let fresh: DreamReview | null = null;
+		try {
+			fresh = await getDreamReview(target);
+		} catch {
+			fresh = null;
+		}
+		setReview((current) => {
+			if (fresh) {
+				return fresh;
+			}
+			// Only an edited target leaves the proposal pending.
+			return current && kind !== "target_changed"
+				? {
+						...current,
+						proposals: current.proposals.filter(
+							(item) => item.id !== proposal.id
+						),
+					}
+				: current;
+		});
+		toast.error(
+			action === "accept"
+				? "Couldn't accept this memory"
+				: "Couldn't reject this proposal",
+			{ description: reviewConflictDescription(kind) }
+		);
 	};
 
 	const accept = async (proposal: MemoryProposal) => {
@@ -234,14 +222,24 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 							proposals: current.proposals.filter(
 								(item) => item.id !== proposal.id
 							),
+							recent: [
+								{ ...proposal, status: "applied" },
+								...current.recent.filter((item) => item.id !== proposal.id),
+							],
 						}
 					: current
 			);
-			toast.success("Memory accepted");
-		} catch {
-			toast.error("Couldn't accept this memory", {
-				description: "The proposal is still waiting for review.",
-			});
+			toast.success(
+				proposal.operation === "archive" ? "Memory archived" : "Memory accepted"
+			);
+		} catch (acceptError) {
+			if (acceptError instanceof ApiError && acceptError.status === 409) {
+				await explainReviewConflict(proposal, acceptError, "accept");
+			} else {
+				toast.error("Couldn't accept this memory", {
+					description: "The proposal is still waiting for review.",
+				});
+			}
 		} finally {
 			setBusyProposal(null);
 		}
@@ -262,8 +260,85 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 					: current
 			);
 			toast.success("Proposal rejected");
+		} catch (rejectError) {
+			if (rejectError instanceof ApiError && rejectError.status === 409) {
+				await explainReviewConflict(proposal, rejectError, "reject");
+			} else {
+				toast.error("Couldn't reject this proposal");
+			}
+		} finally {
+			setBusyProposal(null);
+		}
+	};
+
+	// Core refused an Undo (409). Take its current list of undoable changes,
+	// so one already undone elsewhere disappears, and say why it failed.
+	const explainUndoConflict = async (
+		proposal: MemoryProposal,
+		conflict: ApiError
+	) => {
+		let recent: MemoryProposal[] | null = null;
+		try {
+			recent = (await getDreamReview(target)).recent;
 		} catch {
-			toast.error("Couldn't reject this proposal");
+			recent = null;
+		}
+		const kind = undoConflictKind(
+			conflict.serverMessage,
+			recent ? recent.some((item) => item.id === proposal.id) : null
+		);
+		setReview((current) => {
+			if (!current) {
+				return current;
+			}
+			const listed = recent ?? current.recent;
+			return {
+				...current,
+				recent:
+					kind === "gone"
+						? listed.filter((item) => item.id !== proposal.id)
+						: listed,
+			};
+		});
+		if (kind === "gone") {
+			toast.error("This change can't be undone", {
+				description: "It was already undone or changed elsewhere.",
+			});
+		} else if (kind === "deleted") {
+			toast.error("Couldn't undo this change", {
+				description: "A memory this change touched was deleted since.",
+			});
+		} else {
+			toast.error("Couldn't undo this change", {
+				description:
+					"A later change builds on this memory. Undo that one first.",
+			});
+		}
+	};
+
+	const undo = async (proposal: MemoryProposal) => {
+		setBusyProposal(proposal.id);
+		try {
+			await rollbackMemoryProposal(target, proposal.id);
+			setReview((current) =>
+				current
+					? {
+							...current,
+							recent: current.recent.filter((item) => item.id !== proposal.id),
+						}
+					: current
+			);
+			toast.success("Change undone", {
+				description: "Memory is back to how it was before you accepted it.",
+			});
+		} catch (undoError) {
+			if (undoError instanceof ApiError && undoError.status === 409) {
+				await explainUndoConflict(proposal, undoError);
+			} else {
+				toast.error("Couldn't undo this change", {
+					description: "Check the active node connection and try again.",
+				});
+			}
 		} finally {
 			setBusyProposal(null);
 		}
@@ -287,28 +362,21 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 				</Button>
 			</div>
 
-			<Card appearance="dream-highlight" elevation="flat">
-				<CardContent layout="summary-actions" topSpacing="generous">
-					<div className="flex items-start gap-3">
-						<div className="rounded-full bg-primary/10 p-2 text-primary">
-							<HugeiconsIcon className="size-4" icon={Clock01Icon} />
-						</div>
-						<div>
-							<Label htmlFor="dream-automatic">Automatic review</Label>
-							<p className="mt-1 text-muted-foreground text-xs">
-								Let Dream prepare proposals on its own. You still decide what
-								enters Memory.
-							</p>
-						</div>
-					</div>
-					<Switch
-						checked={settings.automatic}
-						disabled={settingsError}
-						id="dream-automatic"
-						onCheckedChange={toggleAutomatic}
-					/>
-				</CardContent>
-			</Card>
+			<MemoryDreamSchedule
+				disabled={settingsError}
+				managed={managed}
+				onChange={(patch) => void saveSettings(patch)}
+				settings={settings}
+			/>
+
+			<MemoryRememberChatsCard chats={chats} />
+
+			{showChatsPrompt ? (
+				<MemoryRememberChatsPrompt
+					onEnable={() => void enableChats()}
+					saving={chats.saving}
+				/>
+			) : null}
 
 			{error &&
 			error instanceof ApiError &&
@@ -379,6 +447,13 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 					</Button>
 				</Empty>
 			)}
+			{review && !loading && !error ? (
+				<MemoryDreamRecent
+					busyProposal={busyProposal}
+					onUndo={undo}
+					recent={review.recent}
+				/>
+			) : null}
 		</div>
 	);
 }

@@ -12,3 +12,5 @@ mod require_auth;
 pub(in crate::server) use require_auth::*;
 mod member_voice_ticket;
 pub(crate) use member_voice_ticket::*;
+mod member_bearer;
+pub(crate) use member_bearer::*;

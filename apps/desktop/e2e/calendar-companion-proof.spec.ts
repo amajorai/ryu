@@ -299,7 +299,7 @@ test("all schedule controls persist the chosen agent, UTC times, and approval se
 		{
 			value: "weekly",
 			set: async (dialog: Locator) => {
-				await dialog.getByLabel("Day").selectOption("friday");
+				await dialog.getByLabel("Day of week").selectOption("friday");
 				await dialog.getByLabel("Time (UTC)").fill("07:45");
 			},
 			expected: { kind: "cron", expr: "45 07 * * 5" },

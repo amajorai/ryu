@@ -7,6 +7,7 @@
 import { describe, expect, it } from "bun:test";
 import { examplePluginSrcdoc } from "./example-plugin.ts";
 import { HOST_API_VERSION } from "./rpc.ts";
+import { livenessResponderScript } from "./sandbox-liveness-gate.ts";
 
 describe("examplePluginSrcdoc", () => {
 	it("bakes the exact nonce into the ready handshake and the host-port guard", () => {
@@ -54,5 +55,16 @@ describe("examplePluginSrcdoc", () => {
 		expect(doc).toContain("--background: #101114;");
 		expect(doc).toContain('"--ryu-theme-mode":"dark"');
 		expect(doc).toContain("applyThemeTokens(msg.tokens)");
+	});
+});
+
+describe("examplePluginSrcdoc liveness", () => {
+	it("answers the host's liveness probe before handling RPC results", () => {
+		const doc = examplePluginSrcdoc("nonce-abc123");
+		const responderAt = doc.indexOf(livenessResponderScript());
+		expect(responderAt).toBeGreaterThan(-1);
+		expect(responderAt).toBeLessThan(
+			doc.indexOf('if (msg.kind !== "ryu-plugin-rpc-result") return;')
+		);
 	});
 });

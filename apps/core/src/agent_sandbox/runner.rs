@@ -97,6 +97,26 @@ pub fn confine_stdio(
     Ok(stdio)
 }
 
+/// The runner argv that execs `command args...` with every path in `masks`
+/// hidden and deletion left allowed, without the network cut. Command tools
+/// use it so a path Core checked cannot be swapped for a symlink into a hidden
+/// store before the child opens it: inside the runner the store is empty.
+/// Run it with `std::env::current_exe()`; [`untrusted_support`] says whether
+/// this host can.
+pub fn masked_runner_args(command: &Path, args: &[String], masks: &[PathBuf]) -> Vec<String> {
+    let mut runner_args = Vec::with_capacity(args.len() + masks.len() * 2 + 4);
+    runner_args.push(AGENT_SANDBOX_RUNNER_ARG.to_owned());
+    runner_args.push(OPT_ALLOW_DELETE.to_owned());
+    for mask in masks {
+        runner_args.push(OPT_MASK.to_owned());
+        runner_args.push(mask.to_string_lossy().into_owned());
+    }
+    runner_args.push(ARG_SEPARATOR.to_owned());
+    runner_args.push(command.to_string_lossy().into_owned());
+    runner_args.extend(args.iter().cloned());
+    runner_args
+}
+
 /// The runner's parsed command line.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct RunnerPlan {

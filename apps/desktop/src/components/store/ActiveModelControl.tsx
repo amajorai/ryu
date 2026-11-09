@@ -22,6 +22,7 @@ import {
 	waitForModelEngineInstall,
 } from "@/src/lib/model-engine.ts";
 import { fetchCatalog, installSidecar } from "@/src/lib/services-api.ts";
+import { activeModelHelper } from "./ActiveModelControl-helper.ts";
 
 const ACTIVE_MODEL_QUERY = "models";
 
@@ -296,7 +297,9 @@ export function ActiveModelControl({
 	} else if (unavailable) {
 		label = "Engine unavailable";
 	} else if (engineInstalling) {
-		label = `Installing ${engineChoice.displayName}…`;
+		label = tl("Installing {displayName}…", {
+			displayName: engineChoice.displayName,
+		});
 	} else if (refreshFailed) {
 		label = "Retry setup";
 	} else if (isActive) {
@@ -305,18 +308,11 @@ export function ActiveModelControl({
 		label = "Set up & chat";
 	}
 
-	let helper = "Ryu will open a new chat with this model selected.";
-	if (engineOptionsQuery.error) {
-		helper = "Could not check this node's engines. Try setup again.";
-	} else if (engineChoice?.installState === "installed") {
-		helper = `Ready on ${engineChoice.displayName}.`;
-	} else if (engineChoice?.installState === "installing") {
-		helper = `${engineChoice.displayName} is already installing on this node.`;
-	} else if (engineChoice) {
-		helper = `${engineChoice.displayName} will be installed if this node needs it.`;
-	} else if (unavailable) {
-		helper = "This node has no compatible local engine for this model format.";
-	}
+	const helper = activeModelHelper(tl, {
+		engineChoice,
+		engineCheckFailed: Boolean(engineOptionsQuery.error),
+		unavailable,
+	});
 
 	return (
 		<div className="flex shrink-0 flex-col items-end gap-1">

@@ -212,7 +212,19 @@ pub struct NotifyHint {
     /// locale. Absent on an English-only hint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub i18n: Option<Value>,
+    /// Where tapping the notification leads: a deep link into the emitting
+    /// app, `ryu://apps/<plugin id>[/<path>][?<query>]` (see
+    /// [`NotifyHint::link_is_valid_for`]). Core drops a link that names another
+    /// app or is malformed and still delivers the notification. A Core that
+    /// predates links ignores the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
+
+/// The longest tap link Core accepts.
+pub const MAX_NOTIFY_LINK_BYTES: usize = 512;
+/// The scheme and prefix every app notification link starts with.
+const APP_LINK_PREFIX: &str = "ryu://apps/";
 
 impl NotifyHint {
     /// Build a plain `info` hint with just an English title and optional body.
@@ -224,6 +236,7 @@ impl NotifyHint {
             level: None,
             target_user_id: None,
             i18n: None,
+            link: None,
         }
     }
 
@@ -247,6 +260,7 @@ impl NotifyHint {
             level: None,
             target_user_id: None,
             i18n: Some(i18n),
+            link: None,
         }
     }
 
@@ -256,6 +270,95 @@ impl NotifyHint {
         self.level = Some(level.into());
         self
     }
+
+    /// Address the hint to one member.
+    #[must_use]
+    pub fn for_user(mut self, user_id: impl Into<String>) -> Self {
+        self.target_user_id = Some(user_id.into());
+        self
+    }
+
+    /// Open `link` when the notification is tapped. It must be a deep link
+    /// into the emitting app ([`Self::link_is_valid_for`]).
+    #[must_use]
+    pub fn with_link(mut self, link: impl Into<String>) -> Self {
+        self.link = Some(link.into());
+        self
+    }
+
+    /// Whether `link` is a tap target `plugin_id` may attach: exactly
+    /// `ryu://apps/<plugin_id>`, optionally followed by a path and a query, at
+    /// most [`MAX_NOTIFY_LINK_BYTES`] of printable ASCII. The path may not hold
+    /// empty, `.` or `..` segments, nor percent-escapes of `.`, `/`, `\` or
+    /// `%` (so a client that decodes the path, once or twice, still cannot
+    /// climb out of the app), and the link may not carry a fragment,
+    /// whitespace, a backslash or broken percent-escapes. A link can therefore
+    /// only ever open the emitting app's own screens; each surface still maps
+    /// it to a screen it knows, or opens the app's default view.
+    #[must_use]
+    pub fn link_is_valid_for(plugin_id: &str, link: &str) -> bool {
+        if plugin_id.is_empty() || link.len() > MAX_NOTIFY_LINK_BYTES {
+            return false;
+        }
+        let Some(rest) = link
+            .strip_prefix(APP_LINK_PREFIX)
+            .and_then(|rest| rest.strip_prefix(plugin_id))
+        else {
+            return false;
+        };
+        let (path, query) = match rest.split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (rest, None),
+        };
+        let path_ok = path.is_empty()
+            || path.strip_prefix('/').is_some_and(|segments| {
+                segments.split('/').all(|segment| {
+                    !matches!(segment, "" | "." | "..")
+                        && link_text_is_valid(segment, |c| c != b'/' && c != b'?')
+                        && !escapes_path_syntax(segment)
+                })
+            });
+        path_ok && query.is_none_or(|query| link_text_is_valid(query, |_| true))
+    }
+}
+
+/// Whether a path segment percent-escapes path syntax: `.`, `/`, `\`, or
+/// `%` itself (a double-encoded escape). Call it only on text that
+/// [`link_text_is_valid`] accepted, so every `%` starts a full escape.
+fn escapes_path_syntax(segment: &str) -> bool {
+    segment.as_bytes().windows(3).any(|window| {
+        window[0] == b'%'
+            && std::str::from_utf8(&window[1..])
+                .ok()
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+                .is_some_and(|byte| matches!(byte, b'.' | b'/' | b'\\' | b'%'))
+    })
+}
+
+/// Printable ASCII from the URI path/query alphabet, with well-formed
+/// percent-escapes. `extra` narrows the alphabet further.
+fn link_text_is_valid(text: &str, extra: impl Fn(u8) -> bool) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'%' {
+            let escape_ok = bytes
+                .get(index + 1..index + 3)
+                .is_some_and(|hex| hex.iter().all(u8::is_ascii_hexdigit));
+            if !escape_ok {
+                return false;
+            }
+            index += 3;
+            continue;
+        }
+        let allowed = byte.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:@/?".contains(&byte);
+        if !allowed || !extra(byte) {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 #[cfg(test)]

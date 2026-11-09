@@ -44,6 +44,12 @@ pub(super) async fn host_capability(
         Err((status, msg)) => return (status, Json(json!({ "error": msg }))).into_response(),
     };
 
+    // 1a. A member the caller is serving, attested by Core on that request.
+    let principal = match principal_lane::capability_principal(&parts.headers, &caller_id) {
+        Ok(principal) => principal,
+        Err(response) => return response,
+    };
+
     // 1b. KERNEL capability — Core is the implementation, so there is no provider to
     //     bind and the binding registry (which would answer `Unprovided`) must never
     //     be reached. Gate on the row's grant, then dispatch in-process and return.
@@ -242,7 +248,7 @@ pub(super) async fn host_capability(
         forward_payment_authorization: false,
         forward_cookie_names: &[],
         forward_caller_email: false,
-        caller: None,
+        caller: principal.as_ref(),
         caller_resource_ids: None,
         caller_rate_subject: None,
         caller_agent_id: None,

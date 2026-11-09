@@ -111,7 +111,7 @@ export function SubagentsList({
 				);
 			})}
 			{overflow > 0 && (
-				<OverflowRow count={overflow} label="subagents" onShowAll={onShowAll} />
+				<OverflowRow count={overflow} kind="subagents" onShowAll={onShowAll} />
 			)}
 		</ul>
 	);
@@ -227,7 +227,7 @@ export function RenderedArtifactsList({
 					</button>
 				</li>
 			))}
-			{overflow > 0 && <OverflowRow count={overflow} label="artifacts" />}
+			{overflow > 0 && <OverflowRow count={overflow} kind="artifacts" />}
 		</ul>
 	);
 }

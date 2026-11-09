@@ -59,7 +59,8 @@ export interface AppAssistantSurface {
 
 export interface AppAssistantOpenInput {
 	mode?: "floating" | "sidebar";
-	/** Ask on the user's behalf; the host prefixes the app's real name. */
+	/** Suggest a question: the host pre-fills the composer with it (prefixed
+	 * with the app's real name) and never sends it; the user presses Send. */
 	prompt?: string;
 }
 

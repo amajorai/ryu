@@ -17,7 +17,7 @@ fn state(directory: &std::path::Path) -> ServerState {
 
 fn source(message_id: &str, content: &str) -> sources::DreamSource {
     sources::DreamSource {
-        conversation_id: "c1".to_owned(),
+        conversation_id: Some("c1".to_owned()),
         conversation_title: "Trip planning".to_owned(),
         message_id: message_id.to_owned(),
         role: "user".to_owned(),

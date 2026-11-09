@@ -33,6 +33,12 @@ import {
 	useStoreContext,
 } from "./color-picker-store.ts";
 
+/** The swatch group headings (English source copy, translated at render). */
+const SWATCH_GROUP_LABELS = {
+	recent: "Recent colors",
+	swatches: "Swatches",
+} as const;
+
 function ColorPickerHueSlider(
 	props: ComponentProps<typeof SliderPrimitive.Root>
 ) {
@@ -265,10 +271,14 @@ function ColorPickerSwatches({
 	);
 
 	const renderGroup = useCallback(
-		(label: string, entries: Array<{ color: ColorValue; value: string }>) => {
+		(source: string, entries: Array<{ color: ColorValue; value: string }>) => {
 			if (entries.length === 0) {
 				return null;
 			}
+			const label = tl(source);
+			// The English source decides the mid-sentence form: a translated
+			// heading keeps the translator's casing ("Farbfelder").
+			const groupInSentence = sentenceLabel(tl, source);
 			const currentValue = serializeColor(currentColor);
 			return (
 				<div aria-label={label} className="flex flex-col gap-1.5" role="group">
@@ -282,7 +292,7 @@ function ColorPickerSwatches({
 							return (
 								<Button
 									aria-label={tl("Select {group} {value}", {
-										group: sentenceLabel(tl, label),
+										group: groupInSentence,
 										value: entry.value,
 									})}
 									aria-pressed={selected}
@@ -325,9 +335,9 @@ function ColorPickerSwatches({
 			data-slot="color-picker-swatches"
 		>
 			{context.showRecentColors
-				? renderGroup("Recent colors", parsedRecentColors)
+				? renderGroup(SWATCH_GROUP_LABELS.recent, parsedRecentColors)
 				: null}
-			{renderGroup("Swatches", parsedSwatches)}
+			{renderGroup(SWATCH_GROUP_LABELS.swatches, parsedSwatches)}
 		</div>
 	);
 }

@@ -17,9 +17,32 @@ import type {
 	CellOpts,
 	CellPosition,
 	CellUpdate,
+	Direction,
 	NavigationDirection,
 } from "@ryu/ui/types/data-grid.ts";
 import { type MouseEvent, useCallback } from "react";
+
+/**
+ * Cell editors report Tab as "right" and Shift+Tab as "left" (the LTR
+ * reading), while `navigateCell` treats left/right as physical sides. Under
+ * RTL swap them so Tab still moves to the next column, as it does outside
+ * edit mode.
+ */
+function toLogicalTabDirection(
+	direction: NavigationDirection,
+	dir: Direction
+): NavigationDirection {
+	if (dir !== "rtl") {
+		return direction;
+	}
+	if (direction === "right") {
+		return "left";
+	}
+	if (direction === "left") {
+		return "right";
+	}
+	return direction;
+}
 
 function useDataGridFill<TData>(gridContext: DataGridNavigationContext<TData>) {
 	const {
@@ -27,6 +50,7 @@ function useDataGridFill<TData>(gridContext: DataGridNavigationContext<TData>) {
 		columnIds,
 		committedValueRef,
 		dataGridRef,
+		dir,
 		fillOnCommitRef,
 		focusCell,
 		focusCellWrapper,
@@ -127,8 +151,9 @@ function useDataGridFill<TData>(gridContext: DataGridNavigationContext<TData>) {
 			} else if (opts?.direction && currentEditing) {
 				const { rowIndex, columnId } = currentEditing;
 				focusCell(rowIndex, columnId);
+				const direction = toLogicalTabDirection(opts.direction, dir);
 				requestAnimationFrame(() => {
-					navigateCell(opts.direction ?? "right");
+					navigateCell(direction);
 				});
 			} else if (currentEditing) {
 				const { rowIndex, columnId } = currentEditing;
@@ -136,6 +161,7 @@ function useDataGridFill<TData>(gridContext: DataGridNavigationContext<TData>) {
 			}
 		},
 		[
+			dir,
 			store,
 			propsRef,
 			focusCell,

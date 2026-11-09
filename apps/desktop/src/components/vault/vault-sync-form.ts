@@ -2,6 +2,7 @@
 // Manager, Google Cloud Secret Manager) and the status line of a sync. The
 // form holds credentials only until it is submitted; Core never returns them.
 
+import { translate } from "@ryu/i18n/core";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	VaultExternalDestination,
@@ -85,18 +86,19 @@ export function syncTargetInput(
 	const name = form.name.trim();
 	if (!STORE_NAME.test(name)) {
 		return {
-			problem:
-				"Name: lowercase letters, digits, - and _, starting with a letter or digit.",
+			problem: translate(
+				"Name: lowercase letters, digits, - and _, starting with a letter or digit."
+			),
 		};
 	}
 	const base = { name, address: optional(form.address) };
 	switch (form.kind) {
 		case "github-actions":
 			if (!REPOSITORY.test(form.repository.trim())) {
-				return { problem: "Repository must be owner/repo." };
+				return { problem: translate("Repository must be owner/repo.") };
 			}
 			if (!form.token.trim()) {
-				return { problem: "Enter a GitHub token." };
+				return { problem: translate("Enter a GitHub token.") };
 			}
 			return {
 				input: {
@@ -110,10 +112,12 @@ export function syncTargetInput(
 			};
 		case "vercel":
 			if (!(form.projectId.trim() && form.token.trim())) {
-				return { problem: "Enter the Vercel project and a token." };
+				return { problem: translate("Enter the Vercel project and a token.") };
 			}
 			if (form.vercelTargets.length === 0) {
-				return { problem: "Choose at least one Vercel environment." };
+				return {
+					problem: translate("Choose at least one Vercel environment."),
+				};
 			}
 			return {
 				input: {
@@ -128,10 +132,12 @@ export function syncTargetInput(
 			};
 		case "aws-secrets-manager":
 			if (!form.region.trim()) {
-				return { problem: "Enter the AWS region." };
+				return { problem: translate("Enter the AWS region.") };
 			}
 			if (!(form.accessKeyId.trim() && form.secretAccessKey.trim())) {
-				return { problem: "Enter the access key id and secret access key." };
+				return {
+					problem: translate("Enter the access key id and secret access key."),
+				};
 			}
 			return {
 				input: {
@@ -149,7 +155,7 @@ export function syncTargetInput(
 			};
 		default: {
 			if (!form.projectId.trim()) {
-				return { problem: "Enter the Google Cloud project id." };
+				return { problem: translate("Enter the Google Cloud project id.") };
 			}
 			const credential =
 				form.gcpAuth === "token" ? form.token : form.serviceAccountKey;
@@ -157,8 +163,8 @@ export function syncTargetInput(
 				return {
 					problem:
 						form.gcpAuth === "token"
-							? "Enter an access token."
-							: "Paste the service-account key file.",
+							? translate("Enter an access token.")
+							: translate("Paste the service-account key file."),
 				};
 			}
 			return {

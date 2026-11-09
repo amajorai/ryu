@@ -31,6 +31,16 @@ pub(in crate::server) async fn channel_run(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(mut req): Json<ChannelRunRequest>,
 ) -> axum::response::Response {
+    // An enrolled node whose registration is pending, failed or revoked is not an
+    // unbound personal node. Running the turn now would hand the caller an
+    // unrestricted tool principal, free agent choice and orphaned rows, so the
+    // bot door fails closed (like `enforce_permission`) until the binding resolves.
+    if crate::sidecar::node_binding::binding_unresolved() {
+        return json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "this node's organization binding is not resolved yet; retry shortly".to_owned(),
+        );
+    }
     let admission = match crate::execution_control::admit() {
         Ok(admission) => admission,
         Err(message) => return json_error(StatusCode::CONFLICT, message.to_owned()),
@@ -58,8 +68,7 @@ pub(in crate::server) async fn channel_run(
         return resp;
     }
     let team_id = req.team_id.clone().filter(|value| !value.trim().is_empty());
-    let node_bound = crate::sidecar::control_plane::registered_org().is_some()
-        || crate::sidecar::control_plane::is_managed_node();
+    let node_bound = crate::sidecar::node_binding::node_bound_for_tenancy();
     if team_id.is_some() {
         return json_error(
             StatusCode::FORBIDDEN,

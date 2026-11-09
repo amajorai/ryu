@@ -73,6 +73,27 @@ pub struct AutoRecallConfig {
     pub agent_id: Option<String>,
     /// Server-resolved per-user consent for special-category memory.
     pub include_sensitive_topics: bool,
+    /// Similarity floor for the memory facts retrieval returns (`0.0` keeps the
+    /// nearest `top_k` whatever their score). Set from the node's
+    /// `memory.recall-min-relevance` policy by [`AutoRecallConfig::with_min_score`]
+    /// once the turn's policy is resolved. Applies to this store's own ranked
+    /// facts only: keyword/graph matches and past-chat snippets use other score
+    /// scales and are not filtered by it.
+    pub min_score: f32,
+}
+
+impl AutoRecallConfig {
+    /// Apply the turn's minimum relevance. Negative or non-finite values clamp
+    /// to `0.0` (keep everything) so a bad value can never hide all memory.
+    #[must_use]
+    pub fn with_min_score(mut self, min_score: f32) -> Self {
+        self.min_score = if min_score.is_finite() {
+            min_score.max(0.0)
+        } else {
+            0.0
+        };
+        self
+    }
 }
 
 /// Resolve the principal used for per-caller auto-recall. Interactive requests

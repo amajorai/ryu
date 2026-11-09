@@ -157,6 +157,9 @@ impl ApprovalEngine {
                 let skills = self.skills.as_ref().ok_or_else(|| {
                     anyhow::anyhow!("no skills registry attached; cannot activate approved skill")
                 })?;
+                // Read before the write: an approved revision replaces a skill
+                // already in the library, and the inbox result says so.
+                let replaces = skill_in_library(&ryu_skills::SkillRegistry::skills_dir(), slug);
                 // Deferred write happens now (on approve) so a rejected suggestion
                 // never landed on disk. Then flip active + hot-reload the registry.
                 ryu_learning::write_synthesized_skill(slug, skill_md)
@@ -164,7 +167,8 @@ impl ApprovalEngine {
                     .map_err(|e| anyhow::anyhow!("writing approved skill `{slug}`: {e}"))?;
                 ryu_skills::set_active(slug, true);
                 skills.reload();
-                Ok(Some(format!("Added the skill \"{slug}\" to your library.")))
+                let locale = crate::i18n::locale::node_locale().await;
+                Ok(Some(skill_approved_message(slug, replaces).render(locale)))
             }
             PendingAction::ToolCall {
                 tool_id,
@@ -224,3 +228,24 @@ pub(super) async fn reject_action(action: &PendingAction) {
         }
     }
 }
+
+/// Whether `slug` already has a `SKILL.md` under `skills_dir`, so writing an
+/// approved learned skill there replaces it instead of adding one.
+fn skill_in_library(skills_dir: &std::path::Path, slug: &str) -> bool {
+    skills_dir.join(slug).join("SKILL.md").is_file()
+}
+
+/// The inbox result for an approved learned skill: "Updated" when it replaced
+/// a skill already in the library, "Added" for a new one.
+fn skill_approved_message(slug: &str, replaced: bool) -> crate::i18n::Message {
+    let template = if replaced {
+        crate::i18n::messages::APPROVAL_SKILL_UPDATED_MESSAGE
+    } else {
+        crate::i18n::messages::APPROVAL_SKILL_ADDED_MESSAGE
+    };
+    crate::i18n::Message::new(template).text("slug", slug)
+}
+
+#[cfg(test)]
+#[path = "execute_test.rs"]
+mod tests;

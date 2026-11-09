@@ -38,6 +38,8 @@ const JA_TITLE = "ワークフローの継続性";
 const JA_DETAIL =
 	"複数の会話がワークスペース、ブランチ、またはエージェントのワークフローラベルを共有しています。";
 
+const TOPIC_PLURAL = "{count, plural, one {# message} other {# messages}}";
+
 const pack: LanguagePack = {
 	baseLocale: "en",
 	direction: "ltr",
@@ -46,6 +48,9 @@ const pack: LanguagePack = {
 	messages: {
 		[messageIdForLiteral(TITLE)]: JA_TITLE,
 		[messageIdForLiteral(DETAIL)]: JA_DETAIL,
+		[messageIdForLiteral("Active days")]: "アクティブな日数",
+		[messageIdForLiteral(TOPIC_PLURAL)]:
+			"{count, plural, other {# 件のメッセージ}}",
 	},
 	name: "Japanese",
 	schemaVersion: 1,
@@ -62,11 +67,11 @@ const core = Bun.serve({
 		}
 		if (pathname === "/api/memory/reflect") {
 			return NativeResponse.json({
-				activity: [],
+				activity: [{ count: 4, label: "Active days", trend: null }],
 				generated_at: 1,
 				insights: [{ body: DETAIL, id: "workflow-continuity", title: TITLE }],
 				period: "7d",
-				topics: [],
+				topics: [{ count: 2, name: "Travel planning", summary: "1 messages" }],
 			});
 		}
 		return new NativeResponse("not found", { status: 404 });
@@ -120,5 +125,9 @@ describe("MemoryReflectDashboard under a Japanese pack", () => {
 		expect(container.textContent).toContain(JA_TITLE);
 		expect(container.textContent).toContain(JA_DETAIL);
 		expect(container.textContent).not.toContain(TITLE);
+		expect(container.textContent).toContain("アクティブな日数");
+		expect(container.textContent).not.toContain("Active days");
+		expect(container.textContent).toContain("1 件のメッセージ");
+		expect(container.textContent).not.toContain("1 messages");
 	});
 });

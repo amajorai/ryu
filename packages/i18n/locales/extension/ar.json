@@ -178,7 +178,6 @@
   "I've saved them": "لقد حفظتها",
   "I've scanned it": "لقد مسحته",
   "Import browser bookmarks": "استيراد الإشارات المرجعية من المتصفح",
-  "Imported {imported} bookmarks": "تم استيراد {imported} من الإشارات المرجعية",
   "Importing bookmarks…": "جارٍ استيراد الإشارات المرجعية…",
   "Improve writing": "تحسين الكتابة",
   "In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.": "في تطبيق المصادقة، اختر <strong>إدخال مفتاح الإعداد</strong> والصق هذا المفتاح.",
@@ -371,8 +370,9 @@
   "plugin bundle does not export activate(context)": "حزمة المكوّن الإضافي لا تُصدّر activate(context)",
   "{current} of {total}": "{current} من {total}",
   "{current} of {total}: {match}": "{current} من {total}: {match}",
+  "{imported, plural, one {Imported # bookmark} other {Imported # bookmarks}}": "{imported, plural, zero {تم استيراد # إشارة مرجعية} one {تم استيراد إشارة مرجعية واحدة} two {تم استيراد إشارتين مرجعيتين} few {تم استيراد # إشارات مرجعية} many {تم استيراد # إشارة مرجعية} other {تم استيراد # إشارة مرجعية}}",
   "{ipAddress} · Created {createdAgo}": "{ipAddress} · أُنشئت {createdAgo}",
   "{label} will be signed out and must sign in again to use your account.": "سيتم تسجيل خروج {label} ويجب تسجيل الدخول مجددًا لاستخدام حسابك.",
   "{matchCount, plural, one {# local result} other {# local results}}": "{matchCount, plural, zero {لا توجد نتائج محلية} one {نتيجة محلية واحدة} two {نتيجتان محليتان} few {# نتائج محلية} many {# نتيجة محلية} other {# نتيجة محلية}}",
-  "{skipped} duplicate links skipped": "تم تخطي {skipped} من الروابط المكررة"
+  "{skipped, plural, one {# duplicate link skipped} other {# duplicate links skipped}}": "{skipped, plural, zero {تم تخطي # رابط مكرر} one {تم تخطي رابط مكرر واحد} two {تم تخطي رابطين مكررين} few {تم تخطي # روابط مكررة} many {تم تخطي # رابطًا مكررًا} other {تم تخطي # رابط مكرر}}"
 }

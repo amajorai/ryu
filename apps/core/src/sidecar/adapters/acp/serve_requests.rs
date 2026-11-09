@@ -90,7 +90,22 @@ pub(super) async fn handle_permission_request(
     // SECURITY.md.
     let tool_call_json = serde_json::to_value(&req.tool_call).unwrap_or(serde_json::Value::Null);
     let scan = acp_exec_scan_verdict(&tool_call_json, &scan_agent).await;
-    let route = route_permission(&scan, interactive, &tool_call_json, workspace_trusted);
+    let mut route = route_permission(&scan, interactive, &tool_call_json, workspace_trusted);
+    // After a device read on this conversation's live turn, the agent's own
+    // egress-capable tool always asks, and never offers "always": the device
+    // exfiltration guard cannot see tools that bypass the bridge.
+    let kind = tool_call_json
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("other");
+    let device_hold = crate::device_tools::taint::agent_egress_hold(&perm_conversation, kind);
+    let mut options = req.options.clone();
+    if device_hold.is_some() {
+        options = without_always_options(options);
+        if route != PermissionRoute::Reject {
+            route = PermissionRoute::AskUser;
+        }
+    }
     let outcome = if route == PermissionRoute::Reject {
         RequestPermissionOutcome::Cancelled
     } else if route == PermissionRoute::AskUser {
@@ -103,10 +118,18 @@ pub(super) async fn handle_permission_request(
         let chosen = request_user_permission(
             &tx_perm,
             serde_json::to_value(&req.tool_call).unwrap_or(serde_json::Value::Null),
-            serde_json::to_value(&req.options).unwrap_or(serde_json::Value::Null),
+            serde_json::to_value(&options).unwrap_or(serde_json::Value::Null),
             Some(perm_conversation.clone()),
         )
-        .await;
+        .await
+        // Under a device hold only an option that was offered counts, so a
+        // withheld "always" id cannot be smuggled back in.
+        .filter(|chosen| {
+            device_hold.is_none()
+                || options
+                    .iter()
+                    .any(|option| &*option.option_id.0 == chosen.as_str())
+        });
         match chosen {
             Some(option_id) => {
                 RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id))
@@ -127,4 +150,35 @@ pub(super) async fn handle_permission_request(
     };
     responder.respond(RequestPermissionResponse::new(outcome))?;
     Ok(())
+}
+
+/// The offered options minus every "always" kind, so an answer cannot persist
+/// a rule in the agent's own settings.
+pub(super) fn without_always_options(options: Vec<PermissionOption>) -> Vec<PermissionOption> {
+    options
+        .into_iter()
+        .filter(|option| {
+            !matches!(
+                option.kind,
+                PermissionOptionKind::AllowAlways | PermissionOptionKind::RejectAlways
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_device_hold_withholds_every_always_option() {
+        let kept = without_always_options(vec![
+            PermissionOption::new("always", "Always allow", PermissionOptionKind::AllowAlways),
+            PermissionOption::new("once", "Allow", PermissionOptionKind::AllowOnce),
+            PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
+            PermissionOption::new("never", "Never", PermissionOptionKind::RejectAlways),
+        ]);
+        let ids: Vec<&str> = kept.iter().map(|option| &*option.option_id.0).collect();
+        assert_eq!(ids, ["once", "reject"]);
+    }
 }

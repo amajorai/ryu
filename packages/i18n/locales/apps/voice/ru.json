@@ -16,6 +16,7 @@
   "A preset needs a voice.": "Для пресета требуется голос.",
   "A profile with samples needs exactly one primary sample.": "В профиле с образцами должен быть ровно один основной образец.",
   "A saved sample is used only when the selected model supports cloning.": "Сохранённый образец используется, только если выбранная модель поддерживает клонирование.",
+  "A voice can keep up to {MAX_PROFILE_SAMPLES} samples. Remove one first.": "У голоса может быть не более {MAX_PROFILE_SAMPLES} образцов. Сначала удалите один.",
   "A voice sample needs a consent record.": "Для образца голоса требуется запись о согласии.",
   "AM-radio band with heavy compression.": "Полоса AM-радио с сильной компрессией.",
   "Add": "Добавить",

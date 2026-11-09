@@ -2,24 +2,34 @@ import { describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import {
+	CORE_DREAM_ARCHIVE_REASON_FALLBACK,
 	CORE_DREAM_CHAT_SOURCE,
 	CORE_DREAM_REASON_FALLBACK,
+	CORE_DREAM_REVIEW_CONFLICTS,
+	CORE_DREAM_STALE_EVENT_REASON,
+	CORE_DREAM_STALE_EVENT_REASON_LEGACY,
 	CORE_DREAM_SUMMARY_FALLBACKS,
+	CORE_DREAM_UNDO_MEMORY_DELETED,
+	CORE_DREAM_UNDO_NOT_APPLIED,
 	dreamReason,
 	dreamSource,
 	dreamSummary,
+	reviewConflictKind,
+	undoConflictKind,
 } from "./memory-dream-copy.ts";
 
 const PLURAL =
 	"{count, plural, one {# proposal} other {# proposals}} waiting for your review.";
 
-// A Japanese catalog for the three client-owned sentences; anything else
+// A Japanese catalog for some client-owned sentences; anything else
 // formats in English, as tl() does for an untranslated literal.
 const ja: Record<string, string> = {
 	[PLURAL]: "{count} 件の提案がレビュー待ちです。",
 	"Chat decomposition": "チャットの分解",
 	"Derived from recent chat context; review before saving.":
 		"最近のチャットの文脈から導出されました。保存する前に確認してください。",
+	[CORE_DREAM_STALE_EVENT_REASON]:
+		"90 日以上前の出来事で、この 90 日間どのチャットにも使われていません。",
 };
 const tlJa: LiteralMessage = (source, values) =>
 	formatMessage(ja[source] ?? source, values ?? {});
@@ -71,11 +81,61 @@ describe("dreamReason", () => {
 		);
 	});
 
+	it("translates Core's archive rationales", () => {
+		expect(dreamReason(CORE_DREAM_STALE_EVENT_REASON, tlJa)).toBe(
+			"90 日以上前の出来事で、この 90 日間どのチャットにも使われていません。"
+		);
+		// A proposal persisted with the earlier wording reads as the current one.
+		expect(dreamReason(CORE_DREAM_STALE_EVENT_REASON_LEGACY, tlJa)).toBe(
+			"90 日以上前の出来事で、この 90 日間どのチャットにも使われていません。"
+		);
+		// Untranslated, the archive fallback still renders through tl().
+		expect(dreamReason(` ${CORE_DREAM_ARCHIVE_REASON_FALLBACK} `, tlJa)).toBe(
+			CORE_DREAM_ARCHIVE_REASON_FALLBACK
+		);
+	});
+
 	it("keeps a model-written reason unchanged", () => {
 		expect(dreamReason("ユーザーは毎朝コーヒーを飲む。", tlJa)).toBe(
 			"ユーザーは毎朝コーヒーを飲む。"
 		);
 		expect(dreamReason(undefined, tlJa)).toBeNull();
+	});
+});
+
+describe("undoConflictKind", () => {
+	it("calls a change Core no longer lists or no longer applies gone", () => {
+		expect(undoConflictKind("anything", false)).toBe("gone");
+		for (const message of CORE_DREAM_UNDO_NOT_APPLIED) {
+			expect(undoConflictKind(message, null)).toBe("gone");
+			expect(undoConflictKind(message, true)).toBe("gone");
+		}
+	});
+
+	it("tells a deleted memory apart from a later change", () => {
+		for (const message of CORE_DREAM_UNDO_MEMORY_DELETED) {
+			expect(undoConflictKind(message, true)).toBe("deleted");
+		}
+		expect(
+			undoConflictKind(
+				"revision has itself been revised; roll back the later proposal first",
+				true
+			)
+		).toBe("later");
+		expect(undoConflictKind(undefined, null)).toBe("later");
+	});
+});
+
+describe("reviewConflictKind", () => {
+	it("keeps every cause Core names", () => {
+		for (const code of CORE_DREAM_REVIEW_CONFLICTS) {
+			expect(reviewConflictKind(code)).toBe(code);
+		}
+	});
+
+	it("reads a missing or unknown code as already handled", () => {
+		expect(reviewConflictKind(undefined)).toBe("handled");
+		expect(reviewConflictKind("proposal is no longer pending")).toBe("handled");
 	});
 });
 
@@ -96,8 +156,32 @@ describe("Core literal coupling", () => {
 			...CORE_DREAM_SUMMARY_FALLBACKS,
 			CORE_DREAM_CHAT_SOURCE,
 			CORE_DREAM_REASON_FALLBACK,
+			CORE_DREAM_ARCHIVE_REASON_FALLBACK,
+			CORE_DREAM_STALE_EVENT_REASON,
 		]) {
 			expect(core).toContain(`"${literal}"`);
+		}
+	});
+
+	it("finds every review conflict code in Core", () => {
+		for (const code of CORE_DREAM_REVIEW_CONFLICTS) {
+			expect(core).toContain(`=> "${code}"`);
+		}
+	});
+
+	it("finds every matched Undo refusal in Core", () => {
+		const store = readFileSync(
+			new URL(
+				"../../../../../crates/core/memory/src/proposal_review.rs",
+				import.meta.url
+			),
+			"utf8"
+		);
+		for (const literal of CORE_DREAM_UNDO_NOT_APPLIED) {
+			expect(core).toContain(`"${literal}"`);
+		}
+		for (const literal of CORE_DREAM_UNDO_MEMORY_DELETED) {
+			expect(store).toContain(`"${literal}"`);
 		}
 	});
 });
@@ -124,6 +208,17 @@ describe("shipped catalogs", () => {
 		expect(
 			dreamSummary({ proposals: [1, 2, 3], summary: fallback }, tlFor("de"))
 		).toBe("3 Vorschläge warten auf Prüfung.");
+	});
+
+	it("renders the stale-event reason, old wording included, in German", () => {
+		const german =
+			"Dieses Ereignis ist älter als 90 Tage und wurde in den letzten 90 Tagen in keinem Chat verwendet.";
+		expect(dreamReason(CORE_DREAM_STALE_EVENT_REASON, tlFor("de"))).toBe(
+			german
+		);
+		expect(dreamReason(CORE_DREAM_STALE_EVENT_REASON_LEGACY, tlFor("de"))).toBe(
+			german
+		);
 	});
 
 	it("renders the Arabic dual form instead of Core's English", () => {

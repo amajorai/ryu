@@ -314,8 +314,21 @@ function reachLabel(reach: PromptEditReach, tl: LiteralMessage): string {
 	}
 }
 
-/** Field labels that read as plural nouns ("The instructions are …"). */
-const PLURAL_LABEL = /(instructions|skills|replies|goals)$/i;
+/**
+ * A changed setting's label, already translated. A label that names a plural
+ * noun ("The instructions", "Skills") is wrapped with `pluralField`, so the
+ * verb agrees without reading the label's English text.
+ */
+export type PromptField = string | { label: string; plural: true };
+
+/** Marks a translated label as a plural noun ("The instructions are …"). */
+export function pluralField(label: string): PromptField {
+	return { label, plural: true };
+}
+
+function promptFieldLabel(field: PromptField): string {
+	return typeof field === "string" ? field : field.label;
+}
 
 /**
  * The confirmation shown before saving a setting that Core injects into the
@@ -328,17 +341,20 @@ const PLURAL_LABEL = /(instructions|skills|replies|goals)$/i;
  * save without asking.
  */
 export function promptEditCacheWarning(
-	changed: readonly string[],
+	changed: readonly PromptField[],
 	reach: PromptEditReach,
 	tl: LiteralMessage
 ): { description: string; title: string } | null {
-	const fields = changed.filter((field) => field.trim().length > 0);
-	if (fields.length === 0) {
+	const fields = changed.filter(
+		(field) => promptFieldLabel(field).trim().length > 0
+	);
+	const [first] = fields;
+	if (first === undefined) {
 		return null;
 	}
-	const list = formatList(fields, "conjunction");
+	const list = formatList(fields.map(promptFieldLabel), "conjunction");
 	const number =
-		fields.length === 1 && !PLURAL_LABEL.test(list) ? "singular" : "plural";
+		fields.length === 1 && typeof first === "string" ? "singular" : "plural";
 	return {
 		title: tl("Apply now? This resets the prompt cache"),
 		description: tl(

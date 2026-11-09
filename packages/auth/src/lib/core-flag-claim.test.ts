@@ -17,6 +17,7 @@ import {
 	coreClaimFlagKeys,
 	coreFlagClaimFromValues,
 	INDIVIDUAL_PLANS_FLAG,
+	MOBILE_DEVICE_TOOLS_FLAG,
 } from "./feature-flags.ts";
 
 /**
@@ -217,6 +218,7 @@ describe("catalog", () => {
 			CLOUD_TASKS_SUBSCRIPTION_BACKENDS_FLAG,
 			CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG,
 			CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_ANTHROPIC_FLAG,
+			MOBILE_DEVICE_TOOLS_FLAG,
 		]);
 		expect(coreFlagClaimFromValues({})).toEqual([]);
 	});

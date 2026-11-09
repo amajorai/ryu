@@ -21,6 +21,7 @@
     "./continuity": "./src/continuity.ts",
     "./credential-scope": "./src/credential-scope.ts",
     "./deep-link": "./src/deep-link.ts",
+    "./device-tools": "./src/device-tools.ts",
     "./feature-flags": "./src/feature-flags.ts",
     "./hardware": "./src/hardware.ts",
     "./interfaces": "./src/interfaces.ts",

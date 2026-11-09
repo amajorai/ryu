@@ -58,6 +58,7 @@ use serde::{Deserialize, Serialize};
 // re-exports below.
 mod guardrails;
 mod node_kind;
+mod composio_trigger_owner;
 mod persist;
 mod policies;
 mod references;

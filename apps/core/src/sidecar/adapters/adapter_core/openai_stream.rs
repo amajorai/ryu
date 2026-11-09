@@ -155,7 +155,7 @@ where
 
     let OpenAiToolPlan {
         tools_payload,
-        client_tool_mode,
+        modes,
         cloud_tool_mode,
         untrusted_caller,
         cloud_box_machine_tools,
@@ -175,6 +175,7 @@ where
     let agent_control_applied = req.agent_control_applied.clone();
     let client_tool_owner_user_id = req.author_user_id.clone();
     let client_tool_conversation_id = req.conversation_id.clone();
+    let device_offer = req.device.device_tools_offer.clone();
     // Keyed like the ACP plane (`req.agent_id`), so one agent's cache countdown
     // is the same entry whichever plane served its last turn.
     let cache_warmth_agent_id = req.agent_id.clone().unwrap_or_default();
@@ -399,6 +400,7 @@ where
                 cloud_box_machine_tools,
                 client_tool_conversation_id: client_tool_conversation_id.as_deref(),
                 client_tool_owner_user_id: &client_tool_owner_user_id,
+                device_offer: device_offer.as_deref(),
                 traces: &traces,
                 session_id: &session_id,
                 agent_id: &agent_id,
@@ -409,7 +411,7 @@ where
                 let frames = openai_tool_round_frames(
                     &st.tool_calls,
                     st.iter_reply,
-                    client_tool_mode,
+                    modes,
                     tool_env,
                     &mut oai_messages,
                 );

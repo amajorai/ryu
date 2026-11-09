@@ -101,10 +101,9 @@ function takeFailure(
 function makeStoredJob(body: CreateJobBody, id: string): StoredJob {
 	// The request-only quick slot flag is not part of Core's saved job DTO.
 	const { quick_routine: _quickRoutine, ...stored } = body;
-	const target = { ...stored.target };
-	if (target.conversation_id === null) {
-		delete target.conversation_id;
-	}
+	// Core omits a null conversation id from the saved target.
+	const { conversation_id: conversationId, ...unbound } = stored.target;
+	const target = conversationId === null ? unbound : { ...stored.target };
 	return {
 		...stored,
 		target,
@@ -407,7 +406,7 @@ test("changes agent, transcript chat, and weekly UTC day/time in the Calendar ro
 	const agentSelect = page.getByLabel("Agent");
 	await expect(agentSelect).toHaveValue("agent-release");
 	await page.getByLabel("Schedule").selectOption("weekly");
-	await page.getByLabel("Day").selectOption("thursday");
+	await page.getByLabel("Day of week").selectOption("thursday");
 	await page.getByLabel("Time (UTC)").fill("07:45");
 	await page.getByLabel("Transcript destination").selectOption("existing");
 	const chatSelect = page.getByLabel("Persistent chat");

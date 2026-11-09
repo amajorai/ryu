@@ -290,10 +290,11 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		targetIdRef,
 	});
 
-	// An app asked a question on the user's behalf (`assistant.open({ prompt })`)
+	// A first-party shell caller (browser / file annotations) queued a prompt
 	// while the panel was closed — the panel unmounts when closed, so the store
 	// held it. Send it once and clear the queue immediately, before the async send
-	// resolves, so a re-render can never send it twice.
+	// resolves, so a re-render can never send it twice. App-suggested text
+	// (`assistant.open({ prompt })`) is `pendingDraft` instead: composer only.
 	const pendingPrompt = useAssistantStore((s) => s.pendingPrompt);
 	const setPendingPrompt = useAssistantStore((s) => s.setPendingPrompt);
 	useEffect(() => {
@@ -303,6 +304,8 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		setPendingPrompt(null);
 		handleSend({ role: "user", content: pendingPrompt });
 	}, [pendingPrompt, setPendingPrompt, handleSend]);
+	const pendingDraft = useAssistantStore((s) => s.pendingDraft);
+	const consumePendingDraft = useAssistantStore((s) => s.consumePendingDraft);
 
 	const handleOpenFullScreen = useCallback(() => {
 		// Carry THIS conversation into a full `/chat` tab, then close the panel so
@@ -427,6 +430,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 						}
 						composerMenuGroups={activeComposer.composerMenuGroups}
 						composerPrompt={permissionComposerPrompt}
+						draftInsertion={pendingDraft ?? undefined}
 						emptyStateFooter={
 							bare && !isBuilder ? (
 								<RyuAssistantRecentChats
@@ -443,6 +447,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 						messages={displayMessages}
 						onAgentUiSubmit={handleAgentUiSubmit}
 						onComposerMenuSelect={activeComposer.onComposerMenuSelect}
+						onDraftInsertionConsumed={consumePendingDraft}
 						onRetryGeneration={handleRetryGeneration}
 						onSend={handleSend}
 						onSpeak={handleSpeak}

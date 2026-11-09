@@ -1,3 +1,4 @@
+import { translate as tl } from "@ryu/i18n/lite";
 import { useEffect } from "react";
 import { z } from "zod";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -111,22 +112,26 @@ export function useOnboardingSyncEffects({
 		listenWhenReady<InstallerProgress>("installer-progress", ({ payload }) => {
 			const percent = payload.percent ?? null;
 			if (payload.phase === "binary") {
-				const label = installerComponentLabel(payload.component);
+				// The component label is catalog copy ("the model gateway"); translate
+				// it too, or a localized sentence would carry an English name.
+				const componentLabel = tl(installerComponentLabel(payload.component));
 				if (payload.status === "started") {
-					liveStatusRef.current = `Installing ${label}…`;
+					liveStatusRef.current = tl("Installing {componentLabel}…", {
+						componentLabel,
+					});
 				} else if (
 					payload.status === "complete" ||
 					payload.status === "skipped"
 				) {
-					reportDone(`${label} installed`);
+					reportDone(tl("{componentLabel} installed", { componentLabel }));
 					liveStatusRef.current = null;
 				}
 				updateLocalPercent(percent);
 			} else if (payload.phase === "core") {
 				if (payload.status === "started") {
-					liveStatusRef.current = "Starting Ryu Core…";
+					liveStatusRef.current = tl("Starting Ryu Core…");
 				} else if (payload.status === "complete") {
-					reportDone("Ryu Core is healthy");
+					reportDone(tl("Ryu Core is healthy"));
 					liveStatusRef.current = null;
 				}
 				updateLocalPercent(percent);
@@ -135,8 +140,9 @@ export function useOnboardingSyncEffects({
 					payload.component === "bundled-defaults" &&
 					payload.status === "started"
 				) {
-					liveStatusRef.current =
-						"Installing bundled models, engines, and skills…";
+					liveStatusRef.current = tl(
+						"Installing bundled models, engines, and skills…"
+					);
 				} else if (
 					payload.component === "bundled-defaults" &&
 					payload.status === "skipped"

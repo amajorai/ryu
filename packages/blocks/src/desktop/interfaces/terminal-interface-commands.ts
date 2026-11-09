@@ -12,8 +12,52 @@ import {
 	type NewEntry,
 } from "./terminal-interface-entries.ts";
 import { resolveStartTarget } from "./terminal-model.ts";
+import type { TerminalSegment } from "./terminal-output.tsx";
 
 type PushEntries = (...blocks: NewEntry[]) => void;
+
+/**
+ * Stands in for a placeholder so a translated line can be split around it.
+ * Its Latin letters make a right-to-left formatter isolate it, so the split
+ * leaves FSI and PDI around the emphasised value.
+ */
+const SLOT = "\u{E000}slot\u{E000}";
+
+/**
+ * One translated sentence as muted segments around its emphasised value, so
+ * each locale keeps its own word order and the value keeps its own styling.
+ */
+function slotted(
+	text: string,
+	value: TerminalSegment[],
+	tone: TerminalSegment["tone"] = "muted"
+): TerminalSegment[] {
+	const at = text.indexOf(SLOT);
+	const before = at < 0 ? text : text.slice(0, at);
+	const after = at < 0 ? "" : text.slice(at + SLOT.length);
+	return [
+		...(before ? [{ text: before, tone }] : []),
+		...value,
+		...(after ? [{ text: after, tone }] : []),
+	];
+}
+
+/** The line printed when the open thread is closed. */
+export const closedLine = (tl: LiteralMessage, title: string): string =>
+	tl("Closed {title}", { title });
+
+/** The line printed when a thread is opened, its title emphasised. */
+export const openedLine = (
+	tl: LiteralMessage,
+	title: string,
+	number: number | null
+): TerminalSegment[] =>
+	slotted(tl("Opened {title}", { title: SLOT }), [
+		...(number === null
+			? []
+			: [{ text: `#${number} `, tone: "muted" as const }]),
+		{ text: title },
+	]);
 
 /** What starting a thread from the prompt reads and acts through. */
 export interface TerminalStartContext {
@@ -42,26 +86,24 @@ export const startThread = (
 						text: tl("new: no agent, team, or project @{handle}", { handle }),
 						tone: "error",
 					},
-					{
-						text: target.close ? " did you mean " : " try ",
-						tone: "muted",
-					},
-					...target.suggestions.flatMap((suggestion, index) => [
-						...(index > 0 ? [{ text: ", ", tone: "muted" as const }] : []),
-						{
-							action: {
-								kind: "fill" as const,
-								value: `${suggestion} ${message}`,
+					{ text: " ", tone: "muted" },
+					...slotted(
+						target.close
+							? tl("Did you mean {command}?", { command: SLOT })
+							: tl("Try {command}", { command: SLOT }),
+						target.suggestions.flatMap((suggestion, index) => [
+							...(index > 0 ? [{ text: ", ", tone: "muted" as const }] : []),
+							{
+								action: {
+									kind: "fill" as const,
+									value: `${suggestion} ${message}`,
+								},
+								label: tr("Use {suggestion}", { suggestion }),
+								text: suggestion,
+								tone: "primary" as const,
 							},
-							label: tr("Use {suggestion}", { suggestion }),
-							text: suggestion,
-							tone: "primary" as const,
-						},
-					]),
-					{
-						text: target.close && target.suggestions.length > 0 ? "?" : "",
-						tone: "muted",
-					}
+						])
+					)
 				)
 			);
 			return;
@@ -70,8 +112,9 @@ export const startThread = (
 			push(
 				line(
 					{ text: "→ ", tone: "success" },
-					{ text: "started a thread with ", tone: "muted" },
-					{ text: agentHandle(target.agent.name), tone: "primary" }
+					...slotted(tl("started a thread with {handle}", { handle: SLOT }), [
+						{ text: agentHandle(target.agent.name), tone: "primary" },
+					])
 				)
 			);
 			return;
@@ -84,11 +127,13 @@ export const startThread = (
 			push(
 				line(
 					{ text: "→ ", tone: "success" },
-					{
-						text: `${tl("started a thread in {kind}", { kind: target.group.kind })} `,
-						tone: "muted",
-					},
-					{ text: target.group.name, tone: "primary" }
+					...slotted(
+						tl(
+							"started a thread in {kind, select, team {team {name}} other {project {name}}}",
+							{ kind: target.group.kind, name: SLOT }
+						),
+						[{ text: target.group.name, tone: "primary" }]
+					)
 				)
 			);
 			return;
@@ -97,7 +142,7 @@ export const startThread = (
 			push(
 				line(
 					{ text: "→ ", tone: "success" },
-					{ text: "started a new thread", tone: "muted" }
+					{ text: tl("started a new thread"), tone: "muted" }
 				)
 			);
 	}

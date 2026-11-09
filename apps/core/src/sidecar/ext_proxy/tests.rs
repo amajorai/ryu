@@ -10,6 +10,8 @@ mod forwarding;
 mod host_calls;
 mod kernel_table;
 mod manifests;
+mod member_admission;
+mod notify_links;
 mod permissions;
 mod public_mount_policy;
 mod public_mounts;

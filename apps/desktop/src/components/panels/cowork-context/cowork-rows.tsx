@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { FileTypeIcon } from "@ryu/blocks/desktop/agent-elements/file-type-icon.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { type ReactNode, useId, useState } from "react";
@@ -91,16 +92,62 @@ function EmptyHint({ children }: { children: ReactNode }) {
 	return <p className="py-1 text-muted-foreground text-xs">{children}</p>;
 }
 
+export type OverflowKind =
+	| "artifacts"
+	| "files"
+	| "items"
+	| "sideChats"
+	| "steps"
+	| "subagents";
+
+/**
+ * "+N more <things>" as one whole message per kind, so the count, the plural
+ * form and the noun translate together instead of as English fragments.
+ */
+function useOverflowCopy(kind: OverflowKind, count: number): string {
+	const tl = useLiteralMessages();
+	switch (kind) {
+		case "artifacts":
+			return tl(
+				"{count, plural, one {+# more artifact} other {+# more artifacts}}",
+				{ count }
+			);
+		case "files":
+			return tl("{count, plural, one {+# more file} other {+# more files}}", {
+				count,
+			});
+		case "items":
+			return tl("{count, plural, one {+# more item} other {+# more items}}", {
+				count,
+			});
+		case "sideChats":
+			return tl(
+				"{count, plural, one {+# more side chat} other {+# more side chats}}",
+				{ count }
+			);
+		case "steps":
+			return tl("{count, plural, one {+# more step} other {+# more steps}}", {
+				count,
+			});
+		default:
+			return tl(
+				"{count, plural, one {+# more subagent} other {+# more subagents}}",
+				{ count }
+			);
+	}
+}
+
 export function OverflowRow({
 	count,
-	label,
+	kind,
 	onShowAll,
 }: {
 	count: number;
-	label: string;
+	kind: OverflowKind;
 	onShowAll?: () => void;
 }) {
-	const copy = `+${count} more ${label}`;
+	const tl = useLiteralMessages();
+	const copy = useOverflowCopy(kind, count);
 	if (!onShowAll) {
 		return <li className="px-2 py-1 text-muted-foreground text-xs">{copy}</li>;
 	}
@@ -112,7 +159,7 @@ export function OverflowRow({
 				type="button"
 			>
 				<span>{copy}</span>
-				<span className="ms-auto text-xs">View all</span>
+				<span className="ms-auto text-xs">{tl("View all")}</span>
 			</button>
 		</li>
 	);
@@ -176,7 +223,7 @@ export function ProgressSection({
 					</span>
 				</li>
 			))}
-			{overflow > 0 && <OverflowRow count={overflow} label="steps" />}
+			{overflow > 0 && <OverflowRow count={overflow} kind="steps" />}
 		</ul>
 	);
 }
@@ -339,7 +386,7 @@ function SourceGroup({
 						<SourceItemRow item={item} key={item.id} />
 					))}
 					{overflow > 0 && (
-						<OverflowRow count={overflow} label="items" onShowAll={onShowAll} />
+						<OverflowRow count={overflow} kind="items" onShowAll={onShowAll} />
 					)}
 				</ul>
 			)}

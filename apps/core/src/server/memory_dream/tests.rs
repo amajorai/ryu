@@ -82,7 +82,7 @@ fn candidate_text_is_trimmed_bounded_and_keyed_case_insensitively() {
 #[test]
 fn prompt_lists_each_source_with_its_citable_message_id() {
     let source = sources::DreamSource {
-        conversation_id: "c1".to_owned(),
+        conversation_id: Some("c1".to_owned()),
         conversation_title: "Trip planning".to_owned(),
         message_id: "m-42".to_owned(),
         role: "user".to_owned(),
@@ -219,6 +219,8 @@ async fn sources_keep_only_non_empty_user_and_assistant_messages() {
             ("user".to_owned(), "I prefer window seats.".to_owned()),
         ]
     );
-    assert!(loaded.iter().all(|source| source.conversation_id == "c1"));
+    assert!(loaded
+        .iter()
+        .all(|source| source.conversation_id.as_deref() == Some("c1")));
     assert!(loaded.iter().all(|source| !source.message_id.is_empty()));
 }

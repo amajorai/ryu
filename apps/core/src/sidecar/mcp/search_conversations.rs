@@ -42,7 +42,7 @@ const EXACT_WEIGHT: f32 = 1.0;
 const SEMANTIC_WEIGHT: f32 = 1.0;
 
 fn search_schema() -> Value {
-    json!({
+    let mut schema = json!({
         "type": "object",
         "properties": {
             "query": {
@@ -81,7 +81,9 @@ fn search_schema() -> Value {
             }
         },
         "required": ["query"]
-    })
+    });
+    window::extend_schema(&mut schema);
+    schema
 }
 
 /// The search tools exposed through the registry.
@@ -95,7 +97,8 @@ pub fn tools() -> Vec<RegistryTool> {
              strings, file names). Returns matching message snippets with conversation id and \
              title, message id, role, timestamp, which search matched, and a relevance score. \
              Use to recall earlier discussions, decisions, or facts from prior chats; narrow \
-             with since/until for a time range."
+             with since/until for a time range. Pass around_message_id (a result's message_id) \
+             to read the surrounding transcript before relying on a snippet."
                 .to_owned(),
         ),
         input_schema: Some(search_schema()),
@@ -283,56 +286,6 @@ pub(crate) fn merge_hits(
     }
 }
 
-/// Resolve the conversation ids a search may touch.
-///
-/// **Tenancy.** This was the single worst leak in Core: `search_messages` took a
-/// CALLER-SUPPLIED `conversation_ids` list and applied no tenancy filter at all, so
-/// on an org-bound node "search my past conversations for the Q3 numbers" ran
-/// semantic search across EVERY user's messages and printed the snippets into the
-/// asking user's thread. Its REST twin (`search_conversations_handler`) already
-/// filtered via `visible_conversation_ids`; that asymmetry WAS the bug.
-///
-/// The caller-supplied `conversation_ids` is an **INTERSECTION** with
-/// `principal`'s visible set (and the server-owned scope), never a widening.
-/// Omitting the argument searches the visible set; naming someone else's
-/// conversation searches nothing. `Unrestricted` (unbound personal node) keeps
-/// the caller's list exactly as supplied. Both exact and semantic searches use
-/// the id set this returns.
-async fn resolve_conversation_ids(
-    arguments: &Value,
-    store: &ConversationStore,
-    principal: &ToolPrincipal,
-    conversation_scope: Option<&[String]>,
-) -> Result<Option<Vec<String>>> {
-    let requested_ids: Option<Vec<String>> = arguments
-        .get("conversation_ids")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect()
-        });
-    let in_scope = |id: &String| conversation_scope.is_none_or(|scope| scope.contains(id));
-
-    if matches!(principal, ToolPrincipal::Unrestricted) {
-        return Ok(match (requested_ids, conversation_scope) {
-            (Some(requested), Some(_)) => Some(requested.into_iter().filter(in_scope).collect()),
-            (None, Some(scope)) => Some(scope.to_vec()),
-            (requested, None) => requested,
-        });
-    }
-    // THE GATE — the same `TENANCY_VISIBLE_PREDICATE` the REST search uses.
-    let (uid, org, bound) = principal.filter_args();
-    let visible = store.visible_conversation_ids(uid, org, bound).await?;
-    Ok(Some(
-        requested_ids
-            .unwrap_or_else(|| visible.clone())
-            .into_iter()
-            .filter(|id| visible.contains(id) && in_scope(id))
-            .collect(),
-    ))
-}
-
 fn unavailable(error: &str) -> Value {
     json!({ "ok": false, "available": false, "error": error, "results": [], "count": 0 })
 }
@@ -362,6 +315,16 @@ pub async fn dispatch_scoped(
 ) -> Result<Value> {
     if tool != "search" {
         return Err(anyhow!("unknown search_conversations tool '{tool}'"));
+    }
+    if let Some(message_id) = window::around_message_id(&arguments)? {
+        return window::dispatch_window(
+            message_id,
+            &arguments,
+            store,
+            principal,
+            conversation_scope,
+        )
+        .await;
     }
     let query = arguments
         .get("query")
@@ -469,6 +432,13 @@ fn truncate(text: &str) -> String {
     out.push('…');
     out
 }
+
+#[path = "search_conversations_visibility.rs"]
+mod visibility;
+use visibility::resolve_conversation_ids;
+
+#[path = "search_conversations_window.rs"]
+mod window;
 
 #[cfg(test)]
 #[path = "search_conversations_tests.rs"]

@@ -24,6 +24,7 @@ import {
 	MEMORY_SCOPES,
 	type Memory,
 	type MemoryCategory,
+	type MemoryLifecycle,
 	type MemoryScope,
 	memoryCategoryLabels,
 	memoryScopeLabels,
@@ -99,8 +100,17 @@ export const categoryFilterItems = (labels: Record<MemoryCategory, string>) => [
 	...MEMORY_CATEGORIES.map((c) => ({ label: labels[c], value: c })),
 ];
 
-/** A single memory row: the content, one muted meta line, at most one
- *  Sensitive badge, and a hover `⋯` with Edit and Delete. */
+/** The badge on a memory that is history rather than recalled. */
+const LIFECYCLE_LABELS = {
+	active: "Active",
+	archived: "Archived",
+	retracted: "Undone",
+	superseded: "Replaced",
+} satisfies Record<MemoryLifecycle, string>;
+
+/** A single memory row: the content, one muted meta line, a lifecycle badge
+ *  on history, at most one Sensitive badge, and a hover `⋯` with Edit (active
+ *  memories only) and Delete. */
 export function MemoryRow({
 	memory,
 	onDelete,
@@ -122,10 +132,16 @@ export function MemoryRow({
 		tl("Importance {importance}", { importance: memory.importance }),
 		...memory.tags.map((tag) => `#${tag}`),
 	].join(" · ");
+	const active = memory.lifecycle === "active";
 	return (
 		<li className="group/mem flex items-start gap-3 border-border border-b py-3 last:border-b-0">
 			<div className="min-w-0 flex-1">
-				<p className="whitespace-pre-wrap text-foreground text-sm">
+				<p
+					className={cn(
+						"whitespace-pre-wrap text-sm",
+						active ? "text-foreground" : "text-muted-foreground"
+					)}
+				>
 					{memory.content}
 				</p>
 				{memory.whenToUse ? (
@@ -135,6 +151,11 @@ export function MemoryRow({
 				) : null}
 				<p className="mt-1 flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
 					<span>{meta}</span>
+					{active ? null : (
+						<Badge data-testid="memory-lifecycle" variant="outline">
+							{LIFECYCLE_LABELS[memory.lifecycle]}
+						</Badge>
+					)}
 					{memory.sensitiveTopics.length > 0 ? (
 						<Badge tint="amber" variant="secondary">
 							Sensitive topic
@@ -156,11 +177,15 @@ export function MemoryRow({
 					}
 				/>
 				<DropdownMenuContent align="end" className="min-w-40">
-					<DropdownMenuItem onClick={() => onEdit(memory)}>
-						<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
-						Edit memory
-					</DropdownMenuItem>
-					<DropdownMenuSeparator />
+					{active ? (
+						<>
+							<DropdownMenuItem onClick={() => onEdit(memory)}>
+								<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
+								Edit memory
+							</DropdownMenuItem>
+							<DropdownMenuSeparator />
+						</>
+					) : null}
 					<DropdownMenuItem
 						onClick={() => onDelete(memory)}
 						variant="destructive"

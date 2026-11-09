@@ -64,7 +64,7 @@ pub(super) async fn load_related_memories(
     Ok(select_related(owned, &ranked))
 }
 
-fn entry_owner(entry: &memory::LongTermEntry) -> &str {
+pub(super) fn entry_owner(entry: &memory::LongTermEntry) -> &str {
     entry.owner_user_id.as_deref().unwrap_or(memory::LOCAL_USER)
 }
 

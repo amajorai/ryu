@@ -16,7 +16,6 @@ where
     let TurnPlane {
         req,
         registry,
-        agent_store,
         mcp,
         skills,
         traces,
@@ -30,7 +29,7 @@ where
         project_instructions,
         project_rules,
         memory_citations,
-        working_memory_tool_withheld,
+        tool_allowlist,
         provider_access,
         sampling,
         sampling_engine,
@@ -91,32 +90,8 @@ where
             // Governed chat tool loop (R1 / A2): enabled ONLY on this
             // branch — chat egress is via the healthy gateway, so every
             // tool dispatch is governed through `/v1/exec/tool` (D5). The
-            // agent's allowlist narrows which app render tools are offered.
-            let tool_allowlist = resolve_agent_tool_allowlist(
-                effective_agent_id.as_deref(),
-                registry.as_ref(),
-                &agent_store,
-            )
-            .await;
-            let tool_allowlist = match req.public_agent_policy.as_ref() {
-                Some(policy) => Some(
-                    restrict_public_agent_tool_allowlist(mcp.as_ref(), tool_allowlist, policy)
-                        .await,
-                ),
-                None => tool_allowlist,
-            };
-            let tool_allowlist =
-                caller_scoped_tool_allowlist(req.untrusted_caller, mcp.as_ref(), tool_allowlist);
-            let tool_allowlist = if req.read_only_tools {
-                Some(restrict_read_only_tool_allowlist(mcp.as_ref(), tool_allowlist).await)
-            } else {
-                tool_allowlist
-            };
-            let tool_allowlist = if working_memory_tool_withheld {
-                Some(withhold_working_memory_tool_allowlist(mcp.as_ref(), tool_allowlist).await)
-            } else {
-                tool_allowlist
-            };
+            // agent's allowlist (resolved once per turn by
+            // `turn_tool_allowlist`) narrows which tools are offered.
             // Suggestions are discovery for the owner's own tools; an
             // unverified caller gets none, so no hint can widen the turn.
             let capability_suggestions_enabled = !req.untrusted_caller;
@@ -196,6 +171,9 @@ where
             "ryu-gateway unreachable; falling back to direct provider (degraded mode)"
         );
     }
+    // This leg runs no tool loop, so the memory guide (added for a route that
+    // offers tools) would name tools the model cannot call.
+    let long_term_system = long_term_system_without_memory_usage_hint(long_term_system);
     // Only Gateway enforces which of the user's providers an agent may
     // use, so a limited agent never takes a provider key around it.
     if !crate::agent_access::direct_provider_permitted(

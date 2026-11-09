@@ -1335,7 +1335,7 @@ pub fn plan_update_dep_closure(
 /// yet exist), this function returns an allow-all result. The stub is explicit
 /// and logged so it is visible in tests and operator logs. This is the noted
 /// seam: full Gateway-side storage is the Gateway's concern.
-async fn validate_grants_via_gateway(
+pub(super) async fn validate_grants_via_gateway(
     grants: &[String],
     app_id: &str,
     gateway_base_url: &str,

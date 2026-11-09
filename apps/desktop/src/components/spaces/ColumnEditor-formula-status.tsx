@@ -44,7 +44,7 @@ export function FormulaStatus({
 				"error" in status ? "text-destructive" : "text-muted-foreground"
 			)}
 		>
-			{"error" in status ? status.error : "Formula is valid"}
+			{"error" in status ? status.error : tl("Formula is valid")}
 		</p>
 	);
 }

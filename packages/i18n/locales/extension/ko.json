@@ -178,7 +178,6 @@
   "I've saved them": "저장했습니다",
   "I've scanned it": "스캔했습니다",
   "Import browser bookmarks": "브라우저 북마크 가져오기",
-  "Imported {imported} bookmarks": "북마크 {imported}개를 가져왔습니다",
   "Importing bookmarks…": "북마크를 가져오는 중…",
   "Improve writing": "글 다듬기",
   "In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.": "인증 앱에서 <strong>설정 키 입력</strong>을 선택하고 이 키를 붙여넣으세요.",
@@ -371,8 +370,9 @@
   "plugin bundle does not export activate(context)": "플러그인 번들이 activate(context)를 내보내지 않습니다",
   "{current} of {total}": "{total}개 중 {current}번째",
   "{current} of {total}: {match}": "{total}개 중 {current}번째: {match}",
+  "{imported, plural, one {Imported # bookmark} other {Imported # bookmarks}}": "{imported, plural, other {북마크 #개를 가져왔습니다}}",
   "{ipAddress} · Created {createdAgo}": "{ipAddress} · 생성: {createdAgo}",
   "{label} will be signed out and must sign in again to use your account.": "{label}에서 로그아웃되며, 계정을 사용하려면 다시 로그인해야 합니다.",
   "{matchCount, plural, one {# local result} other {# local results}}": "{matchCount, plural, other {로컬 결과 #개}}",
-  "{skipped} duplicate links skipped": "중복 링크 {skipped}개를 건너뛰었습니다"
+  "{skipped, plural, one {# duplicate link skipped} other {# duplicate links skipped}}": "{skipped, plural, other {중복 링크 #개 건너뜀}}"
 }

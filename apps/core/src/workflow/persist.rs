@@ -4,7 +4,17 @@
 use super::*;
 
 pub async fn persist_workflow(workflow: Workflow) -> Result<Workflow, String> {
-    persist_workflow_with_revision(workflow, None)
+    persist_workflow_as(workflow, None).await
+}
+
+/// [`persist_workflow`] on behalf of the verified user saving it, who becomes
+/// the subscriber of its Composio triggers (and must own their accounts on an
+/// organization-bound node).
+pub async fn persist_workflow_as(
+    workflow: Workflow,
+    saver_user_id: Option<&str>,
+) -> Result<Workflow, String> {
+    persist_workflow_with_revision(workflow, None, saver_user_id)
         .await
         .map_err(|error| match error {
             WorkflowPersistError::Invalid(message) => message,
@@ -19,16 +29,20 @@ pub enum WorkflowPersistError {
     RevisionConflict(Option<String>),
 }
 
-pub async fn persist_workflow_guarded(
+/// Save with a revision guard on behalf of the verified user saving it, who
+/// becomes the subscriber of its Composio triggers.
+pub async fn persist_workflow_guarded_as(
     workflow: Workflow,
+    saver_user_id: Option<&str>,
 ) -> Result<Workflow, WorkflowPersistError> {
     let expected_revision = workflow.updated_at.clone();
-    persist_workflow_with_revision(workflow, expected_revision).await
+    persist_workflow_with_revision(workflow, expected_revision, saver_user_id).await
 }
 
 async fn persist_workflow_with_revision(
     mut workflow: Workflow,
     expected_revision: Option<String>,
+    saver_user_id: Option<&str>,
 ) -> Result<Workflow, WorkflowPersistError> {
     // Validate the DAG before persisting so callers never store a broken graph.
     WorkflowGraph::build(&workflow).map_err(|e| WorkflowPersistError::Invalid(e.to_string()))?;
@@ -41,6 +55,9 @@ async fn persist_workflow_with_revision(
         ));
     }
     ensure_agents_active(&workflow)
+        .await
+        .map_err(WorkflowPersistError::Invalid)?;
+    super::composio_trigger_owner::refuse_foreign_composio_accounts(&workflow, saver_user_id)
         .await
         .map_err(WorkflowPersistError::Invalid)?;
 
@@ -74,7 +91,7 @@ async fn persist_workflow_with_revision(
             }
         }
     })?;
-    reconcile_triggers(&workflow).await;
+    reconcile_triggers(&workflow, saver_user_id.unwrap_or_default()).await;
     Ok(workflow)
 }
 
@@ -139,8 +156,9 @@ fn generate_webhook_secret() -> String {
 /// fire it. Idempotent and best-effort (logs and swallows errors):
 ///   - Schedule triggers → deterministic `wf-sched-<id>-*` scheduler jobs.
 ///   - Composio triggers → workflow-target Composio subscriptions.
-/// Manual / Webhook declare no external resource here.
-pub async fn reconcile_triggers(workflow: &Workflow) {
+/// Manual / Webhook declare no external resource here. `subscriber_user_id` is
+/// the verified saver recorded on each Composio subscription (empty when none).
+pub async fn reconcile_triggers(workflow: &Workflow, subscriber_user_id: &str) {
     // Schedules are local + fast, so reconcile inline.
     triggers::apply_schedule_reconcile(&workflow.id, &workflow.name, &workflow.triggers);
 
@@ -206,7 +224,8 @@ pub async fn reconcile_triggers(workflow: &Workflow) {
                 continue;
             };
             if let Err(e) = store
-                .subscribe_workflow(
+                .subscribe_workflow_as(
+                    subscriber_user_id,
                     &workflow.id,
                     toolkit,
                     trigger_slug,
@@ -316,11 +335,54 @@ mod tests {
             )],
             Vec::new(),
         );
-        let refused =
-            with_test_node_binding(true, Some(org_node), persist_workflow_guarded(looping)).await;
+        let refused = with_test_node_binding(
+            true,
+            Some(org_node),
+            persist_workflow_guarded_as(looping, None),
+        )
+        .await;
         assert!(matches!(
             refused,
             Err(WorkflowPersistError::Invalid(message)) if message.contains("nested-workflow")
         ));
+    }
+
+    /// A save with no verified saver on an organization-bound node can never
+    /// subscribe a Composio trigger on someone's account, and stores nothing.
+    #[tokio::test]
+    async fn org_bound_node_refuses_an_unverified_composio_trigger_save() {
+        use crate::sidecar::control_plane::{
+            with_test_node_binding, NodeScope, RegisteredNode, RegisteredOrg,
+        };
+        let org_node = RegisteredNode {
+            org: RegisteredOrg {
+                id: "org1".to_owned(),
+                name: "Org".to_owned(),
+                slug: None,
+            },
+            node_id: "node-1".to_owned(),
+            scope: NodeScope::Org,
+            team_id: None,
+            owner_user_id: None,
+        };
+        let id = format!("wf_composio_owner_{}", uuid::Uuid::new_v4().simple());
+        let mut trigger_workflow = workflow(id.clone(), "mail", Vec::new(), Vec::new());
+        trigger_workflow.triggers = vec![WorkflowTrigger::Composio {
+            toolkit: "gmail".to_owned(),
+            trigger_slug: "GMAIL_NEW_GMAIL_MESSAGE".to_owned(),
+            connected_account_id: Some("ca_victim".to_owned()),
+        }];
+        let refused = with_test_node_binding(
+            true,
+            Some(org_node),
+            persist_workflow_guarded_as(trigger_workflow, None),
+        )
+        .await;
+        assert!(matches!(
+            refused,
+            Err(WorkflowPersistError::Invalid(message))
+                if message == super::super::composio_trigger_owner::UNVERIFIED_SAVER
+        ));
+        assert!(store::load_workflow(&id).is_err(), "nothing was saved");
     }
 }

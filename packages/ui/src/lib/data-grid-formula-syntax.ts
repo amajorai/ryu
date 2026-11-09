@@ -45,6 +45,29 @@ export class FormulaFailure extends Error {
 	}
 }
 
+/**
+ * The fixed sentences a malformed formula fails with, translated where they
+ * are thrown so the column editor shows them in the UI language.
+ */
+export const FORMULA_FAILURE_MESSAGES = {
+	endsUnexpectedly: "Formula ends unexpectedly",
+	missingBrace: "Missing } after column name",
+	missingClose: 'Missing ")"',
+	missingQuote: "Missing closing quote",
+	nestedTooDeeply: "Formula is nested too deeply",
+	tooLong: "Formula is too long",
+	trailingText: "Unexpected text after the formula",
+	unexpectedClose: 'Unexpected ")"',
+	unexpectedSeparator: "Unexpected separator",
+} as const;
+
+export type FormulaFailureMessageKey = keyof typeof FORMULA_FAILURE_MESSAGES;
+
+/** A fixed failure sentence in the active UI language. */
+export function formulaFailureMessage(key: FormulaFailureMessageKey): string {
+	return tl(FORMULA_FAILURE_MESSAGES[key]);
+}
+
 type Token =
 	| { kind: "number"; value: number }
 	| { kind: "string"; value: string }
@@ -99,7 +122,7 @@ export function tokenize(source: string): Token[] {
 			if (end === -1) {
 				throw new FormulaFailure(
 					FORMULA_ERRORS.syntax,
-					"Missing } after column name"
+					formulaFailureMessage("missingBrace")
 				);
 			}
 			tokens.push({ kind: "ref", name: source.slice(i + 1, end).trim() });
@@ -123,7 +146,7 @@ export function tokenize(source: string): Token[] {
 			if (j >= source.length) {
 				throw new FormulaFailure(
 					FORMULA_ERRORS.syntax,
-					"Missing closing quote"
+					formulaFailureMessage("missingQuote")
 				);
 			}
 			tokens.push({ kind: "string", value });
@@ -164,7 +187,10 @@ export function tokenize(source: string): Token[] {
 		);
 	}
 	if (tokens.length > FORMULA_MAX_TOKENS) {
-		throw new FormulaFailure(FORMULA_ERRORS.syntax, "Formula is too long");
+		throw new FormulaFailure(
+			FORMULA_ERRORS.syntax,
+			formulaFailureMessage("tooLong")
+		);
 	}
 	return tokens;
 }
@@ -202,7 +228,7 @@ export function parse(tokens: Token[]): Node {
 	function parsePrimary(): Node {
 		const token = tokens[position++];
 		if (!token) {
-			return fail("Formula ends unexpectedly");
+			return fail(formulaFailureMessage("endsUnexpectedly"));
 		}
 		switch (token.kind) {
 			case "number":
@@ -219,12 +245,12 @@ export function parse(tokens: Token[]): Node {
 				return fail(tl('Unexpected "{op}"', { op: token.op }));
 			case "paren": {
 				if (!token.open) {
-					return fail('Unexpected ")"');
+					return fail(formulaFailureMessage("unexpectedClose"));
 				}
 				const inner = parseExpression(0);
 				const close = tokens[position++];
 				if (close?.kind !== "paren" || close.open) {
-					fail('Missing ")"');
+					fail(formulaFailureMessage("missingClose"));
 				}
 				return inner;
 			}
@@ -264,14 +290,14 @@ export function parse(tokens: Token[]): Node {
 				);
 			}
 			default:
-				return fail("Unexpected separator");
+				return fail(formulaFailureMessage("unexpectedSeparator"));
 		}
 	}
 
 	function parseExpression(minPrecedence: number): Node {
 		depth++;
 		if (depth > FORMULA_MAX_DEPTH) {
-			fail("Formula is nested too deeply");
+			fail(formulaFailureMessage("nestedTooDeeply"));
 		}
 		let left = parsePrimary();
 		for (;;) {
@@ -296,7 +322,7 @@ export function parse(tokens: Token[]): Node {
 
 	const tree = parseExpression(0);
 	if (position < tokens.length) {
-		fail("Unexpected text after the formula");
+		fail(formulaFailureMessage("trailingText"));
 	}
 	return tree;
 }

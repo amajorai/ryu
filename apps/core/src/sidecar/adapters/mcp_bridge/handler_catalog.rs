@@ -155,6 +155,11 @@ impl RyuMcpHandler {
             if self.permission_tx.is_some() {
                 tools.push(tool_from_def(&ask_user_def()));
             }
+            // Phone device tools: listed for the whole session, decided at
+            // dispatch (see `device`).
+            if self.lists_device_tools() {
+                tools.extend(device::device_tool_defs().iter().map(tool_from_def));
+            }
 
             // Programmatic tool calling — only when the JS sandbox is built and its
             // embedded guest compiled (nothing to download or install).

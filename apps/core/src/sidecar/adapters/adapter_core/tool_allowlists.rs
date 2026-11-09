@@ -28,6 +28,46 @@ pub(crate) async fn resolve_agent_tool_allowlist(
     }
 }
 
+/// The tool allowlist a chat turn offers on `route`, narrowed in order by the
+/// public-agent policy, the unverified-caller list, the read-only flag (the
+/// OpenAI-compatible plane only; the route gate refuses it elsewhere) and the
+/// withheld working-memory tool. `None` is unrestricted. Routes that offer no
+/// Core tools (A2A, local engines, SDK apps, a direct provider) resolve nothing
+/// and get `None`; nothing on them reads it.
+pub(crate) async fn turn_tool_allowlist(
+    req: &ChatStreamRequest,
+    route: &AgentRoute,
+    agent_id: Option<&str>,
+    registry: &AcpAgentRegistry,
+    store: &AgentStore,
+    mcp: &McpRegistry,
+    working_memory_tool_withheld: bool,
+) -> Option<Vec<String>> {
+    let apply_read_only = match route {
+        AgentRoute::Acp { .. } => false,
+        AgentRoute::OpenAiCompat {
+            via_gateway: true, ..
+        } => true,
+        _ => return None,
+    };
+    let allowlist = resolve_agent_tool_allowlist(agent_id, registry, store).await;
+    let allowlist = match req.public_agent_policy.as_ref() {
+        Some(policy) => Some(restrict_public_agent_tool_allowlist(mcp, allowlist, policy).await),
+        None => allowlist,
+    };
+    let allowlist = caller_scoped_tool_allowlist(req.untrusted_caller, mcp, allowlist);
+    let allowlist = if apply_read_only && req.read_only_tools {
+        Some(restrict_read_only_tool_allowlist(mcp, allowlist).await)
+    } else {
+        allowlist
+    };
+    if working_memory_tool_withheld {
+        Some(withhold_working_memory_tool_allowlist(mcp, allowlist).await)
+    } else {
+        allowlist
+    }
+}
+
 pub(crate) fn restrict_public_agent_skills(
     current: &mut Vec<String>,
     policy: &PublicAgentRunPolicy,

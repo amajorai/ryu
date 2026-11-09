@@ -35,6 +35,7 @@ pub(super) async fn admit_chat_turn(
         req.worktree_branch = None;
         req.client_tools.clear();
         req.browser_context_consent = false;
+        req.device.device_tools_offer = None;
     }
     if req
         .project_environment

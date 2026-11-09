@@ -32,6 +32,8 @@ use serde_json::{json, Value};
 use std::sync::RwLock;
 use tokio::sync::Mutex;
 
+mod workflow_subscriber;
+
 /// A persisted Composio-trigger subscription. The `target_kind` selects what the
 /// fired event runs: `"agent"` (the default, fires `agent_id`) or `"workflow"`
 /// (fires the workflow named by `workflow_id`, with the event payload injected as
@@ -1238,6 +1240,9 @@ impl ComposioTriggerStore {
                     tracing::warn!(sub = %sub.id, "workflow trigger missing workflow_id");
                     continue;
                 };
+                if !workflow_subscriber::workflow_delivery_allowed(&sub, workflow_id).await {
+                    continue;
+                }
                 let payload_json = serde_json::to_string(payload).unwrap_or_default();
                 let run = match crate::host::host() {
                     Ok(h) => h.run_workflow_for_trigger(workflow_id, &payload_json).await,
@@ -1809,9 +1814,21 @@ mod tests {
         async fn subscriber_may_run_agent(&self, subscriber: &str, _agent: &str) -> Result<bool> {
             Ok(subscriber != "revoked-user")
         }
+
+        /// Stands in for Core's fresh `workflow.run` and account-ownership
+        /// decision: `revoked-user` has lost both.
+        async fn subscriber_may_run_workflow(
+            &self,
+            subscriber: &str,
+            _workflow: &str,
+            _account: &str,
+        ) -> Result<bool> {
+            Ok(subscriber != "revoked-user")
+        }
     }
 
     mod subscriber_access;
+    mod workflow_subscriber_access;
 
     fn host_calls() -> Vec<(String, String)> {
         HOST_CALLS.lock().unwrap_or_else(|e| e.into_inner()).clone()

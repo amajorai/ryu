@@ -1,5 +1,7 @@
 //! Dream's HTTP handlers: read and run a review, read and update its
-//! settings, and accept or reject a proposal (indexing accepted memories).
+//! settings, and accept or reject a proposal. The review itself, and what it
+//! reports when the proposal was already handled, lives in `review`; undo lives
+//! in `rollback`.
 
 use axum::{
     extract::{Path, State},
@@ -13,10 +15,12 @@ use serde_json::json;
 
 use super::automatic::read_settings;
 use super::candidates::{pending_proposals, run_dream_review_inner};
+use super::review::review_dream_proposal;
+use super::rollback::{recent_applied, recent_wire, rollback_dream_proposal};
 use super::run_state::read_run_state;
 use super::wire::{pending_summary, requested_mode, review_body};
 use super::{DREAM_AUTOMATIC_PREF, DREAM_QUIET_END_PREF, DREAM_QUIET_START_PREF};
-use crate::server::{memory, ServerState};
+use crate::server::ServerState;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct DreamReviewBody {
@@ -54,6 +58,10 @@ pub(in crate::server) fn routes() -> Router<ServerState> {
             "/api/memory/dream/review/proposals/:id/reject",
             post(reject_dream_proposal),
         )
+        .route(
+            "/api/memory/dream/review/proposals/:id/rollback",
+            post(rollback_dream_proposal),
+        )
 }
 
 #[utoipa::path(
@@ -86,6 +94,13 @@ pub(in crate::server) async fn get_dream_review(
         Ok(proposals) => {
             let last_run = read_run_state(&state).await.last_run;
             let mut body = review_body("manual", &proposals, pending_summary(&proposals), last_run);
+            // Accepted changes that can still be undone. A failure here only
+            // hides the list; the queue itself still loads.
+            let now = chrono::Utc::now().timestamp_millis();
+            match recent_applied(&state, &owner, include_sensitive, now).await {
+                Ok(recent) => body["review"]["recent"] = recent_wire(&recent),
+                Err(error) => tracing::warn!("memory: listing recent Dream proposals: {error:#}"),
+            }
             // Sealed recall indexes search vectors from memory: report how much
             // is hydrated and how many rows did not open, so degraded semantic
             // recall is visible rather than silent. Counts only, no content.
@@ -231,8 +246,16 @@ pub(in crate::server) async fn update_dream_settings(
     path = "/api/memory/dream/review/proposals/{id}/accept",
     tag = "Memory",
     summary = "Accept a Dream memory proposal",
+    description = "Writes the proposed memory, or archives its target, and returns the memory. Accepting an already accepted proposal returns it again. Refused with 409 when the proposal cannot apply; the body's `code` is `already_rejected`, `already_undone`, `target_deleted` (the memory it targets was deleted) or `target_changed` (that memory was revised or archived since).",
     params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
+    responses(
+        (status = 200, description = "OK", body = serde_json::Value),
+        (status = 400, description = "The proposal has sensitive topics and they are turned off"),
+        (status = 403, description = "The caller may not write memory"),
+        (status = 404, description = "No such proposal for this caller"),
+        (status = 409, description = "The proposal was already handled or its target changed"),
+        (status = 422, description = "The proposal cannot be applied as written")
+    )
 )]
 pub(in crate::server) async fn accept_dream_proposal(
     State(state): State<ServerState>,
@@ -260,8 +283,14 @@ pub(in crate::server) async fn accept_dream_proposal(
     path = "/api/memory/dream/review/proposals/{id}/reject",
     tag = "Memory",
     summary = "Reject a Dream memory proposal",
+    description = "Declines a pending proposal; nothing is written. Rejecting a proposal a reviewer already rejected succeeds again. Refused with 409 when the proposal is in another state; the body's `code` is `already_accepted`, `already_undone` or `target_deleted` (the memory it targeted was deleted, so it was rejected automatically).",
     params(("id" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
+    responses(
+        (status = 200, description = "OK", body = serde_json::Value),
+        (status = 403, description = "The caller may not write memory"),
+        (status = 404, description = "No such proposal for this caller"),
+        (status = 409, description = "The proposal was already handled")
+    )
 )]
 pub(in crate::server) async fn reject_dream_proposal(
     State(state): State<ServerState>,
@@ -282,124 +311,4 @@ pub(in crate::server) async fn reject_dream_proposal(
     let memory = state.memory;
     let retrieval = state.retrieval;
     review_dream_proposal(memory, retrieval, owner, reviewer, &id, false).await
-}
-
-async fn review_dream_proposal(
-    memory: memory::MemoryStore,
-    retrieval: crate::server::retrieval::RetrievalStore,
-    owner: String,
-    reviewer: Option<String>,
-    id: &str,
-    approve: bool,
-) -> Response {
-    let proposal = match memory.get_proposal(id).await {
-        Ok(Some(proposal)) if proposal.owner_user_id == owner => proposal,
-        Ok(_) => {
-            return crate::server::json_error(
-                StatusCode::NOT_FOUND,
-                "proposal not found".to_owned(),
-            )
-        }
-        Err(error) => {
-            return crate::server::json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
-        }
-    };
-    if approve
-        && !memory::detect_sensitive_topics(&proposal.draft.content).is_empty()
-        && !memory
-            .include_sensitive_topics(&owner)
-            .await
-            .unwrap_or(false)
-    {
-        return crate::server::json_error(
-            StatusCode::BAD_REQUEST,
-            "sensitive topics are disabled in Settings → Memory".to_owned(),
-        );
-    }
-    let reviewed = match memory
-        .review_proposal(id, approve, reviewer.as_deref())
-        .await
-    {
-        Ok(Some(reviewed)) => reviewed,
-        Ok(None) => {
-            return crate::server::json_error(
-                StatusCode::NOT_FOUND,
-                "proposal not found".to_owned(),
-            );
-        }
-        Err(error) => {
-            return crate::server::json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
-        }
-    };
-    if !approve {
-        return Json(json!({ "success": true })).into_response();
-    }
-
-    let Some(memory_id) = reviewed.applied_memory_id.as_deref() else {
-        return crate::server::json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "accepted proposal did not produce a memory".to_owned(),
-        );
-    };
-    match memory.get(memory_id).await {
-        Ok(Some(entry)) => {
-            if let Some(superseded_id) = entry.supersedes_id.as_deref() {
-                // A revision creates a new source row; remove the old derived
-                // vector before it can remain recallable as a stale answer.
-                let _ = retrieval.remove_chunk(superseded_id).await;
-            }
-            index_reviewed_memory(memory.clone(), retrieval, entry.clone()).await;
-            Json(json!({ "memory": entry })).into_response()
-        }
-        Ok(None) => crate::server::json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "accepted memory could not be read back".to_owned(),
-        ),
-        Err(error) => {
-            crate::server::json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
-        }
-    }
-}
-
-async fn index_reviewed_memory(
-    memory: memory::MemoryStore,
-    retrieval: crate::server::retrieval::RetrievalStore,
-    entry: memory::LongTermEntry,
-) {
-    let consent_user = entry.owner_user_id.as_deref().unwrap_or(memory::LOCAL_USER);
-    if !entry.sensitive_topics.is_empty()
-        && !memory
-            .include_sensitive_topics(consent_user)
-            .await
-            .unwrap_or(false)
-    {
-        let _ = retrieval.remove_chunk(&entry.id).await;
-        return;
-    }
-    let node_org = crate::server::node_org_id();
-    let owner = match (node_org.as_deref(), entry.owner_user_id.as_deref()) {
-        (Some(org), Some(uid)) if uid != memory::LOCAL_USER => {
-            crate::server::retrieval::RetrievalOwner::owned(Some(uid), Some(org), None)
-        }
-        _ => crate::server::retrieval::RetrievalOwner::shared(),
-    };
-    if let Err(error) = retrieval
-        .index_memory_chunk_with_metadata(
-            &entry.id,
-            &entry.content,
-            entry.scope.as_str(),
-            entry.scope_id.as_deref(),
-            entry.category.as_str(),
-            entry.importance,
-            entry.author_agent_id.as_deref(),
-            !entry.sensitive_topics.is_empty(),
-            owner,
-        )
-        .await
-    {
-        tracing::warn!(
-            "memory: indexing entry {} failed (search may lag): {error:#}",
-            entry.id
-        );
-    }
 }

@@ -31,6 +31,9 @@ mod voice_route_policy_tests;
 mod gateway_audit_route_policy_tests;
 
 #[cfg(test)]
+mod app_delegation_route_policy_tests;
+
+#[cfg(test)]
 mod cloud_environment_route_policy_tests;
 
 #[cfg(test)]
@@ -256,6 +259,9 @@ mod pure_helper_tests;
 
 #[cfg(test)]
 mod per_resource_gate_tests;
+
+#[cfg(test)]
+mod enrolled_unregistered_node_tests;
 
 /// The `/api/output-styles` surface, driven end-to-end through Core's own
 /// [`output_styles_routes`] rather than a hand-rebuilt stand-in of it — the mount

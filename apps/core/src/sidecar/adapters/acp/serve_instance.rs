@@ -157,6 +157,21 @@ pub(super) async fn serve_acp_instance(
                     else {
                         continue;
                     };
+                    // The user's own-chat device turn: bind its offer to THIS
+                    // instance's bridge channel and agent for the turn's
+                    // lifetime, so no other instance on the conversation can
+                    // serve it. Dropped (cleared) when the turn ends.
+                    let _device_turn = turn
+                        .device_offer
+                        .clone()
+                        .filter(|offer| offer.conversation_id == instance_conversation)
+                        .map(|offer| {
+                            crate::device_tools::offer::register_turn_context(
+                                offer,
+                                &_instance_tx,
+                                &widget_agent_id,
+                            )
+                        });
 
                     if let Some(notice) = sandbox_notice.take() {
                         let _ = tx.send(AcpEvent::ConfigWarning {

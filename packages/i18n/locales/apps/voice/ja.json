@@ -16,6 +16,7 @@
   "A preset needs a voice.": "プリセットにはボイスが必要です。",
   "A profile with samples needs exactly one primary sample.": "サンプルを含むプロファイルには、プライマリサンプルがちょうど 1 つ必要です。",
   "A saved sample is used only when the selected model supports cloning.": "保存済みのサンプルは、選択したモデルがクローンに対応している場合にのみ使用されます。",
+  "A voice can keep up to {MAX_PROFILE_SAMPLES} samples. Remove one first.": "1 つの音声に保持できるサンプルは最大 {MAX_PROFILE_SAMPLES} 個です。先に 1 つ削除してください。",
   "A voice sample needs a consent record.": "音声サンプルには同意記録が必要です。",
   "AM-radio band with heavy compression.": "強いコンプレッションをかけた AM ラジオ帯域。",
   "Add": "追加",

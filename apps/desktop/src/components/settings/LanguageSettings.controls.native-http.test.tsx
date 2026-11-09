@@ -179,9 +179,14 @@ function fileInput() {
 /** The status and Export control of one pack's row in "Available language packs". */
 function packRow(name: string) {
 	// The Export label follows the active pack: a French pack falls back to the
-	// official French catalog for the copy it does not carry ("Exporter").
+	// official French catalog for the copy it does not carry ("Exporter"). Under
+	// a right-to-left pack the name sits inside bidi isolates (U+2066 to U+2069).
 	const exportButton = Array.from(element!.querySelectorAll("button")).find(
-		(candidate) => candidate.getAttribute("aria-label")?.endsWith(` ${name}`)
+		(candidate) =>
+			candidate
+				.getAttribute("aria-label")
+				?.replace(/[\u2066-\u2069]/gu, "")
+				.endsWith(` ${name}`)
 	);
 	if (!exportButton) {
 		throw new Error(`No Export control for ${name}`);

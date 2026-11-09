@@ -31,6 +31,7 @@ import type {
 	ObjectWithFields,
 	RelatedGroup,
 } from "@/src/lib/api/crm.ts";
+import { CrmUserText } from "./crm-label.tsx";
 import { renderActivityComposer } from "./record-activity-composer.tsx";
 import { TimelineEntry } from "./record-detail-parts.tsx";
 import { renderRelatedGroups } from "./record-related-groups.tsx";
@@ -286,7 +287,7 @@ export function RecordDetail({
 							{recordTitle(record.title, record.values, titleField)}
 						</h2>
 						<p className="text-muted-foreground text-xs">
-							{subject.object.singular}
+							<CrmUserText text={subject.object.singular} />
 							{record.deleted_at ? " · deleted" : ""}
 						</p>
 					</div>

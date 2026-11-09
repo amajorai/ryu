@@ -65,6 +65,17 @@ pub(super) async fn open_acp_session(
     // instance. Empty for an ephemeral (no-conversation) instance, which
     // the desktop can't target for cancellation anyway.
     let instance_conversation = first_turn.permission_scope_id.clone().unwrap_or_default();
+    // The bridge built below lists device tools for this session only when
+    // the user's own-chat turn that opens it was stamped with a device offer
+    // (flag on, own chat); dispatch still needs that turn's live context.
+    if let Some(offer) = first_turn.turn.device_offer.as_ref() {
+        if offer.conversation_id == instance_conversation {
+            crate::device_tools::turn_context::allow_device_listing(
+                &instance_conversation,
+                &first_turn.agent_id,
+            );
+        }
+    }
 
     // Widget synthesis inputs for the managed-Pi widget path. Pi has no
     // MCP bridge, so a widget-bearing tool it calls through the `ryu-mcp`

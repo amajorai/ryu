@@ -137,6 +137,11 @@ pub mod app_email;
 pub(crate) mod app_file_notes;
 pub(crate) mod app_mcp_call;
 pub mod app_notify;
+// Short-lived, path-scoped delegations to one app's routes (C3).
+pub(crate) mod app_route_delegation;
+pub(crate) mod app_route_delegation_api;
+// Per-member app data purge fan-out (account deletion, member removal).
+pub(crate) mod data_user_purge;
 // Run recovery (`approvals.request`, `runs.rerunAgent`, `workflows.rerun`): the
 // grant-gated kernel capabilities a `core#run.failed` subscriber acts through.
 pub mod app_runs;
@@ -310,6 +315,8 @@ mod acp_agents;
 pub(crate) use acp_agents::*;
 mod chat_controls;
 pub(crate) use chat_controls::*;
+mod device_tools_api;
+use device_tools_api::*;
 mod channel_runs;
 use channel_runs::*;
 mod memory_api;

@@ -30,6 +30,7 @@
 import { z } from "zod";
 
 import { HOST_API_VERSION } from "./rpc.ts";
+import { livenessResponderScript } from "./sandbox-liveness-gate.ts";
 import {
 	buildCompanionThemeLayoutCss,
 	sanitizeCspOrigin,
@@ -162,6 +163,7 @@ export function buildWidgetCsp(
 		`font-src ${passive}`,
 		`media-src ${passive}`,
 		"connect-src 'none'",
+		"webrtc 'block'",
 		"frame-src 'none'",
 		"base-uri 'none'",
 		"form-action 'none'",
@@ -355,6 +357,7 @@ function bridgeSource(
   function onPortMessage(ev){
     var msg = ev.data;
     if(!msg) return;
+    ${livenessResponderScript()}
     if(msg.kind === "ryu-plugin-rpc-chunk"){
       var chunkPending = pending[msg.id];
       if(chunkPending && typeof chunkPending.onChunk === "function") chunkPending.onChunk(msg.delta);

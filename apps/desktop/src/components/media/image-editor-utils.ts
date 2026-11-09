@@ -1,6 +1,10 @@
 import type { LiteralMessage } from "@ryu/i18n";
 import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { formatLocalNumber } from "@/src/lib/locale-format.ts";
+import {
+	EDITABLE_IMAGE_ERRORS,
+	EditableImageError,
+} from "./image-editor-load-error.ts";
 
 export const MAX_EDITABLE_IMAGE_BYTES = 32 * 1024 * 1024;
 export const MAX_EDITABLE_IMAGE_PIXELS = 40_000_000;
@@ -69,11 +73,11 @@ async function readBoundedImage(
 		Number.isFinite(declaredLength) &&
 		declaredLength > MAX_EDITABLE_IMAGE_BYTES
 	) {
-		throw new Error("This image is larger than the 32 MB editor limit.");
+		throw new EditableImageError(EDITABLE_IMAGE_ERRORS.tooLarge);
 	}
 	const reader = response.body?.getReader();
 	if (!reader) {
-		throw new Error("The image response did not include a readable body.");
+		throw new EditableImageError(EDITABLE_IMAGE_ERRORS.noBody);
 	}
 	const chunks: Uint8Array<ArrayBuffer>[] = [];
 	let totalBytes = 0;
@@ -86,7 +90,7 @@ async function readBoundedImage(
 			totalBytes += value.byteLength;
 			if (totalBytes > MAX_EDITABLE_IMAGE_BYTES) {
 				await reader.cancel();
-				throw new Error("This image is larger than the 32 MB editor limit.");
+				throw new EditableImageError(EDITABLE_IMAGE_ERRORS.tooLarge);
 			}
 			chunks.push(new Uint8Array(value));
 		}
@@ -103,14 +107,16 @@ export async function fetchEditableImage(
 ): Promise<Blob> {
 	const safeUrl = safeMediaUrl(url);
 	if (!safeUrl) {
-		throw new Error("This image URL is not safe to open in the editor.");
+		throw new EditableImageError(EDITABLE_IMAGE_ERRORS.unsafeUrl);
 	}
 	const response = await fetch(safeUrl, {
 		credentials: "same-origin",
 		signal,
 	});
 	if (!response.ok) {
-		throw new Error(`Could not load this image (${response.status}).`);
+		throw new EditableImageError(EDITABLE_IMAGE_ERRORS.status, {
+			status: response.status,
+		});
 	}
 	const mimeType =
 		response.headers
@@ -119,9 +125,7 @@ export async function fetchEditableImage(
 			?.trim()
 			.toLowerCase() ?? "";
 	if (!isEditableImageType(mimeType)) {
-		throw new Error(
-			"The editor supports PNG, JPEG, WebP, AVIF, and GIF images."
-		);
+		throw new EditableImageError(EDITABLE_IMAGE_ERRORS.unsupportedType);
 	}
 	return readBoundedImage(response, mimeType);
 }

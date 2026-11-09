@@ -1,4 +1,5 @@
-//! Listing, lookup, counting and deletion of long-term facts.
+//! Listing, lookup and counting of long-term facts. Deletion lives in
+//! `delete`.
 
 use anyhow::Result;
 use rusqlite::params;
@@ -27,7 +28,7 @@ impl MemoryStore {
             let mut stmt = conn.prepare(
                 "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
                         category, importance, tags, agent_id, updated_at, user_id,
-                        lifecycle, supersedes_id
+                        lifecycle, supersedes_id, recall_count, last_recalled_at
                  FROM memory_entries
                  WHERE lifecycle = 'active'
                  ORDER BY created_at DESC, rowid DESC
@@ -79,7 +80,7 @@ impl MemoryStore {
         let sql = format!(
             "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
                     category, importance, tags, agent_id, updated_at, user_id,
-                    lifecycle, supersedes_id
+                    lifecycle, supersedes_id, recall_count, last_recalled_at
              FROM memory_entries
              WHERE (:scope IS NULL OR scope = :scope)
                AND (:scope_id IS NULL OR scope_id = :scope_id)
@@ -140,19 +141,12 @@ impl MemoryStore {
             let mut stmt = conn.prepare(
                 "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
                         category, importance, tags, agent_id, updated_at, user_id,
-                        lifecycle, supersedes_id
+                        lifecycle, supersedes_id, recall_count, last_recalled_at
                  FROM memory_entries WHERE id = ?1",
             )?;
             Self::collect_rows(&mut stmt, params![id])?
         };
         Ok(self.decrypt_rows(rows).into_iter().next())
-    }
-
-    /// Delete a single entry. Returns whether a row was removed.
-    pub async fn delete(&self, id: &str) -> Result<bool> {
-        let conn = self.conn.lock().await;
-        let removed = conn.execute("DELETE FROM memory_entries WHERE id = ?1", params![id])?;
-        Ok(removed > 0)
     }
 
     /// The ids of every entry carrying `tag` (an exact element of the plaintext
@@ -179,17 +173,5 @@ impl MemoryStore {
         let conn = self.conn.lock().await;
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM memory_entries", [], |r| r.get(0))?;
         Ok(n.max(0) as u64)
-    }
-
-    /// Delete **every** long-term memory entry (all users/agents). Single-tenant
-    /// today (`LOCAL_USER`), so this is the "forget everything" wipe. Returns the
-    /// number of rows removed. The encryption key is untouched, so new memories
-    /// recorded afterward stay readable.
-    pub async fn clear_all(&self) -> Result<u64> {
-        let conn = self.conn.lock().await;
-        let removed = conn.execute("DELETE FROM memory_entries", [])?;
-        conn.execute("DELETE FROM memory_proposals", [])?;
-        conn.execute("DELETE FROM memory_settings", [])?;
-        Ok(removed as u64)
     }
 }

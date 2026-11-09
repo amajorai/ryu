@@ -39,6 +39,7 @@ import {
 	parseMemoryMarkdown,
 } from "@/src/lib/memory-git.ts";
 import { isLocalNode } from "@/src/store/useNodeStore.ts";
+import { memoryErrorText } from "./memory-error-text.ts";
 
 const MEMORY_GIT_PATH_KEY = "ryu.memory.git-root.v1";
 const MEMORY_GIT_ROOT_PREF_KEY = "memory.git-root";
@@ -240,7 +241,7 @@ export function MemoryGitSourceCard({
 				)
 			);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : "Memory import failed");
+			setError(memoryErrorText(cause, tl("Memory import failed")));
 		} finally {
 			setBusy(false);
 		}

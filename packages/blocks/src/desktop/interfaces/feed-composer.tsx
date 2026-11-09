@@ -54,7 +54,7 @@ const RING_RADIUS = 9;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /** Circular character counter: fills as you type, counts down near the limit. */
-function CharacterRing({ length }: { length: number }) {
+export function CharacterRing({ length }: { length: number }) {
 	const tl = useLiteralMessages();
 	// Agent prompts run long, so the ring only appears once the limit is near;
 	// an almost-empty ring next to Post reads as a stalled spinner.
@@ -116,7 +116,12 @@ function CharacterRing({ length }: { length: number }) {
 				</span>
 			) : null}
 			<span className="sr-only" role="status">
-				{warn ? tl("{remaining} characters remaining", { remaining }) : ""}
+				{warn
+					? tl(
+							"{remaining, plural, one {# character remaining} other {# characters remaining}}",
+							{ remaining }
+						)
+					: ""}
 			</span>
 		</span>
 	);

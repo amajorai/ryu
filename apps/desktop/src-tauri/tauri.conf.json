@@ -37,6 +37,8 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "A Major Pte. Ltd.",
+    "copyright": "Copyright © 2026 A Major Pte. Ltd.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -80,7 +82,8 @@
         "displayLanguageSelector": false,
         "customLanguageFiles": {
           "Hindi": "nsis/Hindi.nsh"
-        }
+        },
+        "installerHooks": "nsis/installer-hooks.nsh"
       },
       "wix": {
         "language": "en-US"

@@ -137,7 +137,7 @@ pub(crate) fn enforce_permission_on_resolved(
 pub(in crate::server) fn resource_permission_candidate(
     caller: &Option<crate::identity_verify::VerifiedCaller>,
 ) -> Result<Option<bool>, StatusCode> {
-    let managed_node = crate::sidecar::control_plane::is_managed_node();
+    let managed_node = crate::sidecar::node_binding::node_expects_binding();
     let node_org = crate::sidecar::control_plane::registered_org().map(|o| o.id);
 
     resource_permission_admission(managed_node, node_org.as_deref(), caller.as_ref())?;

@@ -423,12 +423,8 @@ fn default_grant_allowlist() -> Vec<String> {
         // and still blocks filesystem reads/writes. A manifest must declare the
         // grant and the user must install/enable that app before it is approved.
         "files:download",
-        // Core's `/api/skills` CRUD, driven from a sandboxed companion frame via
-        // the `skills.crud` bridge family. A **cross-app** hold: the declaring
-        // app is `@ryu/skill-editor`, whose namespace is `skill-editor`, not
-        // `skills` — so the owner-scoped rule does not cover it and the reviewed
-        // entry stays. Skills are a Core-owned domain, not this app's surface.
-        "skills:crud",
+        // `skills:crud` is owner-exclusive (see `crossapp_grants`): it writes
+        // always-on, tool-preapproved SKILL.md files into the shared skills root.
         // model / network scopes
         "model.chat",
         "model.embed",
@@ -454,12 +450,8 @@ fn default_grant_allowlist() -> Vec<String> {
         // from the Recipes app's list route (it used to reach that route through the
         // per-app `ghost.recipes` host verb).
         "app:http:@ryu/recipes",
-        // Outreach uses the Mail app's reviewed host bridge to list inboxes and
-        // send an explicitly selected, human-reviewed message. This is a
-        // cross-app grant, so owner-scoping cannot approve it; keep the exact
-        // capability on the reviewed list rather than teaching the Gateway
-        // about the Outreach app itself.
-        "mail:crud",
+        // `mail:crud` / `social:crud` are owner-exclusive for cross-app holders
+        // (see `crossapp_grants`); Mail and Outpost keep them as protected owners.
         // `warmup:crud` is owner-exclusive (see `OWNER_EXCLUSIVE_GRANTS`): it
         // schedules unattended agent turns, so only the reviewed Warmup app.
         // Owner-tier subscription accounts and cached usage. Core still requires
@@ -514,10 +506,6 @@ fn default_grant_allowlist() -> Vec<String> {
         "notifications:send-to-user",
         // Research queries the RLM host plane as a cross-app dependency.
         "rlm:query",
-        // ReelFarm can hand captions to the Outpost social sidecar through the
-        // cross-app host bridge. `social` is reserved, so this safe capability
-        // needs an exact reviewed entry rather than an owner-scoped match.
-        "social:crud",
         // The two host primitives the seeded `chat-title` plugin needs to do its
         // one job: rename the conversation it just summarised, and read the
         // preferences that say whether (and how often) it should. They gate
@@ -905,6 +893,8 @@ struct OwnerExclusiveGrant {
 /// - `tool:command:<bin>` — a manifest-chosen argv for a trusted binary, i.e.
 ///   unsandboxed process execution; only the plugin that ships that command.
 /// - `tool:http-egress:127.0.0.1` — reach to every loopback port on the node.
+/// - `mail:crud` / `social:crud` — owner-token Agent Mail / Outpost bridges,
+///   for the cross-app holders in `crossapp_grants`.
 const OWNER_EXCLUSIVE_GRANTS: &[OwnerExclusiveGrant] = &[
     OwnerExclusiveGrant {
         owner_ids: &["@ryu/spider", "com.ryu.spider"],
@@ -1016,6 +1006,19 @@ const OWNER_EXCLUSIVE_GRANTS: &[OwnerExclusiveGrant] = &[
     OwnerExclusiveGrant {
         owner_ids: &["@ryu/healing", "com.ryu.healing"],
         grants: &["workflows:runstate"],
+    },
+    // Owner-token Agent Mail / Outpost bridges for reviewed cross-app holders.
+    OwnerExclusiveGrant {
+        owner_ids: crossapp_grants::MAIL_CRUD_CROSSAPP_OWNERS,
+        grants: &[crossapp_grants::MAIL_CRUD_GRANT],
+    },
+    OwnerExclusiveGrant {
+        owner_ids: crossapp_grants::SOCIAL_CRUD_CROSSAPP_OWNERS,
+        grants: &[crossapp_grants::SOCIAL_CRUD_GRANT],
+    },
+    OwnerExclusiveGrant {
+        owner_ids: crossapp_grants::SKILLS_CRUD_CROSSAPP_OWNERS,
+        grants: &[crossapp_grants::SKILLS_CRUD_GRANT],
     },
     // Wholesale loopback egress (any 127.0.0.1 port) for the reviewed in-repo
     // declarers only; a marketplace manifest cannot self-request it.
@@ -1351,14 +1354,19 @@ pub fn verify_manifest(
     ryu_gw_governance::verify_manifest(manifest, signature_b64, &verifying_key)
 }
 
+mod crossapp_grants;
 mod loopback_egress;
 
 #[cfg(test)]
 mod command_grant_tests;
 #[cfg(test)]
+mod crossapp_grant_tests;
+#[cfg(test)]
 mod host_grant_namespace_tests;
 #[cfg(test)]
 mod loopback_egress_tests;
+#[cfg(test)]
+mod skills_grant_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

@@ -150,7 +150,7 @@ export function LobbyPlay({
 		>
 			<div className="flex items-baseline gap-3 px-1">
 				<h2 className="gk-display text-[19px] leading-6">
-					{briefing ? "Brief" : "Mode"}
+					{briefing ? tl("Briefing") : tl("Mode")}
 				</h2>
 				{briefing ? (
 					<p className="flex items-center gap-1.5 truncate font-semibold text-(--gk-ink-muted) text-[13px] leading-5">

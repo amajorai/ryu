@@ -130,6 +130,7 @@ impl ConversationStore {
                         row.get::<_, String>(4)?,
                         row.get::<_, i64>(5)?,
                         row.get::<_, i64>(6)?,
+                        row.get::<_, Option<String>>(7)?,
                     ))
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()?
@@ -137,7 +138,7 @@ impl ConversationStore {
             if pending.is_empty() {
                 break;
             }
-            for (revision, id, conversation, role, sealed, created, dirty) in pending {
+            for (revision, id, conversation, role, sealed, created, dirty, parts) in pending {
                 if !self.chat_memory_enabled() {
                     return Ok(());
                 }
@@ -169,6 +170,12 @@ impl ConversationStore {
                         [revision],
                     )?;
                     continue;
+                };
+                // The keyword index also holds the turn's redacted tool calls.
+                let content = if lexical {
+                    tool_part_index::keyword_index_text(content, &self.tool_text_for_index(parts))
+                } else {
+                    content
                 };
                 let result = if content.trim().is_empty() {
                     if lexical && dirty == 2 {
@@ -317,6 +324,10 @@ impl ConversationStore {
     /// the tokenized inverted index + metadata, never message text). Hits whose
     /// message id no longer resolves (e.g. a deleted conversation orphaned its FTS
     /// row) are dropped.
+    ///
+    /// The index also holds each message's redacted tool-call text (see
+    /// `tool_part_index`); a hit that matched only there carries that text in its
+    /// snippet.
     pub async fn fts_search_messages(
         &self,
         query: &str,
@@ -342,22 +353,26 @@ impl ConversationStore {
         let hits = index.search(query, limit, conversation_ids).await?;
         let mut out = Vec::with_capacity(hits.len());
         for hit in hits {
-            let sealed: Option<String> = {
+            let sealed: Option<(String, Option<String>)> = {
                 let conn = self.conn.lock().await;
                 conn.query_row(
-                    "SELECT content FROM messages WHERE id = ?1",
+                    "SELECT content, CASE WHEN length(parts) <= 8388608 THEN parts END
+                     FROM messages WHERE id = ?1",
                     [&hit.message_id],
-                    |row| row.get::<_, String>(0),
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
                 )
                 .optional()?
             };
             // Drop orphaned rows (message deleted out from under the index).
-            let Some(sealed) = sealed else { continue };
+            let Some((sealed, parts)) = sealed else {
+                continue;
+            };
+            let content = self.open_content(sealed);
             out.push(MessageSearchHit {
                 conversation_id: hit.conversation_id,
                 message_id: hit.message_id,
                 role: hit.role,
-                content: self.open_content(sealed),
+                content: self.keyword_snippet(query, content, parts),
                 created_at: hit.created_at,
                 score: hit.score,
             });

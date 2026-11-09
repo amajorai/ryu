@@ -13,10 +13,11 @@ describe("memory graph and consent route contract", () => {
 	test("keeps the Core routes and the Memory client aligned", () => {
 		const server = rustModuleSource("apps/core/src/server");
 		const client = source("apps/desktop/src/lib/api/memory.ts");
+		const graphClient = source("apps/desktop/src/lib/api/memory-graph.ts");
 		expect(server).toContain('"/api/memory/settings"');
 		expect(server).toContain('"/api/memory/graph"');
 		expect(client).toContain('"/api/memory/settings"');
-		expect(client).toContain('"/api/memory/graph"');
+		expect(graphClient).toContain('"/api/memory/graph"');
 	});
 
 	test("does not make the generic retrieval index a Memory app write path", () => {

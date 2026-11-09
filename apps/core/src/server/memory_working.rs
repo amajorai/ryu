@@ -5,7 +5,8 @@
 //! module is the Core host wiring:
 //!
 //! - `GET/PUT/DELETE /api/memory/working?scope=thread|resource&id=…` — the
-//!   caller's own scratchpad. The owner is derived server-side (verified user on
+//!   caller's own scratchpad; `GET /api/memory/working/history` lists its
+//!   recent versions ([`history`]). The owner is derived server-side (verified user on
 //!   a bound node, the local principal on an unbound one), so a guessed id can
 //!   never reach another user's partition. A `thread` id that names an existing
 //!   conversation is additionally gated by that conversation's ACL.
@@ -36,13 +37,21 @@ use ryu_kernel_contracts::ResourceKey;
 /// `working_memory` built-in server.
 pub const UPDATE_TOOL_NAME: &str = "update_working_memory";
 
+#[path = "memory_working_history.rs"]
+pub mod history;
+
 pub(super) fn routes() -> Router<ServerState> {
-    Router::new().route(
-        "/api/memory/working",
-        get(get_working_memory)
-            .put(put_working_memory)
-            .delete(delete_working_memory),
-    )
+    Router::new()
+        .route(
+            "/api/memory/working",
+            get(get_working_memory)
+                .put(put_working_memory)
+                .delete(delete_working_memory),
+        )
+        .route(
+            "/api/memory/working/history",
+            get(history::get_working_memory_history),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -303,7 +312,9 @@ fn principal_matches_owner(principal: &crate::sidecar::mcp::ToolPrincipal, owner
 }
 
 /// Apply an agent's `update_working_memory` call. `owner` is the server-derived
-/// principal; the model supplies only the new content / patch.
+/// principal; the model supplies only the new content / patch and, optionally,
+/// the `expected_version` it read. Without one the write is unconditional, as
+/// before; with a stale one the call fails with [`conflict_error`].
 pub(crate) async fn apply_agent_update(
     memory: &super::memory::MemoryStore,
     config: &WorkingMemoryConfig,
@@ -315,8 +326,10 @@ pub(crate) async fn apply_agent_update(
         .ok_or_else(|| anyhow::anyhow!("thread working memory needs a host conversation"))?;
     let key = ResourceKey::owned(Some(owner), None);
     let mode = config.mode();
+    let expected_version = parse_expected_version(arguments)?;
     let mut write = WorkingMemoryWrite {
         mode: Some(mode),
+        expected_version,
         ..Default::default()
     };
     match mode {
@@ -341,9 +354,29 @@ pub(crate) async fn apply_agent_update(
             write.schema = config.schema.clone();
         }
     }
-    let doc = memory
+    let doc = match memory
         .put_working_memory(&key, config.scope, id, write)
-        .await?;
+        .await
+    {
+        Ok(doc) => doc,
+        Err(error) => {
+            if let Some(WorkingMemoryError::Conflict { current }) =
+                error.downcast_ref::<WorkingMemoryError>()
+            {
+                let latest = memory
+                    .get_working_memory(&key, config.scope, id)
+                    .await
+                    .ok()
+                    .flatten();
+                return Err(conflict_error(
+                    expected_version.unwrap_or_default(),
+                    *current,
+                    latest.as_ref(),
+                ));
+            }
+            return Err(error);
+        }
+    };
     Ok(json!({
         "ok": true,
         "scope": doc.scope.as_str(),
@@ -352,262 +385,56 @@ pub(crate) async fn apply_agent_update(
     }))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::server::memory::MemoryStore;
-
-    fn template_config(scope: WorkingMemoryScope) -> WorkingMemoryConfig {
-        WorkingMemoryConfig {
-            enabled: true,
-            scope,
-            template: Some("# Task\n- goal:".to_owned()),
-            schema: None,
-        }
-    }
-
-    #[test]
-    fn target_id_follows_scope() {
-        let thread = template_config(WorkingMemoryScope::Thread);
-        assert_eq!(target_id(&thread, Some("conv-1"), "alice"), Some("conv-1"));
-        assert_eq!(target_id(&thread, None, "alice"), None);
-        assert_eq!(target_id(&thread, Some("  "), "alice"), None);
-        let resource = template_config(WorkingMemoryScope::Resource);
-        assert_eq!(target_id(&resource, Some("conv-1"), "alice"), Some("alice"));
-    }
-
-    #[tokio::test]
-    async fn agent_update_writes_template_and_schema_documents() {
-        let store = MemoryStore::open_in_memory().unwrap();
-        let thread = template_config(WorkingMemoryScope::Thread);
-        let result = apply_agent_update(
-            &store,
-            &thread,
-            Some("conv-1"),
-            "alice",
-            &json!({ "content": "# Task\n- goal: ship" }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(result["version"], 1);
-        let doc = store
-            .get_working_memory(
-                &ResourceKey::owned(Some("alice"), None),
-                WorkingMemoryScope::Thread,
-                "conv-1",
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(doc.content.as_deref(), Some("# Task\n- goal: ship"));
-        assert_eq!(doc.template.as_deref(), Some("# Task\n- goal:"));
-
-        let missing = apply_agent_update(&store, &thread, Some("conv-1"), "alice", &json!({}))
-            .await
-            .unwrap_err();
-        assert!(missing.to_string().contains("content"));
-
-        let schema = WorkingMemoryConfig {
-            enabled: true,
-            scope: WorkingMemoryScope::Resource,
-            template: None,
-            schema: Some(json!({
-                "type": "object",
-                "properties": { "name": { "type": "string" }, "city": { "type": "string" } }
-            })),
-        };
-        apply_agent_update(
-            &store,
-            &schema,
-            None,
-            "alice",
-            &json!({ "data": { "name": "Ada" } }),
-        )
-        .await
-        .unwrap();
-        // A model that sends the patch as a JSON string is accepted too.
-        apply_agent_update(
-            &store,
-            &schema,
-            None,
-            "alice",
-            &json!({ "data": "{\"city\":\"London\"}" }),
-        )
-        .await
-        .unwrap();
-        let doc = store
-            .get_working_memory(
-                &ResourceKey::owned(Some("alice"), None),
-                WorkingMemoryScope::Resource,
-                "alice",
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(doc.data, Some(json!({ "name": "Ada", "city": "London" })));
-        let invalid = apply_agent_update(
-            &store,
-            &schema,
-            None,
-            "alice",
-            &json!({ "data": { "name": 7 } }),
-        )
-        .await
-        .unwrap_err();
-        assert!(invalid.to_string().contains("$.name"));
-    }
-
-    #[test]
-    fn injection_requires_the_tool_to_write_the_reader_partition() {
-        use crate::sidecar::mcp::ToolPrincipal;
-        assert!(principal_matches_owner(
-            &ToolPrincipal::Unrestricted,
-            ryu_memory::LOCAL_USER
-        ));
-        let owned = ToolPrincipal::Owned {
-            user_id: "alice".to_owned(),
-            org_id: Some("org".to_owned()),
-        };
-        assert!(principal_matches_owner(&owned, "alice"));
-        // Bob chatting in Alice's shared conversation: the tool would write
-        // Alice's partition, so Bob's turn gets no working memory.
-        assert!(!principal_matches_owner(&owned, "bob"));
-        assert!(!principal_matches_owner(
-            &ToolPrincipal::Unresolved,
-            "alice"
-        ));
-    }
-
-    async fn call(
-        router: &Router,
-        method: &str,
-        uri: &str,
-        body: Option<Value>,
-    ) -> (StatusCode, Value) {
-        use tower::ServiceExt as _;
-        let request = axum::http::Request::builder()
-            .method(method)
-            .uri(uri)
-            .header("content-type", "application/json")
-            .body(match body {
-                Some(body) => axum::body::Body::from(body.to_string()),
-                None => axum::body::Body::empty(),
-            })
-            .unwrap();
-        let response = router.clone().oneshot(request).await.unwrap();
-        let status = response.status();
-        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        (status, serde_json::from_slice(&bytes).unwrap_or_default())
-    }
-
-    /// The real handlers on an unbound node: read-empty, schema create, merge,
-    /// stale-version conflict, schema violation, bad scope, and delete.
-    #[tokio::test]
-    async fn http_routes_round_trip() {
-        let data = tempfile::tempdir().expect("data");
-        let state = crate::server::isolated_plugin_hook_test_state(data.path());
-        let router = routes()
-            .layer(axum::Extension(
-                None::<crate::identity_verify::VerifiedCaller>,
-            ))
-            .with_state(state);
-        let uri = "/api/memory/working?scope=resource&id=user-1";
-
-        let (status, body) = call(&router, "GET", uri, None).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert!(body["working_memory"].is_null());
-        assert_eq!(body["scope"], "resource");
-
-        let schema = json!({
-            "type": "object",
-            "properties": { "plan": { "enum": ["free", "pro"] }, "name": { "type": "string" } },
-            "additionalProperties": false
-        });
-        let (status, body) = call(
-            &router,
-            "PUT",
-            uri,
-            Some(json!({ "data": { "plan": "pro" }, "schema": schema, "expected_version": 0 })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["working_memory"]["mode"], "schema");
-        assert_eq!(body["working_memory"]["version"], 1);
-
-        let (status, body) = call(
-            &router,
-            "PUT",
-            uri,
-            Some(json!({ "data": { "name": "Ada" } })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(
-            body["working_memory"]["data"],
-            json!({ "plan": "pro", "name": "Ada" })
-        );
-
-        let (status, body) = call(
-            &router,
-            "PUT",
-            uri,
-            Some(json!({ "data": { "name": "Grace" }, "expected_version": 1 })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::CONFLICT, "{body}");
-        assert_eq!(body["current_version"], 2);
-
-        let (status, body) = call(
-            &router,
-            "PUT",
-            uri,
-            Some(json!({ "data": { "plan": "gold" } })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-        assert!(body["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("$.plan"));
-
-        let (status, _) = call(
-            &router,
-            "GET",
-            "/api/memory/working?scope=team&id=user-1",
-            None,
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        let (status, _) = call(
-            &router,
-            "GET",
-            "/api/memory/working?scope=thread&id=%20",
-            None,
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-
-        let (status, body) = call(&router, "DELETE", uri, None).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["deleted"], true);
-        let (_, body) = call(&router, "GET", uri, None).await;
-        assert!(body["working_memory"].is_null());
-    }
-
-    #[tokio::test]
-    async fn thread_update_without_conversation_is_refused() {
-        let store = MemoryStore::open_in_memory().unwrap();
-        let error = apply_agent_update(
-            &store,
-            &template_config(WorkingMemoryScope::Thread),
-            None,
-            "alice",
-            &json!({ "content": "x" }),
-        )
-        .await
-        .unwrap_err();
-        assert!(error.to_string().contains("host conversation"));
+/// Read the optional `expected_version` argument: a non-negative integer (a
+/// numeric string is accepted, since some models quote numbers). Absent or
+/// `null` means an unconditional write.
+fn parse_expected_version(arguments: &Value) -> anyhow::Result<Option<i64>> {
+    let parsed = match arguments.get("expected_version") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Number(number)) => number.as_i64(),
+        Some(Value::String(raw)) => raw.trim().parse::<i64>().ok(),
+        Some(_) => None,
+    };
+    match parsed {
+        Some(version) if version >= 0 => Ok(Some(version)),
+        _ => anyhow::bail!(
+            "`expected_version` must be a non-negative integer: the version shown in your \
+             working memory, or the one your last update returned"
+        ),
     }
 }
+
+/// The error an agent gets when its `expected_version` is stale: what happened,
+/// what to do, and the current document to merge into, so it can recover in
+/// the same turn without a separate read tool.
+fn conflict_error(expected: i64, current: i64, latest: Option<&WorkingMemory>) -> anyhow::Error {
+    let mut message = format!(
+        "working memory version conflict: you sent expected_version {expected}, but the document \
+         is now at version {current} because it changed after you read it. Your update was NOT \
+         saved. Re-read the current document below, merge your change into it, and call \
+         `{UPDATE_TOOL_NAME}` again with expected_version: {current}."
+    );
+    let body = latest.map(|doc| match doc.mode {
+        WorkingMemoryMode::Template => doc.content.clone().unwrap_or_default(),
+        WorkingMemoryMode::Schema => doc
+            .data
+            .as_ref()
+            .and_then(|data| serde_json::to_string_pretty(data).ok())
+            .unwrap_or_else(|| "{}".to_owned()),
+    });
+    match body {
+        Some(body) if !body.trim().is_empty() => {
+            message.push_str(&format!(
+                "\n\nCurrent document (version {current}):\n{}",
+                body.trim_end()
+            ));
+        }
+        Some(_) => message.push_str("\n\nThe current document is empty."),
+        None => {}
+    }
+    anyhow::anyhow!(message)
+}
+
+#[cfg(test)]
+#[path = "memory_working_tests.rs"]
+mod tests;

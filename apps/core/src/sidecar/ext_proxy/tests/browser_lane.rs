@@ -42,21 +42,22 @@ async fn the_browser_query_lane_carries_the_stamped_allowlist() {
     use crate::sidecar::capability_consumer::test_support::{
         register_sidecar_for, reserve_port, serve,
     };
-    const APP: &str = "@ryu/browser";
+    // The lane stamps only the browser app (lane.rs), so the fixture uses its id.
+    let app = "@ryu/browser";
     // A test-only agent id no other test writes a policy for.
     let agent = "browser-lane-e2e-agent";
-    let path = format!("/api/ext/{APP}/open?agent_id={agent}");
+    let path = format!("/api/ext/{app}/open?agent_id={agent}");
 
     let directory = tempfile::tempdir().unwrap();
     let state = crate::server::isolated_plugin_hook_test_state(directory.path());
     let port = reserve_port();
-    let mut manifest = web_app(APP, None, false, &[]);
+    let mut manifest = web_app(app, None, false, &[]);
     manifest.sidecars[0].name = "engine".to_owned();
     manifest.sidecars[0].port = port;
     state.app_manifests.write().await.push(manifest);
-    state.app_store.insert(APP, "1.0.0").await.unwrap();
-    state.app_store.set_enabled(APP, &[]).await.unwrap();
-    let _sidecar = register_sidecar_for(&state.manager, APP, port).await;
+    state.app_store.insert(app, "1.0.0").await.unwrap();
+    state.app_store.set_enabled(app, &[]).await.unwrap();
+    let _sidecar = register_sidecar_for(&state.manager, app, port).await;
     let seen: Seen = Arc::default();
     let captured = seen.clone();
     let router = Router::new().route(
@@ -87,7 +88,7 @@ async fn the_browser_query_lane_carries_the_stamped_allowlist() {
             // Boxed: the proxy future is large, and the test thread's stack is not.
             Box::pin(proxy_for_plugin(
                 state,
-                APP,
+                app,
                 "/open",
                 None,
                 browser_request(&path, &headers),

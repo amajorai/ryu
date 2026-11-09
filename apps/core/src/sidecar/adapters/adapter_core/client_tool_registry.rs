@@ -106,6 +106,22 @@ pub fn resolve_client_tool_result(
         .map_err(|_| "browser tool stream is no longer waiting".to_owned())
 }
 
+/// The browser lane's owner rule on top of the waiter's: a conversation with a
+/// stored owner never accepts a result from an anonymous (`None`) caller, and
+/// an owned conversation accepts only its owner.
+pub fn browser_result_owner_ok(
+    conversation_owner: Option<&str>,
+    caller_user_id: Option<&str>,
+) -> bool {
+    match conversation_owner {
+        Some(owner) => caller_user_id == Some(owner),
+        None => true,
+    }
+}
+
+/// Client-declared schemas are browser-only. Device tools never come from
+/// the client (Core compiles their catalog in), so a `device_*` schema is
+/// refused here even though it is a known tool name.
 pub(crate) fn allowed_client_tool_schema(value: &Value) -> bool {
     let name = value.get("name").and_then(Value::as_str).or_else(|| {
         value
@@ -130,6 +146,28 @@ mod client_tool_tests {
             "type": "function",
             "function": { "name": "delete_everything" }
         })));
+    }
+
+    #[test]
+    fn device_schemas_are_never_accepted_from_the_client() {
+        for name in [
+            "device_calendar_create",
+            "device.calendar.create",
+            "device_location_current",
+        ] {
+            assert!(!allowed_client_tool_schema(&serde_json::json!({
+                "type": "function",
+                "function": { "name": name }
+            })));
+        }
+    }
+
+    #[test]
+    fn owned_conversations_refuse_anonymous_browser_results() {
+        assert!(!browser_result_owner_ok(Some("user-1"), None));
+        assert!(!browser_result_owner_ok(Some("user-1"), Some("user-2")));
+        assert!(browser_result_owner_ok(Some("user-1"), Some("user-1")));
+        assert!(browser_result_owner_ok(None, None));
     }
 
     #[tokio::test]

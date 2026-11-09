@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import { formatMessage, type MessageValuesInput } from "@ryu/i18n/core";
 import { vaultTab } from "@/src/pages/VaultPage.model.ts";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../../../packages/i18n/src/active-locale.ts";
 import {
 	emptySyncTargetForm,
 	remotePathHint,
@@ -137,4 +142,40 @@ test("summaries, prefix hints and sync status read the store and the last push",
 	).toEqual({ label: "HTTP 403", tone: "error" });
 	expect(vaultTab("syncs")).toBe("syncs");
 	expect(vaultTab("nope")).toBe("secrets");
+});
+
+test("form problems read in the UI language", () => {
+	const ja: Record<string, string> = {
+		"Choose at least one Vercel environment.":
+			"Vercel の環境を 1 つ以上選択してください。",
+		"Enter the AWS region.": "AWS リージョンを入力してください。",
+	};
+	const japanese = {
+		direction: "ltr" as const,
+		locale: "ja",
+		translate(id: string, values?: MessageValuesInput, fallback?: string) {
+			const source = fallback ?? id;
+			return formatMessage(ja[source] ?? source, values ?? {});
+		},
+	};
+	registerActiveI18nRuntime(japanese);
+	try {
+		expect(
+			syncTargetInput({
+				...emptySyncTargetForm("vercel"),
+				name: "web",
+				projectId: "prj_1",
+				token: "t",
+				vercelTargets: [],
+			})
+		).toEqual({ problem: "Vercel の環境を 1 つ以上選択してください。" });
+		expect(
+			syncTargetInput({
+				...emptySyncTargetForm("aws-secrets-manager"),
+				name: "aws",
+			})
+		).toEqual({ problem: "AWS リージョンを入力してください。" });
+	} finally {
+		unregisterActiveI18nRuntime(japanese);
+	}
 });

@@ -32,10 +32,20 @@ export function cloudEnvironmentIssueMessage(
 			return tl(
 				"Fresh cloud boxes do not support Tailscale VPN. Remove the VPN key."
 			);
-		case "box_rejects_network_secret":
+		case "box_too_many_network_secrets":
 			return tl(
-				"Fresh cloud boxes do not support network secrets. Unselect {key}.",
-				{ key: issue.values.key }
+				"Fresh cloud boxes accept at most {max} network secrets. Unselect some.",
+				{ max: issue.values.max }
+			);
+		case "box_network_secret_not_host_name":
+			return tl(
+				"Fresh cloud boxes substitute network secrets only for host names. Bind {key} to a host name instead of {domain}.",
+				{ key: issue.values.key, domain: issue.values.domain }
+			);
+		case "box_network_secret_domain_not_allowed":
+			return tl(
+				"{key} is bound to {domain}, which the allowed domains do not include. Add it.",
+				{ key: issue.values.key, domain: issue.values.domain }
 			);
 		case "box_reserved_names":
 			return tl(

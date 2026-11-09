@@ -34,6 +34,8 @@ fn production_sources() -> Vec<(&'static str, String)> {
         ("message_pages", include_str!("message_pages.rs")),
         ("message_reads", include_str!("message_reads.rs")),
         ("message_types", include_str!("message_types.rs")),
+        ("message_window", include_str!("message_window.rs")),
+        ("message_window_flat", include_str!("message_window_flat.rs")),
         ("model_change_types", include_str!("model_change_types.rs")),
         ("participants", include_str!("participants.rs")),
         ("reactions", include_str!("reactions.rs")),
@@ -59,6 +61,7 @@ fn production_sources() -> Vec<(&'static str, String)> {
         ("tenancy", include_str!("tenancy.rs")),
         ("text_helpers", include_str!("text_helpers.rs")),
         ("titles_models", include_str!("titles_models.rs")),
+        ("tool_part_index", include_str!("tool_part_index.rs")),
         ("version_tree", include_str!("version_tree.rs")),
         ("version_types", include_str!("version_types.rs")),
     ]

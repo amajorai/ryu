@@ -40,6 +40,7 @@ import type {
 	SelectOption,
 	View,
 } from "@/src/lib/api/crm.ts";
+import { CrmUserText } from "./crm-label.tsx";
 
 /** A board loads more rows than a grid page because every column is on screen at
  *  once; the server still clamps it. */
@@ -274,12 +275,11 @@ export function BoardView({
 											style={colorStyle}
 										/>
 									)}
-									<span
+									<CrmUserText
 										className="truncate font-medium text-sm"
-										title={option.label}
-									>
-										{option.label}
-									</span>
+										text={option.label}
+										withTitle
+									/>
 								</div>
 								<div className="flex shrink-0 items-center gap-1.5">
 									{valueField && total > 0 && (

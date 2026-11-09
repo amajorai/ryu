@@ -321,14 +321,14 @@ export function TunnelLayer({
 
 	const caption = (() => {
 		if (needsControlServer) {
-			return "Needs a control server URL";
+			return tl("Needs a control server URL");
 		}
 		if (!enabled) {
 			if (backend === MESH_BACKEND_CLOUDFLARED) {
-				return "Off · public temporary URL";
+				return tl("Off · public temporary URL");
 			}
 			if (backend === MESH_BACKEND_OPENTUNNEL) {
-				return "Off · public stable URL";
+				return tl("Off · public stable URL");
 			}
 			if (backend === MESH_BACKEND_PLUGIN) {
 				return tl("Off · {pluginName}", { pluginName });
@@ -337,8 +337,8 @@ export function TunnelLayer({
 				return tl("Off · {loginServer}", { loginServer });
 			}
 			return backend === MESH_BACKEND_TAILCAT
-				? "Off · Tailcat"
-				: "Off · Tailscale SaaS";
+				? tl("Off · Tailcat")
+				: tl("Off · Tailscale SaaS");
 		}
 		if (status.backendError && !status.reachable) {
 			return status.backendError;
@@ -346,31 +346,31 @@ export function TunnelLayer({
 		if (status.reachable) {
 			if (backend === MESH_BACKEND_CLOUDFLARED) {
 				return status.cloudflaredUrl
-					? "Cloudflare URL ready"
-					: "Cloudflare connected";
+					? tl("Cloudflare URL ready")
+					: tl("Cloudflare connected");
 			}
 			if (
 				backend === MESH_BACKEND_OPENTUNNEL ||
 				backend === MESH_BACKEND_PLUGIN
 			) {
-				return status.publicUrl ? "Public URL ready" : "Connected";
+				return status.publicUrl ? tl("Public URL ready") : tl("Connected");
 			}
 			if (backend === MESH_BACKEND_TAILCAT) {
 				return status.tailcatAddress
-					? "Tailcat address ready"
-					: "Tailcat connected";
+					? tl("Tailcat address ready")
+					: tl("Tailcat connected");
 			}
 			return status.magicDnsName
 				? tl("Connected as {magicDnsName}", {
 						magicDnsName: status.magicDnsName,
 					})
-				: "Connected";
+				: tl("Connected");
 		}
 		if (status.backendState === "Provisioning") {
 			// First OpenTunnel start waits on certificate issuance (minutes).
-			return "Creating tunnel certificate…";
+			return tl("Creating tunnel certificate…");
 		}
-		return "Connecting…";
+		return tl("Connecting…");
 	})();
 
 	const pluginRows = (plugins?.providers ?? []).map(

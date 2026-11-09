@@ -170,3 +170,40 @@ pub(crate) async fn persist_assistant_reply(
     }
     persisted_message_id
 }
+
+/// What every plane except ACP calls once with the turn's final reply and
+/// outcome: [`persist_assistant_reply`], then the turn's recall marks, paid
+/// only when the outcome is `completed`. ACP keeps its own incremental
+/// persistence and pays the marks from its completion task instead.
+pub(crate) fn turn_reply_persister(
+    conversations: ConversationStore,
+    conversation_id: Option<String>,
+    agent_id: Option<String>,
+    memory_citations: Vec<MemoryCitation>,
+    checkpoint: Option<ReplyCheckpoint>,
+    recall_marks: TurnRecallMarks,
+) -> impl FnOnce(
+    String,
+    &'static str,
+    Vec<Value>,
+) -> futures_util::future::BoxFuture<'static, Option<String>>
+       + Send
+       + 'static {
+    move |reply: String, outcome: &'static str, data_parts: Vec<Value>| {
+        Box::pin(async move {
+            let message_id = persist_assistant_reply(
+                conversations,
+                conversation_id,
+                agent_id,
+                reply,
+                outcome,
+                memory_citations,
+                checkpoint,
+                data_parts,
+            )
+            .await;
+            recall_marks.spawn_settle(outcome);
+            message_id
+        })
+    }
+}

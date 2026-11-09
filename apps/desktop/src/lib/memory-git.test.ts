@@ -13,6 +13,7 @@ const memory: Memory = {
 	createdAt: 1,
 	id: "memory-1",
 	importance: 4,
+	lifecycle: "active",
 	scope: "project",
 	scopeId: "/work/ryu",
 	tags: ["style", "writing"],

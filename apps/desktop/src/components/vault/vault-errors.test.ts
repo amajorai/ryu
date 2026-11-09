@@ -42,6 +42,55 @@ test("a Core vault error shows its sentence without the program code, capitalise
 	).toBe("Unseal it first");
 });
 
+test("a Core vault sentence is translated through the catalog once its code is stripped", () => {
+	const ja: Record<string, string> = {
+		"The vault is sealed": "ボールトは封印されています",
+		"Wait {seconds} seconds": "{seconds} 秒待ってください",
+		"This agent may not use your accounts; change its identity in the agent's settings":
+			"このエージェントはあなたのアカウントを使えません",
+	};
+	const jaTl: LiteralMessage = (source, values) =>
+		formatMessage(ja[source] ?? source, values ?? {});
+	expect(
+		vaultErrorMessage(
+			new ApiError("/api/vault/seal", 423, "vault_sealed: the vault is sealed"),
+			FALLBACK,
+			jaTl
+		)
+	).toBe("ボールトは封印されています");
+	// Text that would parse as ICU is shown as sent, never formatted.
+	expect(
+		vaultErrorMessage(
+			new ApiError(
+				"/api/x",
+				400,
+				"vault_invalid_request: wait {seconds} seconds"
+			),
+			FALLBACK,
+			jaTl
+		)
+	).toBe("Wait {seconds} seconds");
+	// An apostrophe is literal text, so such a sentence is still translated.
+	expect(
+		vaultErrorMessage(
+			new ApiError(
+				"/api/vault/fill-sets",
+				403,
+				"vault_denied: this agent may not use your accounts; change its identity in the agent's settings"
+			),
+			FALLBACK,
+			jaTl
+		)
+	).toBe("このエージェントはあなたのアカウントを使えません");
+	expect(
+		vaultErrorMessage(
+			new ApiError("/api/x", 409, "vault_conflict: the key 'a' exists"),
+			FALLBACK,
+			jaTl
+		)
+	).toBe("The key 'a' exists");
+});
+
 test("only a leading vault_ code is stripped; other messages keep their text", () => {
 	expect(
 		vaultErrorMessage(

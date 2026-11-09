@@ -42,6 +42,20 @@ export interface WorkingMemoryDocument {
 	version: number;
 }
 
+/** One stored version of a working-memory document (see the history route). */
+export interface WorkingMemoryVersion {
+	/** Markdown document (template mode). */
+	content?: string;
+	/** Structured object (schema mode). */
+	data?: Record<string, WorkingMemoryJson>;
+	mode: WorkingMemoryMode;
+	updatedAt: number;
+	version: number;
+}
+
+/** Core keeps at most this many versions of one document, the current one included. */
+export const WORKING_MEMORY_HISTORY_LIMIT = 20;
+
 /** Addresses one working-memory document. */
 export interface WorkingMemoryRef {
 	/** Thread (conversation) id for `thread`, resource id for `resource`. */
@@ -100,6 +114,39 @@ const envelopeSchema = z.object({
 
 const deleteSchema = z.object({ deleted: z.boolean() });
 
+const versionWire = z.object({
+	version: z.number(),
+	mode: z.enum(["template", "schema"]),
+	updated_at: z.number(),
+	content: z.string().nullish(),
+	data: jsonObject.nullish(),
+});
+
+/** The history route's response: the caller's versions, newest first. */
+export const workingMemoryHistorySchema = z.object({
+	scope: z.enum(["thread", "resource"]),
+	id: z.string(),
+	versions: z.array(versionWire),
+});
+
+/** Map one wire version from the history route to camelCase. */
+export function toWorkingMemoryVersion(
+	wire: z.output<typeof versionWire>
+): WorkingMemoryVersion {
+	const version: WorkingMemoryVersion = {
+		version: wire.version,
+		mode: wire.mode,
+		updatedAt: wire.updated_at,
+	};
+	if (wire.content != null) {
+		version.content = wire.content;
+	}
+	if (wire.data != null) {
+		version.data = wire.data;
+	}
+	return version;
+}
+
 function toDocument(
 	wire: z.output<typeof workingMemoryWire>
 ): WorkingMemoryDocument {
@@ -129,6 +176,21 @@ function toDocument(
 function workingMemoryPath(ref: WorkingMemoryRef): string {
 	const params = new URLSearchParams({ scope: ref.scope, id: ref.id });
 	return `/api/memory/working?${params.toString()}`;
+}
+
+/**
+ * The history route for `ref`. `limit` is clamped by Core to
+ * 1..{@link WORKING_MEMORY_HISTORY_LIMIT}; omit it for every kept version.
+ */
+export function workingMemoryHistoryPath(
+	ref: WorkingMemoryRef,
+	limit?: number
+): string {
+	const params = new URLSearchParams({ scope: ref.scope, id: ref.id });
+	if (limit !== undefined) {
+		params.set("limit", String(Math.trunc(limit)));
+	}
+	return `/api/memory/working/history?${params.toString()}`;
 }
 
 /** Read a working-memory document, or `null` when none has been stored yet. */
@@ -191,4 +253,23 @@ export async function deleteWorkingMemory(
 		deleteSchema
 	);
 	return json.deleted;
+}
+
+/**
+ * The caller's recent versions of a working-memory document, newest first
+ * (at most {@link WORKING_MEMORY_HISTORY_LIMIT}). Empty when the document was
+ * never written or has been deleted.
+ */
+export async function getWorkingMemoryHistory(
+	target: ApiTarget,
+	ref: WorkingMemoryRef,
+	limit?: number
+): Promise<WorkingMemoryVersion[]> {
+	const json = await request(
+		target,
+		workingMemoryHistoryPath(ref, limit),
+		undefined,
+		workingMemoryHistorySchema
+	);
+	return json.versions.map(toWorkingMemoryVersion);
 }

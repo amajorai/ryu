@@ -4,7 +4,6 @@ use super::*;
 pub(super) struct TurnPlane<F> {
     pub(super) req: ChatStreamRequest,
     pub(super) registry: Arc<AcpAgentRegistry>,
-    pub(super) agent_store: AgentStore,
     pub(super) manager: Arc<SidecarManager>,
     pub(super) worktree_diffs: crate::server::WorktreeDiffStore,
     pub(super) mcp: Arc<McpRegistry>,
@@ -25,7 +24,9 @@ pub(super) struct TurnPlane<F> {
     pub(super) project_instructions: Option<String>,
     pub(super) project_rules: Option<Vec<Value>>,
     pub(super) memory_citations: Vec<MemoryCitation>,
-    pub(super) working_memory_tool_withheld: bool,
+    /// The turn's effective tool allowlist (`turn_tool_allowlist`), resolved
+    /// once so the planes offer exactly what the memory guide was built from.
+    pub(super) tool_allowlist: Option<Vec<String>>,
     pub(super) provider_access: Option<Vec<String>>,
     pub(super) account_confinement: crate::agent_access::AccountConfinement,
     pub(super) sampling: crate::inference::SamplingConfig,
@@ -42,6 +43,8 @@ pub(super) struct TurnPlane<F> {
     pub(super) host_conversation_store: ConversationStore,
     pub(super) reply_checkpoint: Option<ReplyCheckpoint>,
     pub(super) persist: F,
+    /// Paid by the ACP completion task; the other planes pay through `persist`.
+    pub(super) recall_marks: TurnRecallMarks,
 }
 
 /// Hand the turn to an A2A peer.

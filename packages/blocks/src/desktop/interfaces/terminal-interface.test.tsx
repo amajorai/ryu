@@ -259,7 +259,7 @@ describe("TerminalInterface", () => {
 		await run(view.container, "open 1");
 		const first = listThreads(SNAPSHOT, "all")[0]?.threadId;
 		expect(calls).toEqual([{ kind: "open", threadId: first ?? "" }]);
-		expect(view.container.textContent).toContain("opened #1");
+		expect(view.container.textContent).toContain("Opened #1");
 		await view.dispose();
 	});
 

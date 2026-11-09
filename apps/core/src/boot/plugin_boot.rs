@@ -171,6 +171,12 @@ pub(super) async fn load_plugins(
         crate::plugins::seed::run_one_time_migrations(&app_store, &manifests).await;
         if !offline_test_bootstrap {
             crate::plugins::seed::seed_preinstalled(&app_store, &manifests).await;
+            // Approvals persisted before a Gateway policy tightening (a grant
+            // moved onto an owner-exclusive row) are re-checked and narrowed.
+            crate::plugins::grant_revalidation::spawn(
+                app_store.clone(),
+                Arc::clone(&app_manifests),
+            );
         }
     }
     // Re-read dictation after pre-installed seed: a fresh install may have just

@@ -5,22 +5,28 @@
 //! side model for structured facts, and stores those facts as encrypted proposals.
 //! Nothing enters the long-term memory set until the user accepts it.
 //!
-//! The pieces live in submodules: `routes` (HTTP handlers and accept/reject),
-//! `sources` (recent chat loading), `prompt` (system prompt, model choice and
+//! The pieces live in submodules: `routes` (HTTP handlers), `review` (accept
+//! and reject, and the 409 that names why a proposal was already handled),
+//! `sources` (recent chats and resource-scope working memory), `prompt` (system prompt, model choice and
 //! output parsing), `candidates` (one review run: filter, dedupe and store
 //! proposals), `proposal_draft` (one candidate into a proposal with its
 //! confidence and source excerpts), `reconcile` (related existing memories in,
-//! revisions of them out), `run_state` (the watermark that lets an
+//! revisions of them out), `archive` (retiring memories that no longer hold,
+//! including stale events), `rollback` (undoing an accepted proposal and the
+//! recently accepted list), `run_state` (the watermark that lets an
 //! idle automatic tick skip the model), `automatic` (settings and the opt-in
 //! scheduler) and `wire` (response bodies).
 
 use std::time::Duration;
 
+mod archive;
 mod automatic;
 mod candidates;
 mod prompt;
 mod proposal_draft;
 mod reconcile;
+mod review;
+mod rollback;
 mod routes;
 mod run_state;
 mod sources;
@@ -31,6 +37,7 @@ pub(crate) use automatic::spawn_automatic_review;
 #[cfg(test)]
 use prompt::dream_prompt;
 // OpenAPI resolves each handler through its generated `__path_*` item.
+pub(super) use rollback::__path_rollback_dream_proposal;
 pub(super) use routes::{
     __path_accept_dream_proposal, __path_get_dream_review, __path_get_dream_settings,
     __path_reject_dream_proposal, __path_run_dream_review, __path_update_dream_settings, routes,
@@ -47,6 +54,9 @@ const DREAM_LAST_RUN_PREF: &str = "memory-dream-last-run";
 const DREAM_MAX_CONVERSATIONS: usize = 8;
 const DREAM_MESSAGES_PER_CONVERSATION: usize = 24;
 const DREAM_MAX_TRANSCRIPT_CHARS: usize = 48_000;
+/// The longest excerpt of the person's resource-scope working-memory document;
+/// it counts toward [`DREAM_MAX_TRANSCRIPT_CHARS`].
+const DREAM_MAX_WORKING_DOC_CHARS: usize = 4_000;
 const DREAM_MAX_MEMORY_CHARS: usize = 600;
 const DREAM_MAX_REASON_CHARS: usize = 400;
 const DREAM_MAX_WHEN_TO_USE_CHARS: usize = 240;
@@ -67,7 +77,22 @@ mod language_tests;
 mod tests;
 
 #[cfg(test)]
+mod archive_tests;
+
+#[cfg(test)]
+mod archive_bounds_tests;
+
+#[cfg(test)]
 mod hygiene_tests;
 
 #[cfg(test)]
 mod reconcile_tests;
+
+#[cfg(test)]
+mod review_tests;
+
+#[cfg(test)]
+mod rollback_tests;
+
+#[cfg(test)]
+mod working_source_tests;

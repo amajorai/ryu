@@ -83,7 +83,7 @@ pub(super) async fn load_turn_memory(
         && memory_principal_available
         && (req.persist || temporary_context_flag_enabled)
     {
-        recall
+        recall.map(|cfg| cfg.with_min_score(memory_policy.recall_min_relevance.min_score()))
     } else {
         None
     };
@@ -191,6 +191,7 @@ pub(super) async fn run_turn_auto_recall(
             req.conversation_id.as_deref(),
             SpanStart::new(String::new(), SpanKind::Retrieval, "auto-recall")
                 .attr("top_k", cfg.top_k)
+                .attr("min_score", f64::from(cfg.min_score))
                 .attr("space_count", cfg.space_ids.len())
                 .input(Value::String(user_text.to_owned())),
         )

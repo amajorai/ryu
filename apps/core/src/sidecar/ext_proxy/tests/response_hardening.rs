@@ -122,7 +122,14 @@ fn only_document_capable_third_party_responses_get_the_sandbox() {
         Some("application/xhtml+xml"),
         Some("application/xml"),
         Some("text/xml"),
+        Some("multipart/x-mixed-replace; boundary=b"),
+        Some("Multipart/Mixed; boundary=x"),
         Some(""),
+        Some("text/plain, text/html"),
+        Some("application/json,text/html"),
+        Some("text/plain,"),
+        Some("text/plain, image/png"),
+        Some("nonsense"),
         None,
     ] {
         assert!(sandboxed(active, false), "{active:?} must be sandboxed");
@@ -139,4 +146,31 @@ fn only_document_capable_third_party_responses_get_the_sandbox() {
     ] {
         assert!(!sandboxed(Some(inert), false), "{inert} is not a document");
     }
+}
+
+/// Regression: duplicate `Content-Type` headers are combined by the browser, which then
+/// renders the last valid type, so a leading inert value must not skip the sandbox.
+#[test]
+fn duplicate_content_type_headers_are_sandboxed_for_third_parties() {
+    let mut headers = HeaderMap::new();
+    headers.append("content-type", "application/json".parse().unwrap());
+    headers.append("content-type", "text/html".parse().unwrap());
+    harden_response_headers(&mut headers, false);
+    let policies: Vec<_> = headers.get_all("content-security-policy").iter().collect();
+    assert_eq!(policies, vec![THIRD_PARTY_DOCUMENT_CSP]);
+}
+
+#[tokio::test]
+async fn forwarded_multi_valued_content_type_is_sandboxed() {
+    let port = stub_sidecar(vec![
+        ("content-type", "application/json"),
+        ("content-type", "text/html"),
+    ])
+    .await;
+    let response = forward(port, "@acme/x", false).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        all(&response, "content-security-policy").contains(&THIRD_PARTY_DOCUMENT_CSP.to_owned())
+    );
 }

@@ -5411,6 +5411,12 @@
     ],
     "reason": "Hobby is a native/standard word in German, Italian and Portuguese"
   },
+  "Home (iPhone)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Apple's Home app is named 'Home' in German"
+  },
   "Honcho": {
     "locales": [
       "ar",
@@ -10024,6 +10030,12 @@
     ],
     "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
   },
+  "Ryu Gateway (cloud: {provider}, {model})": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'cloud' is the Italian term and Ryu Gateway is a product name"
+  },
   "Ryu Hire": {
     "locales": [
       "ar",
@@ -12055,12 +12067,6 @@
     ],
     "reason": "'Themes' is the established German UI term per the glossary"
   },
-  "Threads": {
-    "locales": [
-      "de"
-    ],
-    "reason": "'Threads' is the standard German computing term for CPU threads"
-  },
   "Ticket": {
     "locales": [
       "de"
@@ -12261,6 +12267,12 @@
       "fr"
     ],
     "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Transcription": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Transcription' is the French word"
   },
   "Transport": {
     "locales": [
@@ -15124,6 +15136,15 @@
     ],
     "reason": "placeholders and punctuation only; nothing to translate"
   },
+  "{day} · {minutes, plural, one {# min} other {# min}}": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'min' is the standard minute abbreviation in these locales"
+  },
   "{day}, {time}": {
     "locales": [
       "de",
@@ -15629,6 +15650,19 @@
       "ru"
     ],
     "reason": "Only placeholders and punctuation; nothing to translate."
+  },
+  "{label}: {name}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Placeholder-only label pattern; a colon and space is the correct separator in these locales"
   },
   "{label}: {status} · {detail}": {
     "locales": [
@@ -17235,5 +17269,271 @@
       "zh-CN"
     ],
     "reason": "Only a placeholder and a flow arrow; the arrow reads correctly in this left-to-right language."
+  },
+  "Alt key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Alt is the keycap name printed on keyboards in China; no Chinese name is used; Arabic keyboards print the Latin keycap legend Alt; catalog keeps Alt; Keycap label: Japanese keyboards print \"Alt\" on this key.; Keycap label: Russian keyboards print the Latin 'Alt' on this key; the catalog already rend"
+  },
+  "Backspace key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru"
+    ],
+    "reason": "Keycap label printed in Latin on Indian keyboards; Keycap label: Japanese keyboards print \"Backspace\" on this key.; Keycap label: Russian keyboards print the Latin 'Backspace' on this key.; Keycap legend printed in Latin on Arabic keyboards; Korean keyboards print this key's legend in Latin letters;"
+  },
+  "Ctrl key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ctrl is the keycap name printed on keyboards in China; catalog keeps Ctrl; Keycap label: Japanese keyboards print \"Ctrl\"; the catalog renders \"Ctrl\" as Ctrl.; Keycap label: Russian keyboards print the Latin 'Ctrl'; the catalog already renders 'Ctrl' as Ctrl.; Keycap label; catalog renders 'Ctrl' as "
+  },
+  "Delete key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Delete is the keycap name printed on keyboards in China; Keycap label printed in Latin on Indian keyboards; Keycap label: Japanese keyboards print \"Delete\" on this key.; Keycap label: Russian keyboards print the Latin 'Del'/'Delete' on this key.; Keycap legend Delete printed in Latin on Arabic keybo"
+  },
+  "End key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "End is the keycap name printed on keyboards in China; Keycap label printed in Latin on Indian keyboards; Keycap label: Japanese keyboards print \"End\" on this key.; Keycap label: Russian keyboards print the Latin 'End' on this key.; Keycap legend End printed in Latin on Arabic keyboards; Korean keybo"
+  },
+  "Enter key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru"
+    ],
+    "reason": "Keycap label printed in Latin on Indian keyboards; Keycap label: Japanese keyboards print \"Enter\" on this key.; Keycap label: Russian keyboards print the Latin 'Enter'; the catalog uses 'Нажмите Enter' throughout.; Keycap legend Enter printed in Latin on Arabic keyboards, matching Ctrl/Esc/Shift/Tab"
+  },
+  "Escape key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Esc is the keycap name printed on keyboards in China; catalog keeps Esc; Keycap label 'Esc'; catalog renders 'Esc' as Esc; Keycap label: Japanese keyboards print \"Esc\"; the catalog keeps Esc in Latin.; Keycap label: Russian keyboards print the Latin 'Esc'; the catalog renders 'Esc' as Esc.; Keycap l"
+  },
+  "Home key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Home is the keycap name printed on keyboards in China; Keycap label printed in Latin on Indian keyboards; Keycap label: Japanese keyboards print \"Home\" on this key.; Keycap label: Russian keyboards print the Latin 'Home' on this key.; Keycap legend Home printed in Latin on Arabic keyboards; Korean k"
+  },
+  "Page Down key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Keycap label: Japanese keyboards print \"Page Down\"; the catalog keeps (Page Up) in Latin.; Keycap label: Russian keyboards print the Latin 'PgDn' on this key.; Keycap label; catalog keeps '(Page Down)' in Latin; Keycap legend; catalog keeps Page Down untranslated; Korean keyboards print this key's l"
+  },
+  "Page Up key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Keycap label: Japanese keyboards print \"Page Up\"; the catalog keeps (Page Up) in Latin.; Keycap label: Russian keyboards print the Latin 'PgUp' on this key.; Keycap label; catalog keeps '(Page Up)' in Latin; Keycap legend; catalog keeps Page Up untranslated; Korean keyboards print this key's legend "
+  },
+  "Shift key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Keycap label: Japanese keyboards print \"Shift\"; the catalog renders Shift as Shift.; Keycap label: Russian keyboards print the Latin 'Shift'; the catalog renders 'Shift' as Shift.; Keycap label; catalog renders 'Shift' as Shift; Keycap legend Shift; catalog keeps Shift untranslated; Korean keyboards"
+  },
+  "Tab key": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Keycap label: Japanese keyboards print \"Tab\"; the catalog renders Tab as Tab.; Keycap label: Russian keyboards print the Latin 'Tab'; the catalog renders 'Tab' as Tab.; Keycap label; catalog renders 'Tab' as Tab; Keycap legend Tab; catalog keeps Tab untranslated; Korean keyboards print this key's le"
+  },
+  "{action}: {name}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Placeholder-only composite; Placeholder-only composite.; Placeholder-only composite; ASCII colon matches catalog style for label: value.; Placeholder-only composite; the separator is the same in Russian.; Placeholder/punctuation-only composite; nothing to translate.; placeholder-only composite"
+  },
+  "{label} ({key})": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholder-only composite; Placeholder-only composite.; Placeholder-only composite: label with its shortcut key.; Placeholder-only composite; parentheses are the same in Russian.; Placeholder/punctuation-only composite; nothing to translate.; placeholder-only composite; placeholder-only composite; "
+  },
+  "{setting} · {value}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Placeholder-only composite; Placeholder-only composite with a middle-dot separator.; Placeholder-only composite with a neutral separator; Placeholder-only composite.; Placeholder-only composite; the middle-dot separator is the same in Russian.; Placeholder/punctuation-only composite; nothing to tran"
+  },
+  "{size}px": {
+    "locales": [
+      "ar",
+      "es",
+      "fr",
+      "hi",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Pixel unit: the ru catalog writes pixel values as '{value} px' (Latin px), so the translation is ASCII-only.; Placeholder plus px unit abbreviation, catalog keeps px (e.g. {value}px / ث); Placeholder plus the universal CSS unit px; Placeholder plus the universal px unit, used unchanged in ja (catalo"
+  },
+  "{name} is {perf}": {
+    "locales": [
+      "ar",
+      "ko"
+    ],
+    "reason": "Placeholder-only composite rendered as '{name}: {perf}'; the colon reads naturally in Korean and both values are already localized.; Placeholder-only: Arabic drops the copula, rendered as {name}: {perf} (perf is an untranslated tier label)"
+  },
+  "Briefing": {
+    "locales": [
+      "de",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Established French loanword in marketing/briefing context; catalog already uses \"Briefing pour {name}\"; Established German loanword; the catalog already renders brief as Briefing.; Established loanword in Italian (briefing) used as-is in the catalog sense; Standard loanword in Brazilian Portuguese m"
+  },
+  "Bucket": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "S3 storage bucket term kept as-is in pt-BR cloud UIs.; S3 storage bucket term, used untranslated in Italian technical UI; S3 storage bucket; technical term kept as-is in German UIs.; S3 storage term kept as-is in French; catalog already uses \"bucket\"; S3 technical term; catalog keeps \"bucket\" untran"
+  },
+  "{target}; {policy}": {
+    "locales": [
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Placeholder-only composite; Placeholder-only composite.; Placeholder-only composite; the semicolon separator is the same in Russian.; Placeholder/punctuation-only composite; nothing to translate.; placeholder-only composite"
+  },
+  "Space key": {
+    "locales": [
+      "hi"
+    ],
+    "reason": "Keycap label printed in Latin on Indian keyboards"
+  },
+  "{step}: {state}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Placeholder-only composite (step name and its state)"
+  },
+  "Modelfile PARAMETER use_mmap false": {
+    "locales": [
+      "ar",
+      "de",
+      "hi",
+      "it",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Literal Ollama Modelfile directive shown verbatim; code, not prose"
+  },
+  "Micro-skills": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "TokenEconomizer feature name; pt-BR catalog keeps 'skills' as a loanword"
   }
 }

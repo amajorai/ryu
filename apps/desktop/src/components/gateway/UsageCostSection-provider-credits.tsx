@@ -1,5 +1,6 @@
 // Usage & Cost: BYOK provider key balance card.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCurrency } from "@ryu/ui/lib/number-format.ts";
 import { CaptionInfo } from "@/src/components/gateway/quiet.tsx";
 import {
@@ -66,24 +67,27 @@ function ProviderCreditsRow({ providerId }: { providerId: string }) {
 	// supported-provider gate and the poll cadence, and re-typing its query key
 	// here would make the two surfaces share cache only by coincidence.
 	const data = useProviderCredits(providerId);
+	const tl = useLiteralMessages();
 	const label = CREDIT_PROVIDER_LABELS.get(providerId) ?? providerId;
 	const meter = data?.available ? data.meters.at(0) : undefined;
 	const amount = meter?.values.at(0);
-	let value = "Checking…";
+	let value = tl("Checking…");
 	if (data) {
 		if (amount) {
-			value = `${formatCurrency(amount.number, "USD", {
-				maximumFractionDigits: 2,
-				minimumFractionDigits: 2,
-			})} left`;
+			value = tl("{remaining} left", {
+				remaining: formatCurrency(amount.number, "USD", {
+					maximumFractionDigits: 2,
+					minimumFractionDigits: 2,
+				}),
+			});
 		} else if (data.reason === "not_logged_in") {
-			value = "No key stored";
+			value = tl("No key stored");
 		} else if (data.reason === "token_expired") {
-			value = "Key rejected";
+			value = tl("Key rejected");
 		} else if (data.reason === "rate_limited") {
-			value = "Rate limited";
+			value = tl("Rate limited");
 		} else {
-			value = "Unavailable";
+			value = tl("Unavailable");
 		}
 	}
 	return (

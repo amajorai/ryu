@@ -178,7 +178,6 @@
   "I've saved them": "保存しました",
   "I've scanned it": "スキャンしました",
   "Import browser bookmarks": "ブラウザーのブックマークをインポート",
-  "Imported {imported} bookmarks": "ブックマークを {imported} 件インポートしました",
   "Importing bookmarks…": "ブックマークをインポートしています…",
   "Improve writing": "文章を改善",
   "In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.": "認証アプリで<strong>セットアップキーを入力</strong>を選択し、このキーを貼り付けてください。",
@@ -371,8 +370,9 @@
   "plugin bundle does not export activate(context)": "プラグインバンドルが activate(context) をエクスポートしていません",
   "{current} of {total}": "{total}件中{current}件目",
   "{current} of {total}: {match}": "{total}件中{current}件目：{match}",
+  "{imported, plural, one {Imported # bookmark} other {Imported # bookmarks}}": "{imported, plural, other {# 件のブックマークをインポートしました}}",
   "{ipAddress} · Created {createdAgo}": "{ipAddress} · 作成: {createdAgo}",
   "{label} will be signed out and must sign in again to use your account.": "{label} はサインアウトされ、アカウントを使用するには再度サインインする必要があります。",
   "{matchCount, plural, one {# local result} other {# local results}}": "{matchCount, plural, other {# 件のローカル結果}}",
-  "{skipped} duplicate links skipped": "重複リンク {skipped} 件をスキップしました"
+  "{skipped, plural, one {# duplicate link skipped} other {# duplicate links skipped}}": "{skipped, plural, other {重複したリンク # 件をスキップしました}}"
 }

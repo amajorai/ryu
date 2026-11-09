@@ -86,6 +86,9 @@ pub(in crate::server) async fn route_single_turn_once(
                 .include_sensitive_topics(&memory_owner)
                 .await
                 .unwrap_or(false),
+            // Overlaid from the turn's memory policy in `load_turn_memory`, which
+            // resolves the node preferences once per turn.
+            min_score: 0.0,
         })
     } else {
         None

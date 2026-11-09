@@ -25,6 +25,12 @@ export const emailAuthOptions = {
 		minPasswordLength: 8,
 		maxPasswordLength: 128,
 		requireEmailVerification: true,
+		// Account recovery must evict whoever else holds the account. Better Auth
+		// deletes every session inside the reset transaction (link and email-OTP
+		// paths alike), which also kills the hosted MCP OAuth access and refresh
+		// tokens bound to those sessions (`verifyHostedOAuthToken` requires a
+		// live session row). Matches `set-password`, which revokes the others.
+		revokeSessionsOnPasswordReset: true,
 		// `requireEmailVerification` makes Better Auth answer a sign-up for an
 		// already-registered address with a *generic success* — a synthetic user,
 		// no error, and (without this hook) no email at all. That protects against

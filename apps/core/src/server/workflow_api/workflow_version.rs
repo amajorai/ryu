@@ -303,7 +303,8 @@ pub(in crate::server) async fn restore_workflow_version(
     }
     // Re-persist the captured definition through the shared write path so triggers
     // reconcile and `updated_at` is re-stamped.
-    match crate::workflow::persist_workflow(version.workflow).await {
+    let saver = caller.as_ref().map(|caller| caller.user_id.as_str());
+    match crate::workflow::persist_workflow_as(version.workflow, saver).await {
         Ok(workflow) => (
             StatusCode::OK,
             Json(
@@ -315,6 +316,7 @@ pub(in crate::server) async fn restore_workflow_version(
                 || e.contains("unknown node")
                 || e.contains("duplicate node")
                 || e.contains("sent a redacted")
+                || e.contains("Composio trigger")
             {
                 StatusCode::BAD_REQUEST
             } else {

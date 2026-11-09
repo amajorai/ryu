@@ -8,3 +8,5 @@ mod conversation_tenancy;
 pub(crate) use conversation_tenancy::*;
 mod sandbox_connections;
 pub(crate) use sandbox_connections::*;
+#[cfg(test)]
+mod conversation_tenancy_test;

@@ -235,6 +235,9 @@ pub(in crate::server) async fn release_conversation_residue(
     chat_checkpoints::release_conversation(id, checkpoint_folders).await;
     delete_annotation_items_for_run(id).await;
     delete_agent_transcripts(id).await;
+    // Pending and parked phone actions of a deleted conversation are dropped.
+    crate::device_tools::claims::cancel_conversation(id);
+    crate::device_tools::pending::cancel_conversation(id);
 }
 
 /// Release the residue of every conversation a bulk clear removed, detached

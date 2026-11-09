@@ -13,7 +13,7 @@ use crate::server::*;
 pub(in crate::server) fn memory_settings_user_id(
     caller: &Option<crate::identity_verify::VerifiedCaller>,
 ) -> Option<String> {
-    if node_org_id().is_some() {
+    if crate::sidecar::node_binding::node_bound_for_tenancy() {
         caller.as_ref().map(|value| value.user_id.clone())
     } else {
         Some(memory::LOCAL_USER.to_owned())
@@ -201,7 +201,7 @@ pub(in crate::server) async fn get_memory_graph(
     {
         return response;
     }
-    let node_bound = node_org_id().is_some();
+    let node_bound = crate::sidecar::node_binding::node_bound_for_tenancy();
     let caller_user_id = caller.as_ref().map(|value| value.user_id.clone());
     let caller_org_id = caller.as_ref().and_then(|value| value.org_id.clone());
     let include_sensitive = sensitive_memory_enabled(&state, &caller).await;
@@ -248,6 +248,13 @@ pub(in crate::server) struct MemoryListQuery {
     pub(in crate::server) category: Option<String>,
     #[serde(default)]
     pub(in crate::server) limit: Option<usize>,
+    /// One lifecycle to list (`active`, `superseded`, `archived`,
+    /// `retracted`), or `all`. Wins over `include_history`.
+    #[serde(default)]
+    pub(in crate::server) lifecycle: Option<String>,
+    /// List every lifecycle rather than only active memories.
+    #[serde(default)]
+    pub(in crate::server) include_history: bool,
 }
 
 #[derive(serde::Deserialize)]

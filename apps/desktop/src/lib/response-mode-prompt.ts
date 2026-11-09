@@ -39,7 +39,7 @@ export function responseModeCacheWarning(
 	const changed =
 		responseModeForInterface(current) !== responseModeForInterface(next);
 	return promptEditCacheWarning(
-		changed ? [RESPONSE_MODE_FIELD] : [],
+		changed ? [tl(RESPONSE_MODE_FIELD)] : [],
 		"ryu-agent",
 		tl
 	);

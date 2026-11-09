@@ -171,7 +171,7 @@ fn shipped_package_cards_project_canonical_identity_and_permissions() {
             rows.push(json!({ "package": format!("{cluster}/{}", directory.file_name().unwrap().to_string_lossy()), "entry": entry, "manifest": serde_json::from_str::<serde_json::Value>(&raw).unwrap() }));
         }
     }
-    assert_eq!(rows.len(), 106, "all authored packages must be represented");
+    assert_eq!(rows.len(), 107, "all authored packages must be represented");
     assert_eq!(
         incoming_seen,
         incoming_ids.into_iter().map(str::to_string).collect()
@@ -179,5 +179,5 @@ fn shipped_package_cards_project_canonical_identity_and_permissions() {
     let output = repository.join("docs/proof/test-coverage-sweep-20260924/parallel/plugins-runtime/full/cards/core-projection.json");
     std::fs::create_dir_all(output.parent().unwrap()).unwrap();
     std::fs::write(output, serde_json::to_string_pretty(&rows).unwrap()).unwrap();
-    println!("Production card projection:106 canonical packages; incoming FunctionGemma/Jina Reader/Kill Switch/Needle3 identities, permissions, tool metadata and supported surfaces verified; no activation, provider, process or network effects");
+    println!("Production card projection:107 canonical packages; incoming FunctionGemma/Jina Reader/Kill Switch/Needle3 identities, permissions, tool metadata and supported surfaces verified; no activation, provider, process or network effects");
 }

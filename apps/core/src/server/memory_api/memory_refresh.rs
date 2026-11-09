@@ -11,6 +11,11 @@ pub(in crate::server) async fn refresh_memory_retrieval_metadata(
     state: &ServerState,
     entries: &[memory::LongTermEntry],
 ) {
+    // Never restamp chunks as shared while an enrolled node's binding is
+    // unresolved: that would publish members' private facts once it returns.
+    if crate::sidecar::node_binding::binding_unresolved() {
+        return;
+    }
     let node_org = node_org_id();
     for entry in entries {
         let owner = match (node_org.as_deref(), entry.owner_user_id.as_deref()) {
@@ -46,7 +51,7 @@ pub(in crate::server) async fn refresh_memory_retrieval_metadata(
     path = "/api/memory",
     tag = "Memory",
     summary = "List memory entries",
-    params(("scope" = Option<String>, Query, description = "user | node | project | org"), ("scope_id" = Option<String>, Query), ("category" = Option<String>, Query), ("limit" = Option<usize>, Query)),
+    params(("scope" = Option<String>, Query, description = "user | node | project | org"), ("scope_id" = Option<String>, Query), ("category" = Option<String>, Query), ("limit" = Option<usize>, Query), ("lifecycle" = Option<String>, Query, description = "active (default) | superseded | archived | retracted | all"), ("include_history" = Option<bool>, Query, description = "List every lifecycle, not only active memories")),
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub(in crate::server) async fn list_memory(
@@ -63,19 +68,20 @@ pub(in crate::server) async fn list_memory(
     {
         return response;
     }
+    let lifecycle = listed_lifecycle(&q);
     let filter = memory::MemoryFilter {
         scope: q.scope.as_deref().map(memory::MemoryScope::from_str),
         scope_id: q.scope_id,
         category: q.category.as_deref().map(memory::MemoryCategory::from_str),
         limit: q.limit,
-        lifecycle: None,
+        lifecycle,
     };
     // Per-caller tenancy: a bound-node member sees the shared node/project brain plus
     // only their OWN user-scope facts. Unbound → unrestricted (byte-identical).
     let vis = memory::MemoryVisibility::for_caller_in_org(
         caller.as_ref().map(|c| c.user_id.as_str()),
         caller.as_ref().and_then(|c| c.org_id.as_deref()),
-        node_org_id().is_some(),
+        crate::sidecar::node_binding::node_bound_for_tenancy(),
     );
     let include_sensitive = sensitive_memory_enabled(&state, &caller).await;
     match state
@@ -85,6 +91,17 @@ pub(in crate::server) async fn list_memory(
     {
         Ok(entries) => Json(json!({ "memories": entries })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// The lifecycle `GET /api/memory` lists: active memories unless the caller
+/// asks for history. An unrecognized value reads as `active`, never as all.
+fn listed_lifecycle(q: &MemoryListQuery) -> Option<memory::MemoryLifecycle> {
+    match q.lifecycle.as_deref().map(str::trim) {
+        Some(value) if value.eq_ignore_ascii_case("all") => None,
+        Some(value) => Some(memory::MemoryLifecycle::from_str(value)),
+        None if q.include_history => None,
+        None => Some(memory::MemoryLifecycle::Active),
     }
 }
 

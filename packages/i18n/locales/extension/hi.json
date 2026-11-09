@@ -178,7 +178,6 @@
   "I've saved them": "मैंने इन्हें सहेज लिया है",
   "I've scanned it": "मैंने स्कैन कर लिया है",
   "Import browser bookmarks": "ब्राउज़र बुकमार्क आयात करें",
-  "Imported {imported} bookmarks": "{imported} बुकमार्क आयात किए गए",
   "Importing bookmarks…": "बुकमार्क आयात हो रहे हैं…",
   "Improve writing": "लेखन सुधारें",
   "In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.": "अपने ऑथेंटिकेटर ऐप में <strong>सेटअप कुंजी दर्ज करें</strong> चुनें और यह कुंजी पेस्ट करें।",
@@ -371,8 +370,9 @@
   "plugin bundle does not export activate(context)": "प्लगइन बंडल activate(context) एक्सपोर्ट नहीं करता",
   "{current} of {total}": "{total} में से {current}",
   "{current} of {total}: {match}": "{total} में से {current}: {match}",
+  "{imported, plural, one {Imported # bookmark} other {Imported # bookmarks}}": "{imported, plural, one {# बुकमार्क इंपोर्ट किया गया} other {# बुकमार्क इंपोर्ट किए गए}}",
   "{ipAddress} · Created {createdAgo}": "{ipAddress} · {createdAgo} बनाया गया",
   "{label} will be signed out and must sign in again to use your account.": "{label} साइन आउट हो जाएगा और आपके खाते का उपयोग करने के लिए उसे फिर से साइन इन करना होगा।",
   "{matchCount, plural, one {# local result} other {# local results}}": "{matchCount, plural, one {# स्थानीय परिणाम} other {# स्थानीय परिणाम}}",
-  "{skipped} duplicate links skipped": "{skipped} डुप्लिकेट लिंक छोड़े गए"
+  "{skipped, plural, one {# duplicate link skipped} other {# duplicate links skipped}}": "{skipped, plural, one {# डुप्लिकेट लिंक छोड़ा गया} other {# डुप्लिकेट लिंक छोड़े गए}}"
 }

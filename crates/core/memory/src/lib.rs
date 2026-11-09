@@ -54,8 +54,12 @@
 
 use ryu_kernel_contracts::ResourceKey;
 
+mod access;
+mod archive_candidates;
 mod crypto;
+mod delete;
 mod list;
+mod proposal_review;
 mod proposal_types;
 mod proposals;
 mod recall;
@@ -69,6 +73,8 @@ mod visibility;
 pub mod working;
 mod write;
 
+pub use access::MAX_MARK_RECALLED_IDS;
+pub use archive_candidates::UnusedEventQuery;
 pub use proposal_types::{
     MemoryProposalDraft, MemoryProposalFilter, MemoryProposalOperation, MemoryProposalSource,
     MemoryProposalStatus, MemoryRevisionProposal, NewMemoryProposal,
@@ -83,7 +89,7 @@ pub use visibility::MemoryVisibility;
 pub use working::{
     merge_patch, render_working_memory_block, WorkingMemory, WorkingMemoryConfig,
     WorkingMemoryError, WorkingMemoryMode, WorkingMemoryScope, WorkingMemoryWrite,
-    DEFAULT_WORKING_MEMORY_TEMPLATE, MAX_WORKING_MEMORY_BYTES,
+    DEFAULT_WORKING_MEMORY_TEMPLATE, MAX_WORKING_MEMORY_BYTES, WORKING_MEMORY_HISTORY_LIMIT,
 };
 
 /// Default number of recent turns assembled as short-term context.
@@ -123,13 +129,25 @@ pub(crate) fn now_millis() -> i64 {
 }
 
 #[cfg(test)]
+mod access_tests;
+
+#[cfg(test)]
+mod archive_candidates_tests;
+
+#[cfg(test)]
 mod crypto_tests;
+
+#[cfg(test)]
+mod delete_tests;
 
 #[cfg(test)]
 mod list_tests;
 
 #[cfg(test)]
 mod proposal_integrity_tests;
+
+#[cfg(test)]
+mod proposal_review_tests;
 
 #[cfg(test)]
 mod proposal_tests;

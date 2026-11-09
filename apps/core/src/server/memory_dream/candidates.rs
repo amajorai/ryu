@@ -1,13 +1,16 @@
-//! One Dream review run: load sources and the related existing memories,
-//! skip an automatic run with nothing new, call the model, then filter,
-//! dedupe and store the candidate memories and revisions as pending
-//! proposals.
+//! One Dream review run: propose archiving stale events, load sources and the
+//! related existing memories, skip an automatic run with nothing new, call the
+//! model, then filter, dedupe and store the candidate memories, revisions and
+//! archives as pending proposals.
 
 use std::collections::{HashMap, HashSet};
 
 use axum::http::StatusCode;
 use serde_json::Value;
 
+use super::archive::{
+    archive_blocked_targets, model_archive_proposals, propose_stale_event_archives,
+};
 use super::language;
 use super::prompt::{dream_prompt, parse_model_output, resolve_dream_model, DreamModelOutput};
 use super::proposal_draft::candidate_proposal;
@@ -39,6 +42,14 @@ pub(super) async fn run_dream_review_inner(
         .include_sensitive_topics(&owner)
         .await
         .unwrap_or(false);
+    // Model-free pruning runs first, so a run with no new chats still surfaces
+    // stale events. It is fail-open: the review continues without it.
+    let now = chrono::Utc::now().timestamp_millis();
+    if let Err(error) =
+        propose_stale_event_archives(state, caller, &owner, include_sensitive, now).await
+    {
+        tracing::warn!("Dream could not check for stale events: {error:#}");
+    }
     let sources = load_sources(state, caller, include_sensitive)
         .await
         .map_err(internal)?;
@@ -123,8 +134,9 @@ pub(super) async fn run_dream_review_inner(
 }
 
 /// Store the model's output as pending proposals: new memories that are not
-/// already known, and revisions of the `related` memories the model was shown.
-/// Both must cite messages from `sources`.
+/// already known, and revisions and archives of the `related` memories the
+/// model was shown. New memories and revisions must cite messages from
+/// `sources`; an archive may.
 pub(super) async fn store_model_output(
     state: &ServerState,
     caller: &Option<crate::identity_verify::VerifiedCaller>,
@@ -152,7 +164,20 @@ pub(super) async fn store_model_output(
         owner,
         include_sensitive,
     );
+    // An archive never targets a memory revised this run, one with a pending
+    // proposal, or one whose archive the user already declined.
+    let mut blocked = archive_blocked_targets(state, owner, related).await?;
+    blocked.extend(
+        revisions
+            .iter()
+            .filter_map(|proposal| proposal.target_memory_id.clone()),
+    );
     for proposal in revisions {
+        store_proposal(state, proposal).await;
+    }
+    let archives =
+        model_archive_proposals(&output.archive, related, &blocked, &source_by_id, owner);
+    for proposal in archives {
         store_proposal(state, proposal).await;
     }
 

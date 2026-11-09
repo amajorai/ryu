@@ -289,6 +289,20 @@ pub(in crate::server) fn credential_route_policy(
     if path_has_prefix(path, "/api/security-key") && !is_owner_or_member_session(context) {
         return RoutePolicy::OwnerOnly;
     }
+    // Phone device tools are the user's own app session only: API keys,
+    // paired capabilities, MCP / hosted OAuth clients and plugin grants never
+    // reach the device lane (the handlers re-check the same allowlist).
+    if path_has_prefix(path, "/api/device-tools") && !is_owner_or_member_session(context) {
+        return RoutePolicy::OwnerOnly;
+    }
+    // Minting an app route delegation or purging a member's app data is the
+    // user's own session or the owner token: a delegation must never mint a
+    // longer-lived one, and no OAuth scope covers deleting a person's data.
+    if (path == "/api/app-delegations" || path == "/api/data/purge-user")
+        && !is_owner_or_member_session(context)
+    {
+        return RoutePolicy::OwnerOnly;
+    }
     route_policy(method, path)
 }
 
@@ -324,16 +338,27 @@ pub(in crate::server) fn is_gateway_operator_read_path(path: &str) -> bool {
 }
 
 /// Vault reads whose handlers answer only to a vault manager (`require_sys`
-/// with `Admin`, or the manager's unfiltered event stream), so a scoped
+/// with `Admin`, the `sys/broker` and agent-folder `List` baselines only a
+/// manager holds, or the manager's unfiltered event stream), so a scoped
 /// credential must not satisfy them with its signer's role (see
-/// [`credential_route_policy`]).
+/// [`credential_route_policy`]). The broker family is covered by prefix,
+/// except the public CA certificate, the Box relay (both on the public
+/// router), and the static template catalog any signed-in member may read.
 pub(in crate::server) fn is_vault_operator_read_path(path: &str) -> bool {
-    path_has_prefix(path, "/api/vault/audit")
+    (path_has_prefix(path, "/api/vault/broker")
+        && !matches!(
+            path,
+            crate::server::vault_broker_api::CA_PATH
+                | crate::vault::broker::box_relay::RELAY_PATH
+                | "/api/vault/broker/catalog"
+        ))
+        || path_has_prefix(path, "/api/vault/agent-accounts")
+        || path_has_prefix(path, "/api/vault/fill-sets")
+        || path_has_prefix(path, "/api/vault/audit")
         || matches!(
             path,
             "/api/vault/events"
                 | "/api/vault/policies"
-                | "/api/vault/broker/sessions"
                 | "/api/vault/sys/seal-provider"
                 | "/api/vault/sys/rekey"
         )

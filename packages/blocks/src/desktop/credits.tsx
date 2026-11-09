@@ -177,9 +177,13 @@ export function CreditsView({
 										<HugeiconsIcon className="size-3.5" icon={Add01Icon} />
 									)}
 									{tlRich(
-										// biome-ignore lint/suspicious/noTemplateCurlyInString: ICU message with a literal dollar sign before the {primaryPack} placeholder.
-										"Add <span>${primaryPack}</span> credits",
-										{ primaryPack: String(primaryPack) },
+										"Add <span>{amount}</span> credits",
+										{
+											amount: formatCurrency(primaryPack, currency, {
+												maximumFractionDigits: 0,
+												minimumFractionDigits: 0,
+											}),
+										},
 										{ span: (c) => <span className="font-heading">{c}</span> }
 									)}
 								</Button>

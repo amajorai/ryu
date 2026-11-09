@@ -81,6 +81,7 @@ pub(crate) async fn route_chat_stream_inner(
         &user_text,
     )
     .await;
+    let recency_memory_ids = recency_ids.clone();
     let TurnSystem {
         mut breakdown,
         mut long_term_system,
@@ -129,7 +130,16 @@ pub(crate) async fn route_chat_stream_inner(
     )
     .await;
     let memory_citations = dedupe_memory_citations(memory_citations);
-    let (working_memory_tool_withheld, turn_context) = assemble_turn_context(
+    // Paid when the turn completes, never when it fails: see `TurnRecallMarks`.
+    let recall_marks = TurnRecallMarks::new(
+        &memory,
+        recalled_memory_ids(req.persist, &recency_memory_ids, &memory_citations),
+    );
+    let TurnContextParts {
+        working_memory_tool_withheld,
+        working_memory_active,
+        turn_context,
+    } = assemble_turn_context(
         &req,
         &conversations,
         &memory,
@@ -163,6 +173,31 @@ pub(crate) async fn route_chat_stream_inner(
         Ok(turn_route) => turn_route,
         Err(response) => return response,
     };
+    let tool_allowlist = turn_tool_allowlist(
+        &req,
+        &route,
+        binding.effective_agent_id.as_deref(),
+        registry.as_ref(),
+        &agent_store,
+        mcp.as_ref(),
+        working_memory_tool_withheld,
+    )
+    .await;
+    // The memory guide joins the tail of the cached system block, ahead of any
+    // compaction or handoff summary appended below, and is built only from the
+    // tools this route offers, so it stays byte-stable while they do. A leg
+    // that ends up offering none (the direct path while the Gateway is down,
+    // a fallback provider) takes it out again: see
+    // `system_without_memory_usage_hint`.
+    let memory_hint = turn_memory_usage_hint(
+        &route,
+        mcp.as_ref(),
+        tool_allowlist.as_deref(),
+        working_memory_active,
+    )
+    .await;
+    breakdown.add_text("system", "Memory", memory_hint.as_deref());
+    long_term_system = merge_system_prompt(memory_hint, long_term_system);
     let (sampling, sampling_engine) = resolve_turn_sampling(
         &req,
         &route,
@@ -243,28 +278,18 @@ pub(crate) async fn route_chat_stream_inner(
     let reply_checkpoint = conversation_id_for_persist.clone().map(|conv_id| {
         ReplyCheckpoint::new(conversations.clone(), conv_id, persist_agent_id.clone())
     });
-    let persist = {
-        let conv_id = conversation_id_for_persist.clone();
-        let agent_id = persist_agent_id.clone();
-        let checkpoint = reply_checkpoint.clone();
-        move |reply: String, outcome: &'static str, data_parts: Vec<Value>| {
-            persist_assistant_reply(
-                conversations.clone(),
-                conv_id,
-                agent_id,
-                reply,
-                outcome,
-                memory_citations_for_persist.clone(),
-                checkpoint,
-                data_parts,
-            )
-        }
-    };
+    let persist = turn_reply_persister(
+        conversations,
+        conversation_id_for_persist.clone(),
+        persist_agent_id.clone(),
+        memory_citations_for_persist,
+        reply_checkpoint.clone(),
+        recall_marks.clone(),
+    );
 
     let plane = TurnPlane {
         req,
         registry,
-        agent_store,
         manager,
         worktree_diffs,
         mcp,
@@ -285,7 +310,7 @@ pub(crate) async fn route_chat_stream_inner(
         project_instructions,
         project_rules,
         memory_citations,
-        working_memory_tool_withheld,
+        tool_allowlist,
         provider_access,
         account_confinement,
         sampling,
@@ -302,6 +327,7 @@ pub(crate) async fn route_chat_stream_inner(
         host_conversation_store,
         reply_checkpoint,
         persist,
+        recall_marks,
     };
     match route {
         AgentRoute::A2a { peer_id } => dispatch_a2a_plane(plane, peer_id).await,

@@ -16,6 +16,7 @@ import {
 	UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { hugeiconComponent } from "@ryu/blocks/desktop/agent-elements/icons/hugeicon-component.tsx";
+import { translate } from "@ryu/i18n/core";
 import type {
 	MentionGroup,
 	MentionItem,
@@ -33,6 +34,25 @@ const IconPlug = hugeiconComponent(Plug01Icon);
 const IconRobot = hugeiconComponent(RoboticIcon);
 const IconSparkles = hugeiconComponent(SparklesIcon);
 const IconUsers = hugeiconComponent(UserGroupIcon);
+
+/** The "@" menu's section headings, by group kind (English source copy). */
+export const MENTION_GROUP_LABELS: Record<MentionGroup["kind"], string> = {
+	agent: "Agents",
+	app: "Apps",
+	"app-item": "App items",
+	chat: "Chats",
+	folder: "Folders",
+	integration: "Integrations",
+	mcp: "MCP",
+	"output-style": "Personality profiles",
+	page: "Space pages",
+	plugin: "Plugins",
+	skill: "Skills",
+	space: "Spaces",
+	team: "Groups",
+	user: "Users",
+	workflow: "Workflows",
+};
 
 export const CHAT_MENTION_KINDS = [
 	"agent",
@@ -165,33 +185,27 @@ export function buildMentionGroups(
 		q === "" || fields.some((f) => f.toLowerCase().includes(q));
 	const groups: MentionGroup[] = [];
 
-	const add = (
-		kind: MentionGroup["kind"],
-		label: string,
-		items: MentionItem[]
-	) => {
+	const add = (kind: MentionGroup["kind"], items: MentionItem[]) => {
 		if (items.length > 0 && (!allowedKinds || allowed.has(kind))) {
+			const label = translate(MENTION_GROUP_LABELS[kind]);
 			groups.push({ kind, label, items });
 		}
 	};
 
 	add(
 		"agent",
-		"Agents",
 		sources.agents
 			.filter((a) => matches(a.name))
 			.map((a) => ({ kind: "agent", id: a.id, label: a.name, icon: IconRobot }))
 	);
 	add(
 		"team",
-		"Groups",
 		sources.teams
 			.filter((t) => matches(t.name))
 			.map((t) => ({ kind: "team", id: t.id, label: t.name, icon: IconUsers }))
 	);
 	add(
 		"workflow",
-		"Workflows",
 		sources.workflows
 			.filter((w) => matches(w.name))
 			.map((w) => ({
@@ -204,7 +218,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"chat",
-		"Chats",
 		sources.chats
 			.filter((chat) => matches(chat.name, chat.description ?? ""))
 			.map((chat) => ({
@@ -217,7 +230,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"app",
-		"Apps",
 		(sources.apps ?? [])
 			.filter((app) => matches(app.name, app.id, app.description ?? ""))
 			.map((app) => ({
@@ -232,7 +244,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"app-item",
-		"App items",
 		(sources.appItems ?? [])
 			.filter((item) => matches(item.name, item.id, item.description ?? ""))
 			.map((item) => {
@@ -256,7 +267,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"integration",
-		"Integrations",
 		sources.integrations
 			.filter((integration) =>
 				matches(integration.name, integration.id, integration.description ?? "")
@@ -271,7 +281,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"plugin",
-		"Plugins",
 		sources.plugins
 			.filter((p) => matches(p.name, p.id, p.description ?? ""))
 			.map((p) => ({
@@ -286,7 +295,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"skill",
-		"Skills",
 		sources.skills
 			.filter((s) => matches(s.name))
 			.map((s) => ({
@@ -298,14 +306,12 @@ export function buildMentionGroups(
 	);
 	add(
 		"mcp",
-		"MCP",
 		sources.mcp
 			.filter((m) => matches(m.name))
 			.map((m) => ({ kind: "mcp", id: m.id, label: m.name, icon: IconPlug }))
 	);
 	add(
 		"space",
-		"Spaces",
 		sources.spaces
 			.filter((s) => matches(s.name))
 			.map((s) => ({
@@ -317,7 +323,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"page",
-		"Space pages",
 		(sources.pages ?? [])
 			.filter((page) => matches(page.name, page.id, page.description ?? ""))
 			.map((page) => ({
@@ -333,7 +338,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"output-style",
-		"Personality profiles",
 		(sources.outputStyles ?? [])
 			.filter((style) => matches(style.name, style.id, style.description ?? ""))
 			.map((style) => ({
@@ -349,7 +353,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"folder",
-		"Folders",
 		sources.folders
 			.filter((f) => matches(basename(f), f))
 			.map((f) => ({
@@ -362,7 +365,6 @@ export function buildMentionGroups(
 	);
 	add(
 		"user",
-		"Users",
 		(sources.users ?? [])
 			.filter((user) => matches(user.name, user.id, user.description ?? ""))
 			.map((user) => ({

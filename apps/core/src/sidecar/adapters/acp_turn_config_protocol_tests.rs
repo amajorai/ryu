@@ -352,6 +352,7 @@ async fn run_config(explicit: bool, rejected: bool) -> (Vec<String>, Vec<AcpEven
         model_id: Some(model.into()),
         agent_effort: None,
         interactive: true,
+        device_offer: None,
     };
     let trusted = WorkspaceAutonomy {
         trusted: true,

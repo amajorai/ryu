@@ -12,8 +12,9 @@
 //!   worker's scope beyond its own `/api/ext/<id>/` path.
 //! - `X-Content-Type-Options: nosniff` is always set, so a response is never sniffed
 //!   into an active document type the app did not declare.
-//! - A document-capable response (HTML, XML, SVG, or no declared type) from an app that
-//!   is not an exact compiled first-party manifest gets an added
+//! - A document-capable response (HTML, XML, SVG, any `multipart/*` type whose parts
+//!   could render as documents, no declared type, or an ambiguous multi-valued type)
+//!   from an app that is not an exact compiled first-party manifest gets an added
 //!   `Content-Security-Policy: sandbox ...` policy without `allow-same-origin`. Its
 //!   script then runs in an opaque origin. The app's own CSP is kept; browsers enforce
 //!   every policy, so the app can tighten but never loosen this one.
@@ -34,26 +35,48 @@ pub(super) fn is_stripped_response_header(name: &str) -> bool {
 }
 
 /// Whether a response with these headers could render as an active document.
-/// A missing or unparseable `Content-Type` counts, so the check fails closed.
+///
+/// Fails closed: a missing, empty, non-UTF-8 or document-capable `Content-Type`
+/// counts, and so does an ambiguous one. Browsers combine duplicate `Content-Type`
+/// headers, split the result on `,` and use the last valid type, so every value and
+/// every comma-separated piece is checked, and more than one non-empty piece is
+/// treated as document-capable.
 fn is_document_capable(headers: &HeaderMap) -> bool {
-    let Some(value) = headers.get(header::CONTENT_TYPE) else {
-        return true;
-    };
-    let Ok(raw) = value.to_str() else {
-        return true;
-    };
-    let essence = raw
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    essence.is_empty()
+    let mut pieces = 0usize;
+    for value in headers.get_all(header::CONTENT_TYPE) {
+        let Ok(raw) = value.to_str() else {
+            return true;
+        };
+        for piece in raw.split(',') {
+            let essence = piece
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase();
+            if essence.is_empty() || is_document_essence(&essence) {
+                return true;
+            }
+            pieces += 1;
+        }
+    }
+    pieces != 1
+}
+
+/// Whether a lowercased MIME essence names an active document type.
+///
+/// `multipart/*` fails closed: an engine that renders a `multipart/x-mixed-replace`
+/// navigation may show an HTML part as a document, and that part carries no CSP of
+/// its own. The added sandbox is harmless for subresource uses such as MJPEG `<img>`
+/// streams or `multipart/byteranges` fetches, since CSP only governs documents.
+fn is_document_essence(essence: &str) -> bool {
+    essence.starts_with("multipart/")
         || essence == "text/html"
         || essence == "text/xml"
         || essence == "text/xsl"
         || essence == "application/xml"
         || essence.ends_with("+xml")
+        || !essence.contains('/')
 }
 
 /// Add Core's browser-hardening headers to a proxied response's headers.

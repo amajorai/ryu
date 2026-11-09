@@ -8,7 +8,7 @@
 //! The server call sites still pass the English text; `events::system_text`
 //! recognizes it against these sources and renders the node's language. A
 //! count sentence has a `*_ONE_MESSAGE` form for a count of 1, since the
-//! renderer has no ICU `plural` support. Two sentences read slightly
+//! renderer has no ICU `plural` support. One sentence reads slightly
 //! differently from the call-site English, which the extractor would skip.
 #![allow(clippy::useless_format)]
 
@@ -73,10 +73,22 @@ pub const NOTIFY_IMPORT_COMPLETE_MESSAGE: Template = |arg| {
     )
 };
 pub const NOTIFY_CHATS_IMPORTED_TITLE_MESSAGE: Template = |_| format!("Chats imported");
-pub const NOTIFY_CHATS_IMPORTED_MESSAGE: Template = |arg| {
+// `{label}` is the export's product name (`ChatGPT`, `Claude`). The project
+// name is quoted with “ ” because an ICU `'` before `{` would quote the
+// placeholder itself.
+pub const NOTIFY_CHATS_IMPORTED_EXPORT_MESSAGE: Template = |arg| {
     format!(
-        "Imported {title}: {created} new, {updated} updated.",
-        title = arg("title"),
+        "Imported {label} chats: {created} new, {updated} updated.",
+        label = arg("label"),
+        created = arg("created"),
+        updated = arg("updated")
+    )
+};
+pub const NOTIFY_CHATS_IMPORTED_PROJECT_MESSAGE: Template = |arg| {
+    format!(
+        "Imported {label} project “{name}”: {created} new, {updated} updated.",
+        label = arg("label"),
+        name = arg("name"),
         created = arg("created"),
         updated = arg("updated")
     )
@@ -145,7 +157,8 @@ pub(super) const ALL: &[Template] = &[
     NOTIFY_IMPORT_COMPLETE_TITLE_MESSAGE,
     NOTIFY_IMPORT_COMPLETE_MESSAGE,
     NOTIFY_CHATS_IMPORTED_TITLE_MESSAGE,
-    NOTIFY_CHATS_IMPORTED_MESSAGE,
+    NOTIFY_CHATS_IMPORTED_EXPORT_MESSAGE,
+    NOTIFY_CHATS_IMPORTED_PROJECT_MESSAGE,
     NOTIFY_AGENTS_FINISHED_TITLE_MESSAGE,
     NOTIFY_AGENTS_FINISHED_ISSUES_TITLE_MESSAGE,
     NOTIFY_AGENTS_COMPLETED_MESSAGE,

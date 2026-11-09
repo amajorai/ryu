@@ -54,13 +54,17 @@ export function ProviderPoolListItem({
 					<span className="mt-0.5 block text-muted-foreground text-xs">
 						{strategyLabel(pool.strategy)} ·{" "}
 						{pool.strategy === "round_robin" && (pool.sticky_limit ?? 1) > 1
-							? `${tl("{sticky_limit} new sessions per member ·", { sticky_limit: pool.sticky_limit })} `
+							? `${tl(
+									"{sticky_limit, plural, one {# new session per member ·} other {# new sessions per member ·}}",
+									{ sticky_limit: pool.sticky_limit }
+								)} `
 							: null}
-						{tl("{count} active members", {
-							count: String(
-								pool.members.filter((member) => member.enabled).length
-							),
-						})}
+						{tl(
+							"{count, plural, one {# active member} other {# active members}}",
+							{
+								count: pool.members.filter((member) => member.enabled).length,
+							}
+						)}
 					</span>
 				</span>
 			}

@@ -20,6 +20,11 @@ pub(super) async fn seed_agent_routing_prefs(
     // blocks the rest of boot.
     if !offline_test_bootstrap {
         rtk_config::seed_and_apply(&preferences).await;
+        // TokenEconomizer bridge: bring the managed Pi's pointer file in line with
+        // the saved settings (and drop it when the folder is gone).
+        if let Err(e) = tokeneconomizer_config::reconcile(&preferences).await {
+            tracing::warn!(error = %e, "tokeneconomizer: startup reconcile failed");
+        }
     }
     // Command-approval gate: seed `RYU_EXEC_APPROVAL_MODE` from the pref so every
     // ACP agent's native tool calls (Claude/Codex `Bash`/`Write`/`Edit`) are

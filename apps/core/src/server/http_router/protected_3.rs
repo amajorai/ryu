@@ -82,7 +82,7 @@ pub(in crate::server) fn protected_routes_3(state: &ServerState) -> Router<Serve
         .route("/api/mcp/sandbox/enable", post(sandbox_enable))
         .route("/api/mcp/sandbox/disable", post(sandbox_disable))
         .route("/api/mcp/sandbox/status", get(sandbox_status))
-        .route("/api/chat/stream", post(chat_stream))
+        .route("/api/chat/stream", post(chat_stream_http))
         // Resolve an interactive tool-permission prompt raised mid-turn by an
         // ACP agent (the desktop echoes the chosen option id here to unblock it).
         .route("/api/chat/permission", post(chat_permission))
@@ -126,6 +126,27 @@ pub(in crate::server) fn protected_routes_3(state: &ServerState) -> Router<Serve
             "/api/chat/client-tool-result",
             post(chat_client_tool_result),
         )
+        // Device tools (phone apps): pairing, catalog, presence and claim.
+        // Behind `mobile.device_tools`; device-lane actions are signed.
+        .route("/api/device-tools/devices/pair", post(device_tools_pair))
+        .route(
+            "/api/device-tools/devices/:device_id/approve-pair",
+            post(device_tools_approve_pair),
+        )
+        .route("/api/device-tools/devices", get(device_tools_devices))
+        .route(
+            "/api/device-tools/devices/:device_id",
+            axum::routing::patch(device_tools_patch_device).delete(device_tools_forget_device),
+        )
+        .route("/api/device-tools/catalog", get(device_tools_catalog))
+        .route("/api/device-tools/presence", post(device_tools_presence))
+        .route("/api/device-tools/claim", post(device_tools_claim))
+        .route("/api/device-tools/confirm", post(device_tools_confirm))
+        .route(
+            "/api/device-tools/home-accessories",
+            post(device_tools_home_accessories),
+        )
+        .route("/api/device-tools/stream", get(device_tools_stream))
         .route(
             "/api/chat/browser-session-link",
             post(chat_browser_session_link),
@@ -181,6 +202,8 @@ pub(in crate::server) fn protected_routes_3(state: &ServerState) -> Router<Serve
         // ── Danger zone: irreversible bulk "delete all X" (settings) ─────────
         .route("/api/data/counts", get(data_admin::data_counts))
         .route("/api/data/clear", post(data_admin::data_clear))
+        .route("/api/data/purge-user", post(data_user_purge::purge_user))
+        .route("/api/app-delegations", post(app_route_delegation_api::mint))
         // Full node wipe → fresh state (arms a marker; wipe runs on next boot).
         .route("/api/node/reset", post(data_admin::node_reset))
         .route("/api/conversations", get(list_conversations))

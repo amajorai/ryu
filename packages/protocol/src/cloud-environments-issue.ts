@@ -8,6 +8,8 @@
 // checks that parity.
 
 import {
+	type BoxNetworkSecretProblem,
+	boxNetworkSecretProblem,
 	CLOUD_ENVIRONMENT_BACKENDS,
 	CLOUD_ENVIRONMENT_EXECUTORS,
 	CLOUD_ENVIRONMENT_LIFETIME_MINUTES,
@@ -26,7 +28,7 @@ export type CloudEnvironmentIssue =
 	| { code: "managed_agent_requires_box" }
 	| { code: "managed_agent_requires_internet" }
 	| { code: "box_rejects_tailscale" }
-	| { code: "box_rejects_network_secret"; values: { key: string } }
+	| BoxNetworkSecretProblem
 	| { code: "box_reserved_names"; values: { names: readonly string[] } }
 	| { code: "box_too_many_variables"; values: { max: number } };
 
@@ -41,7 +43,9 @@ export const CLOUD_ENVIRONMENT_ISSUE_CODES: readonly CloudEnvironmentIssueCode[]
 		"managed_agent_requires_box",
 		"managed_agent_requires_internet",
 		"box_rejects_tailscale",
-		"box_rejects_network_secret",
+		"box_too_many_network_secrets",
+		"box_network_secret_not_host_name",
+		"box_network_secret_domain_not_allowed",
 		"box_reserved_names",
 		"box_too_many_variables",
 	];
@@ -55,7 +59,7 @@ export function cloudEnvironmentIssue(
 		CloudEnvironment,
 		"internet" | "runtime" | "tailscaleVaultKey" | "vaultKeys"
 	>,
-	vault: readonly Pick<CloudVaultEntry, "key" | "kind">[] = []
+	vault: readonly SecretVaultEntry[] = []
 ): CloudEnvironmentIssue | null {
 	const runtime = environment.runtime ?? DEFAULT_CLOUD_ENVIRONMENT_RUNTIME;
 	if (!CLOUD_ENVIRONMENT_BACKENDS.includes(runtime.backend)) {
@@ -89,19 +93,22 @@ export function cloudEnvironmentIssue(
 	return boxIssue(environment, vault);
 }
 
+type SecretVaultEntry = Pick<CloudVaultEntry, "key" | "kind"> &
+	Partial<Pick<CloudVaultEntry, "domains">>;
+
 function boxIssue(
-	environment: Pick<CloudEnvironment, "tailscaleVaultKey" | "vaultKeys">,
-	vault: readonly Pick<CloudVaultEntry, "key" | "kind">[]
+	environment: Pick<
+		CloudEnvironment,
+		"internet" | "tailscaleVaultKey" | "vaultKeys"
+	>,
+	vault: readonly SecretVaultEntry[]
 ): CloudEnvironmentIssue | null {
 	if (environment.tailscaleVaultKey) {
 		return { code: "box_rejects_tailscale" };
 	}
-	const bound = new Set(environment.vaultKeys);
-	const secret = vault.find(
-		(entry) => entry.kind === "networkSecret" && bound.has(entry.key)
-	);
-	if (secret) {
-		return { code: "box_rejects_network_secret", values: { key: secret.key } };
+	const secretProblem = boxNetworkSecretProblem(environment, vault);
+	if (secretProblem) {
+		return secretProblem;
 	}
 	const reserved = environment.vaultKeys.filter(isBoxReservedVariable);
 	if (reserved.length > 0) {

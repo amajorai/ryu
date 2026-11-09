@@ -10,6 +10,12 @@
 //! template and schema from the calling agent's `MemorySlot.working_memory`. The
 //! model supplies only the new content or merge patch, so it can never address
 //! another user's or another thread's scratchpad.
+//!
+//! Concurrency: the injected block shows the document version, and the model
+//! sends it back as `expected_version`. A stale version is refused with the
+//! current document so the model can merge instead of overwriting a concurrent
+//! update (another turn, the HTTP API, or another thread on a resource-scoped
+//! scratchpad). Omitting `expected_version` keeps the old last-write-wins call.
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
@@ -33,8 +39,10 @@ pub fn tools() -> Vec<RegistryTool> {
             "Update your working memory (the <working_memory> block in your context). \
              Template mode: pass `content`, the COMPLETE updated Markdown; it replaces the \
              document. Schema mode: pass `data`, a JSON merge patch with only the changed \
-             fields (`null` removes a field). Only available when your context contains a \
-             <working_memory> block."
+             fields (`null` removes a field). Pass `expected_version`: the version shown in \
+             the block, or the `version` your last update returned. If it is stale the update \
+             is refused with the current document; merge your change into it and retry. Only \
+             available when your context contains a <working_memory> block."
                 .to_owned(),
         ),
         input_schema: Some(json!({
@@ -47,6 +55,12 @@ pub fn tools() -> Vec<RegistryTool> {
                 "data": {
                     "type": "object",
                     "description": "Schema mode: a JSON merge patch applied to the stored object."
+                },
+                "expected_version": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "The working-memory version you read (0 when it is empty). \
+                        The update is refused if the document changed since."
                 }
             }
         })),
@@ -106,6 +120,15 @@ mod tests {
         assert_eq!(listed[0].id, "working_memory.update_working_memory");
         assert_eq!(listed[0].server, SERVER_NAME);
         assert_ne!(SERVER_NAME, "memory");
+        let schema = listed[0].input_schema.as_ref().unwrap();
+        assert_eq!(
+            schema["properties"]["expected_version"]["type"],
+            json!("integer")
+        );
+        // Optional, so callers that predate it keep working.
+        assert!(schema.get("required").is_none());
+        let description = listed[0].description.as_deref().unwrap();
+        assert!(description.contains("expected_version"));
     }
 
     #[test]

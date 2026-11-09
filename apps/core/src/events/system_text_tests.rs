@@ -44,10 +44,53 @@ fn reworded_sentences_keep_their_arguments() {
         .1,
         "Plan the trip was imported from claude-code and is ready."
     );
-    assert_eq!(
-        english("Chats imported", "ChatGPT chats: 4 new, 1 updated.").1,
-        "Imported ChatGPT chats: 4 new, 1 updated."
-    );
+}
+
+#[test]
+fn chats_imported_sentences_carry_their_label_and_project_name() {
+    let cases = [
+        ("Imported ChatGPT chats: 4 new, 1 updated.", None),
+        (
+            "Imported Claude project “Trip planning”: 0 new, 2 updated.",
+            Some("Trip planning"),
+        ),
+        // A project name that looks like the plain sentence stays whole.
+        (
+            "Imported Claude project “Old chats: 1 new”: 3 new, 0 updated.",
+            Some("Old chats: 1 new"),
+        ),
+    ];
+    for (body, project) in cases {
+        assert_eq!(
+            english("Chats imported", body),
+            ("Chats imported".to_owned(), body.to_owned())
+        );
+        let text = localize("Chats imported", body).unwrap();
+        let sentence = text.body[0].to_wire();
+        let args = &sentence["args"];
+        // The label and name are arguments, never an English title.
+        assert!(args.get("title").is_none(), "{args}");
+        assert!(args["created"]["number"].is_number(), "{args}");
+        match project {
+            Some(name) => {
+                assert_eq!(
+                    sentence["message"],
+                    "Imported {label} project “{name}”: {created} new, {updated} updated."
+                );
+                assert_eq!(args["label"], "Claude");
+                assert_eq!(args["name"], name);
+            }
+            None => {
+                assert_eq!(
+                    sentence["message"],
+                    "Imported {label} chats: {created} new, {updated} updated."
+                );
+                assert_eq!(args["label"], "ChatGPT");
+            }
+        }
+    }
+    // The pre-template call-site wording is no longer a known sentence.
+    assert!(localize("Chats imported", "ChatGPT chats: 4 new, 1 updated.").is_none());
 }
 
 #[test]

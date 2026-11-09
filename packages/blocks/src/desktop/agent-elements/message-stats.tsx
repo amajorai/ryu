@@ -244,7 +244,7 @@ function usageTokenCount(usage: AcpUsage): NativeTokenOperand | null {
  * version, so per-field degradation is the design — an omitted row is correct,
  * a zero-valued row is a lie.
  */
-function acpBreakdownRows(
+export function acpBreakdownRows(
 	usage: AcpUsage,
 	tl: LiteralMessage
 ): Array<{
@@ -292,14 +292,14 @@ function acpBreakdownRows(
 	// Deliberately NOT "First token": on a session's first turn this includes the
 	// agent process spawning and `session/new`, so it is not the local engine's
 	// metric under the same name.
-	push("First response", usage.ttftMs, "ms");
+	push(tl("First response"), usage.ttftMs, "ms");
 	if (isInferenceNumber(usage.durationMs) && usage.done) {
 		// Whole-turn wall clock — it spans tool calls, MCP round-trips and any
 		// approval the user sat on. Labelled "Turn" so it is not read as the
 		// model's generation window.
 		rows.push({ label: "Turn", value: formatDuration(usage.durationMs) });
 	}
-	push("Session total", usage.sessionTotalTokens, "tokens");
+	push(tl("Session total"), usage.sessionTotalTokens, "tokens");
 	if (isInferenceNumber(usage.sessionCostAmount) && usage.sessionCostCurrency) {
 		rows.push({
 			label: "Session cost",

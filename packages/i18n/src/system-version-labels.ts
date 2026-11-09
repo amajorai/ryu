@@ -19,6 +19,7 @@ export const SYSTEM_VERSION_LABELS: readonly string[] = [
 	"Agent saved",
 	"App narrowed identity mode",
 	"App updated agent",
+	"Before learned update",
 	"Before restore",
 	"Document created",
 	"Document imported",
@@ -50,6 +51,8 @@ export function systemVersionLabel(
 			return tl("App narrowed identity mode");
 		case "App updated agent":
 			return tl("App updated agent");
+		case "Before learned update":
+			return tl("Before learned update");
 		case "Before restore":
 			return tl("Before restore");
 		case "Document created":

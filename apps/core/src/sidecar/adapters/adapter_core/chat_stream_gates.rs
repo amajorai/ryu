@@ -25,6 +25,7 @@ pub(super) async fn enforce_turn_gates(
         req.referenced_conversation_ids.clear();
         req.client_tools.clear();
         req.browser_context_consent = false;
+        req.device.device_tools_offer = None;
         composio_actions.retain(|action| policy.allows("composio", action));
         identity_profile_ids.retain(|profile_id| policy.allows("identity", profile_id));
         restrict_public_agent_skills(skills_allowlist, policy);
@@ -33,6 +34,7 @@ pub(super) async fn enforce_turn_gates(
         // A read-only app run gets no client-executed or Composio actions: Core
         // cannot prove either side-effect free.
         req.client_tools.clear();
+        req.device.device_tools_offer = None;
         composio_actions.clear();
     }
     // An unverified caller speaks for nobody on this node. Drop every layer that
@@ -44,6 +46,7 @@ pub(super) async fn enforce_turn_gates(
         req.referenced_conversation_ids.clear();
         req.client_tools.clear();
         req.browser_context_consent = false;
+        req.device.device_tools_offer = None;
         composio_actions.clear();
         identity_profile_ids.clear();
         skills_allowlist.clear();

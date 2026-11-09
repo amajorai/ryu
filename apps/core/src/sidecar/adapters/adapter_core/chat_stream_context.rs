@@ -1,8 +1,15 @@
 use super::*;
 
+/// The per-turn context and what its working-memory block decided.
+pub(super) struct TurnContextParts {
+    /// The working-memory update tool must not be offered this turn.
+    pub(super) working_memory_tool_withheld: bool,
+    /// The turn carries a working-memory block, so its update tool works.
+    pub(super) working_memory_active: bool,
+    pub(super) turn_context: Option<String>,
+}
+
 /// Fold referenced chats and working memory into the per-turn context.
-///
-/// Returns whether the working-memory tool must be withheld, and the turn context.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn assemble_turn_context(
     req: &ChatStreamRequest,
@@ -15,7 +22,7 @@ pub(super) async fn assemble_turn_context(
     breakdown: &mut context_breakdown::BreakdownBuilder,
     query_context: &mut Option<String>,
     session_memory: Option<String>,
-) -> (bool, Option<String>) {
+) -> TurnContextParts {
     let referenced_chats = assemble_referenced_chat_context(
         conversations,
         &req.referenced_conversation_ids,
@@ -71,10 +78,15 @@ pub(super) async fn assemble_turn_context(
         && crate::server::memory_working::agent_config(agent_store, effective_agent_id.as_deref())
             .await
             .is_some();
+    let working_memory_active = working_memory.is_some();
     *query_context = append_turn_context(std::mem::take(query_context), working_memory);
     // Everything a model that holds no transcript of its own needs this turn.
     let turn_context = append_turn_context(session_memory, query_context.clone());
-    (working_memory_tool_withheld, turn_context)
+    TurnContextParts {
+        working_memory_tool_withheld,
+        working_memory_active,
+        turn_context,
+    }
 }
 
 /// Record the user's turn into long-term memory and hand it to the provider sync hook.

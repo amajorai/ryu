@@ -7,10 +7,10 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/meetings",
   "name": "Meetings",
-  "version": "0.1.14",
+  "version": "0.2.0",
   "stability": "experimental",
   "category": "Communication",
-  "description": "Meeting notes: record → live transcript → AI notes, auto-saved into the Meetings Space so they stay editable and RAG-searchable.",
+  "description": "Meeting notes: record → live transcript → AI notes, auto-saved into the Meetings Space so they stay editable and RAG-searchable. Also hosts Recaps: user-started, owner-only conversation recaps uploaded from a phone or watch.",
   "tagline": "Record, transcribe, and write up your meetings",
   "keywords": ["meetings", "transcription", "notes", "recording"],
   "icon": "mic-01",
@@ -65,6 +65,102 @@
         "mount": "/api/meetings",
         "public_mount": "/api/meetings",
         "routes": [
+          { "path": "/recaps", "method": "GET", "permission": "meetings.view" },
+          {
+            "path": "/recaps",
+            "method": "POST",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps",
+            "method": "DELETE",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/settings",
+            "method": "GET",
+            "permission": "meetings.view"
+          },
+          {
+            "path": "/recaps/settings",
+            "method": "PUT",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/availability",
+            "method": "PUT",
+            "permission": "recaps.admin"
+          },
+          {
+            "path": "/recaps/consent",
+            "method": "POST",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/consent",
+            "method": "DELETE",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/daily",
+            "method": "GET",
+            "permission": "meetings.view"
+          },
+          {
+            "path": "/recaps/daily/regenerate",
+            "method": "POST",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/search",
+            "method": "POST",
+            "permission": "meetings.view"
+          },
+          {
+            "path": "/recaps/export",
+            "method": "GET",
+            "permission": "meetings.view"
+          },
+          {
+            "path": "/recaps/:id/detail",
+            "method": "GET",
+            "permission": "meetings.view"
+          },
+          {
+            "path": "/recaps/:id/detail",
+            "method": "PATCH",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/:id/detail",
+            "method": "DELETE",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/:id/confirm",
+            "method": "POST",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/:id/chunks",
+            "method": "GET",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/:id/chunks/:seq",
+            "method": "PUT",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/:id/finalize",
+            "method": "POST",
+            "permission": "recaps.record"
+          },
+          {
+            "path": "/recaps/:id/events",
+            "method": "GET",
+            "permission": "meetings.view"
+          },
           { "path": "/stream", "permission": "meetings.view" },
           { "path": "/detect", "permission": "meetings.record" },
           {
@@ -128,8 +224,9 @@
         ]
       },
       "host_api": {
-        "grants": ["spaces:docs", "crypto:seal"]
-      }
+        "grants": ["spaces:docs", "crypto:seal", "notifications:send-to-user"]
+      },
+      "lazy": false
     },
     {
       "name": "ryu-diarize",
@@ -170,7 +267,7 @@
     },
     {
       "capability": "data.count",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "title": "App data count",
       "sidecar": "ryu-meetings",
       "route": "/data/count",
@@ -178,7 +275,7 @@
     },
     {
       "capability": "data.purge",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "title": "App data purge",
       "sidecar": "ryu-meetings",
       "route": "/data/purge",
@@ -198,7 +295,10 @@
     "spaces:docs",
     "meetings:crud",
     "ui:toast",
-    "ui:declarative-http"
+    "ui:declarative-http",
+    "app:http",
+    "assistant:context",
+    "notifications:send-to-user"
   ],
   "permission_levels": [
     {
@@ -211,6 +311,17 @@
       "label": "Can record",
       "description": "Start and stop meeting capture, which records audio and transcribes everyone in the room.",
       "implies": ["meetings.view"]
+    },
+    {
+      "id": "recaps.record",
+      "label": "Can record recaps",
+      "description": "Start personal recaps from a phone or watch: records conversations around the member, transcribes and summarizes them into notes only that member can see. Not implied by any other level, so org members do not get it until an admin grants it.",
+      "implies": ["meetings.view"]
+    },
+    {
+      "id": "recaps.admin",
+      "label": "Can turn on Recaps",
+      "description": "Turn the Recaps feature on or off for everyone on this node. Not implied by any other level."
     }
   ],
   "companion": {
@@ -241,6 +352,35 @@
       }
     ],
     "hook_events": [
+      {
+        "id": "@ryu/meetings#recap.started",
+        "title": "Recap started",
+        "description": "A member started a recap session from a phone or watch. Carries ids and the local day only - never a title or transcript, because recaps are private to their owner.",
+        "payload_example": {
+          "recap_id": "rcp_9f0c2a1b4d3e4f5a8b7c6d5e4f3a2b1c",
+          "source": "phone",
+          "local_day": "2026-11-08",
+          "started_at": "2026-11-08T14:02:11Z"
+        }
+      },
+      {
+        "id": "@ryu/meetings#recap.ready",
+        "title": "Recap ready",
+        "description": "A recap was transcribed, redacted and summarized. The owner gets a generic notice; read the recap through the owner-scoped /recaps routes.",
+        "payload_example": {
+          "recap_id": "rcp_9f0c2a1b4d3e4f5a8b7c6d5e4f3a2b1c",
+          "local_day": "2026-11-08",
+          "duration_ms": 1260000,
+          "partial": false,
+          "ended_at": "2026-11-08T14:23:11Z"
+        }
+      },
+      {
+        "id": "@ryu/meetings#recap.digest.ready",
+        "title": "Daily recap ready",
+        "description": "A member's daily recap digest was built after their digest time. Fires once per member per day, only when that day has at least one recap.",
+        "payload_example": { "day": "2026-11-08", "count": 3 }
+      },
       {
         "id": "@ryu/meetings#meeting.detected",
         "title": "Meeting detected",

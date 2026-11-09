@@ -94,6 +94,9 @@ export function TeamDialog({
 	// The lead only matters for strategies that designate one.
 	const needsLead =
 		coordination === "debate-synthesis" || coordination === "router";
+	const coordinationDescription = COORDINATION_OPTIONS.find(
+		(o) => o.value === coordination
+	)?.description;
 
 	const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
 	const agentEngine = (id: string) => {
@@ -264,7 +267,7 @@ export function TeamDialog({
 							<Select
 								items={COORDINATION_OPTIONS.map((o) => ({
 									value: o.value,
-									label: o.label,
+									label: tl(o.label),
 								}))}
 								onValueChange={(v) => v && setCoordination(v)}
 								value={coordination}
@@ -275,16 +278,13 @@ export function TeamDialog({
 								<SelectContent>
 									{COORDINATION_OPTIONS.map((o) => (
 										<SelectItem key={o.value} value={o.value}>
-											{o.label}
+											{tl(o.label)}
 										</SelectItem>
 									))}
 								</SelectContent>
 							</Select>
 							<p className="text-muted-foreground text-xs">
-								{
-									COORDINATION_OPTIONS.find((o) => o.value === coordination)
-										?.description
-								}
+								{coordinationDescription ? tl(coordinationDescription) : null}
 							</p>
 						</div>
 						{needsLead && members.length > 0 ? (

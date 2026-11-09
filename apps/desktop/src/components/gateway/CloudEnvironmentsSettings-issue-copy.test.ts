@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { formatMessage, type LiteralMessage } from "@ryu/i18n";
+import { cloudEnvironmentRuntimeIssue } from "@ryuhq/protocol/cloud-environments";
 import {
 	CLOUD_ENVIRONMENT_ISSUE_CODES,
 	type CloudEnvironmentIssue,
@@ -21,9 +22,17 @@ const SAMPLES: Record<CloudEnvironmentIssueCode, CloudEnvironmentIssue> = {
 	managed_agent_requires_box: { code: "managed_agent_requires_box" },
 	managed_agent_requires_internet: { code: "managed_agent_requires_internet" },
 	box_rejects_tailscale: { code: "box_rejects_tailscale" },
-	box_rejects_network_secret: {
-		code: "box_rejects_network_secret",
-		values: { key: "OPENAI_API_KEY" },
+	box_too_many_network_secrets: {
+		code: "box_too_many_network_secrets",
+		values: { max: 16 },
+	},
+	box_network_secret_not_host_name: {
+		code: "box_network_secret_not_host_name",
+		values: { key: "OPENAI_API_KEY", domain: "10.0.0.1" },
+	},
+	box_network_secret_domain_not_allowed: {
+		code: "box_network_secret_domain_not_allowed",
+		values: { key: "OPENAI_API_KEY", domain: "api.openai.com" },
 	},
 	box_reserved_names: {
 		code: "box_reserved_names",
@@ -63,10 +72,44 @@ describe("cloudEnvironmentIssueMessage", () => {
 			"Fresh cloud boxes reserve these variable names: USER and DOCKER_HOST. Rename them."
 		);
 		expect(
-			cloudEnvironmentIssueMessage(english, SAMPLES.box_rejects_network_secret)
+			cloudEnvironmentIssueMessage(
+				english,
+				SAMPLES.box_network_secret_domain_not_allowed
+			)
 		).toBe(
-			"Fresh cloud boxes do not support network secrets. Unselect OPENAI_API_KEY."
+			"OPENAI_API_KEY is bound to api.openai.com, which the allowed domains do not include. Add it."
 		);
+	});
+
+	test("matches the protocol's English runtime issue for every code", () => {
+		const environment = {
+			internet: {
+				enabled: true,
+				domainPolicy: "all" as const,
+				allowedDomains: [],
+			},
+			tailscaleVaultKey: null,
+			vaultKeys: ["OPENAI_API_KEY"],
+			runtime: {
+				backend: "box" as const,
+				executor: "codex" as const,
+				lifetimeMinutes: 30,
+			},
+		};
+		const vault = [
+			{
+				key: "OPENAI_API_KEY",
+				kind: "networkSecret" as const,
+				domains: ["10.0.0.1"],
+			},
+		];
+		const issue = cloudEnvironmentIssue(environment, vault);
+		expect(issue?.code).toBe("box_network_secret_not_host_name");
+		if (issue) {
+			expect(cloudEnvironmentIssueMessage(english, issue)).toBe(
+				cloudEnvironmentRuntimeIssue(environment, vault) ?? ""
+			);
+		}
 	});
 
 	test("translated sentences receive locale-joined names", () => {

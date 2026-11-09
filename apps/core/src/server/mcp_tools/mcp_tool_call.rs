@@ -1,9 +1,37 @@
 //! MCP entries and tool calls from sidecars, ACP agents and host conversations: `call_mcp_tool_inner` through `call_action`.
-// test-exempt: moved verbatim out of server/mod.rs; tests in server/tests/.
 
 use crate::server::*;
 
+/// A conversationless call from a verified caller runs with that caller in the
+/// tool scope, so secret resolution and the org tool policy apply the caller's
+/// own `user:`/`role:`/`team:` rules. A call naming a host conversation keeps
+/// its conversation-owner resolution.
 pub(in crate::server) async fn call_mcp_tool_inner(
+    state: ServerState,
+    caller: Option<crate::identity_verify::VerifiedCaller>,
+    bound_agent_id: Option<String>,
+    body: CallToolBody,
+) -> axum::response::Response {
+    let scoped = conversationless_caller(caller.as_ref(), &body);
+    let dispatch = Box::pin(dispatch_mcp_tool_call(state, caller, bound_agent_id, body));
+    match scoped {
+        Some(caller) => crate::sidecar::mcp::with_verified_tool_caller(&caller, dispatch).await,
+        None => dispatch.await,
+    }
+}
+
+/// The verified caller to bind as the tool principal: only when the body names
+/// no host conversation, whose owner otherwise stays the principal.
+fn conversationless_caller(
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    body: &CallToolBody,
+) -> Option<crate::identity_verify::VerifiedCaller> {
+    caller
+        .filter(|_| body.host_conversation_id.is_none())
+        .cloned()
+}
+
+async fn dispatch_mcp_tool_call(
     state: ServerState,
     caller: Option<crate::identity_verify::VerifiedCaller>,
     bound_agent_id: Option<String>,
@@ -329,4 +357,46 @@ pub(in crate::server) async fn call_action(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn body(host_conversation_id: Option<&str>) -> CallToolBody {
+        serde_json::from_value(json!({
+            "tool": "srv.call",
+            "agent_id": "agent",
+            "host_conversation_id": host_conversation_id,
+        }))
+        .unwrap()
+    }
+
+    fn bob() -> crate::identity_verify::VerifiedCaller {
+        crate::identity_verify::VerifiedCaller {
+            user_id: "bob".to_owned(),
+            email: None,
+            email_verified: false,
+            org_id: Some("org-1".to_owned()),
+            role: crate::identity_verify::OrgRole::Member,
+            teams: Vec::new(),
+        }
+    }
+
+    /// Regression: a REST tool call without a host conversation used to run
+    /// with no verified principal, so vault resolution saw no subjects and the
+    /// caller's own `user:`/`role:` denies never applied.
+    #[test]
+    fn a_conversationless_call_binds_the_verified_caller() {
+        let caller = bob();
+        let bound = conversationless_caller(Some(&caller), &body(None));
+        assert_eq!(bound.map(|caller| caller.user_id).as_deref(), Some("bob"));
+    }
+
+    #[test]
+    fn a_conversation_call_or_owner_token_binds_no_caller() {
+        let caller = bob();
+        assert!(conversationless_caller(Some(&caller), &body(Some("conv-1"))).is_none());
+        assert!(conversationless_caller(None, &body(None)).is_none());
+    }
 }

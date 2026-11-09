@@ -128,6 +128,7 @@ pub(crate) async fn run_member_text_with_flags(
         client_tools: Vec::new(),
         browser_context_consent: false,
         browser_surface: None,
+        device: Default::default(),
         target_agent_id: Some(member_id.to_owned()),
         team_id: None,
         workflow_id: None,

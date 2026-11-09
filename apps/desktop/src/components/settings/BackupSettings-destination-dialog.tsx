@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
@@ -38,6 +39,7 @@ export function DestinationDialog({
 	onClose: () => void;
 	onSaved: () => Promise<void>;
 }) {
+	const tl = useLiteralMessages();
 	const id = useId();
 	const [form, setForm] = useState<SaveBackupDestination>({
 		name: "",
@@ -207,39 +209,44 @@ export function DestinationDialog({
 							</NativeSelect>
 						</div>
 					)}
-					{field("name", "Destination name", "Production backups")}
+					{field("name", tl("Destination name"), tl("Production backups"))}
 					{field(
 						"endpoint",
-						"S3 endpoint",
+						tl("S3 endpoint"),
 						"https://s3.us-east-1.amazonaws.com"
 					)}
 					<div className="grid gap-4 sm:grid-cols-2">
-						{field("bucket", "Bucket", "ryu-backups")}
-						{field("region", "Region", "auto for R2")}
+						{field("bucket", tl("Bucket"), "ryu-backups")}
+						{field("region", tl("Region"), tl("auto for R2"))}
 					</div>
-					{field("prefix", "Object prefix", "ryu/production")}
+					{field("prefix", tl("Object prefix"), "ryu/production")}
 					<div className="grid gap-4 sm:grid-cols-2">
-						{field("accessKeyId", "Access key ID", "Access key ID", true)}
+						{field(
+							"accessKeyId",
+							tl("Access key ID"),
+							tl("Access key ID"),
+							true
+						)}
 						{field(
 							"secretAccessKey",
-							"Secret access key",
-							"Secret access key",
+							tl("Secret access key"),
+							tl("Secret access key"),
 							true
 						)}
 					</div>
 					{field(
 						"sessionToken",
-						"Session token (optional)",
-						"For temporary AWS credentials",
+						tl("Session token (optional)"),
+						tl("For temporary AWS credentials"),
 						true
 					)}
 					<div className="grid gap-2">
 						{field(
 							"recoveryKey",
-							"Recovery key",
+							tl("Recovery key"),
 							destination
-								? "Enter the existing recovery key"
-								: "Generate a key or enter an existing one",
+								? tl("Enter the existing recovery key")
+								: tl("Generate a key or enter an existing one"),
 							true
 						)}
 						<div className="flex flex-wrap gap-2">

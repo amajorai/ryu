@@ -15,7 +15,9 @@
 //! - API keys of built-in providers (`auth.json`) and custom providers
 //!   (`models.json` `apiKey`): the sealed account vault (`pi-accounts.db`) holds
 //!   the key; the file holds `${RYU_PI_KEY_<hex scope key>}`.
-//! - The node bearer Core's loopback provider routes check (`x-ryu-node-token`).
+//! - The bearer Core's loopback provider routes check (`x-ryu-node-token`):
+//!   a route-scoped per-process value ([`provider_token`]), never the node
+//!   owner bearer, because untrusted workspace code inherits it.
 //! - The managed fleet bearer (`${RYU_PI_FLEET_TOKEN}`).
 //! - A plugin sidecar provider's minted ext token (`${RYU_PI_EXT_<hex id>}`),
 //!   kept only in Core's memory.
@@ -36,7 +38,11 @@ use sha2::{Digest, Sha256};
 
 use super::accounts;
 
-/// The node bearer for Core's loopback provider routes.
+mod provider_token;
+pub(crate) use provider_token::{is_provider_route, provider_token};
+
+/// The route-scoped bearer for Core's loopback provider routes (not the node
+/// owner bearer; see [`provider_token`]).
 pub(crate) const NODE_TOKEN_ENV: &str = "RYU_PI_NODE_TOKEN";
 /// The managed fleet bearer (hosted gateway) for the managed provider.
 pub(crate) const FLEET_TOKEN_ENV: &str = "RYU_PI_FLEET_TOKEN";
@@ -175,12 +181,9 @@ fn vault_api_keys(vault: &accounts::AccountVault, env: &mut BTreeMap<String, Str
 /// The secret environment for a managed Pi spawn, sorted by name.
 pub(crate) fn secret_env() -> Vec<(String, String)> {
     let mut env = BTreeMap::new();
-    // `ryu-local` is the placeholder these headers always carried when the node
-    // has no bearer yet; Pi refuses a provider whose header template is unset.
-    env.insert(
-        NODE_TOKEN_ENV.to_owned(),
-        crate::node_token::active_token().unwrap_or_else(|| "ryu-local".to_owned()),
-    );
+    // Never the node owner bearer: Pi's shell tool (and any untrusted workspace
+    // code it runs) inherits this value and can reach Core's port.
+    env.insert(NODE_TOKEN_ENV.to_owned(), provider_token().to_owned());
     if let Some((_, token)) = crate::sidecar::gateway::managed_fleet() {
         if !token.trim().is_empty() {
             env.insert(FLEET_TOKEN_ENV.to_owned(), token);
@@ -292,6 +295,19 @@ mod tests {
             "PI_CODING_AGENT_DIR",
         ] {
             assert!(!is_secret_env_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_pi_node_token_variable_never_carries_the_owner_bearer() {
+        let env = secret_env();
+        let value = env
+            .iter()
+            .find_map(|(name, value)| (name == NODE_TOKEN_ENV).then_some(value.as_str()))
+            .expect("managed Pi always receives a provider-route bearer");
+        assert_eq!(value, provider_token());
+        if let Some(owner) = crate::node_token::active_token() {
+            assert!(env.iter().all(|(_, value)| *value != owner));
         }
     }
 

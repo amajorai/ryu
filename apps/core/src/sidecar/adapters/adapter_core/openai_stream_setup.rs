@@ -3,7 +3,8 @@ use super::*;
 /// The tool offer resolved for one OpenAI-compat turn before its stream starts.
 pub(crate) struct OpenAiToolPlan {
     pub(crate) tools_payload: Vec<Value>,
-    pub(crate) client_tool_mode: bool,
+    /// The client lanes this turn offers (browser, phone device tools).
+    pub(crate) modes: OpenAiToolModes,
     pub(crate) cloud_tool_mode: bool,
     pub(crate) untrusted_caller: bool,
     pub(crate) cloud_box_machine_tools: bool,
@@ -219,8 +220,20 @@ pub(crate) fn openai_select_turn_tools(
         }
         payload
     } else {
-        client_tools_payload
+        // Device tools are often the ONLY tools on a non-cloud turn; their
+        // schemas come from Core's compiled catalog, never from the client.
+        let mut payload = client_tools_payload;
+        if let Some(offer) = req.device.device_tools_offer.as_ref() {
+            payload.extend(offer.openai_tool_schemas());
+        }
+        payload
     };
+    let device_tool_mode = !cloud_tool_mode
+        && req
+            .device
+            .device_tools_offer
+            .as_ref()
+            .is_some_and(|offer| !offer.offerable.is_empty());
     if cloud_tool_mode && tools_payload.is_empty() {
         return Err(error_stream(
             "No cloud tools are permitted for this agent.".to_owned(),
@@ -228,10 +241,14 @@ pub(crate) fn openai_select_turn_tools(
     }
 
     // A loop with no tools to offer is just a plain single-shot chat.
-    let tool_loop_active = !tools_payload.is_empty() && (tools_enabled || client_tool_mode);
+    let tool_loop_active =
+        !tools_payload.is_empty() && (tools_enabled || client_tool_mode || device_tool_mode);
     Ok(OpenAiToolPlan {
         tools_payload,
-        client_tool_mode,
+        modes: OpenAiToolModes {
+            client: client_tool_mode,
+            device: device_tool_mode,
+        },
         cloud_tool_mode,
         untrusted_caller,
         cloud_box_machine_tools,

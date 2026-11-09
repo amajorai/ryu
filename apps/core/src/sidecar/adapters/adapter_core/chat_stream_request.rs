@@ -112,17 +112,19 @@ pub struct ChatStreamRequest {
     /// redaction fires unconditionally before the provider call.
     #[serde(default)]
     pub companion_source: bool,
-    /// Client-owned tool schemas (currently browser tools). Core offers these to
-    /// compatible providers only when the caller also grants browser-context
-    /// consent; execution remains on the client boundary.
+    /// Client-owned browser tool schemas, offered only with browser-context
+    /// consent; execution stays on the client.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub client_tools: Vec<Value>,
-    /// Per-turn consent gate for page-derived context and client tool results.
+    /// Per-turn browser-context consent.
     #[serde(default)]
     pub browser_context_consent: bool,
-    /// Browser surface metadata used for audit/session linking, never as a route.
+    /// Browser surface metadata for audit/session linking only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser_surface: Option<String>,
+    /// Phone device-tool fields (see `DeviceTurnFields`).
+    #[serde(flatten)]
+    pub(crate) device: crate::device_tools::offer::DeviceTurnFields,
     /// Route this specific message to a particular agent within a multi-agent
     /// conversation (#414). When set, Core validates the agent is a participant
     /// in the conversation (auto-adding it if needed) and uses that agent's

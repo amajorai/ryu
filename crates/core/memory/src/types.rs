@@ -298,6 +298,15 @@ pub struct LongTermEntry {
     /// Unix milliseconds of the last edit (equals `created_at` when never edited).
     #[serde(default)]
     pub updated_at: i64,
+    /// How many chat turns injected or cited this fact (see
+    /// [`crate::MemoryStore::mark_recalled`]). Access tracking only: it never
+    /// changes `updated_at`.
+    #[serde(default)]
+    pub recall_count: i64,
+    /// Unix milliseconds of the last turn that injected or cited this fact;
+    /// `None` when it was never recalled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recalled_at: Option<i64>,
 }
 
 pub(crate) fn default_importance() -> i32 {

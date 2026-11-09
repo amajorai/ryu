@@ -126,6 +126,17 @@ pub async fn run_command_tool_with_agent_and_workspace(
         }
     };
 
+    // 3b. CONFINEMENT: a confined caller's child, or one given workspace
+    //     paths, runs with the hidden stores masked (refused for a confined
+    //     caller on a host that cannot sandbox).
+    let (spawn_program, spawn_args) = command_confinement::command_spawn_program(
+        &abs_path,
+        &argv,
+        !workspace_path_args.is_empty(),
+        &hidden,
+        crate::agent_sandbox::untrusted_support,
+    )?;
+
     // 4b. ENV overlay: layer ONLY the declared vars onto the scrubbed base.
     //     Declared VALUES never enter the scan/audit content below.
     for (child_key, source) in env_map {
@@ -238,8 +249,8 @@ pub async fn run_command_tool_with_agent_and_workspace(
 
     // 6. SPAWN — argv array, cleared+declared env, piped stdout/stderr, no stdin.
     let started = std::time::Instant::now();
-    let mut cmd = tokio::process::Command::new(&abs_path);
-    cmd.args(&argv).env_clear();
+    let mut cmd = tokio::process::Command::new(&spawn_program);
+    cmd.args(&spawn_args).env_clear();
     for (k, v) in &child_env {
         cmd.env(k, v);
     }

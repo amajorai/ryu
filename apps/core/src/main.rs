@@ -43,6 +43,7 @@ mod crypto_host;
 mod dashboard_capabilities;
 mod data_path;
 mod dev_execution;
+mod device_tools;
 /// The `document.parse` extraction facade. Shipped in `9bf1e2023` **without a
 /// `mod` line**, so it was never in the module tree and never compiled — the
 /// deepest form of the gap it was written to close. Declared here so
@@ -157,6 +158,8 @@ mod registry;
 mod replicate_auth;
 mod routing_policy;
 mod rtk_config;
+/// Settings bridge for the `@ryu/tokeneconomizer` plugin's managed-Pi pointer file.
+mod tokeneconomizer_config;
 /// Raises the `core#run.failed` kernel event for failed agent, scheduled-job and
 /// workflow runs (the Self-Healing extraction; no consumer is named in Core).
 mod run_failures;

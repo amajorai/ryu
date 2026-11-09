@@ -1,4 +1,5 @@
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { CSSProperties as LayoutCSSProperties } from "react";
 import { WEB_URL } from "@/lib/app-urls.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
@@ -59,11 +60,12 @@ export const computerName = (node: Node) =>
 export function StatusDot({ online }: { online: boolean | null }) {
 	// The dot's hue is the only visual cue, so name the state for assistive tech
 	// and expose it on hover.
-	let status = "Offline";
+	const tl = useLiteralMessages();
+	let status = tl("Offline");
 	if (online === null) {
-		status = "Checking status";
+		status = tl("Checking status");
 	} else if (online) {
-		status = "Online";
+		status = tl("Online");
 	}
 	return (
 		<span

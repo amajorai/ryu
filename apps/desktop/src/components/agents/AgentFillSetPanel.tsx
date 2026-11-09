@@ -1,4 +1,5 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { formatList } from "@ryu/i18n";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -10,6 +11,7 @@ import {
 	SettingsCard,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
+import { vaultErrorMessage } from "@/src/components/vault/vault-errors.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import {
 	attachAgentFillSet,
@@ -24,16 +26,18 @@ import {
 	revokeAgentFillSet,
 	withBoxFillChoices,
 } from "@/src/lib/api/agent-fill-sets.ts";
-import { ApiError, toTarget } from "@/src/lib/api/client.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
 
 const ITEMS_FIELD_ID = "agent-fill-set-items";
 const ENVIRONMENT_FIELD_ID = "agent-fill-set-environment";
 
-function errorText(cause: unknown, fallback: string): string {
-	if (cause instanceof ApiError && cause.serverMessage) {
-		return cause.serverMessage;
-	}
-	return cause instanceof Error ? cause.message : fallback;
+/** Core's `vault_…: …` refusal as the vault pages show it, translated. */
+function errorText(
+	cause: unknown,
+	fallback: string,
+	tl: LiteralMessage
+): string {
+	return vaultErrorMessage(cause, tl(fallback), tl);
 }
 
 function ttlLabel(seconds: number): string {
@@ -136,7 +140,7 @@ export function AgentFillSetPanel({
 			})
 			.catch((cause: unknown) => {
 				if (!cancelled) {
-					setError(errorText(cause, "Attached items could not be loaded."));
+					setError(errorText(cause, "Attached items could not be loaded.", tl));
 				}
 			})
 			.finally(() => {
@@ -147,7 +151,7 @@ export function AgentFillSetPanel({
 		return () => {
 			cancelled = true;
 		};
-	}, [load]);
+	}, [load, tl]);
 
 	const parsed = parseFillSetText(text, environment);
 	const tooMany = parsed.items.length > MAX_FILL_SET_ITEMS;
@@ -159,7 +163,7 @@ export function AgentFillSetPanel({
 		try {
 			await action();
 		} catch (cause) {
-			setError(errorText(cause, fallback));
+			setError(errorText(cause, fallback, tl));
 		} finally {
 			setSaving(false);
 		}
@@ -269,9 +273,13 @@ export function AgentFillSetPanel({
 							</fieldset>
 							{parsed.invalidLines.length > 0 ? (
 								<p className="text-sm text-status-destructive" role="alert">
-									{tl("Line {lines} is not folder/key followed by a site.", {
-										lines: parsed.invalidLines.join(", "),
-									})}
+									{tl(
+										"{count, plural, one {Line {lines} is not folder/key followed by a site.} other {Lines {lines} are not folder/key followed by a site.}}",
+										{
+											count: parsed.invalidLines.length,
+											lines: formatList(parsed.invalidLines.map(String)),
+										}
+									)}
 								</p>
 							) : null}
 							{tooMany ? (

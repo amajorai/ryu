@@ -244,6 +244,13 @@ pub(in crate::server) async fn set_preference(
                     tracing::warn!(error = %e, "rtk auto-wrap: writing exclude_commands failed");
                 }
             }
+            // TokenEconomizer bridge: rewrite (or remove) the managed Pi's pointer
+            // file so the next Pi process picks up the folder and mechanism modes.
+            if crate::tokeneconomizer_config::is_pref_key(&key) {
+                if let Err(e) = crate::tokeneconomizer_config::reconcile(&state.preferences).await {
+                    tracing::warn!(error = %e, "tokeneconomizer: reconcile on pref change failed");
+                }
+            }
             // Untrusted-content wrapping toggle: keep the in-process flag in sync
             // so the next tool result wraps (or, on opt-out, does not) before it
             // re-enters the model. Read on Core's tool-result path.

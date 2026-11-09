@@ -285,7 +285,7 @@ export function CoworkContextPanel({
 							<ul>
 								<OverflowRow
 									count={createdFiles.length - maxItemsPerSection}
-									label="files"
+									kind="files"
 								/>
 							</ul>
 						)}

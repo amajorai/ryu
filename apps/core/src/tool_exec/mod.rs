@@ -51,6 +51,7 @@ use crate::sidecar::mcp::McpRegistry;
 pub(crate) mod bin_version;
 mod command_allowlist;
 mod command_args;
+mod command_confinement;
 mod command_tool;
 pub(crate) mod egress_broker;
 mod env_secrets;

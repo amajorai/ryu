@@ -223,7 +223,7 @@ export function thirdPartyPluginSrcdoc(
 		? `<style>${buildCompanionThemeLayoutCss(scaleInParent)}</style>`
 		: "";
 	const defaultCspMeta = enforceDefaultCsp
-		? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" />`
+		? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; connect-src 'none'; webrtc 'block'; frame-src 'none'; base-uri 'none'; form-action 'none'" />`
 		: "";
 	return `<!doctype html>
 <html ${companionHtmlLocaleAttributes(options?.locale)}>
@@ -1102,7 +1102,7 @@ export function buildHtmlCompanionCsp(csp?: CompanionCsp): string {
 	const connectSrc =
 		connect.length > 0
 			? `connect-src ${connect.join(" ")}`
-			: "connect-src 'none'";
+			: "connect-src 'none'; webrtc 'block'";
 	const imgSrc = ["img-src", "data:", "blob:", ...resource].join(" ");
 	const mediaSrc = ["media-src", "data:", "blob:", ...resource].join(" ");
 	return [

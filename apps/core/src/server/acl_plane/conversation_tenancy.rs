@@ -163,7 +163,7 @@ pub(in crate::server) fn memory_access_ok(
     caller: &Option<crate::identity_verify::VerifiedCaller>,
     entry: &memory::LongTermEntry,
 ) -> bool {
-    if node_org_id().is_none() {
+    if !crate::sidecar::node_binding::node_bound_for_tenancy() {
         return true;
     }
     match entry.scope {
@@ -289,7 +289,12 @@ pub(in crate::server) async fn require_conversation_write_if_owned(
                 &format!("conversation '{conversation_id}' not found"),
             )
         }
-        Ok(_) => Ok(()),
+        Ok(Some(_)) => untenanted_machine_ingress_write(
+            node_org_id().as_deref(),
+            request_presents_owner_token(),
+        ),
+        // A new id: the bot is creating its own conversation.
+        Ok(None) => Ok(()),
         Err(e) => {
             tracing::warn!("per-resource ACL: tenancy lookup failed: {e:#}");
             Err(json_error(
@@ -298,6 +303,28 @@ pub(in crate::server) async fn require_conversation_write_if_owned(
             ))
         }
     }
+}
+
+/// An EXISTING untenanted, non-channel row on the machine-ingress door. A personal
+/// node keeps every row untenanted, so it stays open there. On an org-bound node
+/// such a row is an unattributable legacy row that the human ACL denies; only the
+/// node's own owner token (the Gateway channel runtime, for its channel_id-less
+/// bot threads) may write it. Member, delegated and paired credentials get the
+/// same 403 as `resource_access`, so a ChatWrite holder cannot read, append to or
+/// re-stamp another principal's orphaned conversation through the bot door.
+pub(in crate::server) fn untenanted_machine_ingress_write(
+    node_org: Option<&str>,
+    owner_token: bool,
+) -> Result<(), axum::response::Response> {
+    // An enrolled node with an unresolved binding is still a shared node.
+    let unbound = node_org.is_none() && !crate::sidecar::node_binding::node_expects_binding();
+    if unbound || owner_token {
+        return Ok(());
+    }
+    Err(json_error(
+        StatusCode::FORBIDDEN,
+        "forbidden: this resource has no owner on a shared node".to_owned(),
+    ))
 }
 
 /// Gate a route keyed by a CHILD id (a session, a `/btw` entry) on its PARENT

@@ -269,6 +269,7 @@ struct RyuMcpHandler {
     permission_scope_id: Option<String>,
 }
 
+mod device;
 mod handler_catalog;
 mod handler_consent;
 mod handler_dispatch;

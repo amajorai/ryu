@@ -16,6 +16,8 @@ const { ChatSearchBar } = await import("./ChatSearchBar.tsx");
 // instead of an English "of" between the two numbers.
 const JA: Record<string, string> = {
 	"{current} of {total}": "{total} 件中 {current} 件",
+	"No project folder": "プロジェクトフォルダーがありません",
+	"Search messages": "メッセージを検索",
 };
 
 afterEach(() => {
@@ -57,6 +59,44 @@ test("the chat match counter reads in the UI language", async () => {
 	});
 	const status = container.querySelector('[data-testid="chat-search-status"]');
 	expect(status?.textContent).toBe("3 件中 2 件");
+	await act(async () => root.unmount());
+	container.remove();
+});
+
+test("the idle status hint reads in the UI language", async () => {
+	registerLiteralCatalogLoader((locale) => (locale.startsWith("ja") ? JA : {}));
+	const container = document.createElement("div");
+	// Only the bar's own translation counts, not the DOM localizer's pass.
+	container.setAttribute("data-ryu-i18n", "off");
+	document.body.append(container);
+	const root = createRoot(container);
+	const render = (mode: "chat" | "files") =>
+		root.render(
+			<I18nProvider initialLocale="ja" initialPackId={null}>
+				<ChatSearchBar
+					activeMatchIndex={0}
+					folderAvailable={false}
+					matches={[]}
+					mode={mode}
+					onClose={() => undefined}
+					onModeChange={() => undefined}
+					onNextMatch={() => undefined}
+					onPreviousMatch={() => undefined}
+					onQueryChange={() => undefined}
+					query=""
+				/>
+			</I18nProvider>
+		);
+	await act(async () => render("chat"));
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	});
+	await act(async () => render("chat"));
+	const status = () =>
+		container.querySelector('[data-testid="chat-search-status"]')?.textContent;
+	expect(status()).toBe("メッセージを検索");
+	await act(async () => render("files"));
+	expect(status()).toBe("プロジェクトフォルダーがありません");
 	await act(async () => root.unmount());
 	container.remove();
 });

@@ -21,6 +21,7 @@ fn build_skill_md_round_trips_through_parser() {
             requested_by: Some("user-42".into()),
             user_requested: true,
             synthesized_at: "2026-07-23T00:00:00Z".into(),
+            revises: Some("learned-reverse-text".into()),
         },
     );
     let parsed = ryu_skills::parse_skill_md("learned-x", &md).expect("valid skill");
@@ -34,6 +35,7 @@ fn build_skill_md_round_trips_through_parser() {
     assert!(md.contains("requested-by: user-42\n"));
     assert!(md.contains("origin: user-requested\n"));
     assert!(md.contains("synthesized-at: 2026-07-23T00:00:00Z\n"));
+    assert!(md.contains("revises: learned-reverse-text\n"));
     assert!(!parsed.instructions.contains("source-conversation"));
 }
 
@@ -53,6 +55,7 @@ fn build_skill_md_omits_absent_provenance_fields() {
     assert!(md.contains("origin: auto\n"));
     assert!(!md.contains("source-agent"));
     assert!(!md.contains("requested-by"));
+    assert!(!md.contains("revises"));
 }
 
 #[test]

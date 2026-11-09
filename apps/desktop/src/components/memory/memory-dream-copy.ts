@@ -26,6 +26,22 @@ export const CORE_DREAM_CHAT_SOURCE = "Chat decomposition";
 export const CORE_DREAM_REASON_FALLBACK =
 	"Derived from recent chat context; review before saving.";
 
+/** Core's rationale when the model proposed an archive without a reason. */
+export const CORE_DREAM_ARCHIVE_REASON_FALLBACK =
+	"Recent chats suggest this memory no longer holds; review before archiving.";
+
+/** Core's rationale for archiving an old event no chat has used lately. */
+export const CORE_DREAM_STALE_EVENT_REASON =
+	"This event is more than 90 days old and no chat has used it in the last 90 days.";
+
+/**
+ * The same rationale as Core worded it before recall tracking was counted per
+ * window. Proposals persisted then still carry it; it renders as the current
+ * sentence, which is also true of them.
+ */
+export const CORE_DREAM_STALE_EVENT_REASON_LEGACY =
+	"This event is more than 90 days old and no chat has used it since it was saved.";
+
 function trimmed(value: string | null | undefined): string | null {
 	const text = value?.trim();
 	return text ? text : null;
@@ -70,5 +86,77 @@ export function dreamReason(
 	if (text === CORE_DREAM_REASON_FALLBACK) {
 		return tl("Derived from recent chat context; review before saving.");
 	}
+	if (text === CORE_DREAM_ARCHIVE_REASON_FALLBACK) {
+		return tl(
+			"Recent chats suggest this memory no longer holds; review before archiving."
+		);
+	}
+	if (
+		text === CORE_DREAM_STALE_EVENT_REASON ||
+		text === CORE_DREAM_STALE_EVENT_REASON_LEGACY
+	) {
+		return tl(
+			"This event is more than 90 days old and no chat has used it in the last 90 days."
+		);
+	}
 	return text;
+}
+
+/** Core's 409s for an Undo of a proposal that is no longer accepted. */
+export const CORE_DREAM_UNDO_NOT_APPLIED: readonly string[] = [
+	"only an accepted proposal can be undone",
+	"proposal is no longer applied",
+];
+
+/** Core's 409s for an Undo whose memory was deleted since it was accepted. */
+export const CORE_DREAM_UNDO_MEMORY_DELETED: readonly string[] = [
+	"archived memory no longer exists",
+	"revision memory no longer exists",
+];
+
+/**
+ * Why Core refused an Undo with 409: the change is no longer accepted
+ * (`gone`), a memory it touched was deleted (`deleted`), or a later change
+ * builds on it (`later`). `stillListed` is whether Core's refreshed review
+ * still lists the change as undoable, or null when that refresh failed.
+ */
+export function undoConflictKind(
+	serverMessage: string | null | undefined,
+	stillListed: boolean | null
+): "deleted" | "gone" | "later" {
+	const message = trimmed(serverMessage) ?? "";
+	if (stillListed === false || CORE_DREAM_UNDO_NOT_APPLIED.includes(message)) {
+		return "gone";
+	}
+	if (CORE_DREAM_UNDO_MEMORY_DELETED.includes(message)) {
+		return "deleted";
+	}
+	return "later";
+}
+
+/**
+ * The `code` Core sends with a 409 when an Accept or Reject could not change
+ * a proposal (`apps/core/src/server/memory_dream/review.rs`).
+ */
+export const CORE_DREAM_REVIEW_CONFLICTS = [
+	"already_accepted",
+	"already_rejected",
+	"already_undone",
+	"target_deleted",
+	"target_changed",
+] as const;
+
+/** Why Core refused an Accept or Reject; `handled` when it sent no known code. */
+export type ReviewConflictKind =
+	| (typeof CORE_DREAM_REVIEW_CONFLICTS)[number]
+	| "handled";
+
+/**
+ * The cause of a 409 for an Accept or Reject. A Core from before these codes
+ * only said the proposal was no longer pending, which reads as `handled`.
+ */
+export function reviewConflictKind(
+	code: string | null | undefined
+): ReviewConflictKind {
+	return CORE_DREAM_REVIEW_CONFLICTS.find((kind) => kind === code) ?? "handled";
 }

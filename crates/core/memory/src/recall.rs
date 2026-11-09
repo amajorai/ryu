@@ -49,7 +49,7 @@ impl MemoryStore {
                 let mut stmt = conn.prepare(
                     "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
                             category, importance, tags, agent_id, updated_at, user_id,
-                            lifecycle, supersedes_id
+                            lifecycle, supersedes_id, recall_count, last_recalled_at
                      FROM memory_entries
                      WHERE user_id = ?1 AND agent_id = ?2 AND lifecycle = 'active'
                      ORDER BY created_at DESC, rowid DESC
@@ -119,7 +119,7 @@ impl MemoryStore {
         let sql = format!(
             "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
                     category, importance, tags, agent_id, updated_at, user_id,
-                    lifecycle, supersedes_id
+                    lifecycle, supersedes_id, recall_count, last_recalled_at
              FROM memory_entries
              WHERE scope IN ({level_list}) AND lifecycle = 'active'
                AND (scope != 'agent' OR (?1 IS NOT NULL AND scope_id = ?1))
@@ -169,7 +169,7 @@ impl MemoryStore {
         let sql = format!(
             "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
                     category, importance, tags, agent_id, updated_at, user_id,
-                    lifecycle, supersedes_id
+                    lifecycle, supersedes_id, recall_count, last_recalled_at
              FROM memory_entries
              WHERE scope IN ({level_list})
                AND lifecycle = 'active'

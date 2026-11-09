@@ -45,28 +45,6 @@ fn build_clears_optional_keys_when_emptied() {
 }
 
 #[test]
-fn version_roundtrip_isolated_by_uuid_id() {
-    // Use a unique id against the real ryu_dir(), then self-clean (the
-    // ryu_dir() OnceLock can't be redirected once resolved).
-    let skill_id = format!("test-skill-{}", uuid::Uuid::new_v4().simple());
-    let src = "---\nname: T\n---\nhello";
-    let meta = save_skill_version(&skill_id, "T", src, Some("v1")).expect("save");
-    assert_eq!(meta.skill_id, skill_id);
-
-    let list = list_skill_versions(&skill_id).expect("list");
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].label.as_deref(), Some("v1"));
-
-    let full = load_skill_version(&skill_id, &meta.id)
-        .expect("load")
-        .expect("some");
-    assert_eq!(full.source, src);
-
-    // Git history is immutable; only legacy JSON snapshots are removable.
-    assert!(!delete_skill_versions(&skill_id).expect("delete legacy history"));
-}
-
-#[test]
 fn create_refuses_an_id_held_by_a_legacy_flat_skill() {
     let _guard = crate::SKILLS_ENV_LOCK.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();

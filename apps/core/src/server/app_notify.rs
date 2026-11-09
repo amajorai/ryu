@@ -61,6 +61,11 @@ pub struct DeliverBody {
     /// arguments per message. `title`/`body` stay required as the English text.
     #[serde(default)]
     pub i18n: Option<serde_json::Value>,
+    /// Optional tap target: a `ryu://apps/<this app id>/…` deep link
+    /// ([`ryu_app_events::NotifyHint::link_is_valid_for`]). Any other link is
+    /// refused with 400.
+    #[serde(default)]
+    pub link: Option<String>,
 }
 
 /// `POST /api/host/capability/notify.deliver` — raise a user-targeted
@@ -94,6 +99,7 @@ pub(crate) async fn host_notify_deliver(
         body.body.as_deref().unwrap_or(""),
         body.level.as_deref(),
         text.as_ref(),
+        body.link.as_deref(),
     )
     .await
     {
@@ -131,7 +137,9 @@ fn may_target_recipient(
 /// optional `notify` hint on `events.emit`, so the two seams deliver identically.
 /// `grants` is the caller's Gateway-approved grant set from `authenticate_sidecar`.
 /// Optional localizable `text`, when present, replaces the English
-/// `title`/`body` on every channel, rendered per locale.
+/// `title`/`body` on every channel, rendered per locale. An optional `link`
+/// must be a deep link into `plugin_id` itself (else 400) and rides the toast
+/// and the push `data`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn deliver_for_app_localized(
     client: &reqwest::Client,
@@ -142,10 +150,17 @@ pub(crate) async fn deliver_for_app_localized(
     body: &str,
     level: Option<&str>,
     text: Option<&crate::i18n::AlertText>,
+    link: Option<&str>,
 ) -> Result<(String, String), (StatusCode, String)> {
     let title = title.trim();
     if let Err(message) = validate_notify_input(title, body, target_user_id) {
         return Err((StatusCode::BAD_REQUEST, message.to_owned()));
+    }
+    if link.is_some_and(|link| !ryu_app_events::NotifyHint::link_is_valid_for(plugin_id, link)) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "notification link must be a ryu://apps/<calling app id> deep link".to_owned(),
+        ));
     }
     let Some(store) = crate::notify::global_store() else {
         return Err((
@@ -207,19 +222,22 @@ pub(crate) async fn deliver_for_app_localized(
 
     let delivered = match text {
         Some(text) => {
-            crate::notify::deliver_localized_app_notification(
+            crate::notify::deliver_localized_app_notification_linked(
                 &store,
                 plugin_id,
                 &user_id,
                 text,
                 level,
+                link,
                 clip_rendered,
             )
             .await
         }
         None => {
-            crate::notify::deliver_app_notification(&store, plugin_id, &user_id, title, body, level)
-                .await
+            crate::notify::deliver_app_notification_linked(
+                &store, plugin_id, &user_id, title, body, level, link,
+            )
+            .await
         }
     };
     match delivered {

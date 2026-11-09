@@ -27,6 +27,12 @@ import { useRef, useState } from "react";
 import { formatRatingAverage } from "./rating-format.ts";
 
 const STAR_VALUES = [1, 2, 3, 4, 5] as const;
+const STEP_BY_KEY: Readonly<Record<string, -1 | 1>> = {
+	ArrowDown: -1,
+	ArrowLeft: -1,
+	ArrowRight: 1,
+	ArrowUp: 1,
+};
 const MAX_RATING = 5;
 const AT_MOST_ONE_DECIMAL: Intl.NumberFormatOptions = {
 	maximumFractionDigits: 1,
@@ -36,6 +42,18 @@ const AT_MOST_ONE_DECIMAL: Intl.NumberFormatOptions = {
  *  with no trailing ".0" so a whole rating still reads "Rated 4 out of 5". */
 function formatRatingLabelValue(rounded: number): string {
 	return numberFormatter(activeLocale(), AT_MOST_ONE_DECIMAL).format(rounded);
+}
+
+/** The rating step for an arrow key. The stars run along the inline axis, so
+ *  under a right-to-left layout ArrowLeft raises the rating and ArrowRight
+ *  lowers it; Up and Down keep their meaning in either direction. */
+function arrowStep(key: string, element: Element): -1 | 0 | 1 {
+	const step = STEP_BY_KEY[key] ?? 0;
+	const horizontal = key === "ArrowLeft" || key === "ArrowRight";
+	if (horizontal && getComputedStyle(element).direction === "rtl") {
+		return step === 1 ? -1 : 1;
+	}
+	return step;
 }
 
 /** One display star for a fractional value: full, half, or empty. */
@@ -57,9 +75,9 @@ function DisplayStar({
 					className="size-full text-muted-foreground/70"
 					icon={StarIcon}
 				/>
-				{/* The left half of a filled star over the outline. */}
+				{/* The inline-start half of a filled star over the outline. */}
 				<HugeiconsIcon
-					className="absolute inset-0 size-full fill-warning text-status-warning [clip-path:inset(0_50%_0_0)]"
+					className="absolute inset-0 size-full fill-warning text-status-warning [clip-path:inset(0_50%_0_0)] rtl:[clip-path:inset(0_0_0_50%)]"
 					icon={StarIcon}
 				/>
 			</span>
@@ -151,7 +169,7 @@ export function StarRatingInput({
 	className,
 	disabled = false,
 	allowClear = true,
-	label = "Rating",
+	label,
 }: {
 	value: number;
 	onChange: (rating: number) => void;
@@ -159,6 +177,7 @@ export function StarRatingInput({
 	className?: string;
 	disabled?: boolean;
 	allowClear?: boolean;
+	/** Accessible name of the radiogroup; defaults to the translated "Rating". */
 	label?: string;
 }) {
 	const tl = useLiteralMessages();
@@ -179,7 +198,7 @@ export function StarRatingInput({
 
 	return (
 		<div
-			aria-label={label}
+			aria-label={label ?? tl("Rating")}
 			aria-orientation="horizontal"
 			className={cn("inline-flex items-center gap-1", className)}
 			onMouseLeave={() => setHover(null)}
@@ -202,14 +221,10 @@ export function StarRatingInput({
 							disabled={disabled}
 							onClick={() => commit(position)}
 							onKeyDown={(event) => {
-								if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+								const step = arrowStep(event.key, event.currentTarget);
+								if (step !== 0) {
 									event.preventDefault();
-									move(position, -1);
-									return;
-								}
-								if (event.key === "ArrowRight" || event.key === "ArrowUp") {
-									event.preventDefault();
-									move(position, 1);
+									move(position, step);
 									return;
 								}
 								if (event.key === "Home") {
@@ -249,7 +264,7 @@ export function StarRatingInput({
 			<span aria-live="polite" className="sr-only">
 				{value > 0
 					? tl("{value} out of 5 stars", { value })
-					: "No rating selected"}
+					: tl("No rating selected")}
 			</span>
 		</div>
 	);

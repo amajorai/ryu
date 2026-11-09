@@ -8102,6 +8102,293 @@
         }
       }
     },
+    "/api/device-tools/catalog": {
+      "get": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Device-tool catalog and flag state",
+        "operationId": "device_tools_catalog",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/device-tools/claim": {
+      "post": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Claim a pending device call",
+        "operationId": "device_tools_claim",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Claimed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/device-tools/confirm": {
+      "post": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Confirm a phone action on the phone",
+        "operationId": "device_tools_confirm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Answered",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/device-tools/devices": {
+      "get": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "List paired phones",
+        "operationId": "device_tools_devices",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/device-tools/devices/pair": {
+      "post": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Pair a phone for device tools",
+        "operationId": "device_tools_pair",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Paired",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/device-tools/devices/{device_id}": {
+      "delete": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Forget a paired phone",
+        "operationId": "device_tools_forget_device",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Rename a phone or revoke a grant",
+        "operationId": "device_tools_patch_device",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/device-tools/devices/{device_id}/approve-pair": {
+      "post": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Approve a pending phone pairing on the host",
+        "operationId": "device_tools_approve_pair",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/device-tools/home-accessories": {
+      "post": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Report a phone's Home accessory service types",
+        "operationId": "device_tools_home_accessories",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/device-tools/presence": {
+      "post": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Refresh a phone's foreground lease",
+        "operationId": "device_tools_presence",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/device-tools/stream": {
+      "get": {
+        "tags": [
+          "Device tools"
+        ],
+        "summary": "Per-phone stream of routed device calls",
+        "operationId": "device_tools_stream",
+        "responses": {
+          "200": {
+            "description": "Server-sent events",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/diagnostics/otlp/test-span": {
       "post": {
         "tags": [
@@ -12912,6 +13199,24 @@
               "type": "integer",
               "minimum": 0
             }
+          },
+          {
+            "name": "lifecycle",
+            "in": "query",
+            "description": "active (default) | superseded | archived | retracted | all",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_history",
+            "in": "query",
+            "description": "List every lifecycle, not only active memories",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -12976,6 +13281,7 @@
           "Memory"
         ],
         "summary": "Accept a Dream memory proposal",
+        "description": "Writes the proposed memory, or archives its target, and returns the memory. Accepting an already accepted proposal returns it again. Refused with 409 when the proposal cannot apply; the body's `code` is `already_rejected`, `already_undone`, `target_deleted` (the memory it targets was deleted) or `target_changed` (that memory was revised or archived since).",
         "operationId": "accept_dream_proposal",
         "parameters": [
           {
@@ -12995,6 +13301,21 @@
                 "schema": {}
               }
             }
+          },
+          "400": {
+            "description": "The proposal has sensitive topics and they are turned off"
+          },
+          "403": {
+            "description": "The caller may not write memory"
+          },
+          "404": {
+            "description": "No such proposal for this caller"
+          },
+          "409": {
+            "description": "The proposal was already handled or its target changed"
+          },
+          "422": {
+            "description": "The proposal cannot be applied as written"
           }
         }
       }
@@ -13005,6 +13326,7 @@
           "Memory"
         ],
         "summary": "Reject a Dream memory proposal",
+        "description": "Declines a pending proposal; nothing is written. Rejecting a proposal a reviewer already rejected succeeds again. Refused with 409 when the proposal is in another state; the body's `code` is `already_accepted`, `already_undone` or `target_deleted` (the memory it targeted was deleted, so it was rejected automatically).",
         "operationId": "reject_dream_proposal",
         "parameters": [
           {
@@ -13024,6 +13346,54 @@
                 "schema": {}
               }
             }
+          },
+          "403": {
+            "description": "The caller may not write memory"
+          },
+          "404": {
+            "description": "No such proposal for this caller"
+          },
+          "409": {
+            "description": "The proposal was already handled"
+          }
+        }
+      }
+    },
+    "/api/memory/dream/review/proposals/{id}/rollback": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "Undo an accepted Dream memory proposal",
+        "description": "Retracts the memory an accepted proposal wrote and makes the memory it replaced or archived active again. Refused with 409 when the proposal is not applied, or when a later change builds on it.",
+        "operationId": "rollback_dream_proposal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not write memory"
+          },
+          "404": {
+            "description": "No such proposal for this caller"
+          },
+          "409": {
+            "description": "The proposal cannot be undone"
           }
         }
       }
@@ -13469,6 +13839,79 @@
           },
           "403": {
             "description": "Not permitted",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/working/history": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "List working memory versions",
+        "operationId": "get_working_memory_history",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "thread | resource",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "description": "Thread (conversation) id or resource id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum versions to return (1-20, default 20)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's stored versions of the document, newest first; empty when none are stored",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid scope or id",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Thread not visible to the caller",
             "content": {
               "application/json": {
                 "schema": {}

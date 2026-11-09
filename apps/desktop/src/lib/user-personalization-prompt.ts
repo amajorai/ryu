@@ -22,16 +22,17 @@ const PROMPT_FIELDS: ReadonlyArray<{
 ];
 
 /**
- * Labels of the fields whose prompt line differs. Core trims each value and
+ * Translated labels of the fields whose prompt line differs. Core trims each value and
  * drops empty ones, so whitespace-only edits change nothing.
  */
 export function changedPersonalizationFields(
 	before: UserPersonalization,
-	after: UserPersonalization
+	after: UserPersonalization,
+	tl: LiteralMessage
 ): string[] {
 	return PROMPT_FIELDS.filter(
 		({ key }) => promptValue(before[key]) !== promptValue(after[key])
-	).map(({ label }) => label);
+	).map(({ label }) => tl(label));
 }
 
 /** Core reads only string values (trimmed); anything else is no line. */
@@ -49,7 +50,7 @@ export function personalizationCacheWarning(
 	tl: LiteralMessage
 ): { description: string; title: string } | null {
 	return promptEditCacheWarning(
-		changedPersonalizationFields(before, after),
+		changedPersonalizationFields(before, after, tl),
 		"all-threads",
 		tl
 	);

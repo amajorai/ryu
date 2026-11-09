@@ -99,6 +99,8 @@ pub(crate) async fn run_auto_recall_context(
             node_bound,
             caller_user_id: caller_user_id.clone(),
             caller_org_id: caller_org_id.clone(),
+            // The user's auto-recall relevance floor (default 0.0: unchanged).
+            min_score: cfg.min_score,
             ..RetrievalOptions::default()
         };
         let vector_chunks = match cfg.retrieval.retrieve(query, &opts).await {

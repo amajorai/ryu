@@ -320,20 +320,26 @@ async fn registry_with_native_tools() -> Arc<McpRegistry> {
 }
 
 #[tokio::test]
-async fn a_native_app_tool_is_owned_by_its_plugin_not_a_same_named_server() {
+async fn a_native_app_tool_is_owned_by_its_plugin_unless_a_foreign_server_holds_the_name() {
     let registry = registry_with_native_tools().await;
-    // Dispatch runs the native tool ahead of the user's `brave` server.
-    assert!(registry
-        .provider_target_ownership("@ryu/brave", "brave.search")
-        .await
-        .is_ok());
-    let brave = bridge(Arc::clone(&registry), "@ryu/brave", "brave.search");
+    // No `chromium` server exists, so the native tool is its plugin's target.
+    let browser = bridge(Arc::clone(&registry), "@ryu/browser", "chromium.open_tab");
     let call = crate::tool_exec::CAPABILITY_ADAPTER_CALL_PATH;
     assert_eq!(
-        brave.resolve_owned_target(call, &json!({})).await.unwrap(),
-        "brave.search"
+        browser
+            .resolve_owned_target(call, &json!({}))
+            .await
+            .unwrap(),
+        "chromium.open_tab"
     );
-    // The user's server under the same name is still nobody's provider target.
+    // The user's `brave` server holds that namespace. A plugin that does not
+    // own it (here, not the exact compiled manifest) yields to the server at
+    // dispatch, so the guard judges the target on the server lane too.
+    let denied = registry
+        .provider_target_ownership("@ryu/brave", "brave.search")
+        .await
+        .expect_err("dispatch would reach the user's brave server");
+    assert!(denied.contains("not owned by this provider"), "{denied}");
     let denied = registry
         .provider_target_ownership("@ryu/brave", "brave.other")
         .await

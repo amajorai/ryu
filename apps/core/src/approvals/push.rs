@@ -143,6 +143,10 @@ pub(super) fn approval_push_message(
     locale: &str,
 ) -> serde_json::Value {
     let title = Message::new(messages::APPROVAL_NEEDED_TITLE_MESSAGE).render(locale);
+    // A phone action's title names personal data (an event, a contact, a
+    // place): device approvals always get the content-free body.
+    let show_content = show_content
+        && !crate::device_tools::redaction::is_device_tool_id(req.source_ref.as_deref());
     if show_content {
         // Only a title rendered from the request's messages gets the RTL mark;
         // a raw (often English) title would have its end punctuation flipped.

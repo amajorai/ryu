@@ -120,10 +120,13 @@ function MoreThreads({
 		<li>
 			<DropdownMenu>
 				<DropdownMenuTrigger
-					aria-label={tl("{length} more conversations with {name}", {
-						length: String(threads.length),
-						name: entry.name,
-					})}
+					aria-label={tl(
+						"{count, plural, one {# more conversation with {name}} other {# more conversations with {name}}}",
+						{
+							count: threads.length,
+							name: entry.name,
+						}
+					)}
 					className="flex h-7 items-center gap-1 rounded-md px-2.5 text-muted-foreground text-xs outline-none transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-muted data-[popup-open]:text-foreground"
 				>
 					<span className="flex items-center gap-1 whitespace-nowrap">

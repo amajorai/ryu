@@ -86,11 +86,14 @@ export const TAB_UNLOAD_OPTIONS = [
 // Ctrl/Cmd+Tab cycle order — sequential strip order (default) or MRU.
 export const TAB_SWITCH_OPTIONS: { value: TabSwitchBehavior; label: string }[] =
 	[
-		{ value: "sequential", label: "In order (left to right)" },
+		{ value: "sequential", label: "In tab order" },
 		{ value: "recent", label: "Most recently used" },
 	];
 
+/** Indexed by `physicalSide(location, dir)`: the `right` location is the
+ * workbench's trailing region, which the grid draws on screen-left under RTL. */
 export const TERMINAL_LOCATION_LABELS = {
 	bottom: "Bottom",
+	left: "Left",
 	right: "Right",
-} satisfies Record<TerminalPanelLocation, string>;
+} satisfies Record<TerminalPanelLocation | "left", string>;

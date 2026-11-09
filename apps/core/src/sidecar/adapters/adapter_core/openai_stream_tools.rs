@@ -8,6 +8,8 @@ pub(crate) struct OpenAiToolEnv<'a> {
     pub(crate) cloud_box_machine_tools: bool,
     pub(crate) client_tool_conversation_id: Option<&'a str>,
     pub(crate) client_tool_owner_user_id: &'a Option<String>,
+    /// The turn's server-stamped phone device offer, if any.
+    pub(crate) device_offer: Option<&'a crate::device_tools::DeviceOffer>,
     pub(crate) traces: &'a TraceStore,
     pub(crate) session_id: &'a Option<String>,
     pub(crate) agent_id: &'a Option<String>,
@@ -66,6 +68,13 @@ pub(crate) fn openai_client_tool_frames<'a>(
             },
             Some(&args_val),
         );
+        if let Some(reason) = crate::device_tools::taint::browser_egress_refusal(env.device_offer) {
+            client_tool_span.record_result(Err("held after a private device read"));
+            let result = serde_json::json!({ "isError": true, "error": reason });
+            yield ui_tool_output(&t.id, &result, true, None);
+            push_tool_result_message(oai_messages, t, &result);
+            return;
+        }
         let Some(conversation_id) = env.client_tool_conversation_id else {
             client_tool_span.record_result(Err("browser client tools require a conversation"));
             yield ui_tool_output(
@@ -113,22 +122,36 @@ pub(crate) fn openai_client_tool_frames<'a>(
             Err(_) => serde_json::json!({ "isError": true, "error": "browser tool approval timed out" }),
         };
         client_tool_span.record_result(Ok(&result));
+        // A page result is untrusted external content: later device calls ask.
+        if let Some(offer) = env.device_offer {
+            offer.mark_tainted_input();
+        }
         yield ui_tool_output(
             &t.id,
             &result,
             true,
             None,
         );
-        let content = match &result {
-            Value::String(value) => value.clone(),
-            other => other.to_string(),
-        };
-        oai_messages.push(serde_json::json!({
-            "role": "tool",
-            "tool_call_id": t.id,
-            "content": mcp_bridge::neutralize_external_result(&t.name, content),
-        }));
+        push_tool_result_message(oai_messages, t, &result);
     }
+}
+
+/// Feed one client-lane result back to the model as a neutralized `role:tool`
+/// message (shared by the browser and device lanes).
+pub(crate) fn push_tool_result_message(
+    oai_messages: &mut Vec<Value>,
+    t: &AccToolCall,
+    result: &Value,
+) {
+    let content = match result {
+        Value::String(value) => value.clone(),
+        other => other.to_string(),
+    };
+    oai_messages.push(serde_json::json!({
+        "role": "tool",
+        "tool_call_id": t.id,
+        "content": mcp_bridge::neutralize_external_result(&t.name, content),
+    }));
 }
 
 /// Run one tool call through the Gateway exec front, yielding its frames.
@@ -252,36 +275,93 @@ pub(crate) fn openai_registry_tool_frames<'a>(
     }
 }
 
-/// Record the assistant tool-call turn, then dispatch each call, yielding its frames.
+/// Which client lanes this turn offers.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct OpenAiToolModes {
+    pub(crate) client: bool,
+    pub(crate) device: bool,
+}
+
+/// The lane one tool call is dispatched to, decided by its name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OpenAiToolLane {
+    Browser,
+    Device,
+    Registry,
+    /// A client-lane turn named a tool it was never offered.
+    Refused,
+}
+
+pub(crate) fn openai_tool_lane(
+    name: &str,
+    modes: OpenAiToolModes,
+    cloud_tool_mode: bool,
+) -> OpenAiToolLane {
+    if modes.device && crate::device_tools::catalog::canonical(name).is_some() {
+        return OpenAiToolLane::Device;
+    }
+    if modes.client && name.starts_with("browser_") {
+        return OpenAiToolLane::Browser;
+    }
+    if crate::device_tools::catalog::is_device_tool_name(name) {
+        // A device name outside a device turn never reaches any other lane.
+        return OpenAiToolLane::Refused;
+    }
+    if (modes.client || modes.device) && !cloud_tool_mode {
+        return OpenAiToolLane::Refused;
+    }
+    OpenAiToolLane::Registry
+}
+
+/// Record the assistant tool-call turn, then dispatch each call by name,
+/// yielding its frames.
 pub(crate) fn openai_tool_round_frames<'a>(
     tool_calls: &'a [AccToolCall],
     iter_reply: String,
-    client_tool_mode: bool,
+    modes: OpenAiToolModes,
     tool_env: OpenAiToolEnv<'a>,
     oai_messages: &'a mut Vec<Value>,
 ) -> impl futures_util::Stream<Item = Vec<u8>> + 'a {
     async_stream::stream! {
         openai_push_assistant_tool_call_turn(oai_messages, tool_calls, iter_reply);
 
-        // Execute each requested tool through the Gateway `/v1/exec/tool`
-        // front (D5, A7). Core applies the per-agent allowlist + identity;
-        // gateway firewall/DLP/budget/exec-audit on the plain `kind=tool` path
-        // is a Wave-0 gateway follow-up (see `exec_chat_tool`'s doc comment).
+        // Execute each requested tool through its lane: browser tools in the
+        // extension, device tools on the paired phone, everything else through
+        // the Gateway `/v1/exec/tool` front (D5, A7), where Core applies the
+        // per-agent allowlist + identity.
         for t in tool_calls {
             let args_val: Value =
                 serde_json::from_str(&t.arguments).unwrap_or(Value::Object(Default::default()));
-            if client_tool_mode {
-                let frames = openai_client_tool_frames(t, args_val, tool_env, oai_messages);
-                tokio::pin!(frames);
-                while let Some(frame) = frames.next().await {
-                    yield frame;
+            match openai_tool_lane(&t.name, modes, tool_env.cloud_tool_mode) {
+                OpenAiToolLane::Browser => {
+                    let frames = openai_client_tool_frames(t, args_val, tool_env, oai_messages);
+                    tokio::pin!(frames);
+                    while let Some(frame) = frames.next().await {
+                        yield frame;
+                    }
                 }
-                continue;
-            }
-            let frames = openai_registry_tool_frames(t, args_val, tool_env, oai_messages);
-            tokio::pin!(frames);
-            while let Some(frame) = frames.next().await {
-                yield frame;
+                OpenAiToolLane::Device => {
+                    let frames = openai_device_tool_frames(t, args_val, tool_env, oai_messages);
+                    tokio::pin!(frames);
+                    while let Some(frame) = frames.next().await {
+                        yield frame;
+                    }
+                }
+                OpenAiToolLane::Refused => {
+                    let result = serde_json::json!({
+                        "isError": true,
+                        "error": format!("tool '{}' is not available in this conversation", t.name),
+                    });
+                    yield ui_tool_output(&t.id, &result, true, None);
+                    push_tool_result_message(oai_messages, t, &result);
+                }
+                OpenAiToolLane::Registry => {
+                    let frames = openai_registry_tool_frames(t, args_val, tool_env, oai_messages);
+                    tokio::pin!(frames);
+                    while let Some(frame) = frames.next().await {
+                        yield frame;
+                    }
+                }
             }
         }
     }

@@ -634,7 +634,7 @@ fn every_pre_grammar_allowlist_entry_still_validates() {
         ("@ryu/learning", "learning:crud"),
         ("@ryu/approvals", "approvals:crud"),
         ("@ryu/meetings", "meetings:crud"),
-        // cross-app / reserved-namespace holds that stay on the list
+        // cross-app / reserved-namespace holds (skills:crud is owner-exclusive)
         ("@ryu/skill-editor", "skills:crud"),
         ("@ryu/quests", "quests:crud"),
         ("@ryu/quests", "quests:capture"),

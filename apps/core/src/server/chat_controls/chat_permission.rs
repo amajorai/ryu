@@ -42,8 +42,21 @@ pub(in crate::server) struct QuestionAnswerRequest {
 pub(in crate::server) async fn chat_permission(
     State(state): State<ServerState>,
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    authorization: Option<axum::Extension<ResolvedAuthorization>>,
     Json(body): Json<PermissionDecision>,
 ) -> axum::response::Response {
+    // Phone-action prompts keep their own waiters with the option set Core
+    // offered; they are resolved (and validated) by the device lane.
+    if crate::device_tools::prompts::is_device_prompt_id(&body.request_id) {
+        return resolve_device_prompt(
+            &state,
+            authorization.as_ref().map(|axum::Extension(auth)| auth),
+            caller.as_ref(),
+            &body.request_id,
+            body.option_id.as_deref(),
+        )
+        .await;
+    }
     // Human-in-the-loop INTEGRITY gate. This handler previously took neither `State`
     // nor the caller, so `attach_verified_caller` was inert on it: any holder of the
     // node token could APPROVE or DENY another user's pending tool-permission prompt.
@@ -178,6 +191,10 @@ pub(in crate::server) async fn chat_cancel(
 /// auto-continue, proof) start the next turn right after the user pressed Stop.
 /// Returns whether anything was running.
 pub(crate) fn cancel_conversation_turn(conversation_id: &str) -> bool {
+    // Pending phone actions of this conversation can no longer be claimed,
+    // and parked ones can no longer be retried.
+    crate::device_tools::claims::cancel_conversation(conversation_id);
+    crate::device_tools::pending::cancel_conversation(conversation_id);
     signal_every_canceller(
         conversation_id,
         &[

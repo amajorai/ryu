@@ -48,7 +48,6 @@ import {
 } from "./StorageSettings-dialogs.tsx";
 import {
 	humanBytes,
-	MIN_BACKUP_PASSPHRASE_CHARS,
 	type PickedTarget,
 	type ProgressState,
 	useSelectedNodeTarget,
@@ -57,6 +56,7 @@ import {
 	NativeStorageSections,
 	renderChangeLocationBody,
 } from "./StorageSettings-native-sections.tsx";
+import { exportPassphraseErrorText } from "./StorageSettings-passphrase.ts";
 
 /**
  * The node's upload ceiling. Read-only, and read FROM THE NODE.
@@ -337,17 +337,11 @@ export function StorageSettings() {
 		[tl]
 	);
 
-	const exportPassphraseError = (() => {
-		if ([...exportPassphrase].length < MIN_BACKUP_PASSPHRASE_CHARS) {
-			return tl("Use at least {count} characters.", {
-				count: MIN_BACKUP_PASSPHRASE_CHARS,
-			});
-		}
-		if (exportPassphrase !== exportConfirm) {
-			return "The passphrases do not match.";
-		}
-		return null;
-	})();
+	const exportPassphraseError = exportPassphraseErrorText(
+		exportPassphrase,
+		exportConfirm,
+		tl
+	);
 
 	const closeExportDialog = useCallback(() => {
 		setExportDialogOpen(false);

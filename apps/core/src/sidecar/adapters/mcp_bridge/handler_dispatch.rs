@@ -46,6 +46,13 @@ impl RyuMcpHandler {
             return self.dispatch_ask_user(&args).await;
         }
 
+        // Phone device tools never reach the registry, PTC or `ryu_call_tool`:
+        // they run only through the device lane (and only on a live own-chat
+        // turn of this in-process bridge).
+        if crate::device_tools::catalog::is_device_tool_name(tool_id) {
+            return self.dispatch_device_tool(tool_id, args).await;
+        }
+
         // The profile builder carries an explicit source ceiling. Do not let a
         // model route around it by embedding another registry call in PTC code;
         // the PTC invoker has no profile-scope channel of its own.

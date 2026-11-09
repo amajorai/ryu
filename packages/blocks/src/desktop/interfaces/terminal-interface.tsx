@@ -18,7 +18,9 @@ import {
 } from "react";
 import type { InterfaceRendererProps } from "./interface-renderer.ts";
 import {
+	closedLine,
 	explainUnknown,
+	openedLine,
 	startThread as startThreadCommand,
 } from "./terminal-interface-commands.ts";
 import {
@@ -203,7 +205,7 @@ export function TerminalInterface({
 				return false;
 			}
 			port.closeThread();
-			const message = `closed ${threadTitle(activeThread)}`;
+			const message = closedLine(tlRef.current, threadTitle(activeThread));
 			push(
 				fromCommand ? muted(message) : notice({ text: message, tone: "muted" })
 			);
@@ -217,13 +219,7 @@ export function TerminalInterface({
 			const thread = snapshot.threads.find((item) => item.id === threadId);
 			port.openThread(threadId);
 			const print = fromCommand ? line : notice;
-			push(
-				print(
-					{ text: "opened ", tone: "muted" },
-					{ text: number === null ? "" : `#${number} `, tone: "muted" },
-					{ text: threadTitle(thread) }
-				)
-			);
+			push(print(...openedLine(tlRef.current, threadTitle(thread), number)));
 		},
 		[port, push, snapshot.threads]
 	);

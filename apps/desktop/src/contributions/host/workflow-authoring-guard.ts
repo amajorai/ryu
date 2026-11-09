@@ -1,62 +1,7 @@
-import type { HostServices } from "@ryu/app-host/rpc";
-
-/**
- * Companions reviewed to author and run owner-identity workflows host-direct.
- *
- * A saved workflow runs its Tool, Mcp, GhostAction, Script and Agent nodes as
- * the owner with no per-call approval, so writing or running one is equivalent
- * to the reserved `tool:call` / `hook:run-agent:write` grants. The Gateway keeps
- * `workflows:crud` / `workflows:runstate` owner-exclusive to these ids
- * (`apps/gateway/src/governance/mod.rs`); this mirrors that list so a grant set
- * that slipped through (an operator allowlist override, a stale seed) still
- * cannot reach the owner-token `/workflows` authoring and run APIs.
- */
-const REVIEWED_WORKFLOW_AUTHORS: ReadonlySet<string> = new Set([
-	"@ryu/workflows",
-	"com.ryu.workflows",
-	"@ryu/feedback-board",
-	"com.ryu.feedback-board",
-]);
-
-/** The host verbs that write a definition or start/continue a run. */
-const WORKFLOW_AUTHORING_VERBS = [
-	"workflowsSave",
-	"workflowsDelete",
-	"workflowsVersionRestore",
-	"workflowsTemplateInstall",
-	"workflowsRun",
-	"workflowsResume",
-] as const satisfies readonly (keyof HostServices)[];
-
-export function isReviewedWorkflowAuthor(pluginId: string): boolean {
-	return REVIEWED_WORKFLOW_AUTHORS.has(pluginId.trim().toLowerCase());
-}
-
-function refuseWorkflowAuthoring(): Promise<never> {
-	return Promise.reject(
-		new Error(
-			"Only the reviewed Workflows apps can save or run workflows from an app."
-		)
-	);
-}
-
-/**
- * Returns `services` unchanged for a reviewed workflow author; for any other
- * companion, every authoring/run verb is replaced with a refusal that never
- * reaches Core. Read-only verbs (list, get, run status, catalogs) are kept.
- */
-export function gateWorkflowAuthoring(
-	pluginId: string,
-	services: Partial<HostServices>
-): Partial<HostServices> {
-	if (isReviewedWorkflowAuthor(pluginId)) {
-		return services;
-	}
-	const gated: Partial<HostServices> = { ...services };
-	for (const verb of WORKFLOW_AUTHORING_VERBS) {
-		if (gated[verb]) {
-			gated[verb] = refuseWorkflowAuthoring;
-		}
-	}
-	return gated;
-}
+// The reviewed-author guard is shared with the mobile host so both clients
+// refuse the same owner-token workflow verbs; see the module for the rationale.
+export {
+	gateWorkflowAuthoring,
+	isReviewedWorkflowAuthor,
+	WORKFLOW_AUTHORING_VERBS,
+} from "@ryu/app-host/workflow-authoring-guard";

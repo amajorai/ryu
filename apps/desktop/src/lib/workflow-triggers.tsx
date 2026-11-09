@@ -39,8 +39,17 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	activeLocale,
+	formatRelativeTime,
+	isEnglishLocale,
+} from "@ryu/i18n/core";
 import { formatMessage } from "@ryu/i18n/lite";
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
 import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Tooltip,
@@ -178,19 +187,35 @@ function intervalMs(value: string): number | null {
 	return unit === undefined ? null : Number(match[1]) * unit;
 }
 
-/** Compact relative time until `target` (e.g. "in 12m", "in 3h", "in 2d"). */
-function relativeUntil(target: number, now: number): string {
+/**
+ * Relative time until `target`: the locale's own phrase ("12 分後",
+ * "in 12 Minuten"), or the compact English form ("in 12m", "in 3h", "in 2d").
+ */
+function relativeUntil(
+	target: number,
+	now: number,
+	locale: string,
+	tl: LiteralMessage
+): string {
+	if (!isEnglishLocale(locale)) {
+		const phrase = formatRelativeTime(locale, target, { now });
+		if (phrase) {
+			return phrase;
+		}
+	}
 	const ms = target - now;
 	if (ms <= 0) {
-		return "now";
+		return tl("now");
 	}
 	if (ms < UNIT_MS.h) {
-		return `in ${Math.max(1, Math.round(ms / UNIT_MS.m))}m`;
+		return tl("in {minutes}m", {
+			minutes: Math.max(1, Math.round(ms / UNIT_MS.m)),
+		});
 	}
 	if (ms < UNIT_MS.d) {
-		return `in ${Math.round(ms / UNIT_MS.h)}h`;
+		return tl("in {hours}h", { hours: Math.round(ms / UNIT_MS.h) });
 	}
-	return `in ${Math.round(ms / UNIT_MS.d)}d`;
+	return tl("in {days}d", { days: Math.round(ms / UNIT_MS.d) });
 }
 
 /** English formatting for callers outside a React tree (tests, plain code). */
@@ -201,12 +226,14 @@ const englishLiteral: LiteralMessage = (source, values) =>
  * A one-line tooltip describing when a trigger fires. For `every` schedules we
  * estimate the next run from the job's `lastRunAt` (or now) plus the interval;
  * for cron we surface the raw expression; webhook/composio/manual describe the
- * source. Returns null when there is nothing useful to say.
+ * source. Returns null when there is nothing useful to say. `locale` picks
+ * the next-run phrase's language; it defaults to the active UI locale.
  */
 export function triggerTooltip(
 	trigger: WorkflowTrigger,
 	job: ScheduledJob | null,
-	tl: LiteralMessage = englishLiteral
+	tl: LiteralMessage = englishLiteral,
+	locale: string = activeLocale()
 ): string | null {
 	switch (trigger.type) {
 		case "schedule": {
@@ -223,7 +250,7 @@ export function triggerTooltip(
 					const next = anchor + bumps * step;
 					return tl("Runs every {every} · next {nextRun}", {
 						every: trigger.every,
-						nextRun: relativeUntil(next, now),
+						nextRun: relativeUntil(next, now, locale, tl),
 					});
 				}
 				return tl("Runs every {every}", { every: trigger.every });
@@ -240,9 +267,9 @@ export function triggerTooltip(
 		case "event":
 			return trigger.event
 				? tl("Runs on {event}", { event: trigger.event })
-				: "Runs on an app event (none selected)";
+				: tl("Runs on an app event (none selected)");
 		default:
-			return "Runs manually";
+			return tl("Runs manually");
 	}
 }
 
@@ -263,6 +290,7 @@ export function WorkflowTriggerIcons({
 	className?: string;
 }) {
 	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	const shown = triggers.filter((t) => t.type !== "manual");
 	if (shown.length === 0) {
 		return null;
@@ -271,7 +299,7 @@ export function WorkflowTriggerIcons({
 		<span className={className}>
 			{shown.map((trigger, i) => {
 				const { icon, label } = triggerMeta(trigger);
-				const tip = triggerTooltip(trigger, job, tl) ?? label;
+				const tip = triggerTooltip(trigger, job, tl, locale) ?? label;
 				return (
 					<Tooltip key={`${trigger.type}-${i}`}>
 						<TooltipTrigger

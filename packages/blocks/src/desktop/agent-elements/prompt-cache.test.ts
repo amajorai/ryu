@@ -1,13 +1,20 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 import type { DataUIPart, UIDataTypes, UIMessage } from "ai";
+// The provider registers its runtime here; a test registers a stand-in so the
+// list joins in the reader's language.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../../i18n/src/active-locale.ts";
 import { deriveContextUsage } from "./context-usage.tsx";
 import {
 	formatCacheCountdown,
 	modelDefaultCacheWarning,
 	modelSwitchCacheWarning,
+	pluralField,
 	promptCacheHitRate,
 	promptCachePolicy,
 	promptCacheStatus,
@@ -173,13 +180,74 @@ describe("promptEditCacheWarning", () => {
 
 	test("a plural label takes a plural verb", () => {
 		expect(
-			promptEditCacheWarning(["The project instructions"], "project", tl)
-				?.description
+			promptEditCacheWarning(
+				[pluralField("The project instructions")],
+				"project",
+				tl
+			)?.description
 		).toContain("The project instructions are part of the system prompt");
 		expect(
 			promptEditCacheWarning(["The Alpha skill"], "skill-threads", tl)
 				?.description
 		).toContain("The Alpha skill is part of");
+	});
+
+	test("number agreement never reads the English label text", () => {
+		// An unmarked label is singular even when its English text looks plural.
+		expect(
+			promptEditCacheWarning(["Brief replies"], "project", tl)?.description
+		).toContain("Brief replies is part of");
+	});
+});
+
+describe("promptEditCacheWarning in another language", () => {
+	const SINGULAR_JA = "{list}は{reach}のシステムプロンプトの一部です。";
+	const PLURAL_JA = "{list}はいずれも{reach}のシステムプロンプトの一部です。";
+	const JA: Record<string, string> = {
+		"{number, select, singular {{list} is part of the system prompt for {reach}. Each thread's next message re-sends its whole conversation at the full input price, once; replies after that are cached again. Switching models costs the same.} other {{list} are part of the system prompt for {reach}. Each thread's next message re-sends its whole conversation at the full input price, once; replies after that are cached again. Switching models costs the same.}}": `{number, select, singular {${SINGULAR_JA}} other {${PLURAL_JA}}}`,
+		"Apply now? This resets the prompt cache":
+			"今すぐ適用しますか？プロンプトキャッシュがリセットされます",
+		"every thread in this project": "このプロジェクトのすべてのスレッド",
+	};
+	const ja: LiteralMessage = (source, values) =>
+		formatMessage(JA[source] ?? source, values ?? {});
+	const ASCII_WORD = /[A-Za-z]{2,}/;
+	const japanese = {
+		direction: "ltr" as const,
+		locale: "ja",
+		translate: (id: string) => id,
+	};
+	beforeAll(() => registerActiveI18nRuntime(japanese));
+	afterAll(() => unregisterActiveI18nRuntime(japanese));
+
+	test("one translated label takes the singular branch", () => {
+		const description =
+			promptEditCacheWarning(["プロジェクトの目標"], "project", ja)
+				?.description ?? "";
+		expect(description).toBe(
+			"プロジェクトの目標はこのプロジェクトのすべてのスレッドのシステムプロンプトの一部です。"
+		);
+		expect(description).not.toMatch(ASCII_WORD);
+	});
+
+	test("one plural-marked label takes the plural branch", () => {
+		const description =
+			promptEditCacheWarning([pluralField("プロジェクトの指示")], "project", ja)
+				?.description ?? "";
+		expect(description).toContain("プロジェクトの指示はいずれも");
+		expect(description).not.toMatch(ASCII_WORD);
+	});
+
+	test("two labels take the plural branch", () => {
+		const description =
+			promptEditCacheWarning(
+				["プロジェクトの目標", "簡潔な返信"],
+				"project",
+				ja
+			)?.description ?? "";
+		expect(description).toContain("プロジェクトの目標");
+		expect(description).toContain("簡潔な返信はいずれも");
+		expect(description).not.toMatch(ASCII_WORD);
 	});
 
 	test("names the node-wide reaches", () => {

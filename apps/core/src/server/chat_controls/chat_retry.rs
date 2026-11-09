@@ -274,9 +274,12 @@ pub(in crate::server) struct ClientToolResultBody {
     pub(in crate::server) provenance: serde_json::Value,
 }
 
-/// Resolve one paused browser tool call. The nonce is single-use and short-lived;
-/// the conversation ACL and verified caller are checked before the waiter is
-/// released, so a different extension session cannot inject a result.
+/// Resolve one paused client tool call. The lane is chosen by the pending
+/// call record, never by the client: a pending device call takes the device
+/// lane (signed by the target phone, bound to its claim and frozen input
+/// hash; see `device_tools_api`), anything else the browser lane, whose nonce
+/// is single-use and short-lived. The conversation ACL and verified caller are
+/// checked before any waiter is released.
 #[utoipa::path(
 	post,
 	path = "/api/chat/client-tool-result",
@@ -287,13 +290,52 @@ pub(in crate::server) struct ClientToolResultBody {
 )]
 pub(in crate::server) async fn chat_client_tool_result(
     State(state): State<ServerState>,
+    headers: axum::http::HeaderMap,
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
-    Json(body): Json<ClientToolResultBody>,
+    authorization: Option<Extension<ResolvedAuthorization>>,
+    body: axum::body::Bytes,
 ) -> axum::response::Response {
+    let Ok(routing) = serde_json::from_slice::<ClientToolResultRouting>(&body) else {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid client tool result".to_owned(),
+        );
+    };
     if let Err(resp) =
-        require_conversation_access_if_known(&state, &caller, &body.conversation_id, true).await
+        require_conversation_access_if_known(&state, &caller, &routing.conversation_id, true).await
     {
         return resp;
+    }
+    if is_device_result(&routing.conversation_id, &routing.tool_call_id) {
+        return resolve_device_result(
+            &headers,
+            &body,
+            authorization.as_ref().map(|Extension(auth)| auth),
+            caller.as_ref(),
+        );
+    }
+    let Ok(body) = serde_json::from_slice::<ClientToolResultBody>(&body) else {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid browser tool result".to_owned(),
+        );
+    };
+    // An owned conversation never accepts an anonymous browser result.
+    let conversation_owner = state
+        .conversations
+        .get_access_meta(&body.conversation_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|meta| meta.owner_user_id);
+    if !crate::sidecar::adapters::browser_result_owner_ok(
+        conversation_owner.as_deref(),
+        caller.as_ref().map(|value| value.user_id.as_str()),
+    ) {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "browser tool result owner mismatch".to_owned(),
+        );
     }
     match crate::sidecar::adapters::resolve_client_tool_result(
         &body.conversation_id,
@@ -306,6 +348,13 @@ pub(in crate::server) async fn chat_client_tool_result(
         Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
         Err(error) => json_error(StatusCode::BAD_REQUEST, error),
     }
+}
+
+/// The fields that select a lane, read before either lane's full body.
+#[derive(Debug, Deserialize)]
+pub(in crate::server) struct ClientToolResultRouting {
+    pub(in crate::server) conversation_id: String,
+    pub(in crate::server) tool_call_id: String,
 }
 
 #[derive(Debug, serde::Deserialize)]

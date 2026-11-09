@@ -110,6 +110,19 @@ impl ConversationStore {
             cursor = parent;
         }
         selected.reverse();
+        let messages = self.load_thread_messages_locked(conn, conversation_id, &selected)?;
+        Ok((messages, has_older))
+    }
+
+    /// Decrypt the payloads of `ids` (in the given order) and decorate each with
+    /// its version-pager siblings. Reads alternate versions' ids, never their
+    /// bodies.
+    pub(super) fn load_thread_messages_locked(
+        &self,
+        conn: &Connection,
+        conversation_id: &str,
+        ids: &[String],
+    ) -> Result<Vec<StoredMessage>> {
         let mut message_query = conn.prepare_cached(
             "SELECT id, role, content, agent_id, created_at, author_user_id, author_name,
                     source, widget_instance_id, origin_server, parts, parent_message_id, interrupted, metadata
@@ -119,8 +132,8 @@ impl ConversationStore {
             "SELECT id FROM messages WHERE conversation_id = ?1 AND parent_message_id IS ?2
              ORDER BY created_at ASC, rowid ASC",
         )?;
-        let mut messages = Vec::with_capacity(selected.len());
-        for id in selected {
+        let mut messages = Vec::with_capacity(ids.len());
+        for id in ids {
             let (mut message, parts, metadata) =
                 message_query.query_row(params![id, conversation_id], |row| {
                     Ok((
@@ -165,7 +178,7 @@ impl ConversationStore {
             }
             messages.push(message);
         }
-        Ok((messages, has_older))
+        Ok(messages)
     }
 
     /// The active thread of a conversation: the parent chain walked up from the

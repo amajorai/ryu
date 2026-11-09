@@ -10,6 +10,9 @@ use crate::identity_verify::VerifiedCaller;
 use crate::server::ServerState;
 use crate::sidecar::control_plane;
 
+mod principal;
+pub use principal::verify_forwarded_principal;
+
 pub const PRINCIPAL_HEADER: &str = "x-ryu-caller-principal-proof";
 /// The agent a forwarded app request runs for, as a Core-signed grant. Only the
 /// trusted proxy stamps it (caller copies are stripped); an app keeps it with
@@ -95,13 +98,14 @@ pub fn principal_proof(
 ) -> Option<String> {
     let key = crate::node_token::active_token()?;
     let org = control_plane::registered_org().map(|org| org.id);
-    let unbound_local = org.is_none() && !control_plane::is_managed_node();
+    let expects_binding = crate::sidecar::node_binding::node_expects_binding();
+    let unbound_local = org.is_none() && !expects_binding;
     if (unbound_local || caller.is_none())
         && owner_bearer.is_none_or(|provided| !crate::server::ct_eq(provided, &key))
     {
         return None;
     }
-    if caller.is_none() && (org.is_some() || control_plane::is_managed_node()) {
+    if caller.is_none() && (org.is_some() || expects_binding) {
         return None;
     }
     if caller.is_some_and(|caller| org.is_some() && caller.org_id != org) {

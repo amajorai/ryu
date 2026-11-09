@@ -3,6 +3,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use super::*;
+use crate::i18n::messages;
 use crate::vault::audit::{AuditActor, AuditEntry};
 use crate::vault::broker::proposals::{CredentialRequest, CredentialUse, ProposalInput};
 use crate::vault::broker::services::test_service;
@@ -65,6 +66,16 @@ fn credential_use(subject: &str) -> Proposal {
     }
 }
 
+/// `(title, body)` in English.
+fn english(notice: &Notice) -> (String, String) {
+    notice.text.render("en")
+}
+
+/// The English source of each body sentence.
+fn sources(notice: &Notice) -> Vec<&str> {
+    notice.text.body.iter().map(Message::source).collect()
+}
+
 fn session(minted_by: &str) -> BrokerSession {
     BrokerSession {
         id: "bvs_1".into(),
@@ -112,39 +123,152 @@ fn only_filed_proposals_and_pending_credential_uses_are_observed() {
 #[test]
 fn a_proposal_notice_names_hosts_and_references_but_never_the_message() {
     let notice = notice(&proposal(&["api.linear.app"], &["secret:LINEAR"]));
-    assert_eq!(notice.title, "Agent proposal waiting for approval");
+    let (title, body) = english(&notice);
+    assert_eq!(title, "Agent proposal waiting for approval");
     assert_eq!(
-        notice.body,
-        "An agent asks for 1 service (api.linear.app) and 1 credential (secret:LINEAR) in prod."
+        body,
+        "An agent asks for 1 service in prod: api.linear.app. It also asks for 1 credential: secret:LINEAR."
     );
     assert_eq!(notice.link, "/vault?tab=broker&proposal=bp_1");
-    assert!(!notice.body.contains("sk_live"));
+    assert!(!body.contains("sk_live"));
+    assert_eq!(notice.text.join, Join::Sentences);
+}
+
+#[test]
+fn counts_choose_the_singular_or_plural_sentence() {
+    let one = notice(&proposal(&["a.test"], &[]));
+    assert_eq!(
+        sources(&one),
+        [Message::new(messages::VAULT_BROKER_SERVICES_ONE_MESSAGE).source()]
+    );
+    let two = notice(&proposal(&["a.test", "b.test"], &["secret:A", "secret:B"]));
+    assert_eq!(
+        sources(&two),
+        [
+            Message::new(messages::VAULT_BROKER_SERVICES_MESSAGE).source(),
+            Message::new(messages::VAULT_BROKER_ALSO_CREDENTIALS_MESSAGE).source(),
+        ]
+    );
+    assert_eq!(
+        english(&two).1,
+        "An agent asks for 2 services in prod: a.test, b.test. It also asks for 2 credentials: secret:A, secret:B."
+    );
+    // Credentials alone name the environment in their own sentence.
+    let one_credential = notice(&proposal(&[], &["secret:A"]));
+    assert_eq!(
+        sources(&one_credential),
+        [Message::new(messages::VAULT_BROKER_CREDENTIALS_ONE_MESSAGE).source()]
+    );
+    assert_eq!(
+        english(&one_credential).1,
+        "An agent asks for 1 credential in prod: secret:A."
+    );
+    let credentials = notice(&proposal(&[], &["secret:A", "secret:B"]));
+    assert_eq!(
+        english(&credentials).1,
+        "An agent asks for 2 credentials in prod: secret:A, secret:B."
+    );
 }
 
 #[test]
 fn long_lists_and_long_names_are_shortened() {
     let long = "a".repeat(200);
-    let notice = notice(&proposal(&["one.test", "two.test", "three.test", &long], &[]));
+    let notice = notice(&proposal(
+        &["one.test", "two.test", "three.test", &long],
+        &[],
+    ));
     assert_eq!(
-        notice.body,
-        "An agent asks for 4 services (one.test, two.test, three.test, 1 more) in prod."
+        english(&notice).1,
+        "An agent asks for 4 services in prod: one.test, two.test, three.test, +1."
     );
     let notice = super::notice(&proposal(&[&long], &[]));
-    assert!(notice.body.contains(&format!("{}…", "a".repeat(80))));
-    assert!(!notice.body.contains(&"a".repeat(81)));
+    let body = english(&notice).1;
+    assert!(body.contains(&format!("{}…", "a".repeat(80))));
+    assert!(!body.contains(&"a".repeat(81)));
     let empty = super::notice(&proposal(&[], &[]));
-    assert_eq!(empty.body, "An agent asks for a broker change in prod.");
+    assert_eq!(
+        english(&empty).1,
+        "An agent asks for a broker change in prod."
+    );
+    assert_eq!(
+        sources(&empty),
+        [Message::new(messages::VAULT_BROKER_BROKER_CHANGE_MESSAGE).source()]
+    );
+}
+
+#[test]
+fn both_titles_are_translated_in_german_and_japanese() {
+    // Read from the generated catalog (`tools/generate-core-i18n.mjs`), so a
+    // title that never reached the translators stays English and fails here.
+    for notice in [
+        notice(&proposal(&["a.test"], &[])),
+        notice(&credential_use("broker:user:u1")),
+    ] {
+        let (english_title, _) = english(&notice);
+        for locale in ["de", "ja"] {
+            let (title, _) = notice.text.render(locale);
+            assert_ne!(title, english_title, "{locale}");
+        }
+    }
+}
+
+#[test]
+fn an_arabic_body_isolates_the_latin_hosts_and_keeps_them_verbatim() {
+    let notice = notice(&proposal(&["api.linear.app", "two.test"], &[]));
+    let (_, body) = notice.text.render("ar");
+    assert!(
+        body.contains("\u{2068}api.linear.app, two.test\u{2069}"),
+        "{body:?}"
+    );
+    assert!(body.contains("\u{2068}prod\u{2069}"), "{body:?}");
+    assert_ne!(body, english(&notice).1);
 }
 
 #[test]
 fn a_credential_use_notice_names_the_consumer_reference_and_account() {
     let notice = notice(&credential_use("broker:user:u1"));
-    assert_eq!(notice.title, "Credential use waiting for approval");
+    let (title, body) = english(&notice);
+    assert_eq!(title, "Credential use waiting for approval");
     assert_eq!(
-        notice.body,
+        body,
         "A broker session minted by user:u1 asks to use op://work@dev/GitHub/token from the work account."
     );
     assert_eq!(notice.link, approval_link("bp_1"));
+}
+
+#[test]
+fn each_consumer_kind_chooses_its_own_sentence() {
+    let cases = [
+        (
+            "broker:user:u1",
+            messages::VAULT_BROKER_USE_BY_BROKER_SESSION_MESSAGE,
+            "A broker session minted by user:u1 asks to use op://work@dev/GitHub/token from the work account.",
+        ),
+        (
+            "read:operator",
+            messages::VAULT_BROKER_USE_BY_EXPLICIT_READ_MESSAGE,
+            "operator asks to use op://work@dev/GitHub/token from the work account (explicit read).",
+        ),
+        (
+            "runtime:github:user:u2",
+            messages::VAULT_BROKER_USE_BY_RUNTIME_MESSAGE,
+            "MCP server or plugin github running for user:u2 asks to use op://work@dev/GitHub/token from the work account.",
+        ),
+        (
+            "machine:m1",
+            messages::VAULT_BROKER_USE_BY_SUBJECT_MESSAGE,
+            "machine:m1 asks to use op://work@dev/GitHub/token from the work account.",
+        ),
+    ];
+    for (subject, template, english_body) in cases {
+        let notice = notice(&credential_use(subject));
+        assert_eq!(
+            sources(&notice),
+            [Message::new(template).source()],
+            "{subject}"
+        );
+        assert_eq!(english(&notice).1, english_body);
+    }
 }
 
 #[test]
@@ -193,7 +317,12 @@ async fn a_filed_proposal_raises_one_linked_notification() {
     let mut events = crate::events::subscribe();
     spawn(store);
     let mut input = ProposalInput::default();
-    input.services = vec![test_service("notify-test", "notify.example.test", None, "/")];
+    input.services = vec![test_service(
+        "notify-test",
+        "notify.example.test",
+        None,
+        "/",
+    )];
     let filed = {
         let conn = store.conn.lock().await;
         proposals::create(&conn, input, "default", "machine:m1", "machine:m1").unwrap()
@@ -204,9 +333,8 @@ async fn a_filed_proposal_raises_one_linked_notification() {
     store.audit(&entry).await;
     store.audit(&entry).await;
     let link = approval_link(&filed.id);
-    let matching = |event: &crate::events::DesktopNotification| {
-        event.link.as_deref() == Some(link.as_str())
-    };
+    let matching =
+        |event: &crate::events::DesktopNotification| event.link.as_deref() == Some(link.as_str());
     let first = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let event = events.recv().await.unwrap();
@@ -217,8 +345,14 @@ async fn a_filed_proposal_raises_one_linked_notification() {
     })
     .await
     .expect("a notification for the filed proposal");
-    assert_eq!(first.title, "Agent proposal waiting for approval");
-    assert!(first.body.unwrap_or_default().contains("notify.example.test"));
+    // With no notify store the toast is broadcast in the node's language.
+    let locale = crate::i18n::locale::node_locale().await;
+    let (title, _) = notice(&filed).text.render(locale);
+    assert_eq!(first.title, title);
+    assert!(first
+        .body
+        .unwrap_or_default()
+        .contains("notify.example.test"));
     // No second notification for the same proposal.
     let again = tokio::time::timeout(Duration::from_millis(500), async {
         loop {
@@ -235,7 +369,10 @@ async fn a_filed_proposal_raises_one_linked_notification() {
 #[test]
 fn the_unmatched_host_refusal_tells_the_agent_how_to_propose() {
     let hint = crate::vault::broker::proxy::proposal_hint("api.example.test");
-    assert_eq!(hint["endpoint"], crate::vault::broker::proxy::PROPOSALS_ENDPOINT);
+    assert_eq!(
+        hint["endpoint"],
+        crate::vault::broker::proxy::PROPOSALS_ENDPOINT
+    );
     assert_eq!(
         hint["cli"],
         "ryu-cli secrets broker propose --host api.example.test --message \"<why>\""

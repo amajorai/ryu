@@ -31,6 +31,7 @@ import {
 } from "@/src/lib/api/mesh.ts";
 import { getPreference, setPreference } from "@/src/lib/api/preferences.ts";
 import { watchMeshInstall } from "../shell/mesh-install.ts";
+import { headscaleUrlErrorText } from "./NetworkSettings-headscale-url.ts";
 import {
 	isValidHeadscaleUrl,
 	useNetworkLifetime,
@@ -73,11 +74,7 @@ function NetworkSettingsForNode({ target }: { target: ApiTarget }) {
 		useState<MeshBackend>(MESH_BACKEND_TAILCAT);
 	const [tailcatCopied, setTailcatCopied] = useState(false);
 	const headscaleUrlIsValid = isValidHeadscaleUrl(headscaleUrl);
-	const headscaleUrlError = headscaleUrlIsValid
-		? null
-		: headscaleUrl.trim()
-			? "Enter a valid HTTP or HTTPS URL."
-			: "Enter the Headscale control server URL.";
+	const headscaleUrlError = headscaleUrlErrorText(headscaleUrl, tl);
 	const [cloudflaredCopied, setCloudflaredCopied] = useState(false);
 
 	useEffect(() => {

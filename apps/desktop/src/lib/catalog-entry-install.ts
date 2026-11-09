@@ -1,3 +1,4 @@
+import { translate } from "@ryu/i18n/core";
 import { getActiveToken } from "@/lib/auth-client.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { installPortablePackage } from "@/src/lib/api/marketplace.ts";
@@ -47,6 +48,18 @@ export function catalogInstallRefusal(entry: CatalogEntry): string | null {
 	return null;
 }
 
+/**
+ * The organization-policy refusals that `orgInstallBlock` producers return.
+ * They stay English at the source (both producers return these exact strings)
+ * and are translated where the install throws them, so the table keeps the
+ * sentences extractable for the catalog.
+ */
+export const ORG_INSTALL_BLOCK_COPY = {
+	marketplace:
+		"Marketplace plugins are disabled by your organization's administrator.",
+	apps: "App installation is disabled by your organization's administrator.",
+} as const;
+
 export interface InstallCatalogEntryOptions {
 	channel?: string | null;
 	installed: boolean;
@@ -62,7 +75,7 @@ export async function installCatalogEntry(
 ): Promise<void> {
 	const refusal = catalogInstallRefusal(entry);
 	if (refusal) {
-		throw new Error(refusal);
+		throw new Error(translate(refusal));
 	}
 	const portableTarget = portablePackageTarget(entry);
 	if (portableTarget && !installed) {
@@ -71,7 +84,7 @@ export async function installCatalogEntry(
 	}
 	const orgBlock = orgInstallBlock(!installed && entry.source !== "built-in");
 	if (orgBlock) {
-		throw new Error(orgBlock);
+		throw new Error(translate(orgBlock));
 	}
 	if (!installed && entry.source !== "built-in") {
 		await installPluginFromCatalog(target, entry.id, readBuyerToken(), channel);

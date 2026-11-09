@@ -87,6 +87,22 @@ pub const APPROVAL_SKILL_NOTE_MESSAGE: Template = |_| {
     )
 };
 
+/// The inbox result once an approved learned skill is written: a new skill.
+pub const APPROVAL_SKILL_ADDED_MESSAGE: Template = |arg| {
+    format!(
+        "Added the skill \"{slug}\" to your library.",
+        slug = arg("slug")
+    )
+};
+/// The inbox result when the approved skill replaced one already in the
+/// library (an approved revision).
+pub const APPROVAL_SKILL_UPDATED_MESSAGE: Template = |arg| {
+    format!(
+        "Updated the skill \"{slug}\" in your library.",
+        slug = arg("slug")
+    )
+};
+
 // ---- self-healing ------------------------------------------------------------
 
 pub const APPROVAL_HEAL_RUN_TITLE_MESSAGE: Template = |_| format!("Auto-fix a failed run");
@@ -296,6 +312,8 @@ pub(super) const ALL: &[Template] = &[
     APPROVAL_SKILL_TITLE_MESSAGE,
     APPROVAL_SKILL_SUMMARY_MESSAGE,
     APPROVAL_SKILL_NOTE_MESSAGE,
+    APPROVAL_SKILL_ADDED_MESSAGE,
+    APPROVAL_SKILL_UPDATED_MESSAGE,
     APPROVAL_HEAL_RUN_TITLE_MESSAGE,
     APPROVAL_HEAL_RUN_SUMMARY_MESSAGE,
     APPROVAL_HEAL_RUN_APPROVE_MESSAGE,

@@ -178,7 +178,6 @@
   "I've saved them": "我已保存",
   "I've scanned it": "我已扫描",
   "Import browser bookmarks": "导入浏览器书签",
-  "Imported {imported} bookmarks": "已导入 {imported} 个书签",
   "Importing bookmarks…": "正在导入书签…",
   "Improve writing": "改进文字",
   "In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.": "在身份验证器应用中，选择<strong>输入设置密钥</strong>并粘贴此密钥。",
@@ -371,8 +370,9 @@
   "plugin bundle does not export activate(context)": "插件包未导出 activate(context)",
   "{current} of {total}": "第 {current} 个，共 {total} 个",
   "{current} of {total}: {match}": "{current}/{total}：{match}",
+  "{imported, plural, one {Imported # bookmark} other {Imported # bookmarks}}": "{imported, plural, other {已导入 # 个书签}}",
   "{ipAddress} · Created {createdAgo}": "{ipAddress} · 创建于 {createdAgo}",
   "{label} will be signed out and must sign in again to use your account.": "{label} 将被退出登录，必须重新登录才能使用你的账户。",
   "{matchCount, plural, one {# local result} other {# local results}}": "{matchCount, plural, other {# 个本地结果}}",
-  "{skipped} duplicate links skipped": "已跳过 {skipped} 个重复链接"
+  "{skipped, plural, one {# duplicate link skipped} other {# duplicate links skipped}}": "{skipped, plural, other {已跳过 # 个重复链接}}"
 }

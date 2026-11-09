@@ -43,6 +43,14 @@ describe("StarRating", () => {
 		expect(html).toContain("fill-warning");
 	});
 
+	test("the half star fills the inline-start half under RTL", () => {
+		// LTR clips away the right half; the rtl: variant clips the left half
+		// instead, so a 3.5 average still fills toward the reading start.
+		const html = renderToStaticMarkup(<StarRating value={3.5} />);
+		expect(html).toContain("[clip-path:inset(0_50%_0_0)]");
+		expect(html).toContain("rtl:[clip-path:inset(0_0_0_50%)]");
+	});
+
 	test("role=img marks the whole widget as a single graphic", () => {
 		const html = renderToStaticMarkup(<StarRating value={5} />);
 		expect(html).toContain('role="img"');

@@ -58,8 +58,29 @@ async fn events_emit_records_owner_attributed_activity_and_refuses_kernel_events
 
 /// A sidecar reaches `warmup.*` only with `warmup:crud` both declared in its
 /// `host_api.grants` and approved; the owner is its authenticated id.
-#[tokio::test]
-async fn warmup_kernel_capability_requires_the_declared_and_approved_grant() {
+///
+/// The kernel-capability dispatch builds debug-build futures that exceed the
+/// 2 MiB test thread. Run it on one owned worker with the 16 MiB stack Core's
+/// runtime workers use, rather than changing global stack settings.
+#[test]
+fn warmup_kernel_capability_requires_the_declared_and_approved_grant() {
+    let worker = std::thread::Builder::new()
+        .name("warmup-kernel-capability-fixture".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("create owned warmup fixture runtime")
+                .block_on(Box::pin(run_warmup_kernel_capability_fixture()));
+        })
+        .expect("start warmup fixture worker");
+    if let Err(panic) = worker.join() {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn run_warmup_kernel_capability_fixture() {
     const APP: &str = "@example/pinger";
     let directory = tempfile::tempdir().unwrap();
     let jobs = directory.path().join("jobs");

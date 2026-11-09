@@ -3,25 +3,16 @@
 
 use crate::server::*;
 
-#[utoipa::path(
-    post,
-    path = "/api/chat/stream",
-    tag = "Chat",
-    summary = "Stream a chat turn (SSE, Vercel AI format)",
-    request_body = serde_json::Value,
-    responses((status = 200, description = "Server-Sent Events stream"))
-)]
-pub(in crate::server) async fn chat_stream(
+/// The chat turn pipeline behind `POST /api/chat/stream` (entry points in
+/// `chat_stream_entry`). `body` is the raw request a device signature covers.
+pub(in crate::server) async fn run_chat_stream_request(
     State(state): State<ServerState>,
     headers: axum::http::HeaderMap,
-    // Verified human author (Phase 0), attached by `attach_verified_caller`.
-    // `None` in the anonymous single-tenant / loopback flow. Always present as an
-    // extension (the middleware inserts it on every protected route), so the
-    // direct `Extension` extractor is safe here.
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::Extension(VerifiedUserJwt(user_jwt)): axum::Extension<VerifiedUserJwt>,
     authorization: Option<axum::Extension<ResolvedAuthorization>>,
-    Json(mut req): Json<ChatStreamRequest>,
+    mut req: ChatStreamRequest,
+    body: axum::body::Bytes,
 ) -> axum::response::Response {
     if crate::execution_control::is_paused() {
         return json_error(
@@ -34,6 +25,9 @@ pub(in crate::server) async fn chat_stream(
     // is the ONLY source — a client request body can neither set nor spoof it.
     req.author_user_id = caller.as_ref().map(|c| c.user_id.clone());
     req.verified_caller = caller.clone();
+    let device_auth = authorization
+        .as_ref()
+        .map(|axum::Extension(value)| value.clone());
     req.cloud_authorization = authorization.map(|axum::Extension(value)| Arc::new(value));
     if req.cloud_environment_id.is_some() && req.conversation_id.is_none() {
         req.conversation_id = Some(uuid::Uuid::new_v4().to_string());
@@ -392,6 +386,19 @@ pub(in crate::server) async fn chat_stream(
             ),
         )
         .await;
+    }
+    // Device tools exist only on this interactive single-agent path, for the
+    // caller's own chat (team and workflow turns returned above).
+    let device_user_jwt = req.user_jwt.clone();
+    let device_request = OfferRequest {
+        headers: &headers,
+        body: &body,
+        auth: device_auth.as_ref(),
+        caller: caller.as_ref(),
+        user_jwt: device_user_jwt.as_deref(),
+    };
+    if let Err(response) = stamp_device_offer(&state, device_request, &mut req).await {
+        return response;
     }
     if let Err(reason) = consume_widget_follow_up_ticket(&mut req) {
         return json_error(StatusCode::FORBIDDEN, reason.to_owned());

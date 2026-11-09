@@ -95,7 +95,9 @@ pub(super) async fn require_owner_permission(
     let Some(owner) = owner_user_id else {
         return Ok(());
     };
-    if !control_plane::is_managed_node() && control_plane::registered_org().is_none() {
+    if !crate::sidecar::node_binding::node_expects_binding()
+        && control_plane::registered_org().is_none()
+    {
         return Ok(());
     }
     let (caller, resolved) = resolve_owner(owner)

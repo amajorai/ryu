@@ -214,21 +214,8 @@ pub(in crate::server) async fn require_auth_with_token(
     next: middleware::Next,
     expected: Option<String>,
 ) -> Result<axum::response::Response, StatusCode> {
-    let provided = if req
-        .uri()
-        .path()
-        .starts_with("/api/pi-config/chatgpt/codex/")
-        || req.uri().path().starts_with("/api/pi-config/chatgpt-plan/")
-        || req.uri().path() == "/api/pi-config/claude/v1/messages"
-        || matches!(
-            req.uri().path(),
-            "/api/pi-config/kiro/v1/chat/completions"
-                | "/api/pi-config/kiro/v1/models"
-                | "/api/pi-config/qoder/v1/chat/completions"
-                | "/api/pi-config/qoder/v1/models"
-                | "/api/pi-config/qoder-cn/v1/chat/completions"
-                | "/api/pi-config/qoder-cn/v1/models"
-        ) {
+    let pi_provider_route = crate::pi_config::secret_env::is_provider_route(req.uri().path());
+    let provided = if pi_provider_route {
         req.headers()
             .get("x-ryu-node-token")
             .and_then(|v| v.to_str().ok())
@@ -251,7 +238,11 @@ pub(in crate::server) async fn require_auth_with_token(
     let path_agent_id = mcp_path_agent_id(req.uri().path());
     let resolved = if let Some(expected) = expected {
         let token = provided.as_deref().ok_or(StatusCode::UNAUTHORIZED)?;
-        if ct_eq(token, &expected) {
+        // The managed Pi's provider bearer stands in for the node token on its
+        // provider proxies only; everywhere else it is an unknown token.
+        let pi_provider_bearer =
+            pi_provider_route && ct_eq(token, crate::pi_config::secret_env::provider_token());
+        if ct_eq(token, &expected) || pi_provider_bearer {
             let (caller, verified_user_jwt) =
                 match crate::self_api::self_call_identity(req.headers()) {
                     crate::self_api::SelfCallIdentity::Absent => {

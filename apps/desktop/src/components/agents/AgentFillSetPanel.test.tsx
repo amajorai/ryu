@@ -22,11 +22,14 @@ mock.module("@/src/hooks/useActiveNode.ts", () => ({
 	useActiveNode: () => target,
 }));
 const { createRoot } = await import("react-dom/client");
+const { I18nProvider } = await import("@ryu/i18n/react");
+const { registerLiteralCatalogLoader } = await import("@ryu/i18n/core");
 const { AgentFillSetPanel } = await import("./AgentFillSetPanel.tsx");
 
 const originalFetch = globalThis.fetch;
 type Set = Record<string, unknown>;
 let sets: Set[] = [];
+let attachRefusal: string | null = null;
 let writes: { method: string; path: string; body: unknown }[] = [];
 let root: Root;
 let container: HTMLDivElement;
@@ -90,11 +93,22 @@ async function typeItems(value: string): Promise<void> {
 	});
 }
 
-async function render(): Promise<void> {
+async function render(locale?: string): Promise<void> {
 	container = document.createElement("div");
 	document.body.append(container);
 	root = createRoot(container);
-	await act(async () => root.render(<AgentFillSetPanel agentId="agent-1" />));
+	const panel = <AgentFillSetPanel agentId="agent-1" />;
+	await act(async () =>
+		root.render(
+			locale ? (
+				<I18nProvider initialLocale={locale} initialPackId={null}>
+					{panel}
+				</I18nProvider>
+			) : (
+				panel
+			)
+		)
+	);
 	await until(
 		() =>
 			container.textContent?.includes("Attach items") === true ||
@@ -105,6 +119,7 @@ async function render(): Promise<void> {
 beforeEach(() => {
 	sets = [];
 	writes = [];
+	attachRefusal = null;
 	globalThis.fetch = Object.assign(
 		(input: RequestInfo | URL, init?: RequestInit) => {
 			const url = new URL(String(input));
@@ -113,6 +128,11 @@ beforeEach(() => {
 				return Promise.resolve(Response.json({ fillSets: sets }));
 			}
 			if (url.pathname === "/api/vault/fill-sets" && method === "POST") {
+				if (attachRefusal) {
+					return Promise.resolve(
+						Response.json({ error: attachRefusal }, { status: 409 })
+					);
+				}
 				const body = JSON.parse(String(init?.body)) as {
 					items: { key: string; path?: string }[];
 				};
@@ -136,6 +156,8 @@ beforeEach(() => {
 afterEach(async () => {
 	await act(async () => root.unmount());
 	container.remove();
+	registerLiteralCatalogLoader(null);
+	document.body.removeAttribute("data-ryu-i18n");
 });
 
 afterAll(() => {
@@ -183,6 +205,14 @@ test("a malformed line blocks attaching and says which line", async () => {
 	await typeItems("ok-key\nbad key here");
 	expect(container.textContent).toContain("Line 2 is not folder/key");
 	expect(button("Attach items").disabled).toBe(true);
+});
+
+test("several malformed lines are listed together in one plural sentence", async () => {
+	await render();
+	await typeItems("bad key here\nok-key\nbad key two\nbad key three");
+	expect(container.textContent).toContain(
+		"Lines 1, 3, and 4 are not folder/key followed by a site."
+	);
 });
 
 test("revoking the active set returns to the empty form", async () => {
@@ -272,4 +302,43 @@ test("attaching sends each item's login URL and Box opt-in", async () => {
 		],
 		ttl_secs: 3600,
 	});
+});
+
+test("a Core vault refusal shows its sentence without the vault_ code", async () => {
+	attachRefusal =
+		"vault_conflict: this agent already has an attached vault set; revoke it first";
+	await render();
+	await typeItems("logins/github https://github.com");
+	await act(async () => button("Attach items").click());
+	await until(
+		() =>
+			container.textContent?.includes(
+				"This agent already has an attached vault set; revoke it first"
+			) === true
+	);
+	expect(container.textContent).not.toContain("vault_conflict");
+	expect(container.textContent).not.toContain("The items were not attached.");
+});
+
+test("a Core vault refusal reaches a Japanese reader translated", async () => {
+	const ja: Record<string, string> = {
+		"This agent may not use your accounts; change its identity in the agent's settings":
+			"このエージェントはあなたのアカウントを使えません",
+	};
+	registerLiteralCatalogLoader((locale) => (locale.startsWith("ja") ? ja : {}));
+	// With the DOM localizer off, only the panel's own translation can apply.
+	document.body.setAttribute("data-ryu-i18n", "off");
+	attachRefusal =
+		"vault_denied: this agent may not use your accounts; change its identity in the agent's settings";
+	await render("ja");
+	await typeItems("logins/github https://github.com");
+	await act(async () => button("Attach items").click());
+	await until(
+		() =>
+			container.textContent?.includes(
+				"このエージェントはあなたのアカウントを使えません"
+			) === true
+	);
+	expect(container.textContent).not.toContain("vault_denied");
+	expect(container.textContent).not.toContain("may not use your accounts");
 });

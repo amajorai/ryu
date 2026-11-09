@@ -97,6 +97,8 @@ impl MemoryStore {
                 owner_user_id: row.get(11)?,
                 lifecycle: row.get(12)?,
                 supersedes_id: row.get(13)?,
+                recall_count: row.get(14)?,
+                last_recalled_at: row.get(15)?,
             })
         })?;
         let mut out = Vec::new();
@@ -128,6 +130,8 @@ impl MemoryStore {
                         sensitive_topics: payload.sensitive_topics,
                         lifecycle: MemoryLifecycle::from_str(&r.lifecycle),
                         supersedes_id: r.supersedes_id,
+                        recall_count: r.recall_count.unwrap_or(0),
+                        last_recalled_at: r.last_recalled_at,
                         created_at: r.created_at,
                         updated_at: if r.updated_at == 0 {
                             r.created_at
@@ -159,4 +163,6 @@ pub(crate) struct EncryptedRow {
     owner_user_id: Option<String>,
     lifecycle: String,
     supersedes_id: Option<String>,
+    recall_count: Option<i64>,
+    last_recalled_at: Option<i64>,
 }

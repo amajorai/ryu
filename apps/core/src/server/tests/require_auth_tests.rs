@@ -272,3 +272,44 @@ async fn kiro_proxy_accepts_only_valid_node_token_on_exact_routes() {
         }
     }
 }
+
+/// The bearer a managed Pi (and any workspace code it runs) inherits as
+/// `RYU_PI_NODE_TOKEN` reaches Core's provider proxies, but is never the
+/// node owner bearer anywhere else.
+#[tokio::test]
+async fn managed_pi_provider_bearer_is_admitted_only_on_provider_routes() {
+    let env = crate::pi_config::secret_env::secret_env();
+    let pi_bearer = env
+        .iter()
+        .find_map(|(name, value)| {
+            (name == crate::pi_config::secret_env::NODE_TOKEN_ENV).then_some(value.as_str())
+        })
+        .expect("managed Pi receives a provider bearer");
+    assert_ne!(pi_bearer, "s3cret");
+
+    let mut request = Request::builder()
+        .uri("/api/pi-config/claude/v1/messages")
+        .header("x-ryu-node-token", pi_bearer);
+    let response = router(Some("s3cret"))
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    request = Request::builder()
+        .uri("/api/pi-config/kiro/v1/models")
+        .header("authorization", "Bearer ryu-local-proxy")
+        .header("x-ryu-node-token", pi_bearer);
+    let response = router(Some("s3cret"))
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    for path in ["/x", "/api/sandboxes"] {
+        assert_eq!(
+            get_status(Some("s3cret"), path, Some(pi_bearer)).await,
+            StatusCode::UNAUTHORIZED,
+            "{path} must not accept the managed Pi's bearer"
+        );
+    }
+}

@@ -46,3 +46,40 @@ pub(super) async fn subscriber_may_run_agent(subscriber_user_id: &str, agent_id:
     .await
     .is_ok()
 }
+
+/// Whether the user who subscribed a legacy workflow trigger may still receive
+/// `connected_account_id`'s events into `workflow_id`. The same fresh
+/// `workflow.run` decision a scheduled workflow re-checks at every firing, and
+/// on an organization-bound node a fresh check that the subscriber still owns
+/// the account. A row with no recorded subscriber (saved before subscribers
+/// were stored, or by an unverified save) is refused on a bound node and kept
+/// on an unbound personal node, which has no organization ACL.
+pub(super) async fn subscriber_may_run_workflow(
+    subscriber_user_id: &str,
+    workflow_id: &str,
+    connected_account_id: &str,
+) -> bool {
+    let bound = control_plane::is_managed_node() || control_plane::registered_org().is_some();
+    if subscriber_user_id.is_empty() {
+        return !bound;
+    }
+    if crate::scheduler::workflow_run_access::require_owner_may_run_workflow(
+        Some(subscriber_user_id),
+        workflow_id,
+    )
+    .await
+    .is_err()
+    {
+        return false;
+    }
+    if !bound {
+        return true;
+    }
+    let Some(store) = crate::composio_triggers::global() else {
+        return false;
+    };
+    store
+        .user_owns_account(subscriber_user_id, connected_account_id)
+        .await
+        .unwrap_or(false)
+}

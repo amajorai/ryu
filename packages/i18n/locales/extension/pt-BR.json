@@ -178,7 +178,6 @@
   "I've saved them": "Já salvei",
   "I've scanned it": "Já escaneei",
   "Import browser bookmarks": "Importar favoritos do navegador",
-  "Imported {imported} bookmarks": "{imported} favoritos importados",
   "Importing bookmarks…": "Importando favoritos…",
   "Improve writing": "Melhorar a escrita",
   "In your authenticator app, choose <strong>Enter setup key</strong> and paste this key.": "No seu app autenticador, escolha <strong>Inserir chave de configuração</strong> e cole esta chave.",
@@ -371,8 +370,9 @@
   "plugin bundle does not export activate(context)": "o bundle do plugin não exporta activate(context)",
   "{current} of {total}": "{current} de {total}",
   "{current} of {total}: {match}": "{current} de {total}: {match}",
+  "{imported, plural, one {Imported # bookmark} other {Imported # bookmarks}}": "{imported, plural, one {# favorito importado} other {# favoritos importados}}",
   "{ipAddress} · Created {createdAgo}": "{ipAddress} · Criada {createdAgo}",
   "{label} will be signed out and must sign in again to use your account.": "{label} será desconectado e precisará entrar novamente para usar sua conta.",
   "{matchCount, plural, one {# local result} other {# local results}}": "{matchCount, plural, one {# resultado local} other {# resultados locais}}",
-  "{skipped} duplicate links skipped": "{skipped} links duplicados ignorados"
+  "{skipped, plural, one {# duplicate link skipped} other {# duplicate links skipped}}": "{skipped, plural, one {# link duplicado ignorado} other {# links duplicados ignorados}}"
 }

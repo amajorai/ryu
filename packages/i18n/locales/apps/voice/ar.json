@@ -16,6 +16,7 @@
   "A preset needs a voice.": "يحتاج الإعداد المسبق إلى صوت.",
   "A profile with samples needs exactly one primary sample.": "يحتاج ملف التعريف الذي يحتوي على عينات إلى عينة أساسية واحدة بالضبط.",
   "A saved sample is used only when the selected model supports cloning.": "لا تُستخدم العينة المحفوظة إلا عندما يدعم النموذج المحدد الاستنساخ.",
+  "A voice can keep up to {MAX_PROFILE_SAMPLES} samples. Remove one first.": "يمكن أن يحتفظ الصوت بما يصل إلى {MAX_PROFILE_SAMPLES} عينات. أزل واحدة أولًا.",
   "A voice sample needs a consent record.": "تحتاج عينة الصوت إلى سجل موافقة.",
   "AM-radio band with heavy compression.": "نطاق راديو AM مع ضغط شديد.",
   "Add": "إضافة",

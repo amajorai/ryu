@@ -457,3 +457,21 @@ describe("appearance snapshot (widget bootstrap)", () => {
 		expect(BOOTSTRAP).toContain("applyThemeTokens(msg.tokens)");
 	});
 });
+
+// ExtensionHost delivers a frame's window-level traffic (the MCP Apps JSON-RPC)
+// only after the realm holding the channel port acknowledges a liveness probe,
+// so a widget that navigated its own frame cannot keep driving the bridge.
+describe("liveness responder (widget bootstrap)", () => {
+	const BOOTSTRAP = readFileSync(
+		join(import.meta.dir, "widget-bootstrap.ts"),
+		"utf8"
+	);
+
+	it("answers the host's liveness probe on the channel port", () => {
+		const handler = BOOTSTRAP.slice(
+			BOOTSTRAP.indexOf("function onPortMessage(ev){"),
+			BOOTSTRAP.indexOf('if(msg.kind === "ryu-plugin-rpc-chunk")')
+		);
+		expect(handler).toContain(["$", "{livenessResponderScript()}"].join(""));
+	});
+});

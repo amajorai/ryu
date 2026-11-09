@@ -24,12 +24,17 @@ fn proposal_operation_round_trips_and_unknown_values_create() {
     for operation in [
         MemoryProposalOperation::Create,
         MemoryProposalOperation::Revise,
+        MemoryProposalOperation::Archive,
     ] {
         assert_eq!(
             MemoryProposalOperation::from_str(operation.as_str()),
             operation
         );
     }
+    assert_eq!(
+        serde_json::to_value(MemoryProposalOperation::Archive).unwrap(),
+        serde_json::json!("archive")
+    );
     // An unknown operation must not supersede an existing memory.
     assert_eq!(
         MemoryProposalOperation::from_str("delete"),

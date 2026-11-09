@@ -30,6 +30,7 @@ export const OFFICIAL_PACK_CATALOG_ALIGNMENT: Readonly<
 		[literalMessageId("Dashboard")]: "Übersicht",
 		[literalMessageId("Plan")]: "Tarif",
 		[literalMessageId("Self-hosted")]: "Selbst gehostet",
+		[literalMessageId("Threads")]: "Unterhaltungen",
 		"marketplace.section.marketplaces": "Marktplätze",
 		"marketplace.section.skills": "Fähigkeiten",
 		"marketplace.skills": "Fähigkeiten",
@@ -80,7 +81,7 @@ export const OFFICIAL_PACK_CATALOG_ALIGNMENT: Readonly<
 	},
 	"pt-BR": {
 		"common.marketplace": "Mercado",
-		[literalMessageId("Threads")]: "Linhas de execução",
+		[literalMessageId("Threads")]: "Conversas",
 		"marketplace.section.engines": "Motores",
 		"marketplace.section.marketplaces": "Mercados",
 		"marketplace.section.skills": "Habilidades",

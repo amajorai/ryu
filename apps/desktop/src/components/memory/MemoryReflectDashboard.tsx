@@ -36,8 +36,12 @@ import {
 	type ReflectPeriod,
 	type ReflectSettings,
 	updateReflectSettings,
-} from "@/src/lib/api/memory.ts";
+} from "@/src/lib/api/memory-reflect.ts";
 import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
+import {
+	reflectActivityLabel,
+	topicSummaryText,
+} from "./memory-reflect-copy.ts";
 
 const PERIOD_LABELS = {
 	"7d": "Last 7 days",
@@ -81,10 +85,13 @@ function Stat({
 }: {
 	activity: ReflectDashboard["activity"][number];
 }) {
+	const tl = useLiteralMessages();
 	const trend = formatTrend(activity.trend);
 	return (
 		<div className="flex flex-col gap-1">
-			<p className="text-detail text-muted-foreground">{activity.label}</p>
+			<p className="text-detail text-muted-foreground">
+				{reflectActivityLabel(activity.label, tl)}
+			</p>
 			<p className="font-medium text-xl tabular-nums">
 				{formatNumber(activity.count)}
 			</p>
@@ -319,7 +326,7 @@ export function MemoryReflectDashboard({ target }: { target: ApiTarget }) {
 										<p className="text-sm">{topic.name}</p>
 										{topic.summary ? (
 											<p className="truncate text-detail text-muted-foreground">
-												{topic.summary}
+												{topicSummaryText(topic.summary, tl)}
 											</p>
 										) : null}
 									</div>

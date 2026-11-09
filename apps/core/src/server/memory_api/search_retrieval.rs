@@ -44,7 +44,7 @@ pub(in crate::server) async fn search_retrieval(
             Ok(filter) => filter,
             Err(response) => return response,
         };
-    let node_bound = node_org_id().is_some();
+    let node_bound = crate::sidecar::node_binding::node_bound_for_tenancy();
     let include_sensitive = sensitive_memory_enabled(&state, &caller).await;
     let include_memory = body.include_memory.unwrap_or(true);
     let agent_id = body.agent_id.clone();

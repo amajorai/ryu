@@ -4,7 +4,7 @@ import {
 	type LanguagePack,
 } from "@ryu/i18n";
 import { preferredOfficialLocale, systemLocales } from "@ryu/i18n/core";
-import { useI18n } from "@ryu/i18n/react";
+import { useI18n, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Select,
@@ -47,6 +47,7 @@ export function LanguageSettings({
 	const node = useActiveNode();
 	const { availablePacks, direction, selectedPack, selectPack, setLocale, t } =
 		useI18n();
+	const tl = useLiteralMessages();
 	const [languageMode, setLanguageMode] = useLanguageMode();
 	const [busyId, setBusyId] = useState<string | null>(null);
 	const [pendingPack, setPendingPack] = useState<{
@@ -315,7 +316,7 @@ export function LanguageSettings({
 										</span>
 									) : null}
 									<Button
-										aria-label={`${t("common.export")} ${pack.name}`}
+										aria-label={tl("Export {name}", { name: pack.name })}
 										onClick={() => downloadLanguagePack(pack)}
 										size="sm"
 										variant="ghost"

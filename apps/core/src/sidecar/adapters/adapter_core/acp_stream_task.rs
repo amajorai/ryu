@@ -28,6 +28,10 @@ pub(crate) struct AcpCompletionCtx {
     pub(crate) cost_attribution: Option<SubscriptionCostAttribution>,
     pub(crate) plugin_flags: std::collections::HashMap<String, bool>,
     pub(crate) worktree_diffs: crate::server::WorktreeDiffStore,
+    /// The facts this turn recalled, marked used only on normal completion.
+    pub(crate) recall_marks: TurnRecallMarks,
+    /// The user's own-chat device offer for this turn, if any.
+    pub(crate) device_offer: Option<std::sync::Arc<crate::device_tools::DeviceOffer>>,
 }
 
 /// Sink for rendered frames: the original HTTP client plus the live-turn broadcast.
@@ -84,7 +88,13 @@ pub(crate) async fn run_acp_completion(ctx: AcpCompletionCtx) {
         cost_attribution,
         plugin_flags,
         worktree_diffs,
+        recall_marks,
+        device_offer,
     } = ctx;
+    // Device data never reaches the transcript, resume replay or trace spans
+    // through the agent's own echo of a bridge device call; other agent tools
+    // mark a device turn as holding untrusted input.
+    let mut device_filter = crate::device_tools::agent_events::AgentToolFilter::new(device_offer);
     let mut em = AcpEmitter { live_stream, ui_tx };
     // After stream completes the guard is transferred into WorktreeRun
     // (so the worktree survives for apply). If abandoned before completion
@@ -128,6 +138,7 @@ pub(crate) async fn run_acp_completion(ctx: AcpCompletionCtx) {
                 input,
                 locations,
             } => {
+                let (title, input) = device_filter.on_call(&id, title, &kind, input);
                 st.on_tool_call(&em, refs, id, title, kind, input, locations)
                     .await
             }
@@ -137,6 +148,8 @@ pub(crate) async fn run_acp_completion(ctx: AcpCompletionCtx) {
                 output,
                 input,
             } => {
+                let terminal = matches!(status.as_str(), "completed" | "failed" | "error");
+                let (output, input) = device_filter.on_result(&id, output, input, terminal);
                 st.on_tool_result(&em, refs, id, status, output, input)
                     .await
             }
@@ -270,6 +283,13 @@ pub(crate) async fn run_acp_completion(ctx: AcpCompletionCtx) {
                     }),
                 ));
             }
+            acp::AcpEvent::UiData { name, id, data } => {
+                st.close_thought(&em);
+                st.close_text(&em);
+                em.emit(crate::device_tools::frames::data_part_bytes(
+                    &name, &id, &data,
+                ));
+            }
             acp::AcpEvent::QuestionRequest {
                 tool_call_id,
                 input,
@@ -302,6 +322,7 @@ pub(crate) async fn run_acp_completion(ctx: AcpCompletionCtx) {
                     failure,
                 )
                 .await;
+                // A failed turn leaves its recall marks unpaid.
                 return;
             }
         }
@@ -309,5 +330,8 @@ pub(crate) async fn run_acp_completion(ctx: AcpCompletionCtx) {
 
     st.finish_turn(&mut em, refs, &plugin_flags, &worktree_diffs, &mut guard)
         .await;
+    // `finish_turn` recorded the run as completed; this detached task is off
+    // the reply's path, so the marks can be written in line.
+    recall_marks.settle("completed").await;
     // _guard drops here — worktree removed after diff captured
 }

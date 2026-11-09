@@ -270,6 +270,7 @@ pub(crate) fn acp_turn_config(req: &ChatStreamRequest) -> acp::AcpTurnConfig {
             .as_ref()
             .and_then(|control| control.requested_effort.clone()),
         interactive: true,
+        device_offer: req.device.device_tools_offer.clone(),
     }
 }
 

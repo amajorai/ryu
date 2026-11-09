@@ -117,3 +117,82 @@ fn a_relayed_message_is_verbatim_text_marked_for_catalog_lookup() {
     assert!(wire["i18n"]["body"][1].get("relay").is_none());
     assert!(wire["i18n"]["title"].get("relay").is_none());
 }
+
+#[test]
+fn a_link_serializes_only_when_set_and_round_trips() {
+    let plain = serde_json::to_value(NotifyHint::info("Ready", None)).unwrap();
+    assert!(
+        plain.get("link").is_none(),
+        "an unset link is not serialized"
+    );
+
+    let hint = NotifyHint::info("Ready", None)
+        .for_user("user-1")
+        .with_link("ryu://apps/@ryu/meetings/recaps/r1");
+    let wire = serde_json::to_value(&hint).unwrap();
+    assert_eq!(wire["link"], "ryu://apps/@ryu/meetings/recaps/r1");
+    assert_eq!(wire["target_user_id"], "user-1");
+    let back: NotifyHint = serde_json::from_value(wire).unwrap();
+    assert_eq!(
+        back.link.as_deref(),
+        Some("ryu://apps/@ryu/meetings/recaps/r1")
+    );
+
+    // A hint from an emitter that predates links still parses.
+    let old: NotifyHint = serde_json::from_value(serde_json::json!({ "title": "x" })).unwrap();
+    assert_eq!(old.link, None);
+}
+
+#[test]
+fn an_app_link_must_stay_inside_the_emitting_app() {
+    let app = "@ryu/meetings";
+    for valid in [
+        "ryu://apps/@ryu/meetings",
+        "ryu://apps/@ryu/meetings/recaps",
+        "ryu://apps/@ryu/meetings/recaps/0b8e-1f?tab=notes&day=2026-11-09",
+        "ryu://apps/@ryu/meetings/a%20b",
+        "ryu://apps/@ryu/meetings?view=list",
+        // Other escapes stay valid, and the query is not routed as a path.
+        "ryu://apps/@ryu/meetings/a%41b",
+        "ryu://apps/@ryu/meetings/recaps?q=%2e%2e%2F",
+    ] {
+        assert!(NotifyHint::link_is_valid_for(app, valid), "{valid}");
+    }
+    let too_long = format!(
+        "ryu://apps/@ryu/meetings/{}",
+        "a".repeat(MAX_NOTIFY_LINK_BYTES)
+    );
+    for invalid in [
+        "",
+        "https://evil.example/recaps",
+        "javascript:alert(1)",
+        "/vault?tab=broker",
+        "ryu://apps/@ryu/crm/deals/1",
+        "ryu://apps/@ryu/meetingsx/recaps",
+        "ryu://apps/@ryu/meetings/",
+        "ryu://apps/@ryu/meetings//recaps",
+        "ryu://apps/@ryu/meetings/../crm",
+        "ryu://apps/@ryu/meetings/./x",
+        "ryu://apps/@ryu/meetings/x#frag",
+        "ryu://apps/@ryu/meetings/a b",
+        "ryu://apps/@ryu/meetings/a\\b",
+        "ryu://apps/@ryu/meetings/%zz",
+        "ryu://apps/@ryu/meetings/%4",
+        "ryu://apps/@ryu/meetings/caf\u{e9}",
+        // Escaped path syntax a decoding client would resolve outside the app.
+        "ryu://apps/@ryu/meetings/%2e%2e/%2e%2e/vault",
+        "ryu://apps/@ryu/meetings/%2E%2E/crm",
+        "ryu://apps/@ryu/meetings/.%2e/crm",
+        "ryu://apps/@ryu/meetings/%2e",
+        "ryu://apps/@ryu/meetings/recaps%2F..%2F..",
+        "ryu://apps/@ryu/meetings/recaps%2f..",
+        "ryu://apps/@ryu/meetings/a%5cb",
+        "ryu://apps/@ryu/meetings/a%5Cb",
+        "ryu://apps/@ryu/meetings/%252e%252e/crm",
+        "ryu://nodes/connect?url=http://x",
+        too_long.as_str(),
+    ] {
+        assert!(!NotifyHint::link_is_valid_for(app, invalid), "{invalid}");
+    }
+    assert!(!NotifyHint::link_is_valid_for("", "ryu://apps/"));
+}

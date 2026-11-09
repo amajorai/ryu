@@ -59,12 +59,14 @@ mod model;
 mod resolve;
 mod rows;
 mod store_api;
+mod subject;
 
 #[cfg(test)]
 pub(crate) mod tests;
 
 pub use model::*;
 pub use rows::{init_schema, prune};
+pub use subject::ConsumerSubject;
 // Row access, validation and grant bookkeeping shared by the store methods.
 use rows::*;
 

@@ -70,6 +70,11 @@ pub struct AcpTurnConfig {
     /// handler auto-approves the first offered option — preserving the prior
     /// non-interactive behaviour so tool use keeps working without a UI.
     pub interactive: bool,
+    /// The user's own-chat device offer for this turn, stamped only by the
+    /// interactive chat-stream handler. The instance that admits the turn
+    /// registers it against its own bridge channel and agent id, so no other
+    /// instance on the same conversation can serve it (`device_tools::turn_context`).
+    pub(crate) device_offer: Option<std::sync::Arc<crate::device_tools::DeviceOffer>>,
 }
 
 /// `ConfigWarning::field` Ryu uses when it refuses a session setting because the

@@ -179,6 +179,7 @@ fn plan_mode_id_coexists_with_the_model_config_option() {
         model_id: Some("gpt-5".to_owned()),
         agent_effort: None,
         interactive: true,
+        device_offer: None,
     };
     assert!(
         turn.config_options

@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Select,
@@ -83,6 +84,7 @@ export function UsageAnalyticsDashboard({
 	range,
 	scope,
 }: UsageAnalyticsDashboardProps) {
+	const tl = useLiteralMessages();
 	const providers = providerOptions ?? analytics?.providerOptions ?? [];
 	const models = modelOptions ?? analytics?.modelOptions ?? [];
 	const totals = analytics?.totals;
@@ -253,7 +255,9 @@ export function UsageAnalyticsDashboard({
 				{analytics?.availability?.supported === false ? (
 					<SettingsCard className="text-muted-foreground text-sm">
 						<p data-testid="usage-analytics-availability">
-							{analytics.availability.message}
+							{analytics.availability.message
+								? tl(analytics.availability.message)
+								: null}
 						</p>
 					</SettingsCard>
 				) : null}

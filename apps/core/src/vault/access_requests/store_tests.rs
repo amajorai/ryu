@@ -119,11 +119,7 @@ fn requests_never_reach_the_reserved_system_prefix() {
 #[test]
 fn a_control_group_added_mid_flight_blocks_the_read_grant() {
     let conn = conn();
-    put_policy(
-        &conn,
-        &access_policy("prod", "prod/**"),
-    )
-    .unwrap();
+    put_policy(&conn, &access_policy("prod", "prod/**")).unwrap();
     let now = now_millis();
     let request = create_request(
         &conn,
@@ -149,7 +145,14 @@ fn a_control_group_added_mid_flight_blocks_the_read_grant() {
         },
     )
     .unwrap();
-    let refused = approve(&conn, &request.id, "user:bob", &["user:bob".to_owned()], now).unwrap_err();
+    let refused = approve(
+        &conn,
+        &request.id,
+        "user:bob",
+        &["user:bob".to_owned()],
+        now,
+    )
+    .unwrap_err();
     assert!(matches!(
         refused.downcast_ref::<VaultError>(),
         Some(VaultError::Conflict(_))

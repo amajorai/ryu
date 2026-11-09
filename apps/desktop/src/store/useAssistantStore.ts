@@ -184,6 +184,8 @@ interface AssistantState {
 	clearContextOwner: (owner: string) => void;
 	/** Hide the panel without discarding the conversation. */
 	close: () => void;
+	/** Drop the queued draft once the composer took it (only if `id` still matches). */
+	consumePendingDraft: (id: number) => void;
 	/**
 	 * Whether the user has dismissed the page context for the current session.
 	 * Reset whenever the active page changes (a new page offers fresh context).
@@ -217,6 +219,14 @@ interface AssistantState {
 	/** Richer context published by the active page (doc/file editors, etc.) and by
 	 *  any app that reached the bridge — the flattening of `contextOwners`. */
 	pageContext: PageContextItem[];
+	/**
+	 * Text an app suggested (`assistant.open({ prompt })`), waiting to be placed
+	 * in the composer. Pre-fill only: app-authored text never auto-sends, because
+	 * a turn sent from the panel skips the app-send firewall, exec scan,
+	 * ask-before-send approval and shared-node refusal that `chat.send` passes.
+	 * The user reads it and presses Send. `id` changes per suggestion.
+	 */
+	pendingDraft: { id: number; text: string } | null;
 	/**
 	 * A question an app asked the assistant on the user's behalf
 	 * (`assistant.open({ prompt })`), waiting for the panel to mount and send it.
@@ -254,7 +264,9 @@ interface AssistantState {
 	setConversationId: (id: string | null) => void;
 	/** Switch between floating and sidebar without closing. */
 	setLayout: (mode: "floating" | "sidebar") => void;
-	/** Queue (or clear, with `null`) the app-asked prompt the panel sends on mount. */
+	/** Queue app-suggested text for the composer (never sent automatically). */
+	setPendingDraft: (text: string) => void;
+	/** Queue (or clear, with `null`) a first-party prompt the panel sends on mount. */
 	setPendingPrompt: (prompt: string | null) => void;
 	/**
 	 * App-surface threads kept in memory so closing and reopening Ask Ryu (which
@@ -292,6 +304,8 @@ function withOwner(
 	return slices.map((s) => (s.owner === owner ? { owner, items } : s));
 }
 
+let draftSequence = 0;
+
 export const useAssistantStore = create<AssistantState>((set) => ({
 	mode: "closed",
 	conversationId: null,
@@ -300,6 +314,7 @@ export const useAssistantStore = create<AssistantState>((set) => ({
 	contextOwners: [],
 	contextDismissed: false,
 	pendingPrompt: null,
+	pendingDraft: null,
 	builder: null,
 	surfaceThreads: {},
 	resolvedPermissions: {},
@@ -346,6 +361,13 @@ export const useAssistantStore = create<AssistantState>((set) => ({
 		}),
 	setConversationId: (id) => set({ conversationId: id }),
 	setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
+	setPendingDraft: (text) => {
+		// Monotonic across consumes: the composer ignores an id it already took.
+		draftSequence += 1;
+		set({ pendingDraft: { id: draftSequence, text } });
+	},
+	consumePendingDraft: (id) =>
+		set((s) => (s.pendingDraft?.id === id ? { pendingDraft: null } : {})),
 	newConversation: () =>
 		set({
 			conversationId: null,

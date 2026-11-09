@@ -249,9 +249,15 @@ fn only_a_pi_on_the_managed_config_dir_receives_the_secret_env() {
         .into_owned();
     let mut env = vec![EnvVariable::new("PI_CODING_AGENT_DIR", managed.as_str())];
     assert!(apply_managed_pi_secret_env(&mut env));
-    assert!(env
-        .iter()
-        .any(|variable| variable.name == crate::pi_config::secret_env::NODE_TOKEN_ENV));
+    // Pi's shell tool runs workspace code with this env: the provider bearer,
+    // never the node owner bearer.
+    assert!(env.iter().any(|variable| {
+        variable.name == crate::pi_config::secret_env::NODE_TOKEN_ENV
+            && variable.value == crate::pi_config::secret_env::provider_token()
+    }));
+    if let Some(owner) = crate::node_token::active_token() {
+        assert!(env.iter().all(|variable| variable.value != owner));
+    }
 
     let mut elsewhere = vec![EnvVariable::new("PI_CODING_AGENT_DIR", "/tmp/user-pi")];
     assert!(!apply_managed_pi_secret_env(&mut elsewhere));

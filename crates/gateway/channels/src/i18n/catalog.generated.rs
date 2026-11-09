@@ -10,7 +10,7 @@ static ENTRIES: &[(&str, &[(&str, &str)])] = &[
         "Ask the owner to approve this code on the Ryu Gateway. Once approved, just send your message again.",
         &[
             ("ar", "اطلب من المالك الموافقة على هذا الرمز في Ryu Gateway. بعد الموافقة، أرسل رسالتك مرة أخرى."),
-            ("de", "Bitte den Eigentümer, diesen Code auf dem Ryu Gateway zu genehmigen. Sobald er genehmigt ist, einfach die Nachricht erneut senden."),
+            ("de", "Bitten Sie den Eigentümer, diesen Code auf dem Ryu Gateway zu genehmigen. Sobald er genehmigt ist, senden Sie Ihre Nachricht einfach erneut."),
             ("es", "Pide al propietario que apruebe este código en el Ryu Gateway. Una vez aprobado, vuelve a enviar tu mensaje."),
             ("fr", "Demandez au propriétaire d’approuver ce code sur le Ryu Gateway. Une fois approuvé, renvoyez simplement votre message."),
             ("hi", "मालिक से Ryu Gateway पर इस कोड को स्वीकृत करने के लिए कहें। स्वीकृत होने के बाद, बस अपना संदेश फिर से भेजें।"),

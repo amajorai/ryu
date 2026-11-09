@@ -47,6 +47,7 @@ import { useSystemAnnouncements } from "@/src/hooks/useSystemAnnouncements.ts";
 import type { AppNotification } from "@/src/lib/api/notifications.ts";
 import type { NotificationLayout } from "@/src/lib/notification-layout.ts";
 import { buildAnnouncementStackItems } from "../notifications/announcement-stack-items.tsx";
+import { inboxHiddenLabel } from "./InboxCenter-hidden-label.ts";
 import {
 	inboxEmptyDescription,
 	inboxEmptyTitle,
@@ -393,13 +394,7 @@ export function InboxCenter({
 								onClick={showInbox ? openInbox : () => setOpen(false)}
 								type="button"
 							>
-								{showInbox
-									? tl("{hidden} more in the full inbox", {
-											hidden: String(hidden),
-										})
-									: tl("{hidden} more in announcements", {
-											hidden: String(hidden),
-										})}
+								{inboxHiddenLabel(hidden, showInbox, tl)}
 							</button>
 						)}
 					</>

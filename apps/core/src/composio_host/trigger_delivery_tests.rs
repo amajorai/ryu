@@ -198,3 +198,83 @@ mod subscriber {
         assert!(unbound);
     }
 }
+
+mod workflow_subscriber {
+    //! Regression tests: a legacy workflow trigger fires only while the user
+    //! who subscribed it may still run the workflow, and a row with no
+    //! recorded subscriber never fires on an organization-bound node.
+
+    use crate::identity_verify::{OrgRole, VerifiedCaller};
+    use crate::scheduler::agent_run_access::with_test_owner;
+    use crate::sidecar::control_plane::{
+        with_test_node_binding, NodeScope, RegisteredNode, RegisteredOrg,
+    };
+    use ryu_composio::ComposioHost;
+
+    fn org_node() -> RegisteredNode {
+        RegisteredNode {
+            org: RegisteredOrg {
+                id: "org1".to_owned(),
+                name: "Org".to_owned(),
+                slug: None,
+            },
+            node_id: "node-1".to_owned(),
+            scope: NodeScope::Org,
+            team_id: None,
+            owner_user_id: None,
+        }
+    }
+
+    fn member(user_id: &str, org_id: &str) -> VerifiedCaller {
+        VerifiedCaller {
+            user_id: user_id.to_owned(),
+            email: None,
+            email_verified: false,
+            org_id: Some(org_id.to_owned()),
+            role: OrgRole::Member,
+            teams: Vec::new(),
+        }
+    }
+
+    fn unique_workflow() -> String {
+        format!("wf-trigger-{}", uuid::Uuid::new_v4().simple())
+    }
+
+    async fn bound_answer(current: VerifiedCaller, subscriber: &str, workflow: &str) -> bool {
+        with_test_node_binding(
+            true,
+            Some(org_node()),
+            with_test_owner(
+                current,
+                super::super::CoreComposioHost.subscriber_may_run_workflow(
+                    subscriber,
+                    workflow,
+                    "ca_victim",
+                ),
+            ),
+        )
+        .await
+        .expect("the host answers")
+    }
+
+    #[tokio::test]
+    async fn a_workflow_row_without_a_subscriber_fires_only_on_an_unbound_node() {
+        let workflow = unique_workflow();
+        assert!(!bound_answer(member("u1", "org1"), "", &workflow).await);
+        let unbound = with_test_node_binding(
+            false,
+            None,
+            super::super::CoreComposioHost.subscriber_may_run_workflow("", &workflow, "ca_1"),
+        )
+        .await
+        .expect("the host answers");
+        assert!(unbound);
+    }
+
+    #[tokio::test]
+    async fn a_removed_member_no_longer_fires_the_workflow() {
+        let workflow = unique_workflow();
+        assert!(!bound_answer(member("u1", "other-org"), "u1", &workflow).await);
+        assert!(!bound_answer(member("someone-else", "org1"), "u1", &workflow).await);
+    }
+}

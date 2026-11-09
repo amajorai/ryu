@@ -26,6 +26,10 @@ pub struct SkillProvenance {
     pub user_requested: bool,
     /// RFC 3339 synthesis time.
     pub synthesized_at: String,
+    /// The existing learned skill this one revises, when synthesis proposed an
+    /// update rather than a new skill. The approver sees which skill an approval
+    /// would replace.
+    pub revises: Option<String>,
 }
 
 /// Turn a free-form title into a namespaced, filesystem-safe skill slug.
@@ -65,6 +69,9 @@ pub fn build_skill_md(
     }
     if let Some(user) = &provenance.requested_by {
         front.push_str(&format!("requested-by: {user}\n"));
+    }
+    if let Some(previous) = &provenance.revises {
+        front.push_str(&format!("revises: {previous}\n"));
     }
     let origin = if provenance.user_requested {
         "user-requested"

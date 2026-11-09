@@ -5,6 +5,7 @@
 // (1–5), when-to-use, and tags — and persists via the memory client. Shared by
 // the Memory library for both "New memory" and "Edit" so the form lives once.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -39,6 +40,7 @@ import {
 	memoryScopeLabels,
 	updateMemory,
 } from "@/src/lib/api/memory.ts";
+import { memoryErrorText } from "./memory-error-text.ts";
 
 /** Importance levels (1..5), highest first, with a plain-language label. */
 const IMPORTANCE_LEVELS: { value: number; label: string }[] = [
@@ -93,6 +95,7 @@ export function MemoryEditor({
 	open: boolean;
 	target: ApiTarget;
 }) {
+	const tl = useLiteralMessages();
 	const [friendly] = useFriendlyMode();
 	const scopeLabels = memoryScopeLabels(friendly);
 	const categoryLabels = memoryCategoryLabels(friendly);
@@ -192,9 +195,7 @@ export function MemoryEditor({
 			onSaved(saved);
 			onClose();
 		} catch (err) {
-			setError(
-				err instanceof Error ? err.message : "Failed to save this memory."
-			);
+			setError(memoryErrorText(err, tl("Failed to save this memory.")));
 		} finally {
 			setBusy(false);
 		}

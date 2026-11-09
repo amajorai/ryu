@@ -1,16 +1,23 @@
 import { type Chord, chordTokens, eventToChord } from "@ryu/hotkeys/chord";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
 import { useState } from "react";
+import { chordKeyLabel } from "./chord-key-label.ts";
 
 /** Render a chord as keycaps, or a muted "Unbound" when null. */
 export function ChordCaps({ chord }: { chord: Chord | null }) {
+	const tl = useLiteralMessages();
 	if (!chord) {
 		return <span className="text-muted-foreground text-xs">Unbound</span>;
 	}
+	// Keycaps are already in the reader's language; the DOM localizer must not
+	// re-translate a bare token such as "Down" in another sense.
 	return (
 		<span className="flex items-center gap-1">
 			{chordTokens(chord).map((token, index) => (
-				<Kbd key={`${index}-${token}`}>{token}</Kbd>
+				<Kbd data-ryu-i18n="off" key={`${index}-${token}`} translate="no">
+					{chordKeyLabel(token, tl)}
+				</Kbd>
 			))}
 		</span>
 	);

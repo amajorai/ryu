@@ -48,15 +48,17 @@ import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	deleteMemory,
-	getMemoryGraph,
 	listMemories,
 	type Memory,
 	type MemoryCategory,
-	type MemoryGraphSnapshot,
 	type MemoryScope,
 	memoryCategoryLabels,
 	memoryScopeLabels,
 } from "@/src/lib/api/memory.ts";
+import {
+	getMemoryGraph,
+	type MemoryGraphSnapshot,
+} from "@/src/lib/api/memory-graph.ts";
 import { MemoryDeleteDialog } from "./MemoryDeleteDialog.tsx";
 import { MemoryDreamReview } from "./MemoryDreamReview.tsx";
 import { MemoryEditor } from "./MemoryEditor.tsx";
@@ -113,6 +115,8 @@ export function MemoryLibrary({
 		MemoryCategory | typeof ALL
 	>(ALL);
 	const [tagFilter, setTagFilter] = useState<string>(ALL);
+	// History adds superseded, archived and retracted memories to the list.
+	const [showHistory, setShowHistory] = useState(false);
 
 	// Editor + delete-confirm state.
 	const [editorOpen, setEditorOpen] = useState(false);
@@ -127,7 +131,7 @@ export function MemoryLibrary({
 		let cancelled = false;
 		setLoading(true);
 		setLoadError(null);
-		listMemories(target)
+		listMemories(target, { includeHistory: showHistory })
 			.then((list) => {
 				if (!cancelled) {
 					setMemories(list);
@@ -146,7 +150,7 @@ export function MemoryLibrary({
 		return () => {
 			cancelled = true;
 		};
-	}, [target]);
+	}, [target, showHistory]);
 
 	useEffect(() => reload(), [reload]);
 
@@ -270,12 +274,18 @@ export function MemoryLibrary({
 		});
 	}, [memories, query, scopeFilter, categoryFilter, tagFilter]);
 
+	// Git exports what Ryu recalls, never the history rows.
+	const activeMemories = useMemo(
+		() => memories.filter((memory) => memory.lifecycle === "active"),
+		[memories]
+	);
+
 	const gitDialog = (
 		<Dialog onOpenChange={setGitOpen} open={gitOpen}>
 			<DialogContent className="sm:max-w-lg">
 				<DialogTitle className="sr-only">Git-backed memory</DialogTitle>
 				<MemoryGitSourceCard
-					memories={memories}
+					memories={activeMemories}
 					onImported={reload}
 					target={target}
 				/>
@@ -397,7 +407,9 @@ export function MemoryLibrary({
 						setCategoryFilter={setCategoryFilter}
 						setQuery={setQuery}
 						setScopeFilter={setScopeFilter}
+						setShowHistory={setShowHistory}
 						setTagFilter={setTagFilter}
+						showHistory={showHistory}
 						tagFilter={tagFilter}
 						tagFilterItems={tagFilterItems}
 					/>

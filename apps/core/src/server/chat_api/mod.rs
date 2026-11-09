@@ -6,6 +6,8 @@ mod cloud_auth;
 pub(in crate::server) use cloud_auth::*;
 mod chat_stream;
 pub(in crate::server) use chat_stream::*;
+mod chat_stream_entry;
+pub(in crate::server) use chat_stream_entry::*;
 mod chat_session_binding;
 pub(in crate::server) use chat_session_binding::*;
 mod single_turn;

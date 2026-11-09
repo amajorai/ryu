@@ -294,6 +294,7 @@ async fn graph_recall_connects_people_and_shared_topics() {
         caller_user_id: None,
         agent_id: Some("agent-a".to_owned()),
         include_sensitive_topics: false,
+        min_score: 0.0,
     };
     let chunks = graph_memory_chunks(&memory, &cfg, None, None, None, false, "Maya", 5).await;
     assert!(chunks.iter().any(|chunk| chunk.content.contains("Maya")));
@@ -345,6 +346,7 @@ async fn run_auto_recall_fts_source_gated_by_flag() {
         caller_user_id: None,
         agent_id: None,
         include_sensitive_topics: false,
+        min_score: 0.0,
     };
     let block_off = run_auto_recall(
         &cfg_off,
@@ -371,6 +373,7 @@ async fn run_auto_recall_fts_source_gated_by_flag() {
         caller_user_id: None,
         agent_id: None,
         include_sensitive_topics: false,
+        min_score: 0.0,
     };
     let block_disabled = run_auto_recall(
         &cfg_on,
@@ -423,4 +426,84 @@ fn bound_node_memory_requires_a_verified_caller() {
     assert!(has_memory_principal(false, None));
     assert!(has_memory_principal(true, Some("alice")));
     assert!(!has_memory_principal(true, None));
+}
+
+fn min_score_recall_config(retrieval: RetrievalStore) -> AutoRecallConfig {
+    AutoRecallConfig {
+        retrieval,
+        top_k: 5,
+        fts_enabled: false,
+        read_levels: Vec::new(),
+        space_ids: Vec::new(),
+        caller_user_id: None,
+        agent_id: Some("agent-a".to_owned()),
+        include_sensitive_topics: false,
+        min_score: 0.0,
+    }
+}
+
+/// Without a floor, retrieval fills `top_k` with the nearest facts however
+/// unrelated they are. The `memory.recall-min-relevance` policy drops them, while
+/// a fact that does match the turn is still injected.
+#[tokio::test]
+async fn recall_min_relevance_drops_unrelated_facts_but_keeps_matches() {
+    let memory = MemoryStore::open_in_memory().unwrap();
+    let retrieval = RetrievalStore::open_in_memory(
+        crate::registry::DEFAULT_EMBED_DIMS,
+        crate::registry::DEFAULT_RERANKER_MODEL.to_owned(),
+    )
+    .unwrap();
+    let conversations = ConversationStore::open_in_memory().unwrap();
+    memory
+        .record(LOCAL_USER, "agent-a", "The user prefers dark roast coffee")
+        .await
+        .unwrap()
+        .expect("fact recorded");
+    let recency = std::collections::HashSet::new();
+    let unrelated = "quarterly kubernetes migration retro";
+    let (conversations, memory, recency) = (&conversations, &memory, &recency);
+    let recall = |cfg: AutoRecallConfig, query: &'static str| async move {
+        run_auto_recall(&cfg, conversations, memory, None, recency, query, None).await
+    };
+
+    let unfiltered = recall(min_score_recall_config(retrieval.clone()), unrelated)
+        .await
+        .expect("the default floor keeps the nearest fact");
+    assert!(
+        unfiltered.contains("dark roast coffee"),
+        "default behaviour is unchanged, got: {unfiltered}"
+    );
+
+    let floor = crate::memory_policy::RecallMinRelevance::Medium.min_score();
+    let filtered = recall(
+        min_score_recall_config(retrieval.clone()).with_min_score(floor),
+        unrelated,
+    )
+    .await;
+    assert!(
+        filtered.is_none(),
+        "an unrelated fact must not be injected above the floor, got: {filtered:?}"
+    );
+
+    let relevant = recall(
+        min_score_recall_config(retrieval).with_min_score(floor),
+        "how does the user like their coffee roast",
+    )
+    .await
+    .expect("a matching fact clears the floor");
+    assert!(relevant.contains("dark roast coffee"), "got: {relevant}");
+}
+
+#[test]
+fn recall_min_score_never_goes_negative_or_non_finite() {
+    let retrieval = RetrievalStore::open_in_memory(
+        crate::registry::DEFAULT_EMBED_DIMS,
+        crate::registry::DEFAULT_RERANKER_MODEL.to_owned(),
+    )
+    .unwrap();
+    let cfg = min_score_recall_config(retrieval);
+    assert_eq!(cfg.clone().with_min_score(0.35).min_score, 0.35);
+    assert_eq!(cfg.clone().with_min_score(-1.0).min_score, 0.0);
+    assert_eq!(cfg.clone().with_min_score(f32::NAN).min_score, 0.0);
+    assert_eq!(cfg.with_min_score(f32::INFINITY).min_score, 0.0);
 }

@@ -6,12 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useI18n } from "@ryu/i18n/react";
-import {
-	ContextMenuItem,
-	ContextMenuSub,
-	ContextMenuSubContent,
-	ContextMenuSubTrigger,
-} from "@ryu/ui/components/context-menu.tsx";
+import { ContextMenuItem } from "@ryu/ui/components/context-menu.tsx";
 import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { openTabWindow } from "@/lib/tauri-bridge.ts";
@@ -24,6 +19,7 @@ import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useSidePanelRouteStore } from "@/src/store/useSidePanelRouteStore.ts";
 import { useOptionalDesktopWorkbench } from "@/src/workbench/DesktopWorkbenchContext.tsx";
 import { useWorkbenchDockBridge } from "@/src/workbench/workbench-dock-bridge.tsx";
+import { MoveTabToRegionSubmenu } from "./move-tab-to-region-submenu.tsx";
 import { tabCloseRanges } from "./tab-close-ranges.ts";
 
 /** Pointer/focus handler for a tab chip: an unloaded chat tab remounts cold and
@@ -176,25 +172,11 @@ export function MoveTabToRegionMenu({ tabId }: { tabId: string }) {
 		return null;
 	}
 	return (
-		<ContextMenuSub>
-			<ContextMenuSubTrigger>Move to pane</ContextMenuSubTrigger>
-			<ContextMenuSubContent>
-				{(["center", "right", "bottom"] as const).map((region) => (
-					<ContextMenuItem
-						key={region}
-						onClick={() => {
-							workbench.dispatch({ type: "region/show", region });
-							workbench.moveItem(tabId, { region });
-						}}
-					>
-						{region === "center"
-							? "Center"
-							: region === "right"
-								? "Right"
-								: "Bottom"}
-					</ContextMenuItem>
-				))}
-			</ContextMenuSubContent>
-		</ContextMenuSub>
+		<MoveTabToRegionSubmenu
+			onMove={(region) => {
+				workbench.dispatch({ type: "region/show", region });
+				workbench.moveItem(tabId, { region });
+			}}
+		/>
 	);
 }

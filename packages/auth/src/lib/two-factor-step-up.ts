@@ -46,6 +46,23 @@ export const SIGN_IN_ONLY_TWO_FACTOR_PATHS: ReadonlySet<string> = new Set([
 
 export const TWO_FACTOR_OTP_SIGNED_IN = "TWO_FACTOR_OTP_SIGNED_IN";
 
+export const TWO_FACTOR_OTP_ENROLLMENT_DISABLED =
+	"TWO_FACTOR_OTP_ENROLLMENT_DISABLED";
+
+/**
+ * Better Auth's `/two-factor/enable` also takes `method: "otp"`, which turns
+ * `twoFactorEnabled` on from the password alone with no authenticator behind
+ * it. Ryu enrolls only authenticator apps, so any method other than `totp`
+ * (an omitted method defaults to `totp`) is refused.
+ */
+export function isRefusedTwoFactorEnableMethod(body: unknown): boolean {
+	if (typeof body !== "object" || body === null || !("method" in body)) {
+		return false;
+	}
+	const { method } = body as { method?: unknown };
+	return method !== undefined && method !== "totp";
+}
+
 /**
  * The step-up scope `path` needs for an account whose two-factor state is
  * `twoFactorEnabled`, or null when it needs none.
@@ -65,13 +82,27 @@ export function enrolledTwoFactorStepUpScope(
  * `stepUpGate`, it judges the session the endpoint will run as (cookie or
  * bearer) and fails open with no session so the endpoint's own 401 answers.
  * It also refuses `SIGN_IN_ONLY_TWO_FACTOR_PATHS` to a signed-in session, so an
- * emailed code can never mark an account as having an authenticator.
+ * emailed code can never mark an account as having an authenticator, and it
+ * refuses `/two-factor/enable` with any method but `totp` for the same reason.
  */
 export function twoFactorStepUpGate(): BetterAuthPlugin {
 	return {
 		id: "ryu-two-factor-step-up",
 		hooks: {
 			before: [
+				{
+					matcher: (context: { path?: string }) =>
+						context.path === "/two-factor/enable",
+					handler: createAuthMiddleware(async (ctx) => {
+						if (!isRefusedTwoFactorEnableMethod(ctx.body)) {
+							return;
+						}
+						throw new APIError("BAD_REQUEST", {
+							code: TWO_FACTOR_OTP_ENROLLMENT_DISABLED,
+							message: "Two-factor enrollment needs an authenticator app",
+						});
+					}),
+				},
 				{
 					matcher: (context: { path?: string }) =>
 						ENROLLED_TWO_FACTOR_STEP_UP_PATHS.has(context.path ?? ""),

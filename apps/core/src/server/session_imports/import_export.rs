@@ -82,19 +82,19 @@ pub(in crate::server) async fn import_chat_export_item(
         Ok(Err(e)) => return ImportOutcome::failed(kind::CONVERSATIONS, id, id, &e.to_string()),
         Err(e) => return ImportOutcome::failed(kind::CONVERSATIONS, id, id, &e.to_string()),
     };
-    let title = match &project {
-        Some(project) => format!("{} project '{}'", export.label(), project.name),
-        None => format!("{} chats", export.label()),
-    };
+    let label = export.label();
+    let project_name = project.as_ref().map(|project| project.name.as_str());
+    let title = super::import_export_text::export_title(label, project_name);
     let folder_path = folder
         .as_ref()
         .map(|f| f.path.to_string_lossy().to_string());
     let kept = folder.map(|f| f.kept).unwrap_or_default();
     let tenancy = caller_tenancy(caller);
     let origin = export.origin();
-    let (mut created, mut updated, mut unchanged, mut failed) = (0usize, 0usize, 0usize, 0usize);
-    let mut diverged = 0usize;
-    let shortened = conversations.iter().filter(|c| c.truncated).count();
+    let mut counts = super::import_export_text::ExportCounts {
+        shortened: conversations.iter().filter(|c| c.truncated).count(),
+        ..Default::default()
+    };
     for conversation in conversations {
         match import_export_conversation(
             state,
@@ -106,56 +106,29 @@ pub(in crate::server) async fn import_chat_export_item(
         )
         .await
         {
-            Ok(ExportConversationResult::Created) => created += 1,
-            Ok(ExportConversationResult::Updated) => updated += 1,
-            Ok(ExportConversationResult::Unchanged) => unchanged += 1,
-            Ok(ExportConversationResult::Diverged) => diverged += 1,
+            Ok(ExportConversationResult::Created) => counts.created += 1,
+            Ok(ExportConversationResult::Updated) => counts.updated += 1,
+            Ok(ExportConversationResult::Unchanged) => counts.unchanged += 1,
+            Ok(ExportConversationResult::Diverged) => counts.diverged += 1,
             Err(e) => {
-                failed += 1;
+                counts.failed += 1;
                 tracing::warn!("chat export import: {}: {e:#}", conversation.id);
             }
         }
     }
-    let mut detail = format!("{created} new, {updated} updated, {unchanged} already imported");
-    if diverged > 0 {
-        detail.push_str(&format!(
-            ", {diverged} edited in {} since the last import left as imported",
-            export.label()
-        ));
-    }
-    if failed > 0 {
-        detail.push_str(&format!(", {failed} failed"));
-    }
-    if shortened > 0 {
-        detail.push_str(&format!(
-            ", {shortened} very long chat(s) kept to their first {} messages",
-            crate::import::chat_exports::MAX_MESSAGES_PER_CONVERSATION
-        ));
-    }
-    if let Some(folder) = &folder_path {
-        detail.push_str(&format!(" · project folder {folder}"));
-    }
-    if !kept.is_empty() {
-        detail.push_str(&format!(
-            " · kept your edits to {} (not replaced from the export)",
-            kept.join(", ")
-        ));
-    }
-    let mut outcome = if failed > 0 && created + updated + unchanged + diverged == 0 {
-        ImportOutcome::failed(kind::CONVERSATIONS, id, &title, &detail)
-    } else if created + updated == 0 && diverged > 0 {
-        ImportOutcome::skipped(kind::CONVERSATIONS, id, &title, &detail)
-    } else if created + updated == 0 && folder_path.is_none() {
-        ImportOutcome::already(kind::CONVERSATIONS, id, &title)
-    } else {
-        ImportOutcome::ok(kind::CONVERSATIONS, id, &title)
-    };
-    outcome.detail = Some(detail);
-    outcome.folder_path = folder_path;
-    if created + updated > 0 {
+    let detail =
+        super::import_export_text::export_detail(label, &counts, folder_path.as_deref(), &kept);
+    let outcome =
+        super::import_export_text::export_outcome(id, title, &counts, detail, folder_path);
+    if counts.created + counts.updated > 0 {
         crate::events::publish_system_notification_for_user(
             "Chats imported",
-            format!("{title}: {created} new, {updated} updated."),
+            super::import_export_text::chats_imported_body(
+                label,
+                project_name,
+                counts.created,
+                counts.updated,
+            ),
             "success",
             caller.as_ref().map(|verified| verified.user_id.clone()),
         );

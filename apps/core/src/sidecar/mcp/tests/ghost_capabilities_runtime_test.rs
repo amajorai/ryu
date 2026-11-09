@@ -186,7 +186,13 @@ async fn shipped_ghost_bindings_route_all_native_calls_and_refuse_unapproved_ser
         .call_tool("computer.capture", serde_json::json!({}), None)
         .await
         .unwrap_err();
-    assert_eq!(denied.to_string(), "unknown MCP server: ghost");
+    // The provider-target guard refuses before dispatch: with its MCP server
+    // unapproved, Ghost owns nothing that serves the bound tool.
+    assert_eq!(
+        denied.to_string(),
+        "provider '@ryu/ghost' may not call 'ghost.ghost_annotate': no app tool or MCP server \
+         owned by this provider serves it"
+    );
     assert_eq!(state.lock().await.calls.len(), before);
     store.set_enabled("@ryu/ghost", &approved).await.unwrap();
     assert_eq!(

@@ -18,7 +18,7 @@ const saved = {
 
 describe("About you prompt-cache confirmation", () => {
 	test("an unchanged or whitespace-only edit asks nothing", () => {
-		expect(changedPersonalizationFields(saved, { ...saved })).toEqual([]);
+		expect(changedPersonalizationFields(saved, { ...saved }, tl)).toEqual([]);
 		expect(
 			personalizationCacheWarning(
 				saved,
@@ -38,7 +38,7 @@ describe("About you prompt-cache confirmation", () => {
 			aboutOrganization: "",
 			nickname: "Ray",
 		};
-		expect(changedPersonalizationFields(saved, after)).toEqual([
+		expect(changedPersonalizationFields(saved, after, tl)).toEqual([
 			"Nickname",
 			"About your organization",
 		]);
@@ -69,13 +69,38 @@ describe("About you prompt-cache confirmation", () => {
 			occupation: null,
 		} as unknown as typeof DEFAULT_USER_PERSONALIZATION;
 		expect(
-			changedPersonalizationFields(corrupt, DEFAULT_USER_PERSONALIZATION)
+			changedPersonalizationFields(corrupt, DEFAULT_USER_PERSONALIZATION, tl)
 		).toEqual([]);
 		expect(
-			changedPersonalizationFields(corrupt, {
-				...DEFAULT_USER_PERSONALIZATION,
-				nickname: "42",
-			})
+			changedPersonalizationFields(
+				corrupt,
+				{
+					...DEFAULT_USER_PERSONALIZATION,
+					nickname: "42",
+				},
+				tl
+			)
 		).toEqual(["Nickname"]);
+	});
+
+	test("field labels reach the confirmation in the reader's language", () => {
+		const ja: Record<string, string> = {
+			Nickname: "ニックネーム",
+			"{number, select, singular {{list} is part of the system prompt for {reach}. Each thread's next message re-sends its whole conversation at the full input price, once; replies after that are cached again. Switching models costs the same.} other {{list} are part of the system prompt for {reach}. Each thread's next message re-sends its whole conversation at the full input price, once; replies after that are cached again. Switching models costs the same.}}":
+				"{list}は{reach}のシステムプロンプトの一部です。",
+			"every thread on this node": "このノードのすべてのスレッド",
+		};
+		const japanese: LiteralMessage = (source, values) =>
+			formatMessage(ja[source] ?? source, values ?? {});
+		const after = { ...saved, nickname: "Ray" };
+		expect(changedPersonalizationFields(saved, after, japanese)).toEqual([
+			"ニックネーム",
+		]);
+		const description =
+			personalizationCacheWarning(saved, after, japanese)?.description ?? "";
+		expect(description).toBe(
+			"ニックネームはこのノードのすべてのスレッドのシステムプロンプトの一部です。"
+		);
+		expect(description).not.toContain("Nickname");
 	});
 });

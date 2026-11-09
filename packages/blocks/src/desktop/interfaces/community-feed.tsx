@@ -145,10 +145,13 @@ function PostActionRow({
 				vote={actions.votes[thread.id]}
 			/>
 			<button
-				aria-label={tl("{comments} comments on “{title}”", {
-					comments: String(post.comments),
-					title: thread.title,
-				})}
+				aria-label={tl(
+					"{comments, plural, one {# comment on “{title}”} other {# comments on “{title}”}}",
+					{
+						comments: post.comments,
+						title: thread.title,
+					}
+				)}
 				className={ACTION_PILL}
 				onClick={() => actions.onOpen(thread.id)}
 				type="button"
@@ -335,10 +338,13 @@ export function PostRow({
 					{thread.pinned ? <PinnedMark /> : null}
 					<span className="ms-1 flex items-center gap-0.5">
 						<button
-							aria-label={tl("{comments} comments on “{title}”", {
-								comments: String(post.comments),
-								title: thread.title,
-							})}
+							aria-label={tl(
+								"{comments, plural, one {# comment on “{title}”} other {# comments on “{title}”}}",
+								{
+									comments: post.comments,
+									title: thread.title,
+								}
+							)}
 							className={textAction}
 							onClick={() => actions.onOpen(thread.id)}
 							type="button"

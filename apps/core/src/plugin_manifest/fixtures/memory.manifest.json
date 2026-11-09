@@ -335,6 +335,31 @@
           },
           {
             "type": "select",
+            "pref_key": "memory.recall-min-relevance",
+            "label": "Minimum relevance",
+            "description": "How closely a remembered fact must match your message before automatic recall adds it. `Off` (the default) always adds the closest facts, even when none is really related. A higher level saves prompt space on unrelated turns, but may skip a fact that was worded differently. How strict each level is depends on your embedding model, so raise it one step at a time. Facts matched by keyword and snippets from past chats are not affected.",
+            "options": [
+              {
+                "value": "off",
+                "label": "Off — always add the closest facts (default)"
+              },
+              {
+                "value": "low",
+                "label": "Low — skip clearly unrelated facts"
+              },
+              {
+                "value": "medium",
+                "label": "Medium — only reasonably close matches"
+              },
+              {
+                "value": "high",
+                "label": "High — only close matches"
+              }
+            ],
+            "default": "off"
+          },
+          {
+            "type": "select",
             "pref_key": "memory.write-frequency",
             "label": "Write frequency",
             "description": "When new durable facts are captured from your turns. `Reviewed` stores no raw turns; instead Dream proposes facts from your chats for you to accept, so it needs Remember chats and Dream turned on. `Never` makes memory read-only: existing facts are still recalled, but nothing new is stored. This is independent of Recall mode — \"use what you know but learn nothing new\" is a real choice.",

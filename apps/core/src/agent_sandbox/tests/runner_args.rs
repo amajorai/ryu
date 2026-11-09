@@ -153,3 +153,22 @@ fn seatbelt_profile_hides_provider_store_folders_as_subpaths() {
     });
     assert!(profile.contains(&format!("(subpath {})", seatbelt_string(&pi_agent))));
 }
+
+#[test]
+fn masked_runner_args_round_trip_without_deletion_denial_or_network_cut() {
+    let runner_args = masked_runner_args(
+        Path::new("/usr/bin/rg"),
+        &args(&["--json", "--", "-x", "/ws/d"]),
+        &[PathBuf::from("/home/u/.ssh"), PathBuf::from("/data/ryu")],
+    );
+    assert_eq!(runner_args[0], AGENT_SANDBOX_RUNNER_ARG);
+    let plan = parse_runner_args(&runner_args[1..]).unwrap();
+    assert!(!plan.deny_delete);
+    assert!(!plan.isolate_network);
+    assert_eq!(
+        plan.masks,
+        [PathBuf::from("/home/u/.ssh"), PathBuf::from("/data/ryu")]
+    );
+    assert_eq!(plan.command, "/usr/bin/rg");
+    assert_eq!(plan.args, ["--json", "--", "-x", "/ws/d"]);
+}

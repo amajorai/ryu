@@ -127,6 +127,23 @@ pub(crate) struct EventEmitNotify {
     /// Optional localizable text, the `notify.deliver` `i18n` shape.
     #[serde(default)]
     pub(super) i18n: Option<serde_json::Value>,
+    /// Optional tap target, a deep link into the emitting app. An invalid one
+    /// is dropped (see [`hint_link`]); the notification is still delivered.
+    #[serde(default)]
+    pub(super) link: Option<String>,
+}
+
+/// The tap link of an `events.emit` hint, when it is a deep link into the
+/// emitting app ([`ryu_app_events::NotifyHint::link_is_valid_for`]). Any other
+/// link is dropped with a warning, so a bad link never costs the user the
+/// notification itself.
+pub(super) fn hint_link<'a>(plugin_id: &str, link: Option<&'a str>) -> Option<&'a str> {
+    let link = link?;
+    if ryu_app_events::NotifyHint::link_is_valid_for(plugin_id, link) {
+        return Some(link);
+    }
+    tracing::warn!(plugin = %plugin_id, "events.emit: dropped a notify link outside the app");
+    None
 }
 
 /// `events.emit` — fan an app event out to its subscribers.
@@ -227,6 +244,7 @@ pub(super) async fn host_events_emit(
                 notify.body.as_deref().unwrap_or(""),
                 notify.level.as_deref(),
                 text.as_ref(),
+                hint_link(&plugin_id, notify.link.as_deref()),
             )
             .await;
         }

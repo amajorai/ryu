@@ -1,4 +1,8 @@
-import { FilterHorizontalIcon, Search01Icon } from "@hugeicons/core-free-icons";
+import {
+	Clock01Icon,
+	FilterHorizontalIcon,
+	Search01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
@@ -28,7 +32,8 @@ import {
 } from "./MemoryLibraryParts.tsx";
 
 /** The Memory library's search field and one Filters popover holding the scope,
- *  category and tag filters. */
+ *  category and tag filters, and a History toggle that adds replaced, archived
+ *  and undone memories to the list. */
 export function MemoryLibraryFilters({
 	categoryFilter,
 	categoryLabels,
@@ -39,7 +44,9 @@ export function MemoryLibraryFilters({
 	setCategoryFilter,
 	setQuery,
 	setScopeFilter,
+	setShowHistory,
 	setTagFilter,
+	showHistory,
 	tagFilter,
 	tagFilterItems,
 }: {
@@ -52,7 +59,9 @@ export function MemoryLibraryFilters({
 	setCategoryFilter: (value: MemoryCategory | typeof ALL) => void;
 	setQuery: (value: string) => void;
 	setScopeFilter: (value: MemoryScope | typeof ALL) => void;
+	setShowHistory: (value: boolean) => void;
 	setTagFilter: (value: string) => void;
+	showHistory: boolean;
 	tagFilter: string;
 	tagFilterItems: { label: string; value: string }[];
 }) {
@@ -76,6 +85,16 @@ export function MemoryLibraryFilters({
 					value={query}
 				/>
 			</div>
+			<Button
+				aria-pressed={showHistory}
+				onClick={() => setShowHistory(!showHistory)}
+				size="sm"
+				title="Include replaced, archived and undone memories"
+				variant={showHistory ? "secondary" : "ghost"}
+			>
+				<HugeiconsIcon className="size-4" icon={Clock01Icon} />
+				History
+			</Button>
 			<Popover>
 				<PopoverTrigger
 					render={

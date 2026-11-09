@@ -33,4 +33,16 @@ describe("response mode prompt-cache confirmation", () => {
 		expect(interfaceLevelForProductMode("os")).toBe("expert");
 		expect(interfaceLevelForProductMode("console")).toBe("expert");
 	});
+
+	test("the response-mode label is translated", () => {
+		const japanese: LiteralMessage = (source, values) =>
+			formatMessage(
+				source === RESPONSE_MODE_FIELD ? "応答モード" : source,
+				values ?? {}
+			);
+		const description =
+			responseModeCacheWarning("simple", "expert", japanese)?.description ?? "";
+		expect(description).toStartWith("応答モード is part of");
+		expect(description).not.toContain(RESPONSE_MODE_FIELD);
+	});
 });

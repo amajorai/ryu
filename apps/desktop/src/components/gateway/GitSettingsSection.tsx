@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
@@ -26,6 +27,7 @@ import {
 	GovernanceScopeSwitcher,
 	type GovernanceView,
 } from "./GovernanceScopeSwitcher.tsx";
+import { branchPrefixErrorText } from "./git-branch-prefix.ts";
 import {
 	ChoiceButtons,
 	GitRow,
@@ -44,6 +46,7 @@ export function GitSettingsSection({
 	target: ApiTarget;
 }) {
 	const queryClient = useQueryClient();
+	const tl = useLiteralMessages();
 	const [view, setView] = useState<GovernanceView>("effective");
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState(false);
@@ -114,16 +117,6 @@ export function GitSettingsSection({
 		if (pendingSave) {
 			void save(pendingSave.scope, pendingSave.values);
 		}
-	};
-
-	const validateBranchPrefix = (value: string): string | null => {
-		if (new TextEncoder().encode(value).byteLength > 80) {
-			return "Branch prefixes must be at most 80 bytes.";
-		}
-		if (/\s/u.test(value) || value.includes("..")) {
-			return "Branch prefixes cannot contain whitespace or '..'.";
-		}
-		return null;
 	};
 
 	return (
@@ -199,7 +192,7 @@ export function GitSettingsSection({
 								key={`${view}-${effective("branchPrefix")}`}
 								onBlur={(event) => {
 									const branchPrefix = event.target.value.trim();
-									const error = validateBranchPrefix(branchPrefix);
+									const error = branchPrefixErrorText(branchPrefix, tl);
 									setBranchPrefixError(error);
 									if (!error) {
 										update({ branchPrefix });

@@ -156,8 +156,12 @@ fn an_unreadable_store_fails_closed_and_is_not_overwritten() {
 fn a_deleted_agents_allowlist_is_forgotten_and_others_are_kept() {
     let directory = tempfile::tempdir().unwrap();
     let store = AllowlistStore::at(directory.path().join("allowlists.json"));
-    store.set("gone", Some(strings(&["example.com"]).as_slice())).unwrap();
-    store.set("kept", Some(strings(&["example.org"]).as_slice())).unwrap();
+    store
+        .set("gone", Some(strings(&["example.com"]).as_slice()))
+        .unwrap();
+    store
+        .set("kept", Some(strings(&["example.org"]).as_slice()))
+        .unwrap();
 
     assert!(forget_agent_in(&store, "gone").unwrap());
     assert_eq!(store.get("gone").unwrap(), None);

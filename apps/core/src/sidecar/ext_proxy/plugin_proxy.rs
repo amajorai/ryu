@@ -66,7 +66,7 @@ pub(super) async fn proxy_for_plugin(
         }
         None => false,
     };
-    let caller = crate::server::verified_caller_from_headers(req.headers()).await;
+    let mut caller = crate::server::verified_caller_from_headers(req.headers()).await;
     if crate::sidecar::control_plane::is_managed_node()
         && matches!(
             plugin_id,
@@ -106,20 +106,22 @@ pub(super) async fn proxy_for_plugin(
 
     // Per-route auth: a Protected route requires the node bearer, checked exactly as
     // `require_auth` does (None ⇒ allow, for loopback dev with no token configured).
+    // A route that declares a permission level also admits a member's own
+    // session or app route delegation, which then IS the caller the permission
+    // check below evaluates (see `member_admission`).
     if auth == RouteAuth::Protected {
-        let active_node_token = crate::node_token::active_token();
-        if let Some(expected) = active_node_token.as_deref() {
-            let provided = req
-                .headers()
-                .get("authorization")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("Bearer "));
-            if provided
-                .as_deref()
-                .is_none_or(|candidate| !crate::server::ct_eq(candidate, expected))
-            {
-                return StatusCode::UNAUTHORIZED.into_response();
-            }
+        match member_admission::admit_protected(
+            req.headers(),
+            plugin_id,
+            sub_path,
+            &request_method,
+            required.is_some(),
+        )
+        .await
+        {
+            Ok(member_admission::Admission::NodeToken) => {}
+            Ok(member_admission::Admission::Member(member)) => caller = member,
+            Err(status) => return status.into_response(),
         }
     }
 

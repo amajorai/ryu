@@ -1,5 +1,6 @@
 "use client";
 
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import {
 	HoverCard,
 	HoverCardContent,
@@ -7,8 +8,7 @@ import {
 } from "@ryu/ui/components/hover-card.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { type ReactNode, useRef, useState } from "react";
-
-const SIDEBAR_PREVIEW_BOUNDARY_SELECTOR = "[data-sidebar-preview-boundary]";
+import { sidebarPreviewAnchor } from "./sidebar-preview-anchor.ts";
 
 /**
  * Shared sidebar-row preview: always shows on hover (unlike OverflowTooltip,
@@ -21,7 +21,7 @@ export function SidebarItemPreview({
 	className,
 	spacing,
 	renderContent,
-	side = "right",
+	side = "inline-end",
 	sideOffset = 14,
 }: {
 	children: ReactNode;
@@ -35,33 +35,8 @@ export function SidebarItemPreview({
 }) {
 	const triggerRef = useRef<HTMLAnchorElement>(null);
 	const [open, setOpen] = useState(false);
-	const getPreviewAnchor = () => {
-		const trigger = triggerRef.current;
-		if (!trigger) {
-			return null;
-		}
-
-		const boundary = trigger.closest<HTMLElement>(
-			SIDEBAR_PREVIEW_BOUNDARY_SELECTOR
-		);
-		if (!boundary) {
-			return trigger;
-		}
-
-		return {
-			contextElement: trigger,
-			getBoundingClientRect: () => {
-				const triggerRect = trigger.getBoundingClientRect();
-				const boundaryRect = boundary.getBoundingClientRect();
-				return DOMRect.fromRect({
-					height: triggerRect.height,
-					width: 0,
-					x: boundaryRect.right,
-					y: triggerRect.top,
-				});
-			},
-		};
-	};
+	const dir = useDirection();
+	const getPreviewAnchor = () => sidebarPreviewAnchor(triggerRef.current, dir);
 
 	return (
 		<HoverCard onOpenChange={setOpen}>

@@ -253,21 +253,37 @@ function domainAllowed(allowed: readonly string[], domain: string): boolean {
 	);
 }
 
+/** A network-secret rule a Fresh cloud box breaks, as a code plus its values. */
+export type BoxNetworkSecretProblem =
+	| { code: "box_too_many_network_secrets"; values: { max: number } }
+	| {
+			code: "box_network_secret_not_host_name";
+			values: { key: string; domain: string };
+	  }
+	| {
+			code: "box_network_secret_domain_not_allowed";
+			values: { key: string; domain: string };
+	  };
+
 /**
  * A Box's egress proxy substitutes network secrets only for DNS host names it
  * may reach. Core enforces the same rule, with the package-manager list too.
+ * Both the English and the coded runtime checks read this one rule.
  */
-function boxNetworkSecretIssue(
+export function boxNetworkSecretProblem(
 	environment: Pick<CloudEnvironment, "internet" | "vaultKeys">,
 	vault: readonly (Pick<CloudVaultEntry, "key" | "kind"> &
 		Partial<Pick<CloudVaultEntry, "domains">>)[]
-): string | null {
+): BoxNetworkSecretProblem | null {
 	const bound = new Set(environment.vaultKeys);
 	const secrets = vault.filter(
 		(entry) => entry.kind === "networkSecret" && bound.has(entry.key)
 	);
 	if (secrets.length > MAX_BOX_NETWORK_SECRETS) {
-		return `Fresh cloud boxes accept at most ${MAX_BOX_NETWORK_SECRETS} network secrets. Unselect some.`;
+		return {
+			code: "box_too_many_network_secrets",
+			values: { max: MAX_BOX_NETWORK_SECRETS },
+		};
 	}
 	const { internet } = environment;
 	for (const secret of secrets) {
@@ -276,16 +292,43 @@ function boxNetworkSecretIssue(
 		);
 		const notDns = domains.find((domain) => !BOX_SECRET_DOMAIN.test(domain));
 		if (notDns) {
-			return `Fresh cloud boxes substitute network secrets only for host names. Bind ${secret.key} to a host name instead of ${notDns}.`;
+			return {
+				code: "box_network_secret_not_host_name",
+				values: { key: secret.key, domain: notDns },
+			};
 		}
 		const blocked = domains.find(
 			(domain) => !domainAllowed(internet.allowedDomains, domain)
 		);
 		if (internet.enabled && internet.domainPolicy === "custom" && blocked) {
-			return `${secret.key} is bound to ${blocked}, which the allowed domains do not include. Add it.`;
+			return {
+				code: "box_network_secret_domain_not_allowed",
+				values: { key: secret.key, domain: blocked },
+			};
 		}
 	}
 	return null;
+}
+
+function boxNetworkSecretIssue(
+	environment: Pick<CloudEnvironment, "internet" | "vaultKeys">,
+	vault: readonly (Pick<CloudVaultEntry, "key" | "kind"> &
+		Partial<Pick<CloudVaultEntry, "domains">>)[]
+): string | null {
+	const problem = boxNetworkSecretProblem(environment, vault);
+	if (!problem) {
+		return null;
+	}
+	switch (problem.code) {
+		case "box_too_many_network_secrets":
+			return `Fresh cloud boxes accept at most ${problem.values.max} network secrets. Unselect some.`;
+		case "box_network_secret_not_host_name":
+			return `Fresh cloud boxes substitute network secrets only for host names. Bind ${problem.values.key} to a host name instead of ${problem.values.domain}.`;
+		case "box_network_secret_domain_not_allowed":
+			return `${problem.values.key} is bound to ${problem.values.domain}, which the allowed domains do not include. Add it.`;
+		default:
+			return null;
+	}
 }
 
 /** Box's per-command environment limit. */

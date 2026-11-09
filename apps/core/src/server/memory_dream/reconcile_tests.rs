@@ -22,7 +22,7 @@ fn state(directory: &std::path::Path) -> ServerState {
 
 fn source(message_id: &str, content: &str) -> sources::DreamSource {
     sources::DreamSource {
-        conversation_id: "c1".to_owned(),
+        conversation_id: Some("c1".to_owned()),
         conversation_title: "Trip planning".to_owned(),
         message_id: message_id.to_owned(),
         role: "user".to_owned(),
@@ -58,6 +58,8 @@ fn prompt_lists_existing_memories_as_json_and_asks_for_revisions() {
     assert!(system.contains("\"revisions\":[{\"target_memory_id\""));
     assert!(system.contains("When the sources contradict an existing memory"));
     assert!(system.contains("name the other memory_id in reason"));
+    assert!(system.contains("\"archive\":[{\"target_memory_id\""));
+    assert!(system.contains("time-bound event that is now over, list it under archive"));
     let listed = user
         .split_once("merge with another):\n")
         .and_then(|(_, rest)| rest.split_once("\n\nSources:\n"))
@@ -66,8 +68,15 @@ fn prompt_lists_existing_memories_as_json_and_asks_for_revisions() {
     let rows: Value = serde_json::from_str(listed).unwrap();
     assert_eq!(
         rows,
-        json!([{ "memory_id": "mem-1", "category": "preference", "content": "Prefers aisle seats " }])
+        json!([{
+            "memory_id": "mem-1",
+            "category": "preference",
+            "recorded_on": "1970-01-01",
+            "content": "Prefers aisle seats ",
+        }])
     );
+    assert!(user.starts_with("Decompose these recent chat sources"));
+    assert!(user.contains(" (UTC). Existing memories"), "{user}");
 
     // With nothing to reconcile the user prompt has no existing-memories section.
     let (_, user) = prompt::dream_prompt(&[source("m-1", "Window now.")], &[]);
@@ -440,7 +449,10 @@ async fn a_proposal_the_store_refuses_does_not_fail_the_run_or_drop_the_others()
     // that keeps that scope, as it would any malformed proposal.
     let mut broken = entry("mem-broken", "Team standup is at 9am", 5);
     broken.scope_id = None;
-    let sources = [source("m-1", "Standup moved to 10am. I prefer window seats.")];
+    let sources = [source(
+        "m-1",
+        "Standup moved to 10am. I prefer window seats.",
+    )];
     let output = prompt::parse_model_output(
         &json!({
             "revisions": [{

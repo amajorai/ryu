@@ -101,6 +101,35 @@ describe("workflow authoring guard", () => {
 		expect(requests).toEqual([]);
 	});
 
+	test("a third-party app cannot snapshot or bind owner workflows to triggers", async () => {
+		const services = servicesFor("@evil/x");
+		await expect(
+			dispatchRpc(
+				"workflows.versionCreate",
+				[{ id: "wf-1", label: "pinned" }],
+				GRANTED,
+				services
+			)
+		).rejects.toThrow("reviewed Workflows apps");
+		await expect(
+			dispatchRpc(
+				"workflows.bindConnectTrigger",
+				[{ id: "wf-1", connectTriggerId: "trigger-1" }],
+				GRANTED,
+				services
+			)
+		).rejects.toThrow("reviewed Workflows apps");
+		await expect(
+			dispatchRpc(
+				"workflows.removeConnectBinding",
+				[{ id: "wf-1", bindingId: "binding-1" }],
+				GRANTED,
+				services
+			)
+		).rejects.toThrow("reviewed Workflows apps");
+		expect(requests).toEqual([]);
+	});
+
 	test("the reviewed Workflows editor still saves and runs", async () => {
 		const services = servicesFor("@ryu/workflows");
 		const saved = await dispatchRpc(

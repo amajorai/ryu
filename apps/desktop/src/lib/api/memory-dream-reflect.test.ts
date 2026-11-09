@@ -1,17 +1,23 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
-	acceptMemoryProposal,
-	enableUsageReview,
-	getDreamReview,
-	getMemoryGraph,
 	getMemorySettings,
+	listMemories,
+	setMemorySettings,
+} from "./memory.ts";
+import {
+	acceptMemoryProposal,
+	getDreamReview,
+	rejectMemoryProposal,
+	rollbackMemoryProposal,
+	runDreamReview,
+} from "./memory-dream.ts";
+import { getMemoryGraph } from "./memory-graph.ts";
+import {
+	enableUsageReview,
 	getReflectDashboard,
 	getReflectSettings,
 	isUsageReviewDisabled,
-	rejectMemoryProposal,
-	runDreamReview,
-	setMemorySettings,
-} from "./memory.ts";
+} from "./memory-reflect.ts";
 
 const target = { token: null, url: "http://node.test" };
 const nativeFetch = globalThis.fetch;
@@ -63,6 +69,111 @@ describe("Dream and Reflect memory clients", () => {
 		});
 	});
 
+	it("maps the proposal operation, inferring it for older nodes", async () => {
+		const memory = { content: "Trip to Lisbon in March", id: "memory-1" };
+		globalThis.fetch = Object.assign(
+			async () =>
+				jsonResponse({
+					review: {
+						proposals: [
+							{
+								current: memory,
+								id: "archive-1",
+								operation: "archive",
+								proposed: { content: "", id: "proposal-memory-archive-1" },
+								target_memory_id: "memory-1",
+							},
+							{
+								current: memory,
+								id: "legacy-revision",
+								proposed: { content: "Trip to Lisbon in May", id: "p-2" },
+							},
+							{
+								id: "legacy-create",
+								operation: "retract",
+								proposed: { content: "Prefers tea", id: "p-3" },
+							},
+						],
+					},
+				}),
+			{ preconnect: nativeFetch.preconnect }
+		);
+
+		const review = await getDreamReview(target);
+		expect(
+			review.proposals.map((proposal) => [
+				proposal.id,
+				proposal.operation,
+				proposal.targetMemoryId,
+			])
+		).toEqual([
+			["archive-1", "archive", "memory-1"],
+			["legacy-revision", "revise", null],
+			["legacy-create", "create", null],
+		]);
+		expect(review.proposals[0]?.current?.content).toBe(
+			"Trip to Lisbon in March"
+		);
+	});
+
+	it("maps recently accepted proposals, defaulting to none", async () => {
+		const responses = [
+			{
+				review: {
+					proposals: [],
+					recent: [
+						{
+							id: "applied-1",
+							operation: "create",
+							proposed: { content: "Prefers tea", id: "memory-9" },
+							status: "applied",
+						},
+					],
+				},
+			},
+			{ review: { proposals: [] } },
+		];
+		globalThis.fetch = Object.assign(
+			async () => jsonResponse(responses.shift()),
+			{ preconnect: nativeFetch.preconnect }
+		);
+
+		const review = await getDreamReview(target);
+		expect(
+			review.recent.map((proposal) => [proposal.id, proposal.status])
+		).toEqual([["applied-1", "applied"]]);
+		expect((await getDreamReview(target)).recent).toEqual([]);
+	});
+
+	it("lists memory history only on request and maps each lifecycle", async () => {
+		const urls: string[] = [];
+		globalThis.fetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0]) => {
+				urls.push(String(input));
+				return jsonResponse({
+					memories: [
+						{ content: "a", id: "m-1", lifecycle: "superseded" },
+						{ content: "b", id: "m-2", lifecycle: "retracted" },
+						{ content: "c", id: "m-3" },
+					],
+				});
+			},
+			{ preconnect: nativeFetch.preconnect }
+		);
+
+		const history = await listMemories(target, { includeHistory: true });
+		await listMemories(target, { limit: 5 });
+		expect(urls).toEqual([
+			"http://node.test/api/memory?include_history=true",
+			"http://node.test/api/memory?limit=5",
+		]);
+		expect(history.map((memory) => memory.lifecycle)).toEqual([
+			"superseded",
+			"retracted",
+			"active",
+		]);
+	});
+
 	it("uses the expected Dream mutation routes and request bodies", async () => {
 		const calls: Array<{ body: string; method: string; url: string }> = [];
 		globalThis.fetch = Object.assign(
@@ -83,12 +194,15 @@ describe("Dream and Reflect memory clients", () => {
 		await runDreamReview(target, "manual");
 		await acceptMemoryProposal(target, "proposal/1");
 		await rejectMemoryProposal(target, "proposal/2");
+		await rollbackMemoryProposal(target, "proposal/3");
 
 		expect(calls.map((call) => call.url)).toEqual([
 			"http://node.test/api/memory/dream/review",
 			"http://node.test/api/memory/dream/review/proposals/proposal%2F1/accept",
 			"http://node.test/api/memory/dream/review/proposals/proposal%2F2/reject",
+			"http://node.test/api/memory/dream/review/proposals/proposal%2F3/rollback",
 		]);
+		expect(calls[3].method).toBe("POST");
 		expect(JSON.parse(calls[0].body)).toEqual({ mode: "manual" });
 	});
 

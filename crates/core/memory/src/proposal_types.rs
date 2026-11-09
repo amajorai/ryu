@@ -12,6 +12,12 @@ use crate::{MemoryCategory, MemoryMetadata, MemoryScope, NewMemory};
 pub enum MemoryProposalOperation {
     Create,
     Revise,
+    /// Retire the target: approval moves it to the `archived` lifecycle, out of
+    /// recall but kept for audit and rollback. Nothing is written from the
+    /// draft. By convention an archive draft has empty `content` and copies
+    /// the target's scope, category and importance, so it has the same shape
+    /// as other proposals; reviewers see the target itself as `current`.
+    Archive,
 }
 
 impl MemoryProposalOperation {
@@ -19,12 +25,14 @@ impl MemoryProposalOperation {
         match self {
             Self::Create => "create",
             Self::Revise => "revise",
+            Self::Archive => "archive",
         }
     }
 
     pub(crate) fn from_str(value: &str) -> Self {
         match value {
             "revise" => Self::Revise,
+            "archive" => Self::Archive,
             _ => Self::Create,
         }
     }
@@ -143,6 +151,15 @@ pub struct MemoryRevisionProposal {
     pub reviewed_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_memory_id: Option<String>,
+}
+
+impl MemoryRevisionProposal {
+    /// Whether the store rejected this proposal on its own, because the memory
+    /// it targeted was deleted, rather than a reviewer declining it.
+    pub fn rejected_by_system(&self) -> bool {
+        self.status == MemoryProposalStatus::Rejected
+            && self.reviewed_by.as_deref() == Some(crate::delete::SYSTEM_REVIEWER)
+    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -16,6 +16,7 @@ pub mod agent_inbox_alias;
 pub mod agent_inbox_tool;
 #[cfg(test)]
 mod agent_react_registry_runtime_test;
+pub(crate) mod app_tool_namespace;
 pub(crate) mod app_visibility;
 pub mod artifact_tool;
 pub(crate) mod box_desktop;
@@ -190,10 +191,10 @@ impl ToolPrincipal {
             return principal;
         }
         let Some(store) = store else {
-            return if crate::sidecar::control_plane::registered_org().is_none() {
-                Self::Unrestricted
-            } else {
+            return if crate::sidecar::node_binding::node_bound_for_tenancy() {
                 Self::Unresolved
+            } else {
+                Self::Unrestricted
             };
         };
         Self::resolve_at(
@@ -215,7 +216,13 @@ impl ToolPrincipal {
         node_org: Option<&str>,
     ) -> Self {
         if node_org.is_none() {
-            return Self::Unrestricted;
+            // An enrolled node whose registration is pending, failed or revoked
+            // is not a personal node: its tools fail closed until it rebinds.
+            return if crate::sidecar::node_binding::node_expects_binding() {
+                Self::Unresolved
+            } else {
+                Self::Unrestricted
+            };
         }
         let Some(cid) = host_conversation_id.filter(|s| !s.is_empty()) else {
             return Self::Unresolved;
@@ -2898,6 +2905,10 @@ struct ResolvedAppTool {
     /// dispatch. This is kept beside the resolved backend so the approval path
     /// and execution path read the same live manifest record.
     needs_approval: bool,
+    /// Whether the owning plugin owns the tool id's server namespace (see
+    /// [`app_tool_namespace`]). Only then may it shadow a configured MCP server
+    /// of that name or read vault values bound to that server.
+    owns_namespace: bool,
 }
 
 /// Metadata for one enabled SDK Action. The registered tool id remains the
@@ -3051,6 +3062,8 @@ async fn resolve_mcp_secret_map(
     Ok(resolved)
 }
 
+#[cfg(test)]
+mod verified_caller_secret_tests;
 #[cfg(test)]
 mod vault_reference_tests {
     use super::{resolve_mcp_secret_map, McpServerConfig};
@@ -3832,6 +3845,18 @@ impl McpRegistry {
             }
         }
 
+        // A conversationless dispatch from a verified member (network `/mcp`,
+        // REST tool calls, app tools) resolves as that member, so the member's
+        // `user:`/`role:`/`team:` denies apply as they do in chat.
+        let mut caller_unattributed = false;
+        if node.is_some() && user_id.is_none() {
+            match authenticated_scope::secret_owner_without_conversation(org_id.as_deref()) {
+                authenticated_scope::SecretOwnerFallback::Owner(caller) => user_id = Some(caller),
+                authenticated_scope::SecretOwnerFallback::FailClosed => caller_unattributed = true,
+                authenticated_scope::SecretOwnerFallback::NoCaller => {}
+            }
+        }
+
         // A truly unbound node has one trusted local operator behind its node
         // bearer. Give that operator a stable pseudo-user so user-scoped local
         // secrets work even before a conversation row exists. Bound nodes never
@@ -3862,6 +3887,7 @@ impl McpRegistry {
             conversation_id: host_conversation_id
                 .filter(|id| !id.is_empty())
                 .map(str::to_owned),
+            principal_unverified: caller_unattributed,
             ..Default::default()
         };
         if let (true, Some(owner)) = (node.is_some(), context.user_id.clone()) {
@@ -6075,12 +6101,9 @@ impl McpRegistry {
     ) -> Result<String> {
         let mut implementations = Vec::with_capacity(dispatch_chain.len());
         for dispatch_id in dispatch_chain {
-            let is_registered_app_tool = self
-                .app_tools
-                .lock()
-                .map(|tools| tools.iter().any(|item| item.id == *dispatch_id))
-                .unwrap_or(false);
-            if is_registered_app_tool {
+            // Bind what dispatch runs: an app tool that yields to a configured
+            // server it does not own is hashed as that server (`app_tool_namespace`).
+            if self.app_tool_serves_call(dispatch_id).await {
                 let resolved = self
                     .resolve_app_tool_backend(dispatch_id)
                     .await
@@ -7618,7 +7641,8 @@ impl McpRegistry {
         // to a `server` that is NOT `"app"`, so route it through the app-tool arm too
         // when the id is a registered app tool. The bag is tiny + write-rare, so the
         // uncontended scan is negligible; a native app tool takes precedence over a
-        // same-named external MCP server (an explicit enabled-plugin registration).
+        // same-named external MCP server only when its plugin owns that namespace
+        // (`app_tool_namespace::native_app_tool_may_claim`).
         //
         // The facade's reserved servers (`web`, `browser`, …) are excluded: a
         // capability verb id must always reach the facade arm below, never be
@@ -7636,6 +7660,10 @@ impl McpRegistry {
                 .lock()
                 .map(|tools| tools.iter().any(|t| t.id == tool_id))
                 .unwrap_or(false);
+        // A plugin that does not own a configured server's namespace never
+        // intercepts that server's tool ids (`app_tool_namespace`).
+        let is_native_app_tool =
+            is_native_app_tool && self.native_app_tool_may_claim(server, tool_id).await;
         if server == APP_TOOL_SERVER || is_native_app_tool {
             // Only dispatch ids an enabled app actually registered — never an
             // arbitrary `app.`-prefixed id a caller invents.
@@ -7832,9 +7860,11 @@ impl McpRegistry {
                         let url =
                             url_for_calling_agent(&url, caller_agent_query.as_deref(), agent_id)?;
                         let secret_context = self
-                            .secret_resolution_context(
+                            .app_tool_secret_context(
                                 host_conversation_id,
-                                vec![resolved.plugin_id.clone(), server.to_owned()],
+                                &resolved.plugin_id,
+                                resolved.owns_namespace,
+                                server,
                             )
                             .await;
                         return crate::tool_exec::run_http_tool_with_secret_context(
@@ -9740,6 +9770,9 @@ impl McpRegistry {
         }
 
         let guard = manifests.read().await;
+        let namespace = Self::split_tool_id(tool_id).map_or("", |(server, _)| server);
+        // Two enabled plugins may declare the same id; the namespace owner wins.
+        let mut fallback = None;
         for manifest in guard.iter() {
             let Some(approved_grants) = enabled.get(&manifest.id) else {
                 continue;
@@ -9764,17 +9797,23 @@ impl McpRegistry {
                 let mut backend = cfg.resolve_backend().ok()?;
                 crate::tool_exec::restrict_backend_env_sources(manifest, &mut backend);
                 let grants = effective_tool_grants(manifest, approved_grants);
-                return Some(ResolvedAppTool {
+                let owns_namespace = self.plugin_owns_tool_namespace(manifest, namespace);
+                let resolved = ResolvedAppTool {
                     backend,
                     grants,
                     plugin_id: manifest.id.clone(),
                     permissions: manifest.permissions.clone(),
                     timeout_secs: cfg.timeout_secs,
                     needs_approval: cfg.needs_approval.unwrap_or(false),
-                });
+                    owns_namespace,
+                };
+                if owns_namespace {
+                    return Some(resolved);
+                }
+                fallback.get_or_insert(resolved);
             }
         }
-        None
+        fallback
     }
 
     /// Resolve the approval target and explicit manifest gate for a registered
@@ -9784,12 +9823,9 @@ impl McpRegistry {
     /// to ids already registered by the app-tool loader; ordinary native MCP
     /// ids remain on their existing path.
     pub(crate) async fn approval_target_for_tool(&self, tool_id: &str) -> (String, bool) {
-        let is_registered_app_tool = self
-            .app_tools
-            .lock()
-            .map(|tools| tools.iter().any(|tool| tool.id == tool_id))
-            .unwrap_or(false);
-        if !is_app_tool_id(tool_id) && !is_registered_app_tool {
+        // A native id that yields to a configured server it does not own is gated
+        // as that server's tool, not by the yielding plugin's manifest.
+        if !is_app_tool_id(tool_id) && !self.app_tool_serves_call(tool_id).await {
             return (tool_id.to_owned(), false);
         }
 

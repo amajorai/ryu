@@ -126,7 +126,7 @@ function AudioCppSettingsEditor({
 						/>
 						<NumberField
 							hint="Leave blank to use audio.cpp's default of 4."
-							label="Threads"
+							label="CPU threads"
 							min={1}
 							onChange={(threads) =>
 								setDraft((current) => ({ ...current, threads }))

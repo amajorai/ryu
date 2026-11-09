@@ -285,6 +285,17 @@ fn approval_push_message_follows_the_audience_decision() {
 }
 
 #[test]
+fn device_tool_approval_push_is_always_content_free() {
+    let mut req = pending_req();
+    req.title = "Add event “Dentist” on “Alex's iPhone”".to_owned();
+    req.source_ref = Some("device.calendar.create".to_owned());
+    let message = approval_push_message("tok", &req, true, "en");
+    let text = message.to_string();
+    assert!(!text.contains("Dentist"), "{text}");
+    assert!(message["data"].get("kind").is_none());
+}
+
+#[test]
 fn content_free_approval_push_omits_title_and_kind() {
     let mut req = pending_req();
     req.title = "Wire $40,000 to acct 1234".to_owned();

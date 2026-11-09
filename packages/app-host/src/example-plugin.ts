@@ -14,6 +14,7 @@
 
 import { HORIZONTAL_WHEEL_SCROLL_SCRIPT } from "./horizontal-wheel-scroll-script.ts";
 import { handshakeAnnounceScript } from "./rpc.ts";
+import { livenessResponderScript } from "./sandbox-liveness-gate.ts";
 import {
 	buildCompanionThemeLayoutCss,
 	buildThemeTokenStyle,
@@ -173,7 +174,9 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
 
     function onPortMessage(ev) {
       var msg = ev.data;
-      if (!msg || msg.kind !== "ryu-plugin-rpc-result") return;
+      if (!msg) return;
+      ${livenessResponderScript()}
+      if (msg.kind !== "ryu-plugin-rpc-result") return;
       var p = pending[msg.id];
       if (!p) return;
       delete pending[msg.id];

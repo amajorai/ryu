@@ -9,6 +9,11 @@
  * outside the system block; a model switch warns in the composer).
  */
 
+import {
+	type PromptField,
+	pluralField,
+} from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
+import { translate as tl } from "@ryu/i18n/core";
 import type { Agent } from "@/src/lib/api/agents.ts";
 
 export interface PromptLayerDraft {
@@ -31,17 +36,21 @@ function sameSet(left: readonly string[], right: readonly string[]): boolean {
 	return right.every((item) => seen.has(item));
 }
 
-/** Human labels for the prompt layers this draft changes, in prompt order. */
+/**
+ * Translated labels for the prompt layers this draft changes, in prompt order.
+ * Plural nouns are marked with `pluralField`, so the confirmation's verb
+ * agrees in every language.
+ */
 export function promptLayerChanges(
 	saved: Pick<Agent, "persona" | "skills" | "systemPrompt">,
 	draft: PromptLayerDraft
-): string[] {
-	const changed: string[] = [];
+): PromptField[] {
+	const changed: PromptField[] = [];
 	if (!same(saved.persona?.output_style_id, draft.outputStyleId)) {
-		changed.push("The personality profile");
+		changed.push(tl("The personality profile"));
 	}
 	if (!sameSet(saved.skills ?? [], draft.skills)) {
-		changed.push("Skills");
+		changed.push(pluralField(tl("Skills")));
 	}
 	if (
 		!(
@@ -49,10 +58,10 @@ export function promptLayerChanges(
 			same(saved.persona?.tone, draft.tone)
 		)
 	) {
-		changed.push("The name and tone");
+		changed.push(tl("The name and tone"));
 	}
 	if (!same(saved.systemPrompt, draft.systemPrompt)) {
-		changed.push("The instructions");
+		changed.push(pluralField(tl("The instructions")));
 	}
 	return changed;
 }

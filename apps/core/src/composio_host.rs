@@ -473,6 +473,15 @@ impl ryu_composio::ComposioHost for CoreComposioHost {
     ) -> Result<bool> {
         Ok(subscriber_may_run_agent(subscriber_user_id, agent_id).await)
     }
+
+    async fn subscriber_may_run_workflow(
+        &self,
+        subscriber: &str,
+        workflow_id: &str,
+        account: &str,
+    ) -> Result<bool> {
+        Ok(trigger_delivery::subscriber_may_run_workflow(subscriber, workflow_id, account).await)
+    }
 }
 
 /// Install Core's host implementation. Called once at boot.

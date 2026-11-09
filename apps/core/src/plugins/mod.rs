@@ -21,6 +21,7 @@ pub mod app_contrib;
 pub mod binding;
 pub mod builtins;
 pub mod catalog;
+pub mod grant_revalidation;
 pub mod graph;
 pub mod isolation;
 pub mod lifecycle;

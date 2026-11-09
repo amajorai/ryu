@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import type { OpenRouterProvider } from "@/src/lib/api/openrouter.ts";
 import {
@@ -37,6 +38,37 @@ export interface PercentileValues {
 }
 export type ProviderListKey = "only" | "ignore";
 
+/**
+ * Validation errors thrown by the parsers below. Each message is a catalog
+ * key: the settings page renders `tl(error.message)`.
+ */
+export const ROUTING_OPTION_ERRORS = {
+	firewallInvalidJson: "Extra firewall rules must be valid JSON.",
+	firewallNotArray: "Extra firewall rules must be a JSON array.",
+	firewallRuleShape:
+		"Each rule needs a kind (pii, secret, or prompt_injection), name, and regex.",
+	openRouterInvalidJson: "Advanced OpenRouter options must be valid JSON.",
+	openRouterNotObject: "Advanced OpenRouter options must be a JSON object.",
+} as const;
+
+/**
+ * The reader's-language text of a parser error. The rule-shape message names
+ * JSON values (`prompt_injection`) that stay verbatim, so it is rebuilt with
+ * them as placeholders; the others are catalog keys as they stand.
+ */
+export function routingOptionErrorText(
+	message: string,
+	tl: LiteralMessage
+): string {
+	if (message === ROUTING_OPTION_ERRORS.firewallRuleShape) {
+		return tl(
+			"Each rule needs a kind ({pii}, {secret}, or {promptInjection}), name, and regex.",
+			{ pii: "pii", promptInjection: "prompt_injection", secret: "secret" }
+		);
+	}
+	return tl(message);
+}
+
 export function isRecord(
 	value: Parameters<typeof openRouterOptionsSchema.safeParse>[0]
 ): value is OpenRouterOptions {
@@ -64,18 +96,16 @@ export function parsePatterns(raw: string): NodeRoutingPreferences["firewall"] {
 	try {
 		value = JSON.parse(raw);
 	} catch {
-		throw new Error("Extra firewall rules must be valid JSON.");
+		throw new Error(ROUTING_OPTION_ERRORS.firewallInvalidJson);
 	}
 	if (!Array.isArray(value)) {
-		throw new Error("Extra firewall rules must be a JSON array.");
+		throw new Error(ROUTING_OPTION_ERRORS.firewallNotArray);
 	}
 	const parsed = parseNodeRoutingPreferences(
 		JSON.stringify({ firewall: { custom_patterns: value } })
 	);
 	if (parsed.firewall?.custom_patterns.length !== value.length) {
-		throw new Error(
-			"Each rule needs a kind (pii, secret, or prompt_injection), name, and regex."
-		);
+		throw new Error(ROUTING_OPTION_ERRORS.firewallRuleShape);
 	}
 	return parsed.firewall;
 }
@@ -88,10 +118,10 @@ export function parseOpenRouterOptions(raw: string): OpenRouterOptions | null {
 	try {
 		parsed = openRouterOptionsSchema.safeParse(JSON.parse(raw));
 	} catch {
-		throw new Error("Advanced OpenRouter options must be valid JSON.");
+		throw new Error(ROUTING_OPTION_ERRORS.openRouterInvalidJson);
 	}
 	if (!parsed.success) {
-		throw new Error("Advanced OpenRouter options must be a JSON object.");
+		throw new Error(ROUTING_OPTION_ERRORS.openRouterNotObject);
 	}
 	return parsed.data;
 }

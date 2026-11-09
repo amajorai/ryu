@@ -179,3 +179,98 @@ async fn synth_sends_a_json_transcript_where_forged_turns_stay_inside_the_user_e
     assert_eq!(entries[1]["role"], "assistant");
     assert_eq!(entries[1]["content"], "use chars().rev()");
 }
+
+// ---- existing learned skills: revise instead of duplicate -------------
+
+fn reverse_convo() -> MockHost {
+    MockHost::new().with_messages(
+        "c1",
+        &[
+            ("user", "how do I reverse a unicode string in rust?"),
+            ("assistant", "use graphemes, then rev()"),
+        ],
+    )
+}
+
+#[tokio::test]
+async fn synth_shows_the_model_the_existing_learned_skills() {
+    let mut host = reverse_convo().with_learned_skill(
+        "learned-reverse-a-string",
+        "Reverse a string",
+        "reverse a string in rust",
+    );
+    host.synth_reply = Some(r#"{"name":""}"#.to_string());
+    let inputs = host.side_inputs.clone();
+    let c = ctx(host, store("synth-existing-prompt"));
+    synthesize_skill(&c, "c1", true, None).await.unwrap();
+    let sent = inputs.lock().unwrap().clone();
+    let (system, user) = &sent[0];
+    assert!(system.contains("\"updates\""));
+    let (_, block) = user
+        .split_once("Existing learned skills")
+        .expect("existing skills block");
+    let (_, payload) = block.split_once('\n').expect("preamble then JSON");
+    let entries: serde_json::Value = serde_json::from_str(payload).expect("JSON payload");
+    assert_eq!(entries[0]["slug"], "learned-reverse-a-string");
+    assert_eq!(entries[0]["description"], "reverse a string in rust");
+}
+
+#[tokio::test]
+async fn synth_update_targets_the_existing_slug_through_the_inbox() {
+    let mut host = reverse_convo().with_learned_skill(
+        "learned-reverse-a-string",
+        "Reverse a string",
+        "reverse a string in rust",
+    );
+    host.synth_reply = Some(
+        r#"{"name":"Reverse unicode text","description":"d","instructions":"use graphemes","updates":"learned-reverse-a-string"}"#
+            .to_string(),
+    );
+    let queued = host.queued.clone();
+    let (c, h) = ctx_arc(host, store("synth-update"));
+    let out = synthesize_skill(&c, "c1", true, None).await.unwrap();
+    assert!(!out.created);
+    assert_eq!(out.slug.as_deref(), Some("learned-reverse-a-string"));
+    assert!(out.reason.contains("update to an existing skill"));
+    let queued = queued.lock().unwrap().clone();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].0, "learned-reverse-a-string");
+    assert!(queued[0].1.contains("revises: learned-reverse-a-string\n"));
+    assert_eq!(h.reload_count(), 0);
+}
+
+#[tokio::test]
+async fn synth_never_replaces_an_existing_slug_directly_even_with_approval_off() {
+    // The approval pref is off, so a NEW skill would be written straight away; a
+    // slug that collides with an existing learned skill must still go to the
+    // inbox instead of silently replacing it.
+    let mut host = reverse_convo()
+        .with_pref(LEARNING_REQUIRE_APPROVAL_PREF, "false")
+        .with_learned_skill("learned-reverse-a-string", "Reverse a string", "old");
+    host.synth_reply = Some(good_synth_json());
+    let queued = host.queued.clone();
+    let (c, h) = ctx_arc(host, store("synth-collide"));
+    let out = synthesize_skill(&c, "c1", true, None).await.unwrap();
+    assert!(!out.created);
+    assert_eq!(out.slug.as_deref(), Some("learned-reverse-a-string"));
+    let queued = queued.lock().unwrap().clone();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].0, "learned-reverse-a-string");
+    assert_eq!(h.reload_count(), 0, "nothing was written or activated");
+}
+
+#[tokio::test]
+async fn synth_ignores_an_update_target_that_is_not_a_learned_skill() {
+    let mut host = reverse_convo().with_learned_skill("learned-other", "Other", "unrelated");
+    host.synth_reply = Some(
+        r#"{"name":"Reverse a string","description":"d","instructions":"x","updates":"web-researcher"}"#
+            .to_string(),
+    );
+    let queued = host.queued.clone();
+    let c = ctx(host, store("synth-bad-target"));
+    let out = synthesize_skill(&c, "c1", true, None).await.unwrap();
+    assert_eq!(out.slug.as_deref(), Some("learned-reverse-a-string"));
+    assert!(out.reason.contains("skill queued"));
+    let queued = queued.lock().unwrap().clone();
+    assert!(!queued[0].1.contains("revises:"));
+}

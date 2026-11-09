@@ -44,6 +44,7 @@ import {
 	parsePatterns,
 	patternsText,
 	percentileValues,
+	routingOptionErrorText,
 	withOption,
 } from "./NodeRoutingSettings-options.ts";
 import {
@@ -247,7 +248,7 @@ function ScopedNodeRoutingSettings({ target }: { target: ApiTarget }) {
 				title: "Could not save routing preferences",
 				description:
 					error instanceof Error
-						? error.message
+						? routingOptionErrorText(error.message, tl)
 						: "Invalid routing preferences",
 			});
 			return;
@@ -325,7 +326,9 @@ function ScopedNodeRoutingSettings({ target }: { target: ApiTarget }) {
 			setAdvancedError(null);
 		} catch (error) {
 			setAdvancedError(
-				error instanceof Error ? error.message : "Invalid OpenRouter options."
+				error instanceof Error
+					? routingOptionErrorText(error.message, tl)
+					: "Invalid OpenRouter options."
 			);
 		}
 	};

@@ -100,6 +100,8 @@ import type { ExtensionHostProps } from "./extension-host-props.ts";
 import { createMcpAppBridge } from "./mcp-app-bridge.ts";
 import {
 	armNavigationTeardown,
+	SANDBOX_PAGE_EXPECTED_LOADS,
+	SRCDOC_EXPECTED_LOADS,
 	sandboxFrameState,
 	sendSandboxDocument,
 } from "./sandbox-frame-guard.ts";
@@ -141,7 +143,7 @@ export function ExtensionHost({
 	pushRefRef.current = pushRef;
 	const privacyRef = useRef(streamingPrivacyActive);
 	privacyRef.current = streamingPrivacyActive;
-	// Counts document changes for the sandbox-page transport's iframe key.
+	// Counts document changes for the iframe key (both transports).
 	const documentGeneration = useRef({ generation: 0, srcdoc });
 	if (documentGeneration.current.srcdoc !== srcdoc) {
 		documentGeneration.current = {
@@ -167,12 +169,17 @@ export function ExtensionHost({
 		) {
 			return;
 		}
-		// Sandbox-page transport: per-ELEMENT state, so the document goes over once
-		// per iframe (not once per effect run) and a self-navigated frame, whose
-		// new document escapes `connect-src 'none'`, is never bridged again.
-		const frameState =
-			sandboxPage === undefined ? null : sandboxFrameState(iframe);
-		if (frameState?.navigated) {
+		// Per-ELEMENT state for every transport, so the document (sandbox page)
+		// and the port go over once per iframe (not once per effect run) and a
+		// self-navigated frame, whose new document escapes `connect-src 'none'`,
+		// is never bridged again.
+		const frameState = sandboxFrameState(
+			iframe,
+			sandboxPage === undefined
+				? SRCDOC_EXPECTED_LOADS
+				: SANDBOX_PAGE_EXPECTED_LOADS
+		);
+		if (frameState.navigated) {
 			return;
 		}
 		let port: MessagePort | null = null;
@@ -184,9 +191,9 @@ export function ExtensionHost({
 		// One per-frame in-flight budget for unary and streaming calls, so one app
 		// cannot turn a valid grant into unbounded promise/service work.
 		const { tryAcquireCall, releaseCall } = createCallBudget();
-		// Sandbox-page window traffic is delivered only once the realm holding the
-		// port acknowledges a probe (a self-navigated document cannot).
-		const liveness = frameState ? createLivenessGate() : null;
+		// Window traffic is delivered only once the realm holding the port
+		// acknowledges a probe (a self-navigated document cannot).
+		const liveness = createLivenessGate();
 		const readLifetime = new AbortController();
 		const mcpApp = createMcpAppBridge({
 			granted,
@@ -215,7 +222,7 @@ export function ExtensionHost({
 
 		// RPC handler over the channel port: validate envelope, gate-dispatch, reply.
 		const onPortMessage = (event: MessageEvent) => {
-			if (liveness?.handlePortMessage(event.data)) {
+			if (liveness.handlePortMessage(event.data)) {
 				return;
 			}
 			const req = asRpcRequest(event.data);
@@ -340,8 +347,12 @@ export function ExtensionHost({
 			if (disposed) {
 				return;
 			}
-			// At most once per sandbox-page element, never on a handshake re-run.
-			if (sendSandboxDocument(frameState, event, iframe, { srcdoc, nonce })) {
+			// At most once per sandbox-page element, never on a handshake re-run;
+			// the srcdoc transport never sends one.
+			const documentState = sandboxPage === undefined ? null : frameState;
+			if (
+				sendSandboxDocument(documentState, event, iframe, { srcdoc, nonce })
+			) {
 				return;
 			}
 			if (event.source === iframe.contentWindow) {
@@ -356,11 +367,7 @@ export function ExtensionHost({
 					}
 					void mcpApp.receive(data);
 				};
-				if (liveness) {
-					liveness.admit(deliver);
-				} else {
-					deliver();
-				}
+				liveness.admit(deliver);
 			}
 			// The load-bearing decision, delegated to the pure predicate: correct
 			// nonce, from the window we created (`event.origin` is "null" here and
@@ -369,8 +376,7 @@ export function ExtensionHost({
 				!shouldTransferPort(event.data, {
 					expectedNonce: nonce,
 					fromThisFrame: event.source === iframe.contentWindow,
-					alreadyConnected:
-						port !== null || (frameState?.portTransferred ?? false),
+					alreadyConnected: port !== null || frameState.portTransferred,
 				})
 			) {
 				return;
@@ -383,10 +389,8 @@ export function ExtensionHost({
 			const channel = new MessageChannel();
 			port = channel.port1;
 			port.onmessage = onPortMessage;
-			if (frameState) {
-				frameState.portTransferred = true;
-			}
-			liveness?.attach(port);
+			frameState.portTransferred = true;
+			liveness.attach(port);
 			iframe.contentWindow?.postMessage(
 				{
 					kind: "ryu-plugin-privacy",
@@ -410,7 +414,7 @@ export function ExtensionHost({
 
 		const teardown = () => {
 			disposed = true;
-			liveness?.dispose();
+			liveness.dispose();
 			readLifetime.abort();
 			window.removeEventListener("message", onWindowMessage);
 			const pushTarget = pushRefRef.current;
@@ -464,14 +468,14 @@ export function ExtensionHost({
 			// Dimension attributes keep the frame filling its container in hosts
 			// whose stylesheet does not generate the utility classes above.
 			height="100%"
-			// A sandbox page's `src` never changes, so its key also carries the
-			// document generation: a new document (a retry's fresh nonce included)
-			// reloads the page, as a changed `srcdoc` reloads a srcdoc frame.
+			// The key carries the document generation: a new document (a retry's
+			// fresh nonce included) mounts a fresh element, so a second `load` on one
+			// element always means the companion navigated itself.
 			key={`${sandboxForCompanion({
 				allowDownloads,
 				allowForms,
 				srcdoc,
-			})}${sandboxPage === undefined ? "" : ` ${documentGeneration.current.generation}`}`}
+			})} ${documentGeneration.current.generation}`}
 			ref={iframeRef}
 			// The approved export grant adds downloads without changing the null origin.
 			sandbox={sandboxForCompanion({

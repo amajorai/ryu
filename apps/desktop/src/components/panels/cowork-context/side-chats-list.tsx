@@ -81,7 +81,7 @@ export function SideChatsList({
 						</button>
 					</li>
 				))}
-				{overflow > 0 && <OverflowRow count={overflow} label="side chats" />}
+				{overflow > 0 && <OverflowRow count={overflow} kind="sideChats" />}
 			</ul>
 			<AlertDialog
 				onOpenChange={(open) => {

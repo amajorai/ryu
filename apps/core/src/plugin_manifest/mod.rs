@@ -762,6 +762,13 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // auto-wrap settings that drive `crate::rtk_config` (NOT a tool). Community-tier,
     // opt-in.
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/rtk/manifest.json"),
+    // `tokeneconomizer` bridges the user's own TokenEconomizer install into the
+    // managed Pi agent through ONE `contributes.pi_extensions` row, plus settings
+    // that `crate::tokeneconomizer_config` turns into the extension's pointer file.
+    // Core-tier for the `may_ship_pi_extensions` reason its Pi siblings give, but
+    // NOT in `CORE_PREINSTALLED`: it is BYO (a clone and Python 3.10+) and its
+    // loop guard and fact proposer spend the user's tokens, so it is opt-in.
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/tokeneconomizer/manifest.json"),
     // `ripgrep` exposes the upstream `rg` binary as fixed, read-only command
     // tools (`ripgrep.search` and `ripgrep.files`). It is BYO and Community-tier:
     // the Gateway approves the reviewed `tool:command:rg` grant, while the node

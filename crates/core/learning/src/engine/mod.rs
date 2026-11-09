@@ -20,9 +20,11 @@ use crate::store::ExperienceStore;
 mod config;
 mod cycle;
 mod dispatch;
+mod library;
 mod reward;
 mod score;
 mod skill_md;
+mod skills_dir;
 mod synth;
 mod transcript;
 
@@ -44,10 +46,15 @@ pub use cycle::{
     SftSample,
 };
 pub use dispatch::{inline_samples_within_budget, INLINE_DATASET_BUDGET_BYTES};
+pub use library::{scan_learned_skills, LearnedSkill};
 pub use reward::parse_reward;
 pub use score::{score_buffer, sweep_into_buffer};
 pub use skill_md::{build_skill_md, slugify, SkillProvenance};
-pub use synth::{run_skills_pass, synthesize_skill, write_synthesized_skill, SynthOutcome};
+pub use skills_dir::SkillsDir;
+pub use synth::{
+    run_skills_pass, synthesize_skill, write_synthesized_skill, write_synthesized_skill_in,
+    SynthOutcome,
+};
 
 #[cfg(test)]
 mod config_test;
@@ -58,6 +65,8 @@ mod dispatch_test;
 #[cfg(test)]
 mod harness_test;
 #[cfg(test)]
+mod library_test;
+#[cfg(test)]
 mod reward_test;
 #[cfg(test)]
 mod run_model_test;
@@ -66,7 +75,11 @@ mod score_test;
 #[cfg(test)]
 mod skill_md_test;
 #[cfg(test)]
+mod skills_dir_test;
+#[cfg(test)]
 mod synth_test;
+#[cfg(test)]
+mod synth_write_test;
 #[cfg(test)]
 mod transcript_test;
 

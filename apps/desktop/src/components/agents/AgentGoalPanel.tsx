@@ -94,10 +94,10 @@ export function AgentGoalPanel({
 
 	const changed: string[] = [];
 	if (stored && goal.trim() !== stored.goal.trim()) {
-		changed.push("The bot's goal");
+		changed.push(tl("The bot's goal"));
 	}
 	if (stored && briefValue(brief) !== (stored.briefReplies ?? null)) {
-		changed.push("Main-thread reply length");
+		changed.push(tl("Main-thread reply length"));
 	}
 
 	async function apply() {

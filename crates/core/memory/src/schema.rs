@@ -58,14 +58,26 @@ impl MemoryStore {
         Self::add_column_if_missing(conn, "updated_at", "INTEGER NOT NULL DEFAULT 0")?;
         Self::add_column_if_missing(conn, "lifecycle", "TEXT NOT NULL DEFAULT 'active'")?;
         Self::add_column_if_missing(conn, "supersedes_id", "TEXT")?;
+        // Access tracking, bumped by `mark_recalled` after a turn injects a fact.
+        // Nullable so rows written before the columns existed read as never
+        // recalled.
+        Self::add_column_if_missing(conn, "recall_count", "INTEGER DEFAULT 0")?;
+        Self::add_column_if_missing(conn, "last_recalled_at", "INTEGER")?;
+        // Rows saved before tracking began read as never recalled, which is
+        // unknown rather than true; remember when the clock started.
+        Self::record_access_tracking_start(conn)?;
 
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_memory_scope_level
                  ON memory_entries(scope, scope_id, category);
              CREATE INDEX IF NOT EXISTS idx_memory_lifecycle
-                 ON memory_entries(lifecycle, updated_at);",
+                 ON memory_entries(lifecycle, updated_at);
+             CREATE INDEX IF NOT EXISTS idx_memory_category_age
+                 ON memory_entries(category, lifecycle, created_at);
+             CREATE INDEX IF NOT EXISTS idx_memory_proposals_target
+                 ON memory_proposals(target_memory_id, operation, status);",
         )
-        .context("creating memory level index")?;
+        .context("creating memory indexes")?;
         working::init_schema(conn)?;
         Ok(())
     }
