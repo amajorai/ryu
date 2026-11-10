@@ -1,6 +1,8 @@
 //! Tests moved out of `sidecar/mcp/mod.rs`.
 
 use super::*;
+#[cfg(not(windows))]
+use crate::sidecar::mcp::tests::present_command;
 
 /// The probe's Windows half: it counts a `.cmd`/`.bat` `PATH` hit as present, and
 /// that is only true because the spawn seam rewrites such a command to its full
