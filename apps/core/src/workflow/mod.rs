@@ -35,6 +35,8 @@ pub mod delegation;
 pub mod durable;
 pub mod executor;
 pub mod history;
+#[cfg(test)]
+mod history_fork_tests;
 pub mod limits;
 pub mod notify_user;
 pub mod script;
@@ -56,9 +58,9 @@ use serde::{Deserialize, Serialize};
 
 // Split by responsibility; every item keeps its `workflow::` path through the
 // re-exports below.
+mod composio_trigger_owner;
 mod guardrails;
 mod node_kind;
-mod composio_trigger_owner;
 mod persist;
 mod policies;
 mod references;

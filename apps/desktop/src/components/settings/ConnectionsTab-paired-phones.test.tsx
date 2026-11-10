@@ -22,6 +22,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 interface Phone {
 	always_allowed: string[];
 	app: string;
+	check_code: string | null;
 	device_id: string;
 	foreground: boolean;
 	label: string;
@@ -45,6 +46,7 @@ function phone(overrides: Partial<Phone>): Phone {
 	return {
 		always_allowed: [],
 		app: "ryu",
+		check_code: null,
 		device_id: "phone",
 		foreground: false,
 		label: "Phone",
@@ -258,7 +260,9 @@ test("approving needs a confirmation that shows details to check against the pho
 	core.devices = [
 		phone({
 			app: "ryu-bot",
-			device_id: "dev-0123456789abcdef",
+			// The shared golden vector: Core's code for this id and 91 zero SPKI bytes.
+			check_code: "ZDX-MJ5",
+			device_id: "00000000-0000-4000-8000-000000000001",
 			label: "Alice's iPhone",
 			paired_at_ms: Date.now() - 60_000,
 			state: "pending",
@@ -266,6 +270,7 @@ test("approving needs a confirmation that shows details to check against the pho
 	];
 	await mount();
 	await settle(() => text().includes("Alice's iPhone"), "pending phone");
+	expect(text()).toContain("Waiting for approval · Check code ZDX-MJ5");
 	const trigger = button("Approve Alice's iPhone");
 	await click(trigger);
 	await settle(
@@ -278,7 +283,7 @@ test("approving needs a confirmation that shows details to check against the pho
 	expect(dialog.textContent).toContain("Approve Alice's iPhone?");
 	expect(detail("Platform")).toBe("iPhone");
 	expect(detail("App")).toBe("ryu-bot");
-	expect(detail("Check code")).toBe("ABCDEF");
+	expect(detail("Check code")).toBe("ZDX-MJ5");
 	expect(detail("Requested")).toContain("ago");
 	// Opening the dialog alone approves nothing.
 	expect(core.writes).toEqual([]);
@@ -290,6 +295,32 @@ test("approving needs a confirmation that shows details to check against the pho
 	await flush();
 	expect(core.writes).toEqual([]);
 	expect(core.devices[0]?.state).toBe("pending");
+});
+
+test("an older node without a check code shows no code, never the device id", async () => {
+	core.devices = [
+		phone({
+			device_id: "dev-0123456789abcdef",
+			label: "Old node phone",
+			state: "pending",
+		}),
+	];
+	await mount();
+	await settle(() => text().includes("Old node phone"), "pending phone");
+	expect(text()).not.toContain("Check code");
+	const trigger = button("Approve Old node phone");
+	await click(trigger);
+	await settle(
+		() => trigger.getAttribute("aria-expanded") === "true",
+		"approve dialog"
+	);
+	const dialog = confirmDialog();
+	expect(dialog.querySelector('dd[data-term="Check code"]')).toBeNull();
+	expect(dialog.textContent).toContain("check these details against it");
+	expect(dialog.textContent).not.toContain("ABCDEF");
+	expect(dialog.textContent?.toLowerCase()).not.toContain("abcdef");
+	await click(button("Cancel", dialog));
+	expect(core.writes).toEqual([]);
 });
 
 test("leaves a phone pending when Core refuses the approval", async () => {

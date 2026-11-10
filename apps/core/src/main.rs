@@ -158,8 +158,6 @@ mod registry;
 mod replicate_auth;
 mod routing_policy;
 mod rtk_config;
-/// Settings bridge for the `@ryu/tokeneconomizer` plugin's managed-Pi pointer file.
-mod tokeneconomizer_config;
 /// Raises the `core#run.failed` kernel event for failed agent, scheduled-job and
 /// workflow runs (the Self-Healing extraction; no consumer is named in Core).
 mod run_failures;
@@ -193,6 +191,8 @@ mod telemetry;
 /// Clears inherited `GIT_*` repository variables before any test runs.
 #[cfg(test)]
 mod test_process_env;
+/// Settings bridge for the `@ryu/tokeneconomizer` plugin's managed-Pi pointer file.
+mod tokeneconomizer_config;
 mod tool_exec;
 mod tool_registry_host;
 mod treg_catalog;

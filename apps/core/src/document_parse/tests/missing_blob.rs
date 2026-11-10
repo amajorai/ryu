@@ -12,6 +12,9 @@ async fn sealed_blobs_reach_parsers_only_as_private_temporary_copies() {
     };
     let path = blob_input_path(&sha).unwrap();
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // The blob store is the shared data dir and the writer refuses to replace a
+    // file, so drop a copy an earlier run of this test left behind.
+    let _ = std::fs::remove_file(&path);
     let cipher = ryu_crypto::content_cipher(ryu_spaces::BLOB_STORE).unwrap();
     let context = ryu_crypto::content::ContentContext::for_id("blob", &sha);
     let mut writer = ryu_crypto::SealedFileWriter::create(&path, &cipher, &context).unwrap();

@@ -4745,6 +4745,7 @@
   "this node is already bound; revoke the current enrollment before binding another organization": "यह नोड पहले से बाउंड है; किसी दूसरे संगठन को बाइंड करने से पहले मौजूदा नामांकन निरस्त करें",
   "this node is not connected to its organization": "यह नोड अपने संगठन से कनेक्ट नहीं है",
   "this node resumes handed-off working trees into a new clone only": "यह नोड हैंड-ऑफ़ किए गए वर्किंग ट्री को केवल नए क्लोन में फिर से शुरू करता है",
+  "this node's organization binding is not resolved yet; retry shortly": "इस नोड का संगठन से जुड़ाव अभी तय नहीं हुआ है; थोड़ी देर में फिर से कोशिश करें",
   "this provider account cannot be installed in the Gateway": "यह प्रदाता खाता Gateway में इंस्टॉल नहीं किया जा सकता",
   "this runnable kind has no harness chat adapter on this node": "इस रननेबल प्रकार के लिए इस नोड पर कोई हार्नेस चैट एडैप्टर नहीं है",
   "this service is set to use Composio in the Integrations Store": "यह सेवा इंटीग्रेशन स्टोर में Composio का उपयोग करने के लिए सेट है",

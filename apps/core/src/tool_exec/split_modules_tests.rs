@@ -13,14 +13,20 @@ use crate::plugin_manifest::schema::CommandOutput;
 
 #[test]
 fn the_command_allowlist_keeps_only_absolute_named_entries() {
-    let map = command_allowlist::parse_command_allowlist(
-        "rg=/usr/bin/rg; bad ;=/no/name, rel=bin/rel ,jq = /usr/bin/jq",
-    );
+    // Absolute on the host: a drive-less "/usr/bin/rg" is relative on Windows.
+    let (rg, jq) = if cfg!(windows) {
+        (r"C:\tools\rg.exe", r"C:\tools\jq.exe")
+    } else {
+        ("/usr/bin/rg", "/usr/bin/jq")
+    };
+    let map = command_allowlist::parse_command_allowlist(&format!(
+        "rg={rg}; bad ;=/no/name, rel=bin/rel ,jq = {jq}"
+    ));
     assert_eq!(
         map,
         BTreeMap::from([
-            ("jq".to_string(), PathBuf::from("/usr/bin/jq")),
-            ("rg".to_string(), PathBuf::from("/usr/bin/rg")),
+            ("jq".to_string(), PathBuf::from(jq)),
+            ("rg".to_string(), PathBuf::from(rg)),
         ])
     );
 }

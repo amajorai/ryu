@@ -3,14 +3,17 @@
 //! signature), but only ever over the caller's own devices.
 
 use super::auth::{device_error, require_principal, require_store};
+use crate::device_tools::check_code::check_code;
 use crate::device_tools::declaration::{clean_label, MAX_LABEL};
 use crate::device_tools::registry::DeviceState;
 use crate::device_tools::{catalog, presence, DeviceErrorCode};
 use crate::server::*;
 use axum::response::Response;
 
-/// `GET /api/device-tools/devices` — the caller's paired devices and their
-/// per-tool "Always allow" grants.
+/// `GET /api/device-tools/devices` — the caller's paired devices (pending
+/// pairings included), their per-tool "Always allow" grants, and each one's
+/// pairing `check_code` computed from the stored key
+/// ([`crate::device_tools::check_code`]).
 #[utoipa::path(get, path = "/api/device-tools/devices", tag = "Device tools",
     summary = "List paired phones", responses((status = 200, description = "OK", body = serde_json::Value)))]
 pub(in crate::server) async fn device_tools_devices(
@@ -42,6 +45,7 @@ pub(in crate::server) async fn device_tools_devices(
                 "app": row.app,
                 "platform": row.platform,
                 "state": if row.state == DeviceState::Active { "active" } else { "pending" },
+                "check_code": check_code(&row.device_id, &row.public_key),
                 "paired_at_ms": row.paired_at_ms,
                 "last_seen_ms": row.last_seen_ms,
                 "foreground": presence::is_foreground(&principal_id, &row.device_id, now),

@@ -4745,6 +4745,7 @@
   "this node is already bound; revoke the current enrollment before binding another organization": "このノードはすでに紐付けられています。別の組織に紐付ける前に現在の登録を取り消してください",
   "this node is not connected to its organization": "このノードは組織に接続されていません",
   "this node resumes handed-off working trees into a new clone only": "このノードは、引き継がれた作業ツリーを新しいクローンでのみ再開します",
+  "this node's organization binding is not resolved yet; retry shortly": "このノードの組織の紐付けがまだ解決されていません。しばらくしてから再試行してください",
   "this provider account cannot be installed in the Gateway": "このプロバイダーアカウントは Gateway にインストールできません",
   "this runnable kind has no harness chat adapter on this node": "この実行可能な種類には、このノード上にハーネスのチャットアダプターがありません",
   "this service is set to use Composio in the Integrations Store": "このサービスは連携ストアで Composio を使用するよう設定されています",

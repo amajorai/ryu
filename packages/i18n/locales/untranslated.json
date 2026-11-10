@@ -205,6 +205,12 @@
     ],
     "reason": "'chat' is the established term in these locales (glossary Chat)"
   },
+  "1 conversation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'conversation' is the French word"
+  },
   "1 message": {
     "locales": [
       "fr"
@@ -2685,6 +2691,13 @@
       "fr"
     ],
     "reason": "Code is the native German/French word"
+  },
+  "Code {0}": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Code' is the German and French word"
   },
   "Codes": {
     "locales": [
@@ -8486,6 +8499,12 @@
     ],
     "reason": "Same word in French"
   },
+  "Photos": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Photos' is the French word"
+  },
   "Pierre Dark": {
     "locales": [
       "ar",
@@ -9274,6 +9293,22 @@
     ],
     "reason": "README is a file name."
   },
+  "REC": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Universal recording indicator label, kept as on camera and recorder UIs"
+  },
   "REST API": {
     "locales": [
       "ar",
@@ -9706,6 +9741,22 @@
       "zh-CN"
     ],
     "reason": "Company/provider name"
+  },
+  "Ryu": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product name"
   },
   "Ryu / Tests": {
     "locales": [
@@ -10573,6 +10624,20 @@
       "zh-CN"
     ],
     "reason": "brand name Ryu with a placeholder"
+  },
+  "Ryu: {0}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Product name followed by its message; the colon form is correct in these locales"
   },
   "SAML 2.0": {
     "locales": [
@@ -12565,6 +12630,13 @@
     ],
     "reason": "identical spelling is the correct native word in this locale"
   },
+  "Version {0}": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Version' is the German and French word"
+  },
   "Version {number} {deployed}": {
     "locales": [
       "de",
@@ -13569,6 +13641,12 @@
     ],
     "reason": "Ryu Cloud component name (lowercase diagram label beside core and gateway)"
   },
+  "code": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'code' is the French word"
+  },
   "condition": {
     "locales": [
       "fr"
@@ -14479,6 +14557,18 @@
       "zh-CN"
     ],
     "reason": "brand name YouTube"
+  },
+  "{0} conversations": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'conversations' is the French word"
+  },
+  "{0} conversations · {1}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'conversations' is the French word"
   },
   "{BIN} connect {agentId} --agent <ryu-agent-id> ({detail})": {
     "locales": [

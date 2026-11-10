@@ -19,20 +19,42 @@
 // A node that predates these routes answers 404; callers feature-detect through
 // {@link isRouteMissing} rather than surfacing an error.
 
-import {
-	type PairedDevice,
-	pairedDeviceSchema,
-} from "@ryuhq/core-client/device-tools.ts";
+import { pairedDeviceSchema } from "@ryuhq/core-client/device-tools.ts";
 import { z } from "zod";
 import { ApiError, type ApiTarget, request } from "./client.ts";
-
-export type { PairedDevice } from "@ryuhq/core-client/device-tools.ts";
 
 const DEVICES_PATH = "/api/device-tools/devices";
 const REVOKE_DELEGATIONS_PATH = "/api/app-delegations/revoke";
 
+/**
+ * Core's pairing check code: six Crockford base32 characters of a hash over
+ * the device id and its registered key, shown as `XXX-XXX`. The phone derives
+ * the same code from its own key, so the owner compares the two before
+ * approving.
+ */
+const CHECK_CODE_PATTERN =
+	/^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{3}-[0-9ABCDEFGHJKMNPQRSTVWXYZ]{3}$/;
+
+/**
+ * Core's `check_code` when it is a well-formed `XXX-XXX` code, otherwise null.
+ * An older node sends none; there is deliberately no fallback derived from the
+ * device id, because only a code bound to the phone's key proves anything.
+ */
+export function pairingCheckCode(value: unknown): string | null {
+	return typeof value === "string" && CHECK_CODE_PATTERN.test(value)
+		? value
+		: null;
+}
+
+const pairedPhoneSchema = pairedDeviceSchema.extend({
+	check_code: z.unknown().optional().transform(pairingCheckCode),
+});
+
+/** A paired phone with Core's check code, or null when Core sent none. */
+export type PairedDevice = z.output<typeof pairedPhoneSchema>;
+
 const devicesResponseSchema = z.object({
-	devices: z.array(pairedDeviceSchema),
+	devices: z.array(pairedPhoneSchema),
 	principal_id: z.string(),
 });
 

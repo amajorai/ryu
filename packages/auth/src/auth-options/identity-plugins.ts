@@ -23,8 +23,8 @@ import { PASSKEY_WEBAUTHN_OPTIONS } from "./origins.ts";
 
 // The passkey and SCIM plugins with Ryu's relying party and deprovisioning.
 
-interface RyuPasskeyPlugin extends ReturnType<typeof passkey> {}
-interface RyuScimPlugin extends ReturnType<typeof scim> {}
+export interface RyuPasskeyPlugin extends ReturnType<typeof passkey> {}
+export interface RyuScimPlugin extends ReturnType<typeof scim> {}
 
 export function createRyuPasskeyPlugin(): RyuPasskeyPlugin {
 	return passkey({

@@ -18,7 +18,24 @@
 /** Why the member's data is purged; Core's `reason` values for a departure. */
 export type MemberDataPurgeReason = "account_deleted" | "member_removed";
 
+/**
+ * A node captured before its organization is deleted (account deletion of the
+ * workspace's only member), so the purge can still reach it once the node's
+ * own rows are gone.
+ */
+export interface MemberDataPurgeNodeSnapshot {
+	nodeId: string;
+	/** The node's advertised URL when it was captured; null when it had none. */
+	reachableUrl: string | null;
+	teamId: string | null;
+}
+
 export interface MemberDataPurgeRequest {
+	/**
+	 * The organization's nodes, captured by the caller. Absent: the scheduler
+	 * lists the organization's live nodes itself (the usual departure).
+	 */
+	nodes?: readonly MemberDataPurgeNodeSnapshot[];
 	organizationId: string;
 	reason: MemberDataPurgeReason;
 	userId: string;

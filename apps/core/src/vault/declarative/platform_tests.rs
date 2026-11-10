@@ -263,14 +263,30 @@ fn credentials_must_be_references() {
         let error = parse(&document.to_string()).unwrap_err();
         assert!(!format!("{error:#}").contains(WEBHOOK_SECRET), "{error:#}");
     }
+    // `file:` paths must be absolute on the host: on Windows that needs a
+    // drive (or UNC) prefix, and a rooted `/run/...` path is refused because
+    // it would depend on the current drive.
+    let absolute = if cfg!(windows) {
+        r"file:C:\run\secrets\hook"
+    } else {
+        "file:/run/secrets/hook"
+    };
+    assert!(
+        parse(&role(webhook.clone(), json!({ "signingSecret": absolute })).to_string()).is_ok()
+    );
+    assert!(
+        parse(&role(webhook, json!({ "signingSecret": "file:run/secrets/hook" })).to_string())
+            .is_err()
+    );
+    #[cfg(windows)]
     assert!(parse(
         &role(
-            webhook,
+            json!({ "kind": "webhook", "url": "https://issuer.example/hook" }),
             json!({ "signingSecret": "file:/run/secrets/hook" })
         )
         .to_string()
     )
-    .is_ok());
+    .is_err());
 }
 
 #[test]

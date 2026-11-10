@@ -35,7 +35,10 @@ fn production_sources() -> Vec<(&'static str, String)> {
         ("message_reads", include_str!("message_reads.rs")),
         ("message_types", include_str!("message_types.rs")),
         ("message_window", include_str!("message_window.rs")),
-        ("message_window_flat", include_str!("message_window_flat.rs")),
+        (
+            "message_window_flat",
+            include_str!("message_window_flat.rs"),
+        ),
         ("model_change_types", include_str!("model_change_types.rs")),
         ("participants", include_str!("participants.rs")),
         ("reactions", include_str!("reactions.rs")),

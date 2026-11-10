@@ -4745,6 +4745,7 @@
   "this node is already bound; revoke the current enrollment before binding another organization": "此节点已绑定；请先撤销当前注册，再绑定其他组织",
   "this node is not connected to its organization": "此节点未连接到其组织",
   "this node resumes handed-off working trees into a new clone only": "此节点只会在新克隆中恢复交接的工作树",
+  "this node's organization binding is not resolved yet; retry shortly": "此节点的组织绑定尚未解析；请稍后重试",
   "this provider account cannot be installed in the Gateway": "此提供商账户无法安装到 Gateway",
   "this runnable kind has no harness chat adapter on this node": "此可运行类型在此节点上没有 harness 聊天适配器",
   "this service is set to use Composio in the Integrations Store": "此服务已在集成商店中设置为使用 Composio",

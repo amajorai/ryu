@@ -115,7 +115,10 @@ async fn tool_principal_is_unresolved_on_an_enrolled_unregistered_node() {
     .await;
     assert_eq!(with_store, ToolPrincipal::Unresolved);
     assert_eq!(without_store, ToolPrincipal::Unresolved);
-    assert!(!owns, "an unresolved principal must not write a member's thread");
+    assert!(
+        !owns,
+        "an unresolved principal must not write a member's thread"
+    );
     let visible = store
         .visible_conversation_ids(
             with_store.filter_args().0,

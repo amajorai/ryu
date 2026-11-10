@@ -169,7 +169,9 @@ async fn local_sidecar_bundle_resolves_to_installed_entrypoint_or_records_archiv
         None,
     )
     .await;
-    assert_eq!(program, exe.to_string_lossy());
+    // Compared as paths: the manifest entrypoint is written with '/', which
+    // Windows also accepts as a separator.
+    assert_eq!(std::path::Path::new(&program), exe.as_path());
     assert!(missing_sidecar_binary_reason(&name).is_none());
     std::fs::remove_dir_all(&dir).ok();
 }

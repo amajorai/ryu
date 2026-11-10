@@ -4745,6 +4745,7 @@
   "this node is already bound; revoke the current enrollment before binding another organization": "이 노드는 이미 바인딩되어 있습니다. 다른 조직을 바인딩하기 전에 현재 등록을 철회하세요",
   "this node is not connected to its organization": "이 노드는 조직에 연결되어 있지 않습니다",
   "this node resumes handed-off working trees into a new clone only": "이 노드는 인계된 작업 트리를 새 클론에서만 재개합니다",
+  "this node's organization binding is not resolved yet; retry shortly": "이 노드의 조직 연결이 아직 확인되지 않았습니다. 잠시 후 다시 시도하세요",
   "this provider account cannot be installed in the Gateway": "이 공급자 계정은 Gateway에 설치할 수 없습니다",
   "this runnable kind has no harness chat adapter on this node": "이 실행 가능 유형에는 이 노드에 하네스 채팅 어댑터가 없습니다",
   "this service is set to use Composio in the Integrations Store": "이 서비스는 통합 스토어에서 Composio를 사용하도록 설정되어 있습니다",

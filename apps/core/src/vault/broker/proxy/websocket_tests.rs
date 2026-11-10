@@ -72,7 +72,12 @@ pub(super) fn config(extra_roots: Vec<String>) -> BrokerConfig {
     BrokerConfig {
         guard: NetGuard {
             allow_private: false,
-            allowlist: vec![Cidr::parse("127.0.0.0/8").unwrap()],
+            // `localhost` resolves to both loopback families on Windows and
+            // macOS, and the guard requires every address to be allowed.
+            allowlist: vec![
+                Cidr::parse("127.0.0.0/8").unwrap(),
+                Cidr::parse("::1").unwrap(),
+            ],
         },
         extra_upstream_roots_pem: extra_roots,
         session_check_interval: Duration::from_millis(50),
@@ -156,14 +161,23 @@ pub(super) async fn tls_echo_upstream() -> (u16, String, mpsc::UnboundedReceiver
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
+    // Also listen on [::1] when that port is free there, so a dial to
+    // `localhost` that tries IPv6 first connects at once instead of waiting
+    // out a refused attempt.
+    let listeners = std::iter::once(listener)
+        .chain(TcpListener::bind(("::1", port)).await.ok())
+        .collect::<Vec<_>>();
     let (tx, rx) = mpsc::unbounded_channel();
-    tokio::spawn(async move {
-        while let Ok((stream, _)) = listener.accept().await {
-            if let Ok(tls) = acceptor.accept(stream).await {
-                tokio::spawn(serve_echo(tls, tx.clone()));
+    for listener in listeners {
+        let (acceptor, tx) = (acceptor.clone(), tx.clone());
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                if let Ok(tls) = acceptor.accept(stream).await {
+                    tokio::spawn(serve_echo(tls, tx.clone()));
+                }
             }
-        }
-    });
+        });
+    }
     (port, ca_pem, rx)
 }
 

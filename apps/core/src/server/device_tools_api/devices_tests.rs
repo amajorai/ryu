@@ -13,14 +13,26 @@ const OTHER: &str = "user:someone-else";
 
 /// Pair a device row directly in the process store and return its id.
 fn seed_device(principal_id: &str, label: &str, state: DeviceState) -> String {
-    let store = crate::device_tools::registry::store().expect("device store");
     let device_id = uuid::Uuid::new_v4().to_string();
+    seed_keyed_device(principal_id, &device_id, device_id.as_bytes(), label, state);
+    device_id
+}
+
+/// Pair `device_id` with the exact `public_key` bytes.
+fn seed_keyed_device(
+    principal_id: &str,
+    device_id: &str,
+    public_key: &[u8],
+    label: &str,
+    state: DeviceState,
+) {
+    let store = crate::device_tools::registry::store().expect("device store");
     store
         .pair(
             &NewDevice {
                 principal_id,
-                device_id: &device_id,
-                public_key: device_id.as_bytes(),
+                device_id,
+                public_key,
                 app: "ryu-bot",
                 platform: "ios",
                 label,
@@ -30,7 +42,6 @@ fn seed_device(principal_id: &str, label: &str, state: DeviceState) -> String {
             crate::device_tools::now_ms(),
         )
         .expect("pair");
-    device_id
 }
 
 fn patch(body: Value) -> Json<DevicePatch> {
@@ -75,6 +86,23 @@ async fn the_list_holds_the_callers_devices_and_their_grants_only() {
     assert!(
         listed(&body, &theirs).is_none(),
         "another principal's device never appears"
+    );
+}
+
+#[tokio::test]
+async fn every_listed_device_carries_the_check_code_of_its_stored_key() {
+    // The shared golden vector: this id with a 91-byte all-zero SPKI.
+    let golden = "00000000-0000-4000-8000-000000000001";
+    seed_keyed_device(OWNER, golden, &[0u8; 91], "Golden", DeviceState::Pending);
+    let active = seed_device(OWNER, "Active phone", DeviceState::Active);
+    let (status, body) = list().await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let pending_row = listed(&body, golden).expect("pending pairing listed");
+    assert_eq!(pending_row["state"], "pending");
+    assert_eq!(pending_row["check_code"], "ZDX-MJ5");
+    assert_eq!(
+        listed(&body, &active).expect("active listed")["check_code"],
+        crate::device_tools::check_code::check_code(&active, active.as_bytes())
     );
 }
 

@@ -4745,6 +4745,7 @@
   "this node is already bound; revoke the current enrollment before binding another organization": "هذه العقدة مرتبطة بالفعل؛ ألغِ التسجيل الحالي قبل ربط مؤسسة أخرى",
   "this node is not connected to its organization": "هذه العقدة غير متصلة بمؤسستها",
   "this node resumes handed-off working trees into a new clone only": "تستأنف هذه العقدة أشجار العمل المسلَّمة في نسخة جديدة فقط",
+  "this node's organization binding is not resolved yet; retry shortly": "لم يتم تحديد ارتباط هذه العقدة بالمؤسسة بعد؛ أعد المحاولة بعد قليل",
   "this provider account cannot be installed in the Gateway": "لا يمكن تثبيت حساب المزوّد هذا في Gateway",
   "this runnable kind has no harness chat adapter on this node": "لا يوجد لهذا النوع القابل للتشغيل محوّل دردشة harness على هذه العقدة",
   "this service is set to use Composio in the Integrations Store": "تم ضبط هذه الخدمة لاستخدام Composio في متجر التكاملات",

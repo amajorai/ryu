@@ -233,7 +233,9 @@ fn cloud_box_scripts_take_data_only_from_env() {
 
 /// Runs FETCH_SCRIPT and PUSH_SCRIPT with real git. When the test runs as
 /// root (as Box does), the source repo is owned by another user so the
-/// dubious-ownership check is exercised.
+/// dubious-ownership check is exercised. The scripts are POSIX `sh` that run in
+/// the Linux box, so the test needs a POSIX shell.
+#[cfg(unix)]
 #[test]
 fn cloud_box_clean_room_scripts_push_with_real_git() {
     use std::process::Command;

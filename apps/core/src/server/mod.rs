@@ -147,6 +147,9 @@ pub(crate) mod app_route_revocation_api;
 pub(crate) mod data_user_purge;
 // The control plane's purge delegation, admitted on the purge route only.
 pub(crate) mod data_purge_delegation;
+// Nodes pull queued purges the control plane could not push to them.
+pub(crate) mod data_purge_pull;
+pub(crate) mod data_purge_pull_worker;
 // Run recovery (`approvals.request`, `runs.rerunAgent`, `workflows.rerun`): the
 // grant-gated kernel capabilities a `core#run.failed` subscriber acts through.
 pub mod app_runs;

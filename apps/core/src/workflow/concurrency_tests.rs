@@ -1,25 +1,25 @@
-//! End-to-end tests for concurrent DAG execution, the `ForEach` / `Parallel`
-//! fan-out nodes, and run history / fork (time travel).
+//! End-to-end tests for concurrent DAG execution and the `ForEach` /
+//! `Parallel` fan-out nodes. Run history and fork live in
+//! [`super::history_fork_tests`].
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use super::executor::{fork_run, resume_run, run_workflow};
-use super::history::{self, CheckpointEvent};
+use super::executor::{resume_run, run_workflow};
 use super::store::{self, NodeStatus, RunStatus, WorkflowRun};
 use super::{GraphError, Workflow, WorkflowGraph};
 
-fn unique(prefix: &str) -> String {
+pub(super) fn unique(prefix: &str) -> String {
     format!("{prefix}{}", uuid::Uuid::new_v4().simple())
 }
 
-fn workflow(value: serde_json::Value) -> Workflow {
+pub(super) fn workflow(value: serde_json::Value) -> Workflow {
     serde_json::from_value(value).expect("workflow json")
 }
 
-fn input(text: &str) -> HashMap<String, String> {
+pub(super) fn input(text: &str) -> HashMap<String, String> {
     HashMap::from([("text".to_owned(), text.to_owned())])
 }
 
@@ -48,11 +48,21 @@ fn diamond(id: &str, delay_ms: u64, max_concurrency: Option<u32>) -> Workflow {
     }))
 }
 
-#[tokio::test]
+// Measured on tokio's paused clock, not the wall clock. Every checkpoint
+// fsyncs the run file and its history on this single runtime thread, so a
+// wall-clock bound also timed the disk: under suite load on Windows one run
+// took 22 s instead of 0.4 s. Virtual time advances only while the runtime is
+// idle, so it counts the delay nodes' sleeps and nothing else, and auto-advance
+// makes the minute-long sleeps instant in real time. A node sleeps whatever is
+// left of its wall-clock `wake_at`, so a slow checkpoint can only shorten a
+// sleep; the minute scale keeps that slack far inside the 30 s margin between
+// concurrent (~60 s) and sequential (~120 s) branches.
+#[tokio::test(start_paused = true)]
 async fn independent_branches_run_concurrently_and_join_waits_for_both() {
-    let wf = diamond(&unique("wfconc"), 400, None);
+    const DELAY: Duration = Duration::from_secs(60);
+    let wf = diamond(&unique("wfconc"), DELAY.as_millis() as u64, None);
     let run_id = unique("runconc");
-    let started = Instant::now();
+    let started = tokio::time::Instant::now();
     let run = run_workflow(&wf, input("x"), run_id.clone())
         .await
         .expect("run ok");
@@ -60,8 +70,8 @@ async fn independent_branches_run_concurrently_and_join_waits_for_both() {
     assert_eq!(run.status, RunStatus::Completed);
     assert_eq!(run.output["result"], "x+x");
     assert!(
-        elapsed < Duration::from_millis(750),
-        "two 400ms branches ran concurrently, took {elapsed:?}"
+        elapsed < DELAY * 3 / 2,
+        "two {DELAY:?} branches ran concurrently, took {elapsed:?}"
     );
 
     // Both branches stamped durable timers from their private copies; the
@@ -73,6 +83,19 @@ async fn independent_branches_run_concurrently_and_join_waits_for_both() {
         assert!(node.wake_at.is_some(), "{id} kept its durable timer stamp");
         assert_eq!(node.attempts, 1);
     }
+
+    // Control: the same graph run one node at a time measures past the bound,
+    // so the bound above tells concurrent from sequential execution.
+    let sequential = diamond(&unique("wfconcseq"), DELAY.as_millis() as u64, Some(1));
+    let started = tokio::time::Instant::now();
+    run_workflow(&sequential, input("x"), unique("runconcseq"))
+        .await
+        .expect("run ok");
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= DELAY * 3 / 2,
+        "sequential branches took {elapsed:?}"
+    );
 }
 
 #[tokio::test]
@@ -172,13 +195,13 @@ async fn a_failing_branch_lets_in_flight_siblings_finish_then_fails_the_run() {
     assert!(!persisted.nodes.contains_key("after_slow"));
 }
 
-fn save(value: serde_json::Value) -> Workflow {
+pub(super) fn save(value: serde_json::Value) -> Workflow {
     let wf = workflow(value);
     store::save_workflow(&wf).expect("save workflow");
     wf
 }
 
-fn uppercase_body(id: &str) -> Workflow {
+pub(super) fn uppercase_body(id: &str) -> Workflow {
     save(json!({
         "id": id,
         "name": "body",
@@ -448,198 +471,4 @@ fn new_node_kinds_round_trip_their_wire_format() {
         absent.get("max_concurrency").is_none(),
         "absent stays absent"
     );
-}
-
-/// in → remember (state.k = input) → shout ("{{state.k}}!") → out
-fn fork_workflow() -> Workflow {
-    save(json!({
-        "id": unique("wffork"),
-        "name": "fork",
-        "nodes": [
-            { "id": "in", "type": "input", "key": "text" },
-            { "id": "remember", "type": "set_state", "key": "k", "value": "{{input}}" },
-            { "id": "shout", "type": "transform", "op": "template", "template": "{{state.k}}!" },
-            { "id": "out", "type": "output", "key": "result" }
-        ],
-        "edges": [
-            { "from": "in", "to": "remember" },
-            { "from": "remember", "to": "shout" },
-            { "from": "shout", "to": "out" }
-        ]
-    }))
-}
-
-#[tokio::test]
-async fn history_records_every_node_checkpoint_with_state_snapshots() {
-    let wf = fork_workflow();
-    let run_id = unique("runhist");
-    run_workflow(&wf, input("a"), run_id.clone())
-        .await
-        .expect("run ok");
-    let checkpoints = history::list(&run_id).unwrap();
-    let events: Vec<(CheckpointEvent, Option<&str>)> = checkpoints
-        .iter()
-        .map(|c| (c.event, c.node_id.as_deref()))
-        .collect();
-    assert_eq!(
-        events,
-        vec![
-            (CheckpointEvent::RunStarted, None),
-            (CheckpointEvent::NodeCompleted, Some("in")),
-            (CheckpointEvent::NodeCompleted, Some("remember")),
-            (CheckpointEvent::NodeCompleted, Some("shout")),
-            (CheckpointEvent::NodeCompleted, Some("out")),
-            (CheckpointEvent::RunCompleted, None),
-        ]
-    );
-    for (sequence, checkpoint) in checkpoints.iter().enumerate() {
-        assert_eq!(checkpoint.sequence, sequence as u64);
-        assert_eq!(
-            checkpoint.iteration,
-            u64::from(checkpoint.node_id.is_some())
-        );
-    }
-    assert!(!checkpoints[1].state.contains_key("k"));
-    assert_eq!(checkpoints[2].state["k"], "a");
-    assert_eq!(checkpoints[5].output["result"], "a!");
-}
-
-#[tokio::test]
-async fn fork_replays_from_a_checkpoint_with_a_state_patch() {
-    let wf = fork_workflow();
-    let run_id = unique("runforkparent");
-    run_workflow(&wf, input("a"), run_id.clone())
-        .await
-        .expect("run ok");
-    let after_remember = history::list(&run_id)
-        .unwrap()
-        .into_iter()
-        .find(|c| c.node_id.as_deref() == Some("remember"))
-        .unwrap();
-
-    let forked = fork_run(
-        &run_id,
-        &after_remember.checkpoint_id,
-        HashMap::from([("k".to_owned(), "patched".to_owned())]),
-    )
-    .await
-    .expect("fork ok");
-    assert_ne!(forked.run_id, run_id);
-    assert_eq!(forked.status, RunStatus::Completed);
-    // `remember` was copied, not re-run: re-running it would have reset k to "a".
-    assert_eq!(forked.output["result"], "patched!");
-    let lineage = forked.forked_from.clone().expect("lineage");
-    assert_eq!(lineage.run_id, run_id);
-    assert_eq!(lineage.checkpoint_id, after_remember.checkpoint_id);
-    let fork_history = history::list(&forked.run_id).unwrap();
-    assert_eq!(fork_history[0].event, CheckpointEvent::Forked);
-    assert_eq!(fork_history[0].state["k"], "patched");
-    assert!(fork_history
-        .iter()
-        .all(|c| c.node_id.as_deref() != Some("remember")));
-
-    // The parent is untouched.
-    let parent = store::load_run(&run_id).unwrap();
-    assert_eq!(parent.output["result"], "a!");
-    assert!(parent.forked_from.is_none());
-
-    // Forking without a patch replays the original result.
-    let replay = fork_run(&run_id, &after_remember.checkpoint_id, HashMap::new())
-        .await
-        .expect("replay ok");
-    assert_eq!(replay.output["result"], "a!");
-}
-
-#[tokio::test]
-async fn fork_rejects_engine_state_patches_and_unknown_checkpoints() {
-    let wf = fork_workflow();
-    let run_id = unique("runforkbad");
-    run_workflow(&wf, input("a"), run_id.clone())
-        .await
-        .expect("run ok");
-    let error = fork_run(
-        &run_id,
-        "cp-000001",
-        HashMap::from([("__workflow_parent_run".to_owned(), "x".to_owned())]),
-    )
-    .await
-    .expect_err("engine keys are refused");
-    assert!(error.contains("state_patch"), "{error}");
-    let error = fork_run(&run_id, "cp-999999", HashMap::new())
-        .await
-        .expect_err("unknown checkpoint");
-    assert!(error.contains("not found"), "{error}");
-    let error = fork_run(&unique("missing"), "cp-000000", HashMap::new())
-        .await
-        .expect_err("unknown run");
-    assert!(error.contains("not found"), "{error}");
-}
-
-#[tokio::test]
-async fn fork_refuses_caller_scoped_script_runs() {
-    let run_id = unique("runforkscript");
-    let mut run = WorkflowRun::new(
-        run_id.clone(),
-        format!("{}{}", store::SCRIPT_WORKFLOW_PREFIX, unique("body")),
-        HashMap::new(),
-    );
-    run.status = RunStatus::Completed;
-    store::save_run(&run).unwrap();
-    history::append(&run, CheckpointEvent::RunStarted, None, 0).unwrap();
-    let error = fork_run(&run_id, "cp-000000", HashMap::new())
-        .await
-        .expect_err("script runs stay scoped to their caller");
-    assert!(error.contains("cannot be forked"), "{error}");
-}
-
-#[tokio::test]
-async fn fork_from_a_failure_checkpoint_reruns_the_failed_node_with_patched_state() {
-    // `each` fails while `state.raw` is not a JSON array; fork the failure
-    // checkpoint with a patched value.
-    let body = uppercase_body(&unique("wfforkbody"));
-    let wf = save(json!({
-        "id": unique("wfforkfail"),
-        "name": "fork fail",
-        "nodes": [
-            { "id": "in", "type": "input", "key": "text" },
-            { "id": "flag", "type": "set_state", "key": "raw", "value": "{{input}}" },
-            { "id": "each", "type": "for_each", "body_workflow_id": body.id,
-              "items": "{{state.raw}}" },
-            { "id": "out", "type": "output", "key": "result" }
-        ],
-        "edges": [
-            { "from": "in", "to": "flag" },
-            { "from": "flag", "to": "each" },
-            { "from": "each", "to": "out" }
-        ]
-    }));
-    let run_id = unique("runforkfail");
-    let error = run_workflow(&wf, input("nope"), run_id.clone())
-        .await
-        .expect_err("the parent fails");
-    assert!(error.contains("JSON array"), "{error}");
-    let checkpoints = history::list(&run_id).unwrap();
-    let failed = checkpoints
-        .iter()
-        .find(|c| c.event == CheckpointEvent::NodeFailed)
-        .expect("the failure is a checkpoint");
-    assert_eq!(failed.node_id.as_deref(), Some("each"));
-    assert_eq!(
-        checkpoints.last().unwrap().event,
-        CheckpointEvent::RunFailed
-    );
-
-    let forked = fork_run(
-        &run_id,
-        &failed.checkpoint_id,
-        HashMap::from([("raw".to_owned(), r#"["x","y"]"#.to_owned())]),
-    )
-    .await
-    .expect("the fork succeeds");
-    assert_eq!(forked.status, RunStatus::Completed);
-    let result: serde_json::Value = serde_json::from_str(&forked.output["result"]).unwrap();
-    assert_eq!(result, json!(["X", "Y"]));
-    // Its children are its own: the fork's run id scopes every child run.
-    assert!(store::load_run(&format!("{}-each-item-0", forked.run_id)).is_ok());
-    assert_eq!(store::load_run(&run_id).unwrap().status, RunStatus::Failed);
 }

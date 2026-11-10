@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import {
 	approvePairedPhone,
 	forgetPairedPhone,
@@ -9,6 +10,7 @@ import {
 	MAX_MEMBER_USER_ID_BYTES,
 	memberUserIdProblem,
 	type PairedDevice,
+	pairingCheckCode,
 	renamePairedPhone,
 	revokeMemberAppDelegations,
 	revokePairedPhoneGrants,
@@ -33,6 +35,7 @@ function device(overrides: Partial<PairedDevice>): PairedDevice {
 	return {
 		always_allowed: [],
 		app: "ryu",
+		check_code: null,
 		device_id: "dev",
 		foreground: false,
 		label: "Phone",
@@ -186,4 +189,79 @@ it("reads a JWT subject for cache scoping and ignores anything else", () => {
 	expect(jwtSubject("a.%%%.c")).toBeNull();
 	expect(jwtSubject(null)).toBeNull();
 	expect(jwtSubject(undefined)).toBeNull();
+});
+
+/** The shared pairing-check-code derivation, written out to pin the golden vector. */
+function referenceCheckCode(deviceId: string, spki: Uint8Array): string {
+	const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+	const digest = createHash("sha256")
+		.update("ryu-device-check-v1\n")
+		.update(deviceId.toLowerCase())
+		.update("\n")
+		.update(spki)
+		.digest();
+	const bits = [...digest]
+		.map((byte) => byte.toString(2).padStart(8, "0"))
+		.join("");
+	let code = "";
+	for (let index = 0; index < 6; index += 1) {
+		code += alphabet[Number.parseInt(bits.slice(index * 5, index * 5 + 5), 2)];
+	}
+	return `${code.slice(0, 3)}-${code.slice(3)}`;
+}
+
+const GOLDEN_DEVICE_ID = "00000000-0000-4000-8000-000000000001";
+const GOLDEN_CHECK_CODE = "ZDX-MJ5";
+
+it("matches the shared golden pairing check code vector", () => {
+	expect(referenceCheckCode(GOLDEN_DEVICE_ID, new Uint8Array(91))).toBe(
+		GOLDEN_CHECK_CODE
+	);
+	expect(pairingCheckCode(GOLDEN_CHECK_CODE)).toBe(GOLDEN_CHECK_CODE);
+});
+
+it("keeps Core's check code and never derives one from the device id", async () => {
+	const { target } = serve(() =>
+		Response.json({
+			principal_id: "owner:local",
+			devices: [
+				device({
+					check_code: GOLDEN_CHECK_CODE,
+					device_id: GOLDEN_DEVICE_ID,
+					state: "pending",
+				}),
+				{
+					...device({ device_id: "dev-0123456789abcdef" }),
+					check_code: undefined,
+				},
+				{ ...device({ device_id: "bad" }), check_code: "zdx-mj5" },
+			],
+		})
+	);
+	const snapshot = await listPairedPhones(target);
+	expect(
+		snapshot.devices.map((entry) => [entry.device_id, entry.check_code])
+	).toEqual([
+		[GOLDEN_DEVICE_ID, GOLDEN_CHECK_CODE],
+		["dev-0123456789abcdef", null],
+		["bad", null],
+	]);
+});
+
+it("accepts only well-formed Crockford check codes", () => {
+	expect(pairingCheckCode("0AB-YZ9")).toBe("0AB-YZ9");
+	for (const value of [
+		undefined,
+		null,
+		42,
+		"",
+		"ABCDEF",
+		"ABC-DEFG",
+		"abc-def",
+		"ABI-DEF",
+		"ABC-DLO",
+		"ABU-DEF",
+	]) {
+		expect(pairingCheckCode(value)).toBeNull();
+	}
 });

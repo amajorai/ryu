@@ -190,14 +190,6 @@ function ForgetButton({
 	);
 }
 
-/** Characters of the device id shown as the check code in the approve dialog. */
-const CHECK_CODE_LENGTH = 6;
-
-/** The trailing characters of a device id, for comparing against the phone. */
-export function pairingCheckCode(deviceId: string): string {
-	return deviceId.slice(-CHECK_CODE_LENGTH).toUpperCase();
-}
-
 function requestedAt(pairedAtMs: number): string {
 	if (!(Number.isFinite(pairedAtMs) && pairedAtMs > 0)) {
 		return "";
@@ -212,8 +204,8 @@ function requestedAt(pairedAtMs: number): string {
 /**
  * Approve a pending pairing only after the owner compares what the phone sent
  * with the phone in their hand. The label is chosen by the phone, so the
- * dialog also shows the platform, app, request time and a check code taken
- * from the device id.
+ * dialog also shows the platform, app, request time and, when Core sends one,
+ * the check code bound to the phone's key. Without it no code is shown.
  */
 function ApproveButton({
 	busy,
@@ -232,8 +224,10 @@ function ApproveButton({
 		[tl("Platform"), tl(platformLabel(device.platform))],
 		[tl("App"), device.app || "—"],
 		[tl("Requested"), requestedAt(device.paired_at_ms) || "—"],
-		[tl("Check code"), pairingCheckCode(device.device_id)],
 	];
+	if (device.check_code) {
+		details.push([tl("Check code"), device.check_code]);
+	}
 	return (
 		<AlertDialog onOpenChange={setOpen} open={open}>
 			<AlertDialogTrigger
@@ -308,6 +302,10 @@ export function PairedPhoneRow({
 		: device.foreground
 			? tl("Open now")
 			: tl("Active {when}", { when: presenceAgo(device.last_seen_ms) });
+	const detail = [tl(platformLabel(device.platform)), status];
+	if (device.check_code) {
+		detail.push(`${tl("Check code")} ${device.check_code}`);
+	}
 	return (
 		<SettingsItem
 			actions={
@@ -341,7 +339,7 @@ export function PairedPhoneRow({
 			}
 			title={
 				<RowTitle
-					detail={`${tl(platformLabel(device.platform))} · ${status}`}
+					detail={detail.join(" · ")}
 					leading={
 						<SettingsIconTile
 							icon={SmartPhone01Icon}

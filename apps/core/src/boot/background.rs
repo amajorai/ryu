@@ -147,5 +147,9 @@ pub(super) async fn spawn_control_plane_loops(
         ));
         // The picker's Ryu Router "Free" tags (control-plane projection).
         tokio::spawn(sidecar::control_plane::run_free_models_refresh_loop());
+        // Queued per-member purges the control plane could not push here
+        // (NAT, no advertised URL): pulled with the node credential, run,
+        // acknowledged. Sleeps without network on an unbound node.
+        server::data_purge_pull_worker::spawn(server_state.clone());
     }
 }

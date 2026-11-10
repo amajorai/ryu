@@ -4745,6 +4745,7 @@
   "this node is already bound; revoke the current enrollment before binding another organization": "этот узел уже привязан; отзовите текущую регистрацию, прежде чем привязывать другую организацию",
   "this node is not connected to its organization": "этот узел не подключён к своей организации",
   "this node resumes handed-off working trees into a new clone only": "этот узел возобновляет переданные рабочие деревья только в новом клоне",
+  "this node's organization binding is not resolved yet; retry shortly": "привязка этого узла к организации ещё не определена; повторите попытку чуть позже",
   "this provider account cannot be installed in the Gateway": "эту учётную запись провайдера нельзя установить в Gateway",
   "this runnable kind has no harness chat adapter on this node": "для этого исполняемого типа на этом узле нет адаптера чата harness",
   "this service is set to use Composio in the Integrations Store": "для этой службы в магазине интеграций выбран Composio",

@@ -79,7 +79,9 @@ async function findUserIdByEmail(email: string): Promise<string | null> {
  * Admission decisions for every organization hook below, wired to the Mongo
  * seat claims, Polar capacity and family-sharing capacity in this file.
  */
-export const organizationAdmission = createOrganizationAdmission({
+export const organizationAdmission: ReturnType<
+	typeof createOrganizationAdmission
+> = createOrganizationAdmission({
 	activeSeatCapacity: activeTeamsSeatCount,
 	claimFamilyPlace: (place) =>
 		claimFamilyMembershipSlot({

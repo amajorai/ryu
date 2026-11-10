@@ -30,6 +30,7 @@ pub(crate) mod bridge_calls;
 pub(crate) mod caps;
 pub(crate) mod caps_resolver;
 pub(crate) mod catalog;
+pub(crate) mod check_code;
 pub(crate) mod claims;
 pub(crate) mod codes;
 pub(crate) mod confirm;

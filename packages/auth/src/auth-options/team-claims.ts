@@ -11,7 +11,7 @@ interface OrgClaim {
 }
 
 /** Mirrors Core's `TeamMembership` — the keys are a wire contract, keep them short. */
-interface TeamClaim {
+export interface TeamClaim {
 	id: string;
 	org: string;
 	role: string;

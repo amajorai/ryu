@@ -4745,6 +4745,7 @@
   "this node is already bound; revoke the current enrollment before binding another organization": "questo nodo è già associato; revoca la registrazione attuale prima di associare un’altra organizzazione",
   "this node is not connected to its organization": "questo nodo non è connesso alla sua organizzazione",
   "this node resumes handed-off working trees into a new clone only": "questo nodo riprende gli alberi di lavoro passati solo in un nuovo clone",
+  "this node's organization binding is not resolved yet; retry shortly": "il collegamento di questo nodo all'organizzazione non è ancora risolto; riprova tra poco",
   "this provider account cannot be installed in the Gateway": "questo account del provider non può essere installato nel Gateway",
   "this runnable kind has no harness chat adapter on this node": "questo tipo eseguibile non ha un adattatore di chat harness su questo nodo",
   "this service is set to use Composio in the Integrations Store": "questo servizio è impostato per usare Composio nello Store delle integrazioni",
