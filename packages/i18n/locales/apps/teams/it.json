@@ -28,6 +28,7 @@
   "Group created": "Gruppo creato",
   "Group deleted": "Gruppo eliminato",
   "Group updated": "Gruppo aggiornato",
+  "Groups cannot reach its sidecar. Check the {permission} permission and try again.": "Groups non riesce a raggiungere il proprio sidecar. Controlla l’autorizzazione {permission} e riprova.",
   "Groups couldn't load": "Impossibile caricare i gruppi",
   "Groups loaded, but agents could not: {error}": "I gruppi sono stati caricati, ma gli agenti no: {error}",
   "Groups returned an invalid group record.": "Gruppi ha restituito un record di gruppo non valido.",

@@ -46,6 +46,13 @@
 // and the companion shows every operator and every sub-call behind an answer. If a
 // reading looks wrong, the trace is where it is settled.
 
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
+
 if (!(ctx.flags && ctx.flags["io.ryu.rlm"])) {
 	return { kind: "none" };
 }
@@ -67,9 +74,9 @@ const contextId = await host.getPreference({ key: "rlm-active-context" });
 if (!(contextId && String(contextId).trim())) {
 	return {
 		kind: "note",
-		text:
-			"Deep read skipped: no context is selected. Load one in the Deep Read companion, " +
-			"then put its id in Settings → Recursive Language Model.",
+		text: await host.t(
+			"Deep read skipped: no context is selected. Load one in the Deep Read companion, then put its id in Settings → Recursive Language Model.",
+		),
 	};
 }
 
@@ -107,7 +114,7 @@ try {
 		wall_time_secs: 900,
 	});
 } catch (e) {
-	return { kind: "note", text: `Deep read could not run: ${e}` };
+	return { kind: "note", text: await host.t("Deep read could not run: {error}", { error: String(e) }) };
 }
 
 // Normalize nullable transport replies before checking the final-text marker.
@@ -116,11 +123,14 @@ const marker = text.match(/RLM:\s*(ok|budget_exhausted|error)\s+(\S+)\s*$/im);
 if (!marker) {
 	return {
 		kind: "note",
-		text:
-			"Deep read did not run: the reader could not reach the RLM tool, so nothing was " +
-			"read from your documents and the answer above is unchanged. (Its reply: " +
-			(text || "empty") +
-			")",
+		text: text
+			? await host.t(
+					"Deep read did not run: the reader could not reach the RLM tool, so nothing was read from your documents and the answer above is unchanged. (Its reply: {reply})",
+					{ reply: text },
+				)
+			: await host.t(
+					"Deep read did not run: the reader could not reach the RLM tool, so nothing was read from your documents and the answer above is unchanged. (Its reply: empty)",
+				),
 	};
 }
 
@@ -133,7 +143,7 @@ const body = text
 if (status === "error") {
 	return {
 		kind: "note",
-		text: `Deep read failed (run ${runId}). Nothing was read from your documents.\n${body}`,
+		text: `${await host.t("Deep read failed (run {runId}). Nothing was read from your documents.", { runId })}\n${body}`,
 	};
 }
 
@@ -142,7 +152,7 @@ if (status === "error") {
 // it got" are different claims and only one of them is safe to act on.
 const header =
 	status === "budget_exhausted"
-		? `From your documents — PARTIAL, the read hit its budget (run ${runId})`
-		: `From your documents (run ${runId})`;
+		? await host.t("From your documents — PARTIAL, the read hit its budget (run {runId})", { runId })
+		: await host.t("From your documents (run {runId})", { runId });
 
 return { kind: "note", text: `${header}\n${body}` };

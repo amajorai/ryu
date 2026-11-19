@@ -38,6 +38,7 @@ import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 import { NodePanelNav, PanelBackButton } from "./NodePanelNav.tsx";
 import { AddNodeDialog } from "./NodeSelector-add-node-dialog.tsx";
 import { AutoSelectRow } from "./NodeSelector-auto-select.tsx";
+import { useCoreUnavailableLabel } from "./NodeSelector-core-unavailable.ts";
 import { NodeSelectorDropdown } from "./NodeSelector-dropdown.tsx";
 import { NodeHardwareDialog } from "./NodeSelector-hardware.tsx";
 import { ShareNodeDialog } from "./NodeSelector-lazy-share-node-dialog.tsx";
@@ -47,6 +48,7 @@ import {
 } from "./NodeSelector-menu-parts.tsx";
 import { NodeItem } from "./NodeSelector-node-item.tsx";
 import { ServiceRow } from "./NodeSelector-service-row.tsx";
+import { useServicesSummary } from "./NodeSelector-services-summary.ts";
 import { NodeSelectorSettingsRoot } from "./NodeSelector-settings-root.tsx";
 import { openManageCloudServers, resolveTone } from "./NodeSelector-status.tsx";
 import { CloudSuggestions, ManagedNodeWallet } from "./NodeSelector-wallet.tsx";
@@ -211,13 +213,10 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 	if (meshStatus !== null) {
 		services.push({ label: "Network", up: meshReachable });
 	}
-	const stoppedServices = services.filter((svc) => svc.up === false);
-	let servicesSummary = "All running";
-	if (loading) {
-		servicesSummary = "Checking…";
-	} else if (stoppedServices.length > 0) {
-		servicesSummary = `${stoppedServices.map((svc) => svc.label).join(", ")} stopped`;
-	}
+	const servicesSummary = useServicesSummary(
+		loading,
+		services.filter((svc) => svc.up === false).map((svc) => svc.label)
+	);
 
 	const openSettings = () => setSettingsOpen(true);
 
@@ -277,12 +276,7 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 	// the STEADY reachability: one missed status poll must not unmount the
 	// sections and throw the user off the layer page they are on.
 	const coreSteady = useSteadyReachable(coreReachable === true, target.url);
-	let coreUnavailable: string | null = null;
-	if (loading) {
-		coreUnavailable = "Checking…";
-	} else if (!coreSteady) {
-		coreUnavailable = "Unavailable — Core isn't reachable";
-	}
+	const coreUnavailable = useCoreUnavailableLabel(loading, coreSteady);
 
 	// Steady like the rows above: a failed status poll nulls `meshStatus`, and an
 	// unmounted row would send a user mid-task on this page back to the root.

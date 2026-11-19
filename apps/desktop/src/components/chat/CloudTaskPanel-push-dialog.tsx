@@ -123,7 +123,7 @@ export function PushDialog({
 			} else {
 				toast.error(
 					tl("Push failed ({error}). The box was kept.", {
-						error: finish.pushError ?? "unknown",
+						error: finish.pushError ?? tl("unknown"),
 					})
 				);
 			}
@@ -192,7 +192,7 @@ export function PushDialog({
 						{result && !result.pushed ? (
 							<p className="text-sm text-status-destructive" role="alert">
 								{tl("Push failed ({error}). The box was kept.", {
-									error: result.pushError ?? "unknown",
+									error: result.pushError ?? tl("unknown"),
 								})}
 							</p>
 						) : null}

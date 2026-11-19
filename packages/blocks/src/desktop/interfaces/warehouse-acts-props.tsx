@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	ClockOptions,
 	InterfaceAgentAct,
@@ -37,10 +38,14 @@ export const SKIN: ActSkin = {
  * 15:10" (the kit adds "Likely ").
  */
 export const forkliftLimit: LimitText = (act, clearsAt) => {
-	const words = clearsAt ? `back ${clearsAt}` : "parked for now";
-	return limitIsLikely(act)
-		? words
-		: `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+	if (limitIsLikely(act)) {
+		return clearsAt
+			? tr("back {time}", { time: clearsAt })
+			: tr("parked for now");
+	}
+	return clearsAt
+		? tr("Back {time}", { time: clearsAt })
+		: tr("Parked for now");
 };
 
 /** The basket's items as progress pips: picked, still to pick, a guess. */

@@ -178,6 +178,6 @@ describe("MemoryDreamReview archive proposals", () => {
 		// The archive moves to Recently accepted, where it can be undone.
 		const recent = container.querySelector("[data-testid=dream-recent]");
 		expect(recent?.textContent).toContain("Flew to Lisbon on 3 March");
-		expect(recent?.textContent).toContain("Archived");
+		expect(recent?.textContent).toContain("Memory archived");
 	});
 });

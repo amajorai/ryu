@@ -28,12 +28,12 @@ export function ModelContextAttachments({ scope }: { scope: string }) {
 					const title =
 						item._meta?.["openai/title"] ||
 						(item.type === "text"
-							? item.text.slice(0, 64) || "App context"
+							? item.text.slice(0, 64) || tl("App context")
 							: item.type === "resource_link"
 								? item.name
 								: item.type === "resource"
 									? item.resource.uri
-									: "App image");
+									: tl("App image"));
 					const thumbnail =
 						item.type === "image"
 							? `data:${item.mimeType};base64,${item.data}`

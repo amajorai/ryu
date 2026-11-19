@@ -1,9 +1,13 @@
 import { formatPercent } from "@ryu/i18n/format-percent";
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useRichLiteralMessages,
+} from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { ChevronLeft } from "lucide-react";
-import { type RefObject, useId, useRef } from "react";
+import { type ReactNode, type RefObject, useId, useRef } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
 import { threadStatusLabel } from "./interface-renderer.ts";
 import { ChapterComposer } from "./library-composer.tsx";
@@ -112,6 +116,29 @@ function ContentsRow({
 	);
 }
 
+/** The author names after "by": names, so the page localizer leaves them. */
+function authorsTag(chunks: ReactNode): ReactNode {
+	return (
+		<span className="font-medium text-foreground" data-ryu-i18n="off">
+			{chunks}
+		</span>
+	);
+}
+
+/**
+ * The composer's placeholder, naming whom the chapter is for as one whole
+ * sentence per kind of book (an agent, or the team, project or collection).
+ */
+export function chapterPlaceholder(
+	book: Pick<LibraryBook, "kind" | "title">,
+	tl: LiteralMessage
+): string {
+	return tl(
+		"{kind, select, agent {Start a new conversation with {title}} team {Start a new conversation with the {title} team} project {Start a new conversation with the {title} project} other {Start a new conversation with the {title} collection}}",
+		{ kind: book.kind, title: book.title }
+	);
+}
+
 /** The one line of state beside the author: a failure, a live run, or a turn. */
 function authorStatus(
 	book: LibraryBook,
@@ -169,13 +196,11 @@ export function BookDetail({
 	const fieldRef = useRef<HTMLTextAreaElement>(null);
 	const contentsId = useId();
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const resume = resumeChapter(book);
 	const percent = progressPercent(book);
 	const status = authorStatus(book, tl);
-	const subject =
-		book.kind === "agent"
-			? book.title
-			: `the ${book.title} ${book.kind === "unassigned" ? "collection" : book.kind}`;
+	const placeholder = chapterPlaceholder(book, tl);
 	const writeChapter = () => {
 		fieldRef.current?.focus();
 		fieldRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -219,10 +244,11 @@ export function BookDetail({
 						{book.title}
 					</h1>
 					<p className="mt-2 text-base text-muted-foreground">
-						by{" "}
-						<span className="font-medium text-foreground">
-							{authorList(book.authors)}
-						</span>
+						{tlRich(
+							"by <authors>{authors}</authors>",
+							{ authors: authorList(book.authors) },
+							{ authors: authorsTag }
+						)}
 						{status ? (
 							<span
 								className={cn(
@@ -319,7 +345,7 @@ export function BookDetail({
 						defaultAgentId={book.agentId}
 						fieldRef={fieldRef}
 						onSubmit={onWrite}
-						subject={subject}
+						placeholder={placeholder}
 					/>
 				</div>
 			</section>

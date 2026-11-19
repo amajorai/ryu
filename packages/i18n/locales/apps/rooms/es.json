@@ -65,6 +65,7 @@
   "The room is generating…": "La sala está generando…",
   "The room is ready. Send the first prompt.": "La sala está lista. Envía el primer prompt.",
   "The room is temporarily unavailable. Try again.": "La sala no está disponible temporalmente. Inténtalo de nuevo.",
+  "The room request was not accepted.": "No se aceptó la solicitud de la sala.",
   "The turn response was not a valid room.": "La respuesta del turno no era una sala válida.",
   "This closes the room and revokes its current guest sessions.": "Esto cierra la sala y revoca sus sesiones de invitado actuales.",
   "This invite is invalid, expired, or revoked.": "Esta invitación no es válida, ha caducado o se ha revocado.",

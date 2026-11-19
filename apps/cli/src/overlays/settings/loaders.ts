@@ -13,7 +13,12 @@ import { listQuests } from "@ryuhq/core-client/quests";
 import { z } from "zod";
 import type { ListRow } from "../../core/featureList.ts";
 import { formatCliDate, formatCliNumber } from "../../i18n/format.ts";
-import { tf, tr } from "../../i18n/translate.ts";
+import {
+	CLI_TRANSLATOR,
+	type CliTranslator,
+	tf,
+	tr,
+} from "../../i18n/translate.ts";
 
 const TITLE_MAX = 72;
 const KIB = 1024;
@@ -117,18 +122,30 @@ export async function loadMeetings(target: ApiTarget): Promise<ListRow[]> {
 
 // ── Tasks / quests (GET /api/quests) ────────────────────────────────────────
 
-export async function loadQuests(target: ApiTarget): Promise<ListRow[]> {
-	const quests = await listQuests(target);
+type Quest = Awaited<ReturnType<typeof listQuests>>[number];
+
+/** Quest rows: a missing kind and the pinned badge read in the CLI locale. */
+export function questRows(
+	quests: readonly Quest[],
+	translator: Pick<CliTranslator, "tf" | "tr"> = CLI_TRANSLATOR
+): ListRow[] {
+	const { tf, tr } = translator;
 	return quests.map((quest) => {
-		const kind = quest.kind ?? "task";
+		const kind = quest.kind ?? tr("task");
 		const detail = quest.completion_condition || quest.detail || "";
 		return {
 			id: quest.id,
 			title: oneLine(quest.title) || quest.id,
 			subtitle: detail ? `${kind} · ${oneLine(detail)}` : kind,
-			badge: quest.pinned ? `${quest.status} · pinned` : quest.status,
+			badge: quest.pinned
+				? tf("{status} · pinned", { status: tr(quest.status) })
+				: quest.status,
 		};
 	});
+}
+
+export async function loadQuests(target: ApiTarget): Promise<ListRow[]> {
+	return questRows(await listQuests(target));
 }
 
 // ── Features / apps (GET /api/plugins) ──────────────────────────────────────
@@ -169,7 +186,7 @@ export async function loadStorage(target: ApiTarget): Promise<ListRow[]> {
 			id: "current",
 			title: "Data folder",
 			subtitle: info.current,
-			badge: info.is_custom ? "custom" : "default",
+			badge: info.is_custom ? tr("custom") : tr("default"),
 		},
 	];
 	if (info.size_bytes !== undefined) {

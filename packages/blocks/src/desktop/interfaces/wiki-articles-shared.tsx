@@ -153,15 +153,18 @@ export function RunList({
 	);
 }
 
-export function Missing({ noun }: { noun: string }) {
+/** What a missing article was about: an agent, a team or project, a thread. */
+export type MissingArticle = "agent" | "group" | "thread";
+
+export function Missing({ article }: { article: MissingArticle }) {
 	const tl = useLiteralMessages();
 	const tlRich = useRichLiteralMessages();
 	return (
 		<div className="pt-4">
 			<p className={PROSE}>
 				{tl(
-					"The wiki does not have a {noun} with this name. It may have been deleted or renamed.",
-					{ noun }
+					"{article, select, agent {The wiki does not have an agent with this name. It may have been deleted or renamed.} group {The wiki does not have a team or project with this name. It may have been deleted or renamed.} other {The wiki does not have a thread with this name. It may have been deleted or renamed.}}",
+					{ article }
 				)}
 			</p>
 			<p className={`${PROSE} mt-3`}>

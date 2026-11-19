@@ -8,7 +8,7 @@ import {
 	SourceCodeIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Command,
 	CommandDialog,
@@ -50,9 +50,9 @@ const IS_MAC_PLATFORM =
  *  Command/Meta+Backspace (Mac laptops label Backspace "delete" and need Fn for
  *  a forward Delete). */
 const REMOVE_PROJECT_KEYSHORTCUTS = "Delete Meta+Backspace";
-const REMOVE_PROJECT_SHORTCUT_LABEL = IS_MAC_PLATFORM
-	? "Command+Delete or Fn+Delete"
-	: "Delete";
+/** The shortcut as the platform labels its keys, in the viewer's language. */
+const removeProjectShortcutLabel = (tl: LiteralMessage) =>
+	IS_MAC_PLATFORM ? tl("Command+Delete or Fn+Delete") : tl("Delete");
 
 function isRemoveProjectShortcut(e: React.KeyboardEvent): boolean {
 	if (e.altKey || e.shiftKey || e.ctrlKey) {
@@ -273,7 +273,7 @@ function ProjectPickerContent({
 								<CommandItem
 									aria-description={tl(
 										"Press {shortcut} to remove from projects",
-										{ shortcut: REMOVE_PROJECT_SHORTCUT_LABEL }
+										{ shortcut: removeProjectShortcutLabel(tl) }
 									)}
 									aria-keyshortcuts={REMOVE_PROJECT_KEYSHORTCUTS}
 									aria-label={tl("Open {name}", { name })}
@@ -334,7 +334,7 @@ function ProjectPickerContent({
 										className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md opacity-0 transition-opacity duration-150 hover:bg-foreground/10 group-hover/recent:opacity-100 group-data-selected/recent:opacity-100"
 										data-remove-project=""
 										title={tl("Remove from projects ({shortcut})", {
-											shortcut: REMOVE_PROJECT_SHORTCUT_LABEL,
+											shortcut: removeProjectShortcutLabel(tl),
 										})}
 									>
 										<HugeiconsIcon

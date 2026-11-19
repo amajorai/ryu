@@ -181,3 +181,31 @@ export function resetGettingStarted(): void {
 	writeStorage(cache);
 	notify();
 }
+
+/**
+ * A quest's title in the UI language. Each title is a literal `tl()` call so
+ * the extractor catalogs it; the quest table only holds the English.
+ */
+export function questTitle(
+	tl: (source: string) => string,
+	quest: Pick<GettingStartedQuest, "content" | "id">
+): string {
+	switch (quest.id) {
+		case "chat":
+			return tl("Send your first message");
+		case "project":
+			return tl("Create your first project");
+		case "agent":
+			return tl("Explore the agents");
+		case "model":
+			return tl("Install a local model");
+		case "skill":
+			return tl("Add a skill");
+		case "workflow":
+			return tl("Build a workflow");
+		case "customize":
+			return tl("Customize your Ryu");
+		default:
+			return tl(quest.content);
+	}
+}

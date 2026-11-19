@@ -167,7 +167,7 @@ export function RecordsHeader({
 							</DropdownMenuGroup>
 							<DropdownMenuSeparator />
 							<DropdownMenuGroup>
-								<DropdownMenuLabel>Views</DropdownMenuLabel>
+								<DropdownMenuLabel>Saved views</DropdownMenuLabel>
 								{RECORDS_VIEWS.map((option) => (
 									<DropdownMenuItem
 										className={MENU_ITEM}

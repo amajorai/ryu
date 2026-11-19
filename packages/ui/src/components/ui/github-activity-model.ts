@@ -34,6 +34,28 @@ export const DEFAULT_UNIT = {
 	singular: "contribution",
 } as const satisfies ContributionUnit;
 
+/** The profile activity graph's unit: Ryu requests a day. */
+export const REQUEST_UNIT = {
+	plural: "requests",
+	singular: "request",
+} as const satisfies ContributionUnit;
+
+/**
+ * Which built-in unit `unit` is, matched by its words rather than identity:
+ * a unit a server page hands a client component arrives as a copy. Built-in
+ * units get whole ICU sentences; any other unit's words go into a template.
+ */
+function builtInUnit(
+	unit: ContributionUnit
+): "contribution" | "request" | null {
+	for (const known of [DEFAULT_UNIT, REQUEST_UNIT]) {
+		if (unit.singular === known.singular && unit.plural === known.plural) {
+			return known.singular;
+		}
+	}
+	return null;
+}
+
 export const gapFor = (cellSize: number) =>
 	Math.max(2, Math.round(cellSize / 4));
 // never zero: weeks.slice(-0) would hand back the whole history instead of nothing
@@ -100,9 +122,16 @@ export function describeDay(
 		month: "short",
 		year: "numeric",
 	}).format(new Date(`${date}T00:00:00`));
-	if (unit === DEFAULT_UNIT) {
+	const known = builtInUnit(unit);
+	if (known === "contribution") {
 		return tl(
 			"{count, plural, one {# contribution on {date}} other {# contributions on {date}}}",
+			{ count, date: day }
+		);
+	}
+	if (known === "request") {
+		return tl(
+			"{count, plural, one {# request on {date}} other {# requests on {date}}}",
 			{ count, date: day }
 		);
 	}
@@ -125,7 +154,16 @@ export function contributionHeading(
 		total,
 		year: String(year ?? ""),
 	};
-	if (unit === DEFAULT_UNIT) {
+	const known = builtInUnit(unit);
+	if (known === "request") {
+		return year
+			? tl(
+					"{total, plural, one {# request in {year}} other {# requests in {year}}}",
+					values
+				)
+			: tl("{total, plural, one {# request} other {# requests}}", values);
+	}
+	if (known === "contribution") {
 		return year
 			? tl(
 					"{total, plural, one {# contribution in {year}} other {# contributions in {year}}}",

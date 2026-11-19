@@ -77,7 +77,6 @@ import {
 	ProductModeProvider,
 	useCliProductMode,
 } from "./core/ProductModeContext.tsx";
-import type { ProductMode } from "./core/productMode.ts";
 import {
 	OverlayHost,
 	OverlayProvider,
@@ -94,6 +93,7 @@ import {
 	moveTargetFor,
 } from "./core/keymap.ts";
 import { CommandPalette } from "./palette/CommandPalette.tsx";
+import { focusedRegionName, shellStatusLeft } from "./shell-status-names.ts";
 import { Sidebar } from "./sidebar/Sidebar.tsx";
 import { copySelectionToClipboard, useCopyOnSelect } from "./ui/clipboard.ts";
 import { StatusProvider } from "./ui/StatusContext.tsx";
@@ -104,20 +104,6 @@ import { RegionView } from "./workspace/RegionView.tsx";
 import { SplitView } from "./workspace/SplitView.tsx";
 import { TabStrip } from "./workspace/TabStrip.tsx";
 import { useWorkspace } from "./workspace/WorkspaceContext.tsx";
-
-/** Each product mode's display name (the stored values stay "bot" / "console" / "os"). */
-const MODE_NAMES: Record<ProductMode, string> = {
-	bot: "Bot",
-	console: "Agent",
-	os: "OS",
-};
-
-const REGION_NAMES = {
-	bottom: "Bottom",
-	center: "Center",
-	left: "Left",
-	right: "Right",
-} as const;
 
 /** A second Ctrl+C within this window quits. */
 export const EXIT_CONFIRM_WINDOW_MS = 2000;
@@ -442,11 +428,9 @@ function WorkspaceShell() {
 			) : null}
 			<ShellStatusBar
 				// The mode's name, not its stored value ("console" is Agent).
-				left={`${MODE_NAMES[effectiveMode].toUpperCase()} · ${url}`}
+				left={shellStatusLeft(effectiveMode, url)}
 				// Right / Bottom focus is named and kept; a narrow terminal trims the URL.
-				leftSuffix={
-					focusedRegion === "center" ? undefined : REGION_NAMES[focusedRegion]
-				}
+				leftSuffix={focusedRegionName(focusedRegion)}
 				mode={effectiveMode}
 			/>
 			{/* Absolute top-right layer; last so it paints above panes and overlays. */}

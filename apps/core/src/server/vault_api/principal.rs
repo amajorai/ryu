@@ -39,6 +39,7 @@ impl Ctx {
         let subjects = caller_subjects(caller.as_ref());
         let policies = {
             let conn = store.conn.lock().await;
+            crate::vault::policy::namespace_locks::refresh(store, &conn).map_err(vault_error)?;
             crate::vault::policy::policies_for(&conn, &subjects).map_err(vault_error)?
         };
         Ok(Self {
@@ -107,6 +108,9 @@ impl Ctx {
     /// row-iterating caller (listing, `to_wire`, `scan`, audit events) and
     /// every per-item check therefore agrees with [`resolve_target`].
     pub(crate) fn caps(&self, coords: &SecretCoords) -> CapabilitySet {
+        if self.namespace_lock(coords).is_some() {
+            return CapabilitySet::new();
+        }
         if !scope_visible(
             coords.scope,
             &coords.scope_id,
@@ -163,7 +167,7 @@ impl Ctx {
         self.caps(coords).contains(&Capability::Read) && self.read_control_group(coords).is_none()
     }
 
-    /// The first parameter-constraint violation a write of `value` to
+    /// The first parameter-constraint or value-rule violation a write of `value` to
     /// `coords` would commit, if any. A JSON-object value contributes its
     /// top-level keys; any other value is the single parameter `value`.
     pub(crate) fn write_parameters_violation(
@@ -171,17 +175,20 @@ impl Ctx {
         coords: &SecretCoords,
         value: &str,
     ) -> Option<String> {
+        use crate::vault::policy_ext::{check_parameters, check_value_rules};
         let parameters: BTreeMap<String, Value> = match serde_json::from_str::<Value>(value) {
             Ok(Value::Object(map)) => map.into_iter().collect(),
             _ => BTreeMap::from([("value".to_owned(), Value::String(value.to_owned()))]),
         };
-        crate::vault::policy_ext::check_parameters(
+        let (key, context) = (coords.policy_key(), self.template_context());
+        check_parameters(
             &self.policies,
-            &coords.policy_key(),
+            &key,
             Capability::Write,
-            &self.template_context(),
+            &context,
             &parameters,
         )
+        .and_then(|()| check_value_rules(&self.policies, &key, &context, value))
         .err()
     }
 
@@ -228,6 +235,12 @@ impl Ctx {
         coords: &SecretCoords,
         capability: Capability,
     ) -> Result<(), Response> {
+        if let Some(lock) = self.namespace_lock(coords) {
+            return Err(json_error(
+                StatusCode::LOCKED,
+                format!("vault_locked: {}", lock.refusal()),
+            ));
+        }
         if self.caps(coords).contains(&capability) {
             Ok(())
         } else {
@@ -293,11 +306,11 @@ impl Ctx {
 
     /// Whether team/org values for this request live in the control plane.
     pub(crate) fn shared_remote(&self, scope: SecretScope) -> bool {
-        matches!(scope, SecretScope::Team | SecretScope::Org) && crate::vault::shared::is_enabled()
+        matches!(scope, SecretScope::Team | SecretScope::Org) && shared_enabled()
     }
 
     /// The team/org id for a shared request, defaulting to this node's own.
-    pub(super) fn shared_scope_id(&self, coords: &CoordsBody) -> String {
+    pub(crate) fn shared_scope_id(&self, coords: &CoordsBody) -> String {
         coords
             .scope_id
             .clone()
@@ -313,9 +326,9 @@ impl Ctx {
             .unwrap_or_default()
     }
 
-    /// Whether this node may vouch for a shared plaintext read (reveal or
-    /// export), so the control plane does not ask for a step-up. The gateway
-    /// key goes with every proxied request; the vouch
+    /// Whether this node may vouch for a shared plaintext read (reveal,
+    /// export, or subkeys), so the control plane does not ask for a step-up.
+    /// The gateway key goes with every proxied request; the vouch
     /// (`x-ryu-node-vouch: 1`) only with these. See [`node_key_may_vouch`].
     pub(crate) async fn node_vouches(&self) -> bool {
         let Some(jwt) = self.jwt.as_deref() else {
@@ -450,7 +463,7 @@ pub(super) async fn proxy(
 
 /// [`proxy`], optionally with this node's vouch for a plaintext
 /// read (decided by [`Ctx::node_vouches`]).
-pub(super) async fn proxy_with_proof(
+pub(crate) async fn proxy_with_proof(
     ctx: &Ctx,
     method: reqwest::Method,
     subpath: &str,
@@ -458,6 +471,10 @@ pub(super) async fn proxy_with_proof(
     body: Option<Value>,
     node_proof: bool,
 ) -> Response {
+    #[cfg(test)]
+    if let Some(answer) = record_forward(&method, subpath, query, &body, node_proof) {
+        return answer;
+    }
     let Some(jwt) = ctx.jwt.as_deref() else {
         return json_error(
             StatusCode::UNAUTHORIZED,

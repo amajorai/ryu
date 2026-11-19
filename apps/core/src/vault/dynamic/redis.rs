@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use super::target_guard::{self, TargetEgress};
+use super::username_template::{render_username, TemplateContext};
 use super::{random_suffix, Issued};
 
 const DEFAULT_RULES: &[&str] = &["~*", "+@read"];
@@ -41,6 +42,11 @@ pub struct RedisConfig {
     /// Username prefix (default `ryu`).
     #[serde(default)]
     pub username_prefix: Option<String>,
+    /// Username template (see [`super::username_template`]), instead of
+    /// `usernamePrefix`. It must render a valid ACL username (1-128 letters,
+    /// digits, or `_ - . @ :`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username_template: Option<String>,
     /// How connections are made (set from the role's writer; never stored).
     #[serde(skip)]
     pub(crate) egress: TargetEgress,
@@ -85,6 +91,12 @@ impl RedisConfig {
             {
                 bail!("usernamePrefix must be 1-16 lowercase letters, digits, or underscores");
             }
+        }
+        if self.username_template.is_some() {
+            if self.username_prefix.is_some() {
+                bail!("set usernamePrefix or usernameTemplate, not both");
+            }
+            self.username_for("sample_role", "token")?;
         }
         Ok(())
     }
@@ -329,15 +341,32 @@ impl Connection {
     }
 }
 
-pub(super) async fn issue(config: &RedisConfig, role: &str) -> Result<Issued> {
-    let prefix = config.username_prefix.as_deref().unwrap_or("ryu");
-    let role_part: String = role
-        .bytes()
-        .filter(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        .take(16)
-        .map(char::from)
-        .collect();
-    let name = format!("{prefix}_{role_part}_{}", random_suffix(10));
+impl RedisConfig {
+    /// The username for a new lease: the template's output, or
+    /// `<prefix>_<role>_<random>`.
+    pub(super) fn username_for(&self, role: &str, display_name: &str) -> Result<String> {
+        if let Some(template) = &self.username_template {
+            let context = TemplateContext {
+                role_name: role.to_owned(),
+                display_name: display_name.to_owned(),
+            };
+            return render_username(template, &context, 128, |name| {
+                validate_username(name).is_ok()
+            });
+        }
+        let prefix = self.username_prefix.as_deref().unwrap_or("ryu");
+        let role_part: String = role
+            .bytes()
+            .filter(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            .take(16)
+            .map(char::from)
+            .collect();
+        Ok(format!("{prefix}_{role_part}_{}", random_suffix(10)))
+    }
+}
+
+pub(super) async fn issue(config: &RedisConfig, role: &str, display_name: &str) -> Result<Issued> {
+    let name = config.username_for(role, display_name)?;
     let password = random_suffix(32);
     let secret = format!(">{password}");
     let rules = config.rules();

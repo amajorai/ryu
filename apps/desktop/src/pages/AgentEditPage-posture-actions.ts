@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback } from "react";
 import { glyphToPersonaFields } from "@/src/lib/agent-persona.ts";
 import {
@@ -34,6 +35,7 @@ export function useAgentEditPostureActions(
 		AgentEditHydrate &
 		AgentEditSave
 ) {
+	const tl = useLiteralMessages();
 	const {
 		isNew,
 		isBuiltIn,
@@ -203,7 +205,7 @@ export function useAgentEditPostureActions(
 		}
 		try {
 			const created = await create({
-				name: name.trim() || "Untitled agent",
+				name: name.trim() || tl("Untitled agent"),
 				title: agentTitle.trim(),
 				description: description.trim() || null,
 				model: agentModel.trim() || null,
@@ -276,6 +278,7 @@ export function useAgentEditPostureActions(
 		safetyProfile,
 		selectedUninstalledAgent,
 		create,
+		tl,
 	]);
 
 	// After the builder applies an edit, reload the record and re-hydrate the

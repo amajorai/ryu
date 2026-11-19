@@ -66,7 +66,7 @@ function SettingsForm({
 			await queryClient.invalidateQueries({
 				queryKey: ["vault", "broker", "environment"],
 			});
-			sileo.success({ title: "Broker settings saved" });
+			sileo.success({ title: tl("Broker settings saved") });
 		},
 	});
 	const dirty =

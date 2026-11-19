@@ -8,6 +8,10 @@ use serde_json::Value;
 use super::super::policy::{wildcard_matches, Capability, Policy, PolicyRule};
 use super::*;
 
+#[path = "value_rules.rs"]
+mod value_rules;
+pub use value_rules::*;
+
 // ── Parameter constraints ─────────────────────────────────────────────────
 
 /// Parameter-value constraints: parameter name (or `*`) → allowed value globs.
@@ -85,7 +89,7 @@ pub fn validate_rule(rule: &PolicyRule) -> Result<()> {
         }
         group.validate()?;
     }
-    Ok(())
+    validate_value_rules(rule)
 }
 
 pub(super) fn parameter_text(value: &Value) -> String {
@@ -117,7 +121,7 @@ pub(super) fn lookup<'m>(map: &'m ParameterMap, name: &str) -> Option<&'m Vec<St
 }
 
 /// Whether any allow rule matching `path` that grants `capability` carries
-/// parameter constraints.
+/// parameter constraints or value rules.
 pub fn has_parameter_constraints<'a>(
     policies: impl IntoIterator<Item = &'a Policy>,
     path: &str,
@@ -130,7 +134,8 @@ pub fn has_parameter_constraints<'a>(
                 && rule.capabilities.contains(&capability)
                 && (rule.allowed_parameters.is_some()
                     || rule.denied_parameters.is_some()
-                    || !rule.required_parameters.is_empty())
+                    || !rule.required_parameters.is_empty()
+                    || rule.value_rules.is_some())
                 && rule_matches(rule, path, context)
         })
     })

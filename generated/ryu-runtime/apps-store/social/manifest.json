@@ -329,6 +329,7 @@
               "remote_id": "112233445566778899",
               "remote_url": "https://x.com/acme/status/112233445566778899",
               "error": null,
+              "outcome_unknown": false,
               "attempts": 1
             }
           ]
@@ -337,7 +338,7 @@
       {
         "id": "@ryu/social#post.failed",
         "title": "Post failed or partly failed",
-        "description": "A post settled with at least one leg that did not publish. `status` distinguishes the two cases — `partial` (some accounts went out, some did not) from `failed` (none did) — and the per-leg `error` says why. Fires once per settle, AFTER the retry budget for those legs is spent, not on each failed attempt; a leg that fails and then succeeds on retry never reaches here. Retrying a failed post can make it settle again, so the same post id can appear twice.",
+        "description": "A post settled with at least one leg that did not publish. `status` distinguishes the two cases — `partial` (some accounts went out, some did not) from `failed` (none did) — and the per-leg `error` says why. A failed leg with `outcome_unknown: true` failed after it was sent, so it may already be live on its platform; retrying the post then needs `acknowledge_outcome_unknown=true`. Fires once per settle, AFTER the retry budget for those legs is spent, not on each failed attempt; a leg that fails and then succeeds on retry never reaches here. Retrying a failed post can make it settle again, so the same post id can appear twice.",
         "payload_example": {
           "post_id": "spo_9f0c2a1b4d3e4f5a8b7c6d5e4f3a2b1c",
           "workspace_id": "default",
@@ -350,6 +351,7 @@
               "remote_id": "112233445566778899",
               "remote_url": "https://x.com/acme/status/112233445566778899",
               "error": null,
+              "outcome_unknown": false,
               "attempts": 1
             },
             {
@@ -359,6 +361,7 @@
               "remote_id": null,
               "remote_url": null,
               "error": "provider rejected the post: rate limited",
+              "outcome_unknown": false,
               "attempts": 3
             }
           ]

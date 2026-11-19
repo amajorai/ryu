@@ -10,7 +10,11 @@ import { Plus } from "lucide-react";
 import { useId } from "react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
-import { compactAge, threadStatusLabel } from "./interface-renderer.ts";
+import {
+	compactAge,
+	formatNameList,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 import {
 	buildTopics,
 	type PanelsTopic,
@@ -107,7 +111,7 @@ function TopicSection({
 	const headingId = useId();
 	const kind = topic.group?.kind;
 	const shown = topic.members.slice(0, MEMBER_LIMIT);
-	const memberNames = topic.members.map((agent) => agent.name).join(", ");
+	const memberNames = formatNameList(topic.members.map((agent) => agent.name));
 	return (
 		<section
 			aria-labelledby={headingId}

@@ -123,10 +123,22 @@ export interface FilterOption {
 	label: string;
 }
 
-/** Distinct filter values of a column with counts, blanks last (Excel's AutoFilter list). */
+/** A keyed word sense (`en-messages-senses*.ts`) with its English fallback. */
+export type SenseMessage = (id: string, fallback: string) => string;
+
+const englishSense: SenseMessage = (_id, fallback) => fallback;
+
+/**
+ * Distinct filter values of a column with counts, blanks last (Excel's
+ * AutoFilter list). A checkbox column's values read through the keyed
+ * `dataGrid.checked` and `dataGrid.unchecked` (ja チェックあり, チェックなし):
+ * the bare catalog words are a check time and "not verified" (ja チェック日時,
+ * 未確認).
+ */
 export function collectFilterOptions(
 	values: Iterable<unknown>,
-	cellOpts?: CellOpts
+	cellOpts?: CellOpts,
+	sense: SenseMessage = englishSense
 ): FilterOption[] {
 	const counts = new Map<string, number>();
 	for (const value of values) {
@@ -139,7 +151,9 @@ export function collectFilterOptions(
 			return "(Blanks)";
 		}
 		if (cellOpts?.variant === "checkbox") {
-			return key === "true" ? "Checked" : "Unchecked";
+			return key === "true"
+				? sense("dataGrid.checked", "Checked")
+				: sense("dataGrid.unchecked", "Unchecked");
 		}
 		return getCellDisplayText(key, cellOpts).text || key;
 	};

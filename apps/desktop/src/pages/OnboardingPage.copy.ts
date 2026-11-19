@@ -1,3 +1,4 @@
+import { formatList } from "@ryu/i18n";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type { NodeOnboardingSnapshot } from "@/src/lib/api/onboarding-profile.ts";
 import type { DesktopOnboardingPhase } from "@/src/lib/desktop-onboarding-state.ts";
@@ -137,6 +138,24 @@ export const ROTATING_SUBTITLES = new Map<Phase, string[]>([
 
 export const ROTATE_INTERVAL_MS = 2600;
 
+/**
+ * Why Core will not start one agent draft under the chosen identity mode, as
+ * one translated sentence. `modeTitle` is the mode card's English title (a
+ * catalog key); `reason` is Core's refusal, or null for the generic one.
+ */
+export function agentRefusalSentence(
+	tl: LiteralMessage,
+	name: string,
+	modeTitle: string,
+	reason: string | null | undefined
+): string {
+	return tl('{name} can\'t start as "{mode}": {reason}', {
+		name,
+		mode: tl(modeTitle),
+		reason: reason ?? tl("Ryu won't start this agent."),
+	});
+}
+
 /** Why some selected agent drafts were not added, as one sentence group. */
 export function agentSuggestionsFailureMessage(
 	tl: LiteralMessage,
@@ -169,7 +188,7 @@ export function agentSuggestionsFailureMessage(
 				failures:
 					createFailedNames.length > 0
 						? ` ${tl("Couldn't add {names}. Try again or skip.", {
-								names: createFailedNames.join(", "),
+								names: formatList(createFailedNames),
 							})}`
 						: "",
 				refusals: refused.join(" "),
@@ -179,7 +198,7 @@ export function agentSuggestionsFailureMessage(
 	if (createdCount > 0) {
 		return tl("Added {count}. Couldn't add {names}. Try again or skip.", {
 			count: createdCount,
-			names: failedNames.join(", "),
+			names: formatList(failedNames),
 		});
 	}
 	return "Ryu couldn't add those agents yet. Try again or skip for now.";

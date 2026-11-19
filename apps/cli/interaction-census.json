@@ -1631,7 +1631,7 @@
       "control": "Local image multipart upload, cancellation, denied retry, session confirmation and removal are reachable; native picker/crop remains a presentation difference.",
       "status": "covered",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
       ],
       "source": "src/overlays/settings/profile-avatar.tsx",
       "evidence_note": "Historical row retained for coordinator reconciliation; granular current controls are enumerated separately. Fixture evidence proves client behavior, not live external services."
@@ -1642,8 +1642,8 @@
       "control": "Reachable four-field personal context editor: all field edits, Tab cycling, cancellation, denied persistence retry, failed load retry and exact Core readback.",
       "status": "covered",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback",
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback",
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
       ],
       "source": "src/overlays/settings/personal-context.tsx",
       "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary."
@@ -1722,8 +1722,8 @@
       "control": "i install, e enable/disable, u update, D/Shift+d uninstall, C/Shift+c cascade disable/uninstall",
       "status": "covered",
       "tests": [
-        "src/__tests__/store.interactions.test.tsx#Store Plugins install, toggle, update, uninstall, and refresh through Core lifecycle actions",
-        "src/__tests__/store.interactions.test.tsx#Store Plugins offer C after a dependent refusal and retry the uninstall with cascade"
+        "src/__tests__/store.plugins-lifecycle.interactions.test.tsx#Store Plugins install, toggle, update, uninstall, and refresh through Core lifecycle actions",
+        "src/__tests__/store.plugins-lifecycle.interactions.test.tsx#Store Plugins offer C after a dependent refusal and retry the uninstall with cascade"
       ]
     },
     {
@@ -2289,7 +2289,7 @@
       "source": "src/overlays/settings/personal-context.tsx",
       "source_anchor": "key.name === \"p\"",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
       ]
     },
     {
@@ -2300,7 +2300,7 @@
       "source": "src/overlays/settings/personal-context.tsx",
       "source_anchor": "key: \"nickname\"",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
       ]
     },
     {
@@ -2311,7 +2311,7 @@
       "source": "src/overlays/settings/personal-context.tsx",
       "source_anchor": "void save()",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
       ]
     },
     {
@@ -2322,7 +2322,7 @@
       "source": "src/overlays/settings/personal-context.tsx",
       "source_anchor": "Cancel personal context",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
       ]
     },
     {
@@ -2334,7 +2334,7 @@
       "source_anchor": "key: \"occupation\"",
       "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
       ]
     },
     {
@@ -2346,7 +2346,7 @@
       "source_anchor": "key: \"aboutYou\"",
       "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
       ]
     },
     {
@@ -2358,7 +2358,7 @@
       "source_anchor": "key: \"aboutOrganization\"",
       "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
       ]
     },
     {
@@ -2370,7 +2370,7 @@
       "source_anchor": "setField((index)",
       "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
       ]
     },
     {
@@ -2382,7 +2382,7 @@
       "source_anchor": "key.name === \"r\"",
       "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context failed read blocks edits and r retries canonical preference read"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile personal context failed read blocks edits and r retries canonical preference read"
       ]
     },
     {
@@ -2393,7 +2393,7 @@
       "source": "src/overlays/settings/profile-avatar.tsx",
       "source_anchor": "key.name === \"a\"",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
       ]
     },
     {
@@ -2404,7 +2404,7 @@
       "source": "src/overlays/settings/profile-avatar.tsx",
       "source_anchor": "onInput={setPath}",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
       ]
     },
     {
@@ -2415,7 +2415,7 @@
       "source": "src/overlays/settings/profile-avatar.tsx",
       "source_anchor": "method: \"POST\"",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
       ]
     },
     {
@@ -2426,7 +2426,7 @@
       "source": "src/overlays/settings/profile-avatar.tsx",
       "source_anchor": "key.name === \"tab\"",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
       ]
     },
     {
@@ -2437,7 +2437,7 @@
       "source": "src/overlays/settings/profile-avatar.tsx",
       "source_anchor": "key.name === \"d\"",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
       ]
     },
     {
@@ -2448,7 +2448,7 @@
       "source": "src/overlays/settings/profile-avatar.tsx",
       "source_anchor": "key.name === \"n\"",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
       ]
     },
     {
@@ -2459,7 +2459,7 @@
       "source": "src/overlays/settings/profile-avatar.tsx",
       "source_anchor": "method: \"DELETE\"",
       "tests": [
-        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+        "src/__tests__/settings-profile-context.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
       ]
     },
     {

@@ -88,6 +88,20 @@ const RETRIEVAL_ENGINES: Array<{
  * the same 5s cadence as the rest of the status spine. Renders nothing until at
  * least one engine is installed.
  */
+/** The busy engine slots, as one catalogued phrase. */
+export function engineSlotsLabel(
+	busy: number,
+	total: number,
+	tl: LiteralMessage
+): string {
+	return total > 0
+		? tl("{busy}/{total, plural, one {# slot} other {# slots}}", {
+				busy,
+				total,
+			})
+		: tl("{busy} busy", { busy });
+}
+
 /**
  * Compact live "N/M slots · K queued" badge for the local-engine admission
  * queue. Renders nothing when the engine is idle (no slots busy, nothing
@@ -110,7 +124,7 @@ function EngineQueueBadge({
 	if (busy <= 0 && queued <= 0) {
 		return null;
 	}
-	const slots = total > 0 ? `${busy}/${total} slots` : `${busy} busy`;
+	const slots = engineSlotsLabel(busy, total, tl);
 	return (
 		<span className="font-medium text-muted-foreground/70 text-xs tabular-nums">
 			{slots}
@@ -350,7 +364,7 @@ export function EnginesSection({ target }: { target: ApiTarget }) {
 						activeChatItem
 							? chatRunning
 								? tl("Resident chat · {usage}", {
-										usage: chatUsage ?? "running",
+										usage: chatUsage ?? tl("running"),
 									})
 								: tl("Resident chat · idle")
 							: "No chat selected"

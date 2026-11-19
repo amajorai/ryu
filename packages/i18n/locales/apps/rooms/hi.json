@@ -65,6 +65,7 @@
   "The room is generating…": "रूम जनरेट कर रहा है…",
   "The room is ready. Send the first prompt.": "रूम तैयार है। पहला प्रॉम्प्ट भेजें।",
   "The room is temporarily unavailable. Try again.": "रूम अस्थायी रूप से उपलब्ध नहीं है। फिर से कोशिश करें।",
+  "The room request was not accepted.": "रूम अनुरोध स्वीकार नहीं किया गया।",
   "The turn response was not a valid room.": "टर्न प्रतिक्रिया मान्य रूम नहीं थी।",
   "This closes the room and revokes its current guest sessions.": "इससे रूम बंद हो जाएगा और उसके मौजूदा अतिथि सत्र रद्द हो जाएंगे।",
   "This invite is invalid, expired, or revoked.": "यह आमंत्रण अमान्य, समाप्त या रद्द किया गया है।",

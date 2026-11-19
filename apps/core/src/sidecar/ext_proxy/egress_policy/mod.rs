@@ -40,6 +40,11 @@ const MAX_AGENT_ID_LENGTH: usize = 256;
 
 const WILDCARD_PREFIX: &str = "*.";
 
+/// The refusal for an entry that is not a host or `*.` and a domain. The
+/// desktop's Allowed sites panel shows it, translated, as sent.
+pub const INVALID_SITE_REFUSAL: &str =
+    "Each allowed site must be a host name such as example.com, or *.example.com for its subdomains.";
+
 /// Why an allowlist or agent id was refused. The message is safe to show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AllowlistError(pub String);
@@ -110,9 +115,7 @@ fn normalize_pattern(raw: &str) -> Result<String, AllowlistError> {
     match normalized {
         Some(host) if wildcard => Ok(format!("{WILDCARD_PREFIX}{host}")),
         Some(host) => Ok(host),
-        None => Err(refuse(
-            "egress allowlist entries must be a host name or `*.` and a domain",
-        )),
+        None => Err(refuse(INVALID_SITE_REFUSAL)),
     }
 }
 

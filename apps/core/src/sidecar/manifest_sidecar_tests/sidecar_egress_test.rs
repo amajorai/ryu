@@ -132,7 +132,10 @@ fn sidecar_without_the_seal_grant_gets_no_seal_key() {
 /// (`gh`, Chromium, ffmpeg) do not, so those children never inherit a
 /// subkey. Research does seal, but its sidecar captures the key before its
 /// runtime starts and spawns every experiment child with a cleared
-/// environment (`apps-store/research/backend/src/engine_runtime.rs`).
+/// environment (`apps-store/research/backend/src/engine_runtime.rs`). The
+/// browser seals session replays the same way: it captures the key, then
+/// deletes every seal variable from its environment before Chromium starts
+/// (`apps-store/browser/sidecar/src/main/index.ts`).
 #[test]
 fn only_sealing_apps_receive_a_seal_key() {
     let catalog = crate::plugin_manifest::PluginManifestLoader::load_install_catalog();
@@ -152,10 +155,11 @@ fn only_sealing_apps_receive_a_seal_key() {
         "@ryu/dashboards",
         "@ryu/research",
         "@ryu/projects",
+        "@ryu/browser",
     ] {
         assert!(seals(id), "{id} must receive its seal key");
     }
-    for id in ["@ryu/browser", "@ryu/pull-requests"] {
+    for id in ["@ryu/pull-requests"] {
         assert!(!seals(id), "{id} must not receive a seal key");
     }
 }

@@ -27,7 +27,7 @@ import {
 	type SelectedHumanMention,
 	selectHumanNotificationTargets,
 } from "../../core/humanMentions.ts";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 import {
 	EMPTY_APPS,
 	EMPTY_MENTION_USERS,
@@ -332,7 +332,7 @@ export function useChatMentions(deps: UseChatMentionsDeps) {
 			const senderName =
 				directory?.identity?.name?.trim() ||
 				directory?.identity?.email?.trim() ||
-				"Someone";
+				tr("Someone");
 			void inboxEnabled(target)
 				.then((enabled) =>
 					enabled

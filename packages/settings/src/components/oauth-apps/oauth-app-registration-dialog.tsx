@@ -148,7 +148,7 @@ export function OAuthAppRegistrationDialog({
 								<div className="flex items-center gap-2 rounded-lg bg-muted p-3">
 									<code className="flex-1 break-all font-mono text-xs">
 										<SensitiveValue
-											label="client secret"
+											label="Client secret"
 											value={createdApp.clientSecret}
 										/>
 									</code>

@@ -18,6 +18,17 @@ export const CLOUD_NODE_CHANGE_PLAN_IDS = [
  */
 export const CLOUD_NODE_CHANGE_PLANS_LABEL = "Business, Teams, or Enterprise";
 
+/**
+ * The same plans as names, for a client that joins them in the reader's
+ * language ("Business, Teams o Enterprise") instead of splicing the English
+ * "or" of `CLOUD_NODE_CHANGE_PLANS_LABEL` into a translated sentence.
+ */
+export const CLOUD_NODE_CHANGE_PLAN_NAMES = [
+	"Business",
+	"Teams",
+	"Enterprise",
+] as const;
+
 /** The plan half of the managed-server purchase/resize authorization rule. */
 export function planAllowsCloudNodeChanges(
 	plan: PlanId | null | undefined

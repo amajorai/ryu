@@ -94,12 +94,14 @@ pub(super) fn rows() -> [SeedSpec; 18] {
             // row. The set mirrors the manifest exactly; `vault:fill` and
             // `security-key:relay` (the `securityKey.request` relay to the owner's
             // desktop key) are approved only for this app (Gateway owner-exclusive
-            // grants), the other two are on the reviewed allowlist.
+            // grants), the others are on the reviewed allowlist. `crypto:seal`
+            // seals opt-in session replays at rest under this app's subkey.
             grants: &[
                 "browser:control",
                 "tool:http-egress:127.0.0.1",
                 "vault:fill",
                 "security-key:relay",
+                "crypto:seal",
             ],
             ui_code: None,
         },

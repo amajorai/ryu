@@ -62,14 +62,20 @@ const KEY_SOURCE_COPY = {
 	{ caption: string; label: string; strong: boolean }
 >;
 
-const STORE_BADGE = {
-	sealed: { text: "Encrypted", variant: "default" },
-	partial: { text: "Partly encrypted", variant: "secondary" },
-	plaintext: { text: "Not encrypted", variant: "destructive" },
-} satisfies Record<
-	StoreCoverage["status"],
-	{ text: string; variant: "default" | "destructive" | "secondary" }
->;
+/** A store's badge, each label a literal `tl()` so the extractor catalogs it. */
+function storeBadge(
+	status: StoreCoverage["status"],
+	tl: LiteralMessage
+): { text: string; variant: "default" | "destructive" | "secondary" } {
+	switch (status) {
+		case "sealed":
+			return { text: tl("Encrypted"), variant: "default" };
+		case "partial":
+			return { text: tl("Partly encrypted"), variant: "secondary" };
+		default:
+			return { text: tl("Not encrypted"), variant: "destructive" };
+	}
+}
 
 /** "412 of 480 rows" — only when Core could actually measure the store. */
 function coverageLine(store: StoreCoverage, tl: LiteralMessage): string | null {
@@ -283,7 +289,7 @@ function ScopedEncryptionSettings({
 			>
 				<SettingsGroup>
 					{status.stores.map((store) => {
-						const badge = STORE_BADGE[store.status];
+						const badge = storeBadge(store.status, tl);
 						const coverage = coverageLine(store, tl);
 						const copy = storeRowCopy(store, tl);
 						return (

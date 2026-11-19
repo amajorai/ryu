@@ -267,7 +267,8 @@ export function WarehouseDioramaScene({
 					key={zone.id}
 					label={tl("{zone}: {orders}. Show them on the clipboard", {
 						orders: warehouseCount(zone.count, "order"),
-						zone: actors && zone.id === "exception" ? "Stopped" : zone.label,
+						zone:
+							actors && zone.id === "exception" ? tl("Stopped") : zone.label,
 					})}
 					onSelect={() => onPickTab(zone.tab)}
 				>

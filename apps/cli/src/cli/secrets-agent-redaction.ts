@@ -23,6 +23,7 @@ import {
 } from "@ryuhq/core-client/vault";
 import { tf, tr } from "../i18n/translate.ts";
 import { arg, coordsFrom, type SecretsArgs } from "./secrets-args.ts";
+import { renderRequestedExport } from "./secrets-export-formats.ts";
 import { agentTarget, exportFormat, exportResult } from "./secrets-output.ts";
 import { selectTagged } from "./secrets-run-env.ts";
 import type { CliContext } from "./types.ts";
@@ -212,7 +213,10 @@ export async function agentExport(
 	}
 	const leftOut = narrowToReadable(args, rows, agentReadableNames(rows));
 	const names = args.values.get("--name") ?? [];
-	const result = await exportResult(ctx, args, format);
+	const result = renderRequestedExport(
+		args,
+		await exportResult(ctx, args, format)
+	);
 	if (!stillReadable(await listedRows(ctx), names)) {
 		return refuseUnchecked(ctx, marker);
 	}

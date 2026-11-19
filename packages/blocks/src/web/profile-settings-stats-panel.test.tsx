@@ -104,3 +104,38 @@ test("Arabic picks the right plural form for each count", async () => {
 	expect(text).toMatch(/[3٣] أيام/);
 	expect(text).not.toMatch(/\d days/);
 });
+
+test("Japanese unlock tiers read as paid and points, not paid-status or scores", async () => {
+	// The bare words are a payment status (支払い済み) and a score (配点).
+	registerLiteralCatalogLoader((requested) =>
+		requested.startsWith("ja") ? { Paid: "支払い済み", Points: "配点" } : null
+	);
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	mounted = { container, root };
+	const feature = (key: string, tier: "paid" | "progressive") => ({
+		description: `${key} description`,
+		key,
+		tier,
+		title: `${key} title`,
+	});
+	await act(async () => {
+		root.render(
+			<I18nProvider initialLocale="ja" initialPackId="official/ja">
+				<ProfileStatsPanel
+					catalog={[feature("pro", "paid"), feature("theme", "progressive")]}
+					summary={SUMMARY}
+				/>
+			</I18nProvider>
+		);
+	});
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	});
+	const text = container.textContent ?? "";
+	expect(text).toContain("有料");
+	expect(text).toContain("ポイント");
+	expect(text).not.toContain("支払い済み");
+	expect(text).not.toContain("配点");
+});

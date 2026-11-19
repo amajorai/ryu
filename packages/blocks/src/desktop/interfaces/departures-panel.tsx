@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -151,13 +151,15 @@ function FlightCard({
 	snapshot: InterfaceSnapshot;
 }) {
 	const tl = useLiteralMessages();
+	// The route ends; the bare "From" and "To" are a move source and target.
+	const i18n = useOptionalI18n();
 	const reduceMotion = useReducedMotion();
 	const inlineSign = useInlineSign();
 	const agent = flight.gateAgentId
 		? snapshot.agents.find((candidate) => candidate.id === flight.gateAgentId)
 		: undefined;
 	const you = "You";
-	const gate = agent?.name ?? "No gate";
+	const gate = agent?.name ?? tl("No gate");
 	const [origin, destination] =
 		flight.board === "departures" ? [you, gate] : [gate, you];
 	const position = planePosition(flight, now);
@@ -168,7 +170,11 @@ function FlightCard({
 			className="flex flex-col gap-5 border-border border-b px-4 py-4"
 		>
 			<div className="flex items-start gap-4">
-				<RouteEnd align="start" label="From" name={origin} />
+				<RouteEnd
+					align="start"
+					label={i18n?.t("departures.origin", {}, "From") ?? "From"}
+					name={origin}
+				/>
 				<div aria-hidden="true" className="relative mt-5 h-7 min-w-12 flex-1">
 					<span className="absolute inset-x-0 top-1/2 border-border border-t border-dashed" />
 					<span
@@ -195,7 +201,11 @@ function FlightCard({
 						/>
 					</motion.span>
 				</div>
-				<RouteEnd align="end" label="To" name={destination} />
+				<RouteEnd
+					align="end"
+					label={i18n?.t("departures.destination", {}, "To") ?? "To"}
+					name={destination}
+				/>
 			</div>
 			<ol aria-label="Timeline" className="flex flex-col">
 				{steps.map((step, position) => (
@@ -333,7 +343,7 @@ export function DeparturesPanel({
 			fieldRef.current?.focus({ preventScroll: true });
 		}
 	}, [booking]);
-	const title = booking ? "Book a flight" : (flight?.title ?? "Flight");
+	const title = booking ? tl("Book a flight") : (flight?.title ?? tl("Flight"));
 	const subtitle = booking
 		? "Starts a conversation with the gate you pick"
 		: [

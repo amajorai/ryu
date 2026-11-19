@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 
 const nativeErrorSchema = z.instanceof(Error);
 
@@ -22,7 +22,9 @@ const CONNECTION_CODES = new Set([
 	"FailedToOpenSocket",
 ]);
 const CONNECTION_MESSAGE =
-	/Unable to connect|ECONNREFUSED|ENOTFOUND|fetch failed|Failed to fetch|socket connection was closed/i;
+	/Unable to connect|ECONNREFUSED|ENOTFOUND|fetch failed|Failed to fetch|socket connection was closed|Ryu Core is not reachable at/i;
+/** The URL Core's identity check names when it cannot open a connection. */
+const NOT_REACHABLE_AT = /Ryu Core is not reachable at (\S+)/;
 const HTTP_STATUS_MESSAGE = /failed: (\d{3})\b|\bHTTP (\d{3})\b/;
 
 const errorFieldsSchema = z.looseObject({
@@ -174,7 +176,7 @@ function firstIssueText(
 ): string {
 	const issue = issues[0];
 	if (!issue) {
-		return "invalid data";
+		return tr("invalid data");
 	}
 	const path = (issue.path ?? []).map(String).join(".");
 	return path ? `${path}: ${issue.message}` : issue.message;
@@ -221,14 +223,47 @@ function statusOf(
 
 function unreachableText(
 	fields: z.infer<typeof errorFieldsSchema> | null,
-	ctx: HumanizeErrorContext | undefined
+	ctx: HumanizeErrorContext | undefined,
+	message = "",
+	format: typeof tf = tf
 ): string {
-	const url = ctx?.url ?? fields?.path;
+	const url =
+		ctx?.url ?? fields?.path ?? NOT_REACHABLE_AT.exec(message)?.[1] ?? null;
 	return url
-		? tf("Core isn't reachable at {hostPort}", {
+		? format("Core isn't reachable at {hostPort}", {
 				hostPort: displayHostPort(url),
 			})
-		: "Core isn't reachable";
+		: format("Core isn't reachable", {});
+}
+
+function isConnectionFailureFields(
+	fields: z.infer<typeof errorFieldsSchema> | null,
+	message: string
+): boolean {
+	return (
+		(fields?.code !== undefined && CONNECTION_CODES.has(fields.code)) ||
+		fields?.name === "AbortError" ||
+		fields?.name === "TimeoutError" ||
+		CONNECTION_MESSAGE.test(message)
+	);
+}
+
+/**
+ * The sentence for a refused, timed-out or unreachable connection to Core,
+ * rendered with `format` (the CLI locale for people), or null when the caught
+ * value is some other failure.
+ */
+export function unreachableMessage(
+	value: unknown,
+	ctx?: HumanizeErrorContext,
+	format: typeof tf = tf
+): string | null {
+	const fieldsResult = errorFieldsSchema.safeParse(value);
+	const fields = fieldsResult.success ? fieldsResult.data : null;
+	const message = nativeErrorMessage(value);
+	return isConnectionFailureFields(fields, message)
+		? unreachableText(fields, ctx, message, format)
+		: null;
 }
 
 /**
@@ -249,13 +284,8 @@ export function humanizeError(
 	const fields = fieldsResult.success ? fieldsResult.data : null;
 	const message = nativeErrorMessage(value);
 
-	if (
-		(fields?.code && CONNECTION_CODES.has(fields.code)) ||
-		fields?.name === "AbortError" ||
-		fields?.name === "TimeoutError" ||
-		CONNECTION_MESSAGE.test(message)
-	) {
-		return unreachableText(fields, ctx);
+	if (isConnectionFailureFields(fields, message)) {
+		return unreachableText(fields, ctx, message);
 	}
 
 	const issues = issuesFromMessage(message);

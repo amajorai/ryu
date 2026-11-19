@@ -138,7 +138,7 @@ export function validate(
 	if (section === "firewall" && record(before)) {
 		for (const key of Object.keys(before)) {
 			if (!(key in value)) {
-				throw new Error(`Keep served field ${key}; edit its value explicitly.`);
+				throw new Error(`Keep served field ${key}. Edit its value explicitly.`);
 			}
 		}
 	}

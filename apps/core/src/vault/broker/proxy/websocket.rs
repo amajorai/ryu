@@ -160,6 +160,7 @@ impl Broker {
         let route = self.route(session, target, request.uri().path()).await?;
         let name = route.service.as_ref().map(|s| s.name().to_owned());
         let fail = |refusal: Refusal| (refusal, name.clone());
+        Self::refuse_policy_upgrade(route.service.as_ref()).map_err(fail)?;
         if route.merchant_only {
             return Err(fail(forbidden_unmatched(&target.host)));
         }

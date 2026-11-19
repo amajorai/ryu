@@ -227,7 +227,7 @@ test("choosing a sound pack persists it and plays a Run complete sample", async 
 
 	expect(storedPrefs()).toMatchObject({ pack: "retro" });
 	expect(recorded).toEqual([{ id: "run-complete", kind: "preview" }]);
-	expect(document.body.textContent).toContain("8-bit square waves");
+	expect(document.body.textContent).toContain("Square waves on an 8-bit");
 });
 
 test("the volume slider writes this device's volume and previews once it settles", async () => {

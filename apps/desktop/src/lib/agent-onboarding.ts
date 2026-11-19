@@ -27,6 +27,8 @@ export function buildNewAgentChatSeed(
 		initialAgent: agentId,
 		initialPrompt: `Introduce yourself to me as ${name}. Briefly explain what you can help with based on your setup, then ask what I would like to work on first. Keep the welcome concise and friendly.`,
 		initialSubmit: true,
-		title: tl("{name} chat", { name }),
+		title: tl("{name} chat", {
+			name: agentName.trim() || tl("your new agent"),
+		}),
 	};
 }

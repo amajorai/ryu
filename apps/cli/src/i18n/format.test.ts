@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { formatCliBytes } from "./format.ts";
+import { formatCliBytes, formatCliList } from "./format.ts";
 
 const GIB = 1024 ** 3;
 
@@ -29,5 +29,21 @@ describe("formatCliBytes", () => {
 			new Intl.NumberFormat("ar", { minimumFractionDigits: 1 }).format(1.5)
 		);
 		expect(arabic).not.toBe("1.5 GB");
+	});
+});
+
+describe("formatCliList", () => {
+	test("joins a list the way the language writes one", () => {
+		expect(formatCliList(["a", "b", "c"], "conjunction", "en")).toBe(
+			"a, b, and c"
+		);
+		expect(formatCliList(["a", "b", "c"], "conjunction", "ja")).toBe("a、b、c");
+		expect(formatCliList(["a", "b"], "disjunction", "de")).toBe("a oder b");
+	});
+
+	test("falls back to English for an unusable tag", () => {
+		expect(formatCliList(["a", "b"], "conjunction", "not a tag!")).toBe(
+			"a and b"
+		);
 	});
 });

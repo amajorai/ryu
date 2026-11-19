@@ -38,7 +38,7 @@ export function TrackingThreadPanel({
 	const tl = useLiteralMessages();
 	const title = parcel
 		? parcel.thread.title.trim() || tr("Untitled conversation")
-		: "New parcel";
+		: tl("New parcel");
 	return (
 		<motion.aside
 			animate={{ opacity: 1, x: 0 }}

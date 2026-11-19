@@ -16,8 +16,9 @@ import {
 	UnverifiableCoreError,
 } from "../core/coreIdentity.ts";
 import { accessRefusalHint, sharedRefusalCode } from "../core/native-errors.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { flag, type SecretsArgs } from "./secrets-args.ts";
+import { isLocalExportFormat } from "./secrets-export-formats.ts";
 import { type CliContext, UsageError } from "./types.ts";
 import { withStepUpHint } from "./vaultStepUp.ts";
 
@@ -84,7 +85,7 @@ export function sealLine(seal: VaultSealStatus): string {
 				progress: String(seal.progress),
 				threshold: String(seal.threshold),
 			})
-		: "Sealed (auto).";
+		: tr("Sealed (auto).");
 }
 
 // ── Machine-token mode ───────────────────────────────────────────────────────
@@ -97,7 +98,9 @@ export function sealLine(seal: VaultSealStatus): string {
  * CLI refuses rather than hand a credential to, or take secret values and a
  * broker CA from, whatever holds the port.
  */
-export function machineTarget(ctx: CliContext): VaultMachineTarget {
+export function machineTarget(
+	ctx: Pick<CliContext, "target">
+): VaultMachineTarget {
 	if (
 		isPlainHttpLoopback(ctx.target.url) &&
 		!requiresCoreIdentity(ctx.target)
@@ -131,9 +134,12 @@ const EXPORT_FORMATS = new Map<string, VaultExportFormat>([
 
 export function exportFormat(args: SecretsArgs): VaultExportFormat {
 	const raw = flag(args, "--format") ?? "dotenv";
-	const format = EXPORT_FORMATS.get(raw);
+	// The CLI renders these from the json export (`renderRequestedExport`).
+	const format = isLocalExportFormat(raw) ? "json" : EXPORT_FORMATS.get(raw);
 	if (!format) {
-		throw new UsageError("--format must be dotenv, json, yaml, shell, or k8s.");
+		throw new UsageError(
+			"--format must be dotenv, json, yaml, shell, k8s, csv, toml, hcl, or ini."
+		);
 	}
 	return format;
 }
@@ -188,11 +194,23 @@ export async function exportResult(
 }
 
 /** The stderr warning for an export that left the shared values out. */
-function sharedValuesMissingWarning(sharedError: string): string {
+export function sharedValuesMissingWarning(sharedError: string): string {
 	const code = sharedRefusalCode(sharedError);
 	if (!code) {
-		return `Warning: Team and Organization values are missing because the control plane couldn't be reached (${sharedError}). Only your own and this node's values were used.\n`;
+		return `${tf(
+			"Warning: Team and Organization values are missing because the control plane couldn't be reached ({sharedError}). Only your own and this node's values were used.",
+			{ sharedError }
+		)}\n`;
 	}
 	const hint = accessRefusalHint({ code })?.hint;
-	return `Warning: Team and Organization values are missing because the control plane refused this request (${code}).${hint ? ` ${hint}` : ""} Only your own and this node's values were used.\n`;
+	if (!hint) {
+		return `${tf(
+			"Warning: Team and Organization values are missing because the control plane refused this request ({code}). Only your own and this node's values were used.",
+			{ code }
+		)}\n`;
+	}
+	return `${tf(
+		"Warning: Team and Organization values are missing because the control plane refused this request ({code}). {hint} Only your own and this node's values were used.",
+		{ code, hint: tr(hint) }
+	)}\n`;
 }

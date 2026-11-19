@@ -27,7 +27,7 @@ export function describeAccess(view: AgentIdentityView): string[] {
 	if (view.accountAccess && view.accountAccess.length > 0) {
 		const rows = view.accountAccess.map((key) => [
 			key,
-			accountKeyKind(key)?.label ?? "Other",
+			tr(accountKeyKind(key)?.label ?? "Other"),
 			accountKeyUnusedReason(key, view.identityMode) ?? "",
 		]);
 		const table = formatTable(["KEY", "KIND", "NOTE"], rows);
@@ -46,8 +46,31 @@ export function describePendingIdentity(view: AgentIdentityView): string[] {
 			"App request:    {mode}. A newer version of this agent's app asks for it; nothing changes until you choose.",
 			{ mode: identityModeLabel(view.pendingIdentityMode) }
 		),
-		`                Accept: ryu-cli agents identity ${view.id} ${view.pendingIdentityMode}`,
-		`                Dismiss and keep ${identityModeLabel(view.identityMode)}: ryu-cli agents identity ${view.id} dismiss`,
+		`                ${tf("Accept: ryu-cli agents identity {id} {mode}", {
+			id: view.id,
+			mode: view.pendingIdentityMode,
+		})}`,
+		`                ${tf(
+			"Dismiss and keep {mode}: ryu-cli agents identity {id} dismiss",
+			{ id: view.id, mode: identityModeLabel(view.identityMode) }
+		)}`,
+	];
+}
+
+/** The "How it works" line and the mode's description under it. */
+export function describeIdentityMode(view: AgentIdentityView): string[] {
+	return [
+		tf("How it works:   {title}", {
+			title: identityModeLabel(view.identityMode),
+		}),
+		`                ${identityModeDescription(view.identityMode)}`,
+	];
+}
+
+function describeHeader(view: AgentIdentityView): string[] {
+	return [
+		tf("Agent:          {name} ({id})", { id: view.id, name: view.name }),
+		tf("Engine:         {engine}", { engine: view.engine ?? "—" }),
 	];
 }
 
@@ -62,17 +85,11 @@ export function describeRemotePeer(): string[] {
 
 export function describeAgent(view: AgentIdentityView): string {
 	if (isRemotePeerEngine(view.engine)) {
-		return [
-			`Agent:          ${view.name} (${view.id})`,
-			`Engine:         ${view.engine ?? "—"}`,
-			...describeRemotePeer(),
-		].join("\n");
+		return [...describeHeader(view), ...describeRemotePeer()].join("\n");
 	}
 	return [
-		`Agent:          ${view.name} (${view.id})`,
-		`Engine:         ${view.engine ?? "—"}`,
-		`How it works:   ${identityModeLabel(view.identityMode)}`,
-		`                ${identityModeDescription(view.identityMode)}`,
+		...describeHeader(view),
+		...describeIdentityMode(view),
 		...describePendingIdentity(view),
 		...describeAccess(view),
 	].join("\n");
@@ -115,7 +132,10 @@ export function refuseRemotePeerChange(
 export function requireEditable(view: AgentIdentityView): void {
 	if (view.locked) {
 		throw new Error(
-			`Agent '${view.id}' is locked. Unlock it before changing how it works or its account access.`
+			tf(
+				"Agent '{id}' is locked. Unlock it before changing how it works or its account access.",
+				{ id: view.id }
+			)
 		);
 	}
 }

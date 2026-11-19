@@ -20,7 +20,7 @@ import {
 	type ModelPickerChoice,
 	withDefaultModelChoice,
 } from "../../core/modelPicker.ts";
-import { nativeErrorMessage as errText } from "../../core/native-errors.ts";
+import { failureText as errText } from "../../i18n/failure-text.ts";
 import { tf } from "../../i18n/translate.ts";
 import {
 	BOT_ROUTING_NOTICE,

@@ -11,6 +11,7 @@ import { Label } from "@ryu/ui/components/label.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import type { Dispatch, SetStateAction } from "react";
 import type { ActivityKind } from "@/src/lib/api/crm.ts";
+import { activityNoteLabel } from "./activity-kind-label.ts";
 
 /** Which kinds a person can author. `field_change` / `stage_change` are absent on
  *  purpose — they are the store's audit trail, not something anyone writes. */
@@ -62,7 +63,7 @@ export function renderActivityComposer({
 						variant={composerKind === option.kind ? "secondary" : "ghost"}
 					>
 						<HugeiconsIcon icon={option.icon} size={14} />
-						{option.label}
+						{option.kind === "note" ? activityNoteLabel() : option.label}
 					</Button>
 				))}
 			</div>

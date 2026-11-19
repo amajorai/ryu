@@ -4,7 +4,7 @@
 // while Live is on. Rows carry method, host, path and status only: never
 // headers, bodies or credential values. Both need `list` on `sys/broker`.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -31,6 +31,7 @@ import {
 	type BrokerServiceDraft,
 	VaultBrokerServiceDialog,
 } from "./VaultBrokerServiceDialog.tsx";
+import { brokerOutcomeLabel } from "./vault-broker-outcomes.ts";
 import { serviceFormFromHost } from "./vault-broker-service-form.ts";
 import { whenLabel } from "./vault-broker-summary.ts";
 import { vaultErrorMessage } from "./vault-errors.ts";
@@ -53,12 +54,12 @@ export function logLine(row: VaultBrokerLogRow): string {
 	return `${row.method} ${row.host}${port}${row.path}`;
 }
 
-export function logDetail(row: VaultBrokerLogRow): string {
+export function logDetail(row: VaultBrokerLogRow, tl: LiteralMessage): string {
 	return [
 		whenLabel(row.at),
-		row.service ?? "no service",
-		row.outcome,
-		`${row.latencyMs} ms`,
+		row.service ?? tl("no service"),
+		brokerOutcomeLabel(row.outcome, tl),
+		tl("{ms} ms", { ms: row.latencyMs }),
 	].join(" · ");
 }
 
@@ -245,7 +246,7 @@ function RequestLog({
 										{logLine(row)}
 									</p>
 									<p className="mt-0.5 truncate text-muted-foreground text-xs">
-										{logDetail(row)}
+										{logDetail(row, tl)}
 									</p>
 								</div>
 							</li>

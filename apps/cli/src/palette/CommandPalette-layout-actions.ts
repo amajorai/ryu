@@ -1,13 +1,14 @@
 // CommandPalette layout + navigation builders - pane Layout actions and the
 // merged NAV destinations (static list plus registered surfaces).
 
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { listSurfaces } from "../workspace/router.ts";
 import type { useWorkspace } from "../workspace/WorkspaceContext.tsx";
 import {
 	NAV_DESTINATIONS,
 	type PaletteAction,
 } from "./CommandPalette-registry.ts";
+import { localizePaletteAction } from "./localize.ts";
 
 // Merge the static NAV_DESTINATIONS with any registered surface path that is not
 // already listed, so newly registered surfaces are reachable from the palette
@@ -29,26 +30,37 @@ export function layoutActions(
 	const actions: PaletteAction[] = [];
 	for (const [region, name] of SIDE_REGIONS) {
 		if (workspace.focusedRegion !== region) {
-			actions.push({
-				id: `layout:move-${region}`,
-				group: "Actions",
-				label: tf("Move tab to {name}", { name }),
-				run: run(() => workspace.moveActiveTo(region)),
-			});
+			actions.push(
+				localizePaletteAction(
+					{
+						id: `layout:move-${region}`,
+						group: "Actions",
+						label: tf("Move tab to {name}", { name: tr(name) }),
+						run: run(() => workspace.moveActiveTo(region)),
+					},
+					`Move tab to ${name}`
+				)
+			);
 		}
 		const hasTabs = workspace.state.groups.some(
 			(group) => group.region === region && group.itemIds.length > 0
 		);
 		if (hasTabs) {
 			const open = workspace.state.openRegions[region];
-			actions.push({
-				id: `layout:toggle-${region}`,
-				group: "Actions",
-				label: `${open ? "Hide" : "Show"} ${name}`,
-				run: run(() =>
-					open ? workspace.hideRegion(region) : workspace.showRegion(region)
-				),
-			});
+			const values = { name: tr(name) };
+			actions.push(
+				localizePaletteAction(
+					{
+						id: `layout:toggle-${region}`,
+						group: "Actions",
+						label: open ? tf("Hide {name}", values) : tf("Show {name}", values),
+						run: run(() =>
+							open ? workspace.hideRegion(region) : workspace.showRegion(region)
+						),
+					},
+					`${open ? "Hide" : "Show"} ${name}`
+				)
+			);
 		}
 	}
 	if (workspace.focusedRegion !== "center") {

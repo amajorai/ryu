@@ -17,6 +17,7 @@ import {
 	BLOCK_SUGGESTION_TOKEN,
 	type ResolvedSuggestion,
 } from "@ryu/ui/lib/block-discussion-index.ts";
+import { suggestionMarkLabel } from "@ryu/ui/lib/block-suggestion-text.ts";
 import { CheckIcon, XIcon } from "lucide-react";
 import { useEditorPlugin, usePluginOption } from "platejs/react";
 import { Fragment, useState } from "react";
@@ -166,13 +167,11 @@ export function BlockSuggestionCard({
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground text-sm">
 									{Object.keys(suggestion.properties).map((key) => (
-										<span key={key}>Un{key}</span>
+										<span key={key}>{suggestionMarkLabel(key, true)}</span>
 									))}
 
 									{Object.keys(suggestion.newProperties).map((key) => (
-										<span key={key}>
-											{key.charAt(0).toUpperCase() + key.slice(1)}
-										</span>
+										<span key={key}>{suggestionMarkLabel(key, false)}</span>
 									))}
 								</span>
 								<span className="text-sm">{suggestion.newText}</span>

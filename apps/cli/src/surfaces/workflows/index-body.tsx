@@ -10,6 +10,7 @@ import { Divider } from "@/components/ui/divider.tsx";
 import { StatusMessage } from "@/components/ui/status-message.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { tf } from "../../i18n/translate.ts";
+import { nameFieldLabel } from "../../ui/name-field-label.ts";
 
 const MAX_OUTPUT_LINES = 10;
 
@@ -152,7 +153,7 @@ function WorkflowMeta({ workflow }: { workflow: Workflow }) {
 				valueColor={theme.colors.mutedForeground}
 			/>
 			<box flexDirection="row" gap={1}>
-				<text fg={theme.colors.mutedForeground}>name</text>
+				<text fg={theme.colors.mutedForeground}>{nameFieldLabel()}</text>
 				<text fg={theme.colors.foreground}>
 					<b>{workflow.name}</b>
 				</text>

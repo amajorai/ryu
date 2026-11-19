@@ -52,7 +52,7 @@ hex = "0.4"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 base64 = "0.22"
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 
 # Extracted gateway stage crates (decomposition W6, first extraction). The budget

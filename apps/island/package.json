@@ -50,7 +50,7 @@
     "electron-vite": "^6.0.0",
     "tailwindcss": "catalog:",
     "typescript": "^5",
-    "vite": "^6"
+    "vite": "^6.4.6"
   },
   "optionalDependencies": {
     "electron-liquid-glass": "1.1.1",

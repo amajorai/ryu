@@ -1,5 +1,4 @@
 {
-  "1 second": "ثانية واحدة",
   "A Ryu credential was exposed publicly": "تم كشف بيانات اعتماد Ryu علنًا",
   "A Ryu internal organization crossed the {level} threshold. It was not throttled or suspended automatically.": "تجاوزت مؤسسة داخلية في Ryu الحد {level}. ولم يتم خفض معدلها أو تعليقها تلقائيًا.",
   "A child safety case was opened": "تم فتح قضية تتعلق بسلامة الأطفال",
@@ -656,7 +655,10 @@
   "{amount} in Ryu Credits": "{amount} من Ryu Credits",
   "{amount} is now available in your Ryu balance": "أصبح {amount} متاحًا الآن في رصيدك على Ryu",
   "{code} is your Ryu for Students code": "{code} هو رمز Ryu for Students الخاص بك",
+  "{count, plural, one {# hour} other {# hours}}": "{count, plural, zero {# ساعة} one {ساعة واحدة} two {ساعتان} few {# ساعات} many {# ساعة} other {# ساعة}}",
+  "{count, plural, one {# minute} other {# minutes}}": "{count, plural, zero {# دقيقة} one {دقيقة واحدة} two {دقيقتان} few {# دقائق} many {# دقيقة} other {# دقيقة}}",
   "{count, plural, one {# seat in {organizationName} is unassigned} other {# seats in {organizationName} are unassigned}}": "{organizationName, select, other {في {organizationName}، {count, plural, zero {لا توجد مقاعد غير مخصصة} one {يوجد مقعد واحد غير مخصص} two {يوجد مقعدان غير مخصصين} few {توجد # مقاعد غير مخصصة} many {يوجد # مقعدًا غير مخصص} other {يوجد # مقعد غير مخصص}}}}",
+  "{count, plural, one {# second} other {# seconds}}": "{count, plural, zero {# ثانية} one {ثانية واحدة} two {ثانيتان} few {# ثوانٍ} many {# ثانية} other {# ثانية}}",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month} and cost {cost}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, zero {لم يكن أي وكيل نشطًا} one {كان هذا الوكيل نشطًا} two {كان هذان الوكيلان نشطين} few {كان هؤلاء الوكلاء الـ # نشطين} many {كان هؤلاء الوكلاء الـ # نشطين} other {كان هؤلاء الوكلاء الـ # نشطين}} في كل أيام {month} تقريبًا بتكلفة {cost}. إذا كان ذلك مقصودًا، فلا شيء عليك فعله. وإذا تُرك أحدها قيد التشغيل عن طريق الخطأ، فيمكنك إيقافه مؤقتًا من عرض الوكلاء في Ryu.",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, zero {لم يكن أي وكيل نشطًا} one {كان هذا الوكيل نشطًا} two {كان هذان الوكيلان نشطين} few {كان هؤلاء الوكلاء الـ # نشطين} many {كان هؤلاء الوكلاء الـ # نشطين} other {كان هؤلاء الوكلاء الـ # نشطين}} في كل أيام {month} تقريبًا. إذا كان ذلك مقصودًا، فلا شيء عليك فعله. وإذا تُرك أحدها قيد التشغيل عن طريق الخطأ، فيمكنك إيقافه مؤقتًا من عرض الوكلاء في Ryu.",
   "{didntAsk} Someone may have your session. Ignore this link, then change your password and sign out your other devices from Settings.": "{didntAsk} قد يكون شخص ما قد حصل على جلستك. تجاهل هذا الرابط، ثم غيّر كلمة المرور وسجّل الخروج من أجهزتك الأخرى من الإعدادات.",

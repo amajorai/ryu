@@ -7,14 +7,14 @@ description = "Authoritative CRDT document engine for Ryu: Core's durable server
 repository = "https://github.com/amajorai/ryu"
 
 # Versions match apps/core/Cargo.toml so there is no skew when Core links this
-# crate in-process. rusqlite is pinned 0.40.0 workspace-wide (links= collision
+# crate in-process. rusqlite is pinned 0.41.0 workspace-wide (links= collision
 # otherwise). This crate has ZERO dependency on apps/core.
 [dependencies]
 # The data-dir layout (`db/`, `state/`, …) shared by every Ryu process.
 ryu-sidecar-runtime = { path = "../sidecar-runtime", version = "0.5.1" }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 serde_json = "1"
 yrs = "0.27"
 tracing = "0.1"

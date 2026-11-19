@@ -59,13 +59,13 @@ import {
 	useCatalogHost,
 	useNoInterfaceLevel,
 } from "./host.tsx";
+import { catalogLayerBadges } from "./layer-labels.ts";
 import { runScorecard } from "./scorecard.ts";
 import { stabilityLabel } from "./stability.ts";
-import {
-	type AppCatalogItem,
-	type CatalogVersion,
-	catalogLayerBadges,
-	type PluginCatalogDetail,
+import type {
+	AppCatalogItem,
+	CatalogVersion,
+	PluginCatalogDetail,
 } from "./types.ts";
 
 /** The detail panel's tab set. Overview, Reviews and Health are ALWAYS present
@@ -277,6 +277,7 @@ export function AppDetailPanel({
 			.map((k) => runnableKindLabel(k)),
 		...catalogLayerBadges(
 			detail?.layers ?? entry.layers,
+			tl,
 			detail?.external ?? entry.external
 		),
 	].filter((b): b is string => Boolean(b));

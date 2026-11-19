@@ -36,6 +36,7 @@ import {
 	SERVICE_COMMANDS,
 	type ServiceCommand,
 } from "@ryuhq/services-cli";
+import { tf, tr } from "../i18n/translate.ts";
 import type { CliContext, CliIO, Command } from "./types.ts";
 import { VERSION } from "./version.ts";
 
@@ -280,7 +281,10 @@ export function runServicesFromRyu(
 	const dangling = flags.find((flag) => flag.kind === "dangling");
 	if (dangling) {
 		return refuse(
-			`${dangling.tokens[0]} before \`services\` has no value. Put it after the command with its value, for example: ryu-cli services <service> <command> ${dangling.tokens[0]} <value>`
+			tf(
+				"{flag} before `services` has no value. Put it after the command with its value, for example: ryu-cli services <service> <command> {flag} <value>",
+				{ flag: dangling.tokens[0] ?? "" }
+			)
 		);
 	}
 	const forwarded = flags
@@ -291,7 +295,9 @@ export function runServicesFromRyu(
 		.flatMap((flag) => flag.tokens);
 	if (flags.some((flag) => flag.kind === "version") && rawArgs.length > 0) {
 		return refuse(
-			"--version takes no service or command. Run: ryu-cli services --version"
+			tr(
+				"--version takes no service or command. Run: ryu-cli services --version"
+			)
 		);
 	}
 	if (moved.length === 0) {
@@ -309,11 +315,13 @@ export function runServicesFromRyu(
 	const echoed = [...forwarded, ...head, ...moved, ...tail];
 	const corrected = ["ryu-cli", "services", ...redactKey(echoed)].join(" ");
 	const keyNote = echoed.some((token) => token.startsWith("--api-key"))
-		? "\n  (replace <key> with your key, or set the service's key env var instead)"
+		? `\n  ${tr("(replace <key> with your key, or set the service's key env var instead)")}`
 		: "";
-	return refuse(
-		`${moved.map(shellWord).join(" ")} before \`services\` is not a ryu-services global flag, so it is not forwarded. Put it after the command:\n  ${corrected}${keyNote}`
+	const notForwarded = tf(
+		"{flags} before `services` is not a ryu-services global flag, so it is not forwarded. Put it after the command:",
+		{ flags: moved.map(shellWord).join(" ") }
 	);
+	return refuse(`${notForwarded}\n  ${corrected}${keyNote}`);
 }
 
 /** `ryu services …`: listed in `ryu help`. The dispatcher calls

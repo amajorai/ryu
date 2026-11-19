@@ -4,6 +4,7 @@ import {
 	Download01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { modelBytesLabel } from "@ryu/blocks/desktop/model-byte-label.ts";
 import { isBlockedFit } from "@ryu/blocks/desktop/model-fit.ts";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -219,6 +220,7 @@ function FileRow({
 	const isUninstalling = uninstalling === file.filename;
 	const blocked = isBlockedFit(file.fit);
 	const compression = friendlyQuant(file.quant);
+	const sizeLabel = modelBytesLabel(file.sizeBytes, file.sizeHuman);
 	const { attempt, error: installError } = useInstallAttempt();
 	const handleInstall = () => {
 		if (!blocked) {
@@ -283,10 +285,8 @@ function FileRow({
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
 					{renderLabel()}
-					{file.sizeHuman && (
-						<span className="text-muted-foreground text-xs">
-							{file.sizeHuman}
-						</span>
+					{sizeLabel && (
+						<span className="text-muted-foreground text-xs">{sizeLabel}</span>
 					)}
 				</div>
 				{/* A blocked file's notice below already leads with its fit label. */}

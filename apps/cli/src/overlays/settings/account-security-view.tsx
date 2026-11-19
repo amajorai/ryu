@@ -12,6 +12,7 @@ import type {
 	UnloadedEmailChange,
 	UnloadedSecuritySession,
 } from "./account-security-types.ts";
+import { type PanelNotice, PanelNoticeText } from "./panel-notice.tsx";
 
 export function AccountSecurityView({
 	busy,
@@ -29,7 +30,7 @@ export function AccountSecurityView({
 	busy: boolean;
 	codes: string[];
 	emailChange: SecurityEmailChangeResponse | UnloadedEmailChange;
-	message: string;
+	message: PanelNotice | null;
 	methodIndex: number;
 	methods: string[];
 	operation: Operation;
@@ -121,17 +122,7 @@ export function AccountSecurityView({
 					<text>Enter acknowledge and clear</text>
 				</>
 			) : null}
-			{message ? (
-				<text
-					fg={
-						message.startsWith("Could not")
-							? theme.colors.error
-							: theme.colors.success
-					}
-				>
-					{message}
-				</text>
-			) : null}
+			<PanelNoticeText notice={message} />
 			{busy ? (
 				<text>Working…</text>
 			) : stage === "idle" ? null : (

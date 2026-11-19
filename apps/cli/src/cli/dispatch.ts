@@ -6,9 +6,11 @@
 // names none, or the first token is "tui", fall through to the interactive
 // WorkspaceShell (unchanged). `ryu` and `ryu tui` both open the TUI.
 
+import { readFileSync } from "node:fs";
 import type { ApiTarget } from "@ryuhq/core-client/client";
 import { resolveNodeTarget, UnknownNodeError } from "../core/nodeTarget.ts";
-import { tf, tr } from "../i18n/translate.ts";
+import { tlsSettings, withTargetTls } from "../core/tlsTarget.ts";
+import { CLI_TRANSLATOR, tf, tr } from "../i18n/translate.ts";
 import {
 	promptLine,
 	readStdin,
@@ -46,9 +48,10 @@ const EXIT_USAGE = 2;
 /** The flags that consume a VALUE (`--flag v` or `--flag=v`), mapped to the field
  *  they set. A table keeps the parse loop flat: each new value-flag is one entry
  *  here instead of two more branches in an ever-growing else-if chain. */
-type ValueFlag = "agent" | "file" | "kind" | "node" | "template";
+type ValueFlag = "agent" | "caCert" | "file" | "kind" | "node" | "template";
 const VALUE_FLAGS = new Map<string, ValueFlag>([
 	["--agent", "agent"],
+	["--ca-cert", "caCert"],
 	["--file", "file"],
 	["--kind", "kind"],
 	["--node", "node"],
@@ -66,12 +69,14 @@ const VALUE_FLAGS = new Map<string, ValueFlag>([
 export function parseArgs(argv: string[]): ParsedArgs {
 	const flags: GlobalFlags = {
 		agent: null,
+		caCert: null,
 		file: null,
 		json: false,
 		kind: null,
 		node: null,
 		print: false,
 		template: null,
+		tlsSkipVerify: false,
 		tokenEnv: false,
 		force: false,
 		cascade: false,
@@ -110,6 +115,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
 			flags.print = true;
 		} else if (tok === "--token-env") {
 			flags.tokenEnv = true;
+		} else if (tok === "--tls-skip-verify") {
+			flags.tlsSkipVerify = true;
 		} else if (tok === "-f") {
 			flags.file = argv[i + 1] ?? null;
 			i++;
@@ -169,12 +176,37 @@ function resolveTarget(flags: GlobalFlags): ApiTarget {
 	}
 }
 
+/** {@link resolveTarget} under the `--ca-cert` / `--tls-skip-verify`
+ *  settings (core/tlsTarget.ts); skipping verification warns on stderr. */
+function resolveTlsTarget(flags: GlobalFlags, io: CliIO): ApiTarget {
+	let settings: ReturnType<typeof tlsSettings>;
+	try {
+		settings = tlsSettings(flags, process.env, (path) =>
+			readFileSync(path, "utf8")
+		);
+	} catch (err) {
+		throw new UsageError(err instanceof Error ? err.message : String(err));
+	}
+	if (settings?.rejectUnauthorized === false) {
+		io.err(
+			`${tr("Warning: TLS certificate verification is off; the node token goes to whoever answers.")}\n`
+		);
+	}
+	return withTargetTls(resolveTarget(flags), settings);
+}
+
 /** Render a command failure to stderr and map it to an exit code (2 = usage). */
-function reportFailure(io: CliIO, flags: GlobalFlags, err: unknown): number {
+function reportFailure(
+	io: CliIO,
+	flags: GlobalFlags,
+	err: unknown,
+	target?: ApiTarget
+): number {
 	if (flags.json) {
 		io.err(`${JSON.stringify(errorToJson(err))}\n`);
 	} else {
-		io.err(`${tf("Error: {message}", { message: formatError(err) })}\n`);
+		const message = formatError(err, CLI_TRANSLATOR, { url: target?.url });
+		io.err(`${tf("Error: {message}", { message })}\n`);
 	}
 	return err instanceof UsageError ? EXIT_USAGE : EXIT_ERROR;
 }
@@ -252,7 +284,7 @@ export async function runCli(
 
 	let target: ApiTarget;
 	try {
-		target = overrides.target ?? resolveTarget(flags);
+		target = overrides.target ?? resolveTlsTarget(flags, io);
 	} catch (err) {
 		return reportFailure(io, flags, err);
 	}
@@ -290,7 +322,7 @@ export async function runCli(
 		return await runAppCommand(ctx, parsed.command);
 	} catch (err) {
 		// A bad/missing argument is a usage error (2); anything else is runtime (1).
-		return reportFailure(io, flags, err);
+		return reportFailure(io, flags, err, target);
 	}
 }
 

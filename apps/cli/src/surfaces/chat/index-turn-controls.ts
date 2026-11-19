@@ -8,6 +8,7 @@ import { type ChatStreamOptions, stopChatTurn } from "../../core/chatStream.ts";
 import { herdrReporter } from "../../core/herdr.ts";
 import { readMemoryConsent } from "../../core/memoryConsent.ts";
 import { resetPromptNavigation } from "../../core/promptHistory.ts";
+import { tr } from "../../i18n/translate.ts";
 import { nextStarterPlaceholder } from "./index-constants.ts";
 import type { ChatSurfaceContext } from "./index-context.ts";
 
@@ -247,8 +248,8 @@ export function useChatTurnControls(deps: UseChatTurnControlsDeps) {
 							: "idle",
 				message: blocked
 					? overlay.kind === "permission"
-						? "Waiting for tool permission"
-						: "Waiting for an answer"
+						? tr("Waiting for tool permission")
+						: tr("Waiting for an answer")
 					: (turnError ?? undefined),
 				options: messages.length > 0 ? buildOptions() : undefined,
 			},

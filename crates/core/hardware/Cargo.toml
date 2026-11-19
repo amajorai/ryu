@@ -16,7 +16,7 @@ serde_json = "1"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 tracing = "0.1"
 sha2 = "0.10"

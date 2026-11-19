@@ -1,4 +1,5 @@
 "use client";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { PopoverContent, PopoverTrigger } from "@ryu/ui/components/popover.tsx";
 import { useAsRef } from "@ryu/ui/hooks/use-as-ref.ts";
@@ -177,6 +178,7 @@ function ColorPickerArea(props: DivProps): ReactElement {
 		ref,
 		...areaProps
 	} = props;
+	const tl = useLiteralMessages();
 
 	const propsRef = useAsRef({
 		onPointerDown: onPointerDownProp,
@@ -319,7 +321,7 @@ function ColorPickerArea(props: DivProps): ReactElement {
 		onKeyDown,
 		role: "group",
 		tabIndex: context.disabled || context.readOnly ? -1 : 0,
-		"aria-label": "Saturation and brightness",
+		"aria-label": tl("Saturation and brightness"),
 		ref: composedRef,
 		children: (
 			<>

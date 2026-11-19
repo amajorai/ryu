@@ -264,7 +264,7 @@ export function statusLine(
 	switch (post.status) {
 		case "working":
 			return {
-				text: lead ? tl("{lead} is replying", { lead }) : "Replying",
+				text: lead ? tl("{lead} is replying", { lead }) : tl("Replying"),
 				tone: "live",
 			};
 		case "attention":

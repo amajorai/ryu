@@ -2,6 +2,7 @@ import Link from "next/link";
 import { docsHref } from "../../data/resources.tsx";
 import { LinkArrow } from "../../link-arrow.tsx";
 import { nextLinkHref } from "../../next-link-href.ts";
+import { SenseLabel } from "../../sense-label.tsx";
 import type {
 	ProductRelatedKind,
 	ProductRelatedLink,
@@ -12,6 +13,10 @@ import {
 	sectionChipClass,
 } from "./section-shell.tsx";
 
+/**
+ * Chip labels. "Guide" renders through the keyed `kb.guideKind` sense: the
+ * bare catalog word is the verb (ja 指示).
+ */
 export const RELATED_KIND_LABELS: Readonly<Record<ProductRelatedKind, string>> =
 	{
 		guide: "Guide",
@@ -28,7 +33,13 @@ function RelatedRow({ link }: { link: ProductRelatedLink }) {
 		<>
 			<span>
 				<span className={sectionChipClass}>
-					{RELATED_KIND_LABELS[link.kind]}
+					{link.kind === "guide" ? (
+						<SenseLabel id="kb.guideKind">
+							{RELATED_KIND_LABELS.guide}
+						</SenseLabel>
+					) : (
+						RELATED_KIND_LABELS[link.kind]
+					)}
 				</span>
 			</span>
 			<span className="font-medium text-foreground text-sm md:text-base">

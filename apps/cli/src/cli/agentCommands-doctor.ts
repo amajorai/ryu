@@ -1,6 +1,6 @@
 // `ryu doctor agents`: probe Core's MCP endpoint and each coding agent's entry.
 
-import { tf, tr } from "../i18n/translate.ts";
+import { tf, tr, trMessage } from "../i18n/translate.ts";
 import {
 	BIN,
 	connectionTarget,
@@ -21,6 +21,7 @@ import {
 	type TokenMode,
 	UnsupportedConfigError,
 } from "./agentConnect.ts";
+import { localize } from "./localizedText.ts";
 import { formatTable } from "./output.ts";
 import type { CliContext } from "./types.ts";
 import { VERSION } from "./version.ts";
@@ -104,7 +105,7 @@ export async function probeMcpEndpoint(
 	const message = errorMessageFrom(body);
 	if (response.status === 401) {
 		return {
-			detail: message ?? "the node token was rejected",
+			detail: message ?? localize("the node token was rejected").english,
 			status: "unauthorized",
 			url,
 		};
@@ -193,7 +194,7 @@ function probeFixHint(probe: ProbeResult, agentId: string): string {
 			detail: probe.detail,
 		});
 	}
-	return "Start Ryu (the desktop app, or run ryu-cli once)";
+	return localize("Start Ryu (the desktop app, or run ryu-cli once)").english;
 }
 
 export async function buildAgentsDoctorReport(
@@ -246,14 +247,20 @@ export async function buildAgentsDoctorReport(
 				current = readEntryLenient(agent, text, configPath);
 				if (current !== undefined) {
 					report.notes.push(
-						`${configPath} has comments, so ${BIN} connect/disconnect cannot edit it; change the '${MCP_SERVER_NAME}' entry by hand.`
+						localize(
+							"{configPath} has comments, so {BIN} connect/disconnect cannot edit it; change the '{MCP_SERVER_NAME}' entry by hand.",
+							{ configPath, BIN, MCP_SERVER_NAME }
+						).english
 					);
 				}
 			}
 		} catch (error) {
 			report.status = "unreadable";
 			report.notes.push(error instanceof Error ? error.message : String(error));
-			report.fix = `Fix ${configPath}, or run ${BIN} connect ${agent.id} --print and add the entry by hand`;
+			report.fix = localize(
+				"Fix {configPath}, or run {BIN} connect {agentId} --print and add the entry by hand",
+				{ configPath, BIN, agentId: agent.id }
+			).english;
 			continue;
 		}
 		if (current === undefined) {
@@ -304,7 +311,9 @@ export async function buildAgentsDoctorReport(
 			// Core's /mcp route always requires a bearer, so this entry cannot
 			// work; probing with our own token would report a false "connected".
 			report.status = "broken";
-			report.notes.push("The entry sends no Authorization header.");
+			report.notes.push(
+				localize("The entry sends no Authorization header.").english
+			);
 			report.fix = `${BIN} connect ${agent.id}${report.managedByRyu ? "" : " --force"}`;
 			continue;
 		}
@@ -323,55 +332,70 @@ export async function buildAgentsDoctorReport(
 	return { agents, coreUrl: target.coreUrl, endpoint };
 }
 
-const STATUS_LABELS: Record<AgentStatus, string> = {
-	broken: "broken",
-	connected: "connected",
-	"not-connected": "not connected",
-	"other-node": "other node",
-	unreadable: "unreadable",
-	unverified: "configured (Core down)",
-};
+/** Status words for the table, translated when the report renders. */
+function statusLabel(status: AgentStatus): string {
+	switch (status) {
+		case "broken":
+			return tr("broken");
+		case "connected":
+			return tr("connected");
+		case "not-connected":
+			return tr("not connected");
+		case "other-node":
+			return tr("other node");
+		case "unreadable":
+			return tr("unreadable");
+		default:
+			return tr("configured (Core down)");
+	}
+}
 
 export function renderAgentsDoctorReport(report: AgentsDoctorReport): string {
 	const lines = [
 		tf("Ryu MCP endpoint {url}: {status} ({detail})", {
 			url: report.endpoint.url,
 			status: report.endpoint.status,
-			detail: report.endpoint.detail,
+			detail: trMessage(report.endpoint.detail),
 		}),
 		"",
 		formatTable(
 			["AGENT", "ON PATH", "RYU ENTRY", "CONFIG"],
 			report.agents.map((agent) => [
 				agent.id,
-				agent.binary ?? "no",
-				STATUS_LABELS[agent.status],
+				agent.binary ?? tr("no"),
+				statusLabel(agent.status),
 				agent.configPath,
 			])
 		),
 	];
 	const notes = report.agents.flatMap((agent) => [
-		...agent.notes.map((note) => `  ${agent.id}: ${note}`),
+		...agent.notes.map((note) => `  ${agent.id}: ${trMessage(note)}`),
 		...(agent.endpoint &&
 		agent.endpoint.status !== "ok" &&
 		agent.endpoint.status !== "unreachable"
-			? [`  ${agent.id}: ${agent.endpoint.status} — ${agent.endpoint.detail}`]
+			? [
+					`  ${agent.id}: ${agent.endpoint.status}: ${trMessage(agent.endpoint.detail)}`,
+				]
 			: []),
 		...(agent.tokenMode === "inline"
-			? [`  ${agent.id}: the node token is stored inline in its config`]
+			? [
+					`  ${agent.id}: ${tr("the node token is stored inline in its config")}`,
+				]
 			: []),
 	]);
 	if (notes.length > 0) {
-		lines.push("", "Notes:", ...notes);
+		lines.push("", tr("Notes"), ...notes);
 	}
 	const fixes = report.agents
 		.filter((agent) => agent.fix)
-		.map((agent) => `  ${agent.id}: ${agent.fix}`);
+		.map((agent) => `  ${agent.id}: ${trMessage(agent.fix ?? "")}`);
 	if (report.endpoint.status !== "ok") {
-		fixes.unshift(`  endpoint: ${probeFixHint(report.endpoint, "<agent>")}`);
+		fixes.unshift(
+			`  endpoint: ${trMessage(probeFixHint(report.endpoint, "<agent>"))}`
+		);
 	}
 	if (fixes.length > 0) {
-		lines.push("", "Fixes:", ...fixes);
+		lines.push("", tr("Fixes"), ...fixes);
 	}
 	return `${lines.join("\n")}\n`;
 }

@@ -59,14 +59,14 @@ pub struct LoginUrlsBody {
     description = "Login URLs decide where a session Box fill may submit the account's password. \
         Validated like account create: https, the account's host, its www. variant or a \
         subdomain, no user name, port, query or fragment, at most four. Audited with the URLs \
-        before and after.",
+        before and after. An account created before login URLs gains the field on its first set.",
     params(("agent_id" = Option<String>, Query, description = "Agent that owns the account (set by Core)")),
     request_body = serde_json::Value,
     responses(
         (status = 200, description = "The account (metadata only)", body = serde_json::Value),
         (status = 400, description = "A login URL breaks a rule"),
         (status = 404, description = "No such account for this agent"),
-        (status = 409, description = "The account predates login URLs"),
+        (status = 409, description = "The account changed while it was updated; retry"),
     ))]
 pub async fn login_urls_set(
     State(state): State<ServerState>,

@@ -9,6 +9,7 @@ import {
 	TITLE_SPINNER_INTERVAL_MS,
 	terminalTitle,
 } from "./core/terminalTitle.ts";
+import { tabTitleText } from "./workspace/tabStripLayout.ts";
 
 /**
  * Mirror the focused tab into the terminal title (an OSC window-title sequence) and the Herdr pane
@@ -20,7 +21,9 @@ export function useShellTitle(renderer: CliRenderer, tabTitle: string | null) {
 		chatActivity.subscribe,
 		chatActivity.focused
 	);
-	const label = focusedChat?.title ?? tabTitle ?? "";
+	// A conversation title is shown as written; a tab's surface title
+	// ("New chat") is translated like its chip.
+	const label = focusedChat?.title ?? (tabTitle ? tabTitleText(tabTitle) : "");
 	const streaming = focusedChat?.streaming ?? false;
 	const model = focusedChat?.model ?? null;
 	const [frame, setFrame] = useState(0);

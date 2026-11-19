@@ -6,6 +6,7 @@ import {
 	request,
 } from "@ryuhq/core-client/client";
 import { z } from "zod";
+import { LocalizedError, localize } from "../cli/localizedText.ts";
 import {
 	type ConversationWire,
 	conversationDate,
@@ -108,7 +109,9 @@ export async function resumeConversation(
 	}
 	const parsed = resumedConversationSchema.safeParse(await response.json());
 	if (!parsed.success) {
-		throw new Error("Resume conversation returned an invalid conversation");
+		throw new LocalizedError(
+			localize("Resume conversation returned an invalid conversation")
+		);
 	}
 	return {
 		id: parsed.data.id,
@@ -130,7 +133,7 @@ export async function renameConversation(
 ): Promise<string> {
 	const normalizedTitle = title.trim();
 	if (normalizedTitle.length === 0) {
-		throw new Error("Conversation title must not be empty");
+		throw new LocalizedError(localize("Conversation title must not be empty"));
 	}
 	const response = await fetchForTarget(target)(
 		apiUrl(target, `${conversationPath(conversationId)}/title`),
@@ -145,7 +148,7 @@ export async function renameConversation(
 	}
 	const parsed = conversationTitleSchema.safeParse(await response.json());
 	if (!parsed.success) {
-		throw new Error("Rename conversation returned no title");
+		throw new LocalizedError(localize("Rename conversation returned no title"));
 	}
 	return parsed.data.title;
 }
@@ -224,7 +227,9 @@ export async function forkConversation(
 	}
 	const parsed = forkConversationSchema.safeParse(await response.json());
 	if (!parsed.success) {
-		throw new Error("Fork conversation returned no conversation id");
+		throw new LocalizedError(
+			localize("Fork conversation returned no conversation id")
+		);
 	}
 	return parsed.data.conversation.id;
 }

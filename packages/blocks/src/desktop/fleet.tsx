@@ -17,7 +17,7 @@ import {
 	ServerStack01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { translate as tl } from "@ryu/i18n/core";
+import { translate as tl, translateMessage } from "@ryu/i18n/core";
 import { formatDurationUnit } from "@ryu/i18n/format-intl";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
@@ -120,7 +120,9 @@ function NodeStatusCell({
 					</span>
 				)}
 				<Badge variant={online ? "default" : "destructive"}>
-					{online ? "Online" : "Offline"}
+					{/* The keyed presence word: the bare catalog "Online" is an online
+					event (zh-CN "线上"). */}
+					{online ? translateMessage("status.online", {}, "Online") : "Offline"}
 				</Badge>
 			</>
 		);

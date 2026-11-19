@@ -1,3 +1,4 @@
+import { translate as tr } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -26,7 +27,7 @@ import {
 	GlanceMark,
 	glanceThreadState,
 } from "./glance-parts.tsx";
-import { agentById, compactAge } from "./interface-renderer.ts";
+import { agentById, compactAge, formatNameList } from "./interface-renderer.ts";
 
 export { GlanceAgentsFace } from "./glance-faces-agents.tsx";
 export { GlanceFlowFace } from "./glance-faces-flow.tsx";
@@ -42,7 +43,7 @@ function agentNames(
 	const names = thread.agentIds
 		.map((id) => agentById(snapshot, id)?.name)
 		.filter((name): name is string => Boolean(name));
-	return names.length > 0 ? names.join(", ") : "No agent";
+	return names.length > 0 ? formatNameList(names) : tr("No agent");
 }
 
 // ---------------------------------------------------------------------------

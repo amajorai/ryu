@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -171,6 +171,9 @@ export function ContextBreakdownPanel({
 	usage?: ContextUsage | null;
 }) {
 	const tl = useLiteralMessages();
+	// Remaining context tokens, not the price sense of the bare "Free".
+	const freeLabel =
+		useOptionalI18n()?.t("context.freeTokens", {}, "Free") ?? "Free";
 	const windowSize = usage?.total || breakdown?.window || 0;
 	const reported = usage?.used ?? 0;
 	if (!breakdown) {
@@ -277,7 +280,7 @@ export function ContextBreakdownPanel({
 				) : null}
 				{isPositiveContextCount(windowSize) ? (
 					<SummaryRow
-						label="Free"
+						label={freeLabel}
 						muted
 						value={tl("{free} of {total}", {
 							free: formatCount(free) ?? "—",

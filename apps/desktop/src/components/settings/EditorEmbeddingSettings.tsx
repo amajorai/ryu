@@ -271,14 +271,14 @@ function EditorAiCard({
 						? tlRich(
 								"Uses {name}'s model: <span>{model}</span>",
 								{
-									name: selectedAgent?.name ?? "the agent",
+									name: selectedAgent?.name ?? tl("the agent"),
 									model: agentModelDisplay,
 								},
 								{ span: (c) => <span title={agentModelTitle}>{c}</span> }
 							)
 						: tl(
 								"{name} has no model set yet, so inline AI won't produce real edits. Set a model on the agent, or choose “Custom model”.",
-								{ name: selectedAgent?.name ?? "This agent" }
+								{ name: selectedAgent?.name ?? tl("This agent") }
 							)}
 				</p>
 			) : (

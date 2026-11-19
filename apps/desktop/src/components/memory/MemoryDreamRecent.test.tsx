@@ -188,8 +188,8 @@ describe("MemoryDreamReview recently accepted", () => {
 		const [revision, blocked] = recentItems(container);
 		expect(container.textContent).toContain("Recently accepted");
 		expect(revision?.textContent).toContain("Prefers exit rows");
-		expect(revision?.textContent).toContain("Updated");
-		expect(blocked?.textContent).toContain("Saved");
+		expect(revision?.textContent).toContain("Memory updated");
+		expect(blocked?.textContent).toContain("Memory saved");
 
 		await act(async () => {
 			buttonIn(revision, "Undo")?.click();
@@ -246,7 +246,7 @@ describe("MemoryDreamReview recently accepted", () => {
 		]);
 		const [accepted] = recentItems(container);
 		expect(accepted?.textContent).toContain("Prefers window seats");
-		expect(accepted?.textContent).toContain("Saved");
+		expect(accepted?.textContent).toContain("Memory saved");
 		expect(container.querySelector("[data-testid=dream-proposal]")).toBe(null);
 	});
 });

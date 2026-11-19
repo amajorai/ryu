@@ -1,4 +1,5 @@
 import { withNativeMenuMessages } from "./en-messages-native-menu.ts";
+import { withSenseMessages } from "./en-messages-senses.ts";
 import { OFFICIAL_LANGUAGE_PACKS } from "./locales.ts";
 import { alignOfficialPackWithCatalog } from "./official-pack-catalog-alignment.ts";
 import type { LanguagePack } from "./pack.ts";
@@ -15,9 +16,9 @@ export { EN_MESSAGES, type MessageId } from "./en-messages.ts";
  * (asserted by `built-in-packs.test.ts`); keep the two lists in step.
  */
 export const BUILT_IN_LANGUAGE_PACKS: readonly LanguagePack[] = [
-	...OFFICIAL_LANGUAGE_PACKS.map(alignOfficialPackWithCatalog).map(
-		withNativeMenuMessages
-	),
+	...OFFICIAL_LANGUAGE_PACKS.map(alignOfficialPackWithCatalog)
+		.map(withNativeMenuMessages)
+		.map(withSenseMessages),
 	{
 		baseLocale: "en",
 		direction: "ltr",

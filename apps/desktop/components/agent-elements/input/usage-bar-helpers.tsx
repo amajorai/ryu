@@ -5,6 +5,7 @@ import type {
 	UsageValue,
 	UsageWindow,
 } from "@/src/lib/api/usage.ts";
+import { COUNTDOWN_EXPIRED, formatCountdown } from "@/src/lib/expiry.ts";
 import { usagePercentText } from "./usage-percent.ts";
 
 /**
@@ -147,27 +148,26 @@ export function shortLabel(usageWindow: UsageWindow): string {
 	return `${Math.round(hours / HOURS_PER_DAY)}d`;
 }
 
-/** "resets in ~3h" / "resets in ~12m" / "" when unknown or already past. */
-export function formatReset(resetsAt: string | null): string {
+/**
+ * "Resets in 3 hours" / "Resets soon" / "" when unknown, worded as the usage
+ * dashboard words it (the same catalogued sentences) with the duration in the
+ * reader's language.
+ */
+export function formatReset(
+	resetsAt: string | null,
+	tl: LiteralMessage,
+	now: number = Date.now()
+): string {
 	if (!resetsAt) {
 		return "";
 	}
-	const resetMs = Date.parse(resetsAt);
-	if (Number.isNaN(resetMs)) {
+	const countdown = formatCountdown(resetsAt, now);
+	if (!countdown) {
 		return "";
 	}
-	const diffMinutes = Math.round((resetMs - Date.now()) / 60_000);
-	if (diffMinutes <= 0) {
-		return "resets soon";
-	}
-	if (diffMinutes < 60) {
-		return `resets in ~${diffMinutes}m`;
-	}
-	const hours = Math.round(diffMinutes / 60);
-	if (hours < 48) {
-		return `resets in ~${hours}h`;
-	}
-	return `resets in ~${Math.round(hours / 24)}d`;
+	return countdown === COUNTDOWN_EXPIRED
+		? tl("Resets soon")
+		: tl("Resets in {duration}", { duration: countdown });
 }
 
 /**

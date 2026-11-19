@@ -367,6 +367,8 @@ pub(in crate::server) fn is_vault_operator_read_path(path: &str) -> bool {
             path,
             "/api/vault/events"
                 | "/api/vault/policies"
+                | "/api/vault/capabilities-accessor"
+                | "/api/vault/sys/metrics"
                 | "/api/vault/sys/seal-provider"
                 | "/api/vault/sys/rekey"
         )

@@ -25,7 +25,12 @@
 //! * [`catalog`]: built-in service templates;
 //! * [`proxy`]: the listener (CONNECT and absolute-form);
 //! * [`runtime`]: sessions Core mints for the agent runtimes it spawns;
-//! * [`box_relay`]: per-Box sessions relayed into cloud-task Boxes.
+//! * [`box_relay`]: per-Box sessions relayed into cloud-task Boxes;
+//! * [`delegation`]: `onBehalfOf` sessions and remote admission;
+//! * [`jsonrpc`]: tool-call metadata of brokered MCP requests;
+//! * [`session_log`]: per-session request logs sealed at rest;
+//! * [`request_events`]: session-log and audit-device fan-out per request;
+//! * [`remote`]: the opt-in remote-reachable listener.
 //!
 //! Authorization uses `sys/broker/<service>` (`use` to broker through a
 //! service, `admin` to manage it) and `sys/broker` (`admin` for environment
@@ -35,6 +40,8 @@ pub mod box_relay;
 pub mod ca;
 pub mod catalog;
 pub mod command_tools;
+pub mod delegation;
+pub mod jsonrpc;
 pub mod log;
 pub mod netguard;
 pub mod oauth;
@@ -42,9 +49,12 @@ pub mod proposal_notify;
 pub mod proposals;
 pub mod proxy;
 pub mod ratelimit;
+pub mod remote;
+pub mod request_events;
 pub mod runtime;
 pub mod services;
 pub mod session_identity;
+pub mod session_log;
 pub mod sessions;
 pub mod settings;
 pub mod substitute;
@@ -70,8 +80,17 @@ pub const ENV_NETWORK_ALLOWLIST: &str = "RYU_VAULT_BROKER_NETWORK_ALLOWLIST";
 pub const ENV_RPS: &str = "RYU_VAULT_BROKER_RPS";
 /// Token-bucket burst per session (default 200).
 pub const ENV_BURST: &str = "RYU_VAULT_BROKER_BURST";
-/// Largest request body the broker buffers (default 10 MiB); larger is 413.
+/// Largest request body the broker buffers (default 64 MiB); larger is 413.
 pub const ENV_MAX_REQUEST_BYTES: &str = "RYU_VAULT_BROKER_MAX_REQUEST_BYTES";
+/// Largest upstream response the broker relays (default 256 MiB): a larger
+/// declared length is a 502, and an undeclared one is cut off at the cap.
+pub const ENV_MAX_RESPONSE_BYTES: &str = "RYU_VAULT_BROKER_MAX_RESPONSE_BYTES";
+/// Seconds a client may take to send a request's headers, including the
+/// wait for the next request on a kept-alive connection (default 30).
+pub const ENV_HEADER_TIMEOUT_SECS: &str = "RYU_VAULT_BROKER_HEADER_TIMEOUT_SECS";
+/// Client connections the broker serves at once, across sessions (default
+/// 1024); a connection over the cap is closed at once.
+pub const ENV_MAX_CONNECTIONS: &str = "RYU_VAULT_BROKER_MAX_CONNECTIONS";
 /// Request-log retention in hours (default 168).
 pub const ENV_LOG_MAX_AGE_HOURS: &str = "RYU_VAULT_BROKER_LOG_MAX_AGE_HOURS";
 /// Request-log row cap (default 10 000).
@@ -82,9 +101,12 @@ pub const SYS_BROKER: &str = "sys/broker";
 
 const DEFAULT_RPS: f64 = 20.0;
 const DEFAULT_BURST: f64 = 200.0;
-const DEFAULT_MAX_REQUEST_BYTES: usize = 10 * 1024 * 1024;
+const DEFAULT_MAX_REQUEST_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_MAX_RESPONSE_BYTES: usize = 256 * 1024 * 1024;
 const DEFAULT_MAX_TUNNELS_PER_SESSION: usize = 32;
 const DEFAULT_SESSION_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+const DEFAULT_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_MAX_CONNECTIONS: usize = 1024;
 const DEFAULT_LOG_MAX_AGE_HOURS: i64 = 168;
 const DEFAULT_LOG_MAX_ROWS: i64 = 10_000;
 const MAINTENANCE_TICK: Duration = Duration::from_secs(60);
@@ -101,6 +123,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
     settings::init_schema(conn)?;
     log::init_schema(conn)?;
     proposals::init_schema(conn)?;
+    delegation::init_schema(conn)?;
     ca::init_schema(conn)
 }
 
@@ -113,12 +136,19 @@ pub struct BrokerConfig {
     pub rps: f64,
     pub burst: f64,
     pub max_request_bytes: usize,
+    /// Largest upstream response relayed.
+    pub max_response_bytes: usize,
     /// Concurrent CONNECT tunnels (intercepted or raw) per session.
     pub max_tunnels_per_session: usize,
     /// How often an open tunnel re-checks that its session is still live
     /// (unrevoked, unexpired, and its minting token live); a dead session
     /// closes the tunnel.
     pub session_check_interval: Duration,
+    /// How long a client may take to send a request's headers, also bounding
+    /// an idle kept-alive connection (slow-loris protection).
+    pub header_read_timeout: Duration,
+    /// Client connections served at once across every session.
+    pub max_connections: usize,
     /// Extra PEM roots trusted for upstream TLS, in addition to the system
     /// roots. Only tests set this (a local fake upstream).
     pub(crate) extra_upstream_roots_pem: Vec<String>,
@@ -158,8 +188,18 @@ impl BrokerConfig {
             max_request_bytes: env_parse(ENV_MAX_REQUEST_BYTES)
                 .filter(|v: &usize| *v > 0)
                 .unwrap_or(DEFAULT_MAX_REQUEST_BYTES),
+            max_response_bytes: env_parse(ENV_MAX_RESPONSE_BYTES)
+                .filter(|v: &usize| *v > 0)
+                .unwrap_or(DEFAULT_MAX_RESPONSE_BYTES),
             max_tunnels_per_session: DEFAULT_MAX_TUNNELS_PER_SESSION,
             session_check_interval: DEFAULT_SESSION_CHECK_INTERVAL,
+            header_read_timeout: env_parse(ENV_HEADER_TIMEOUT_SECS)
+                .filter(|secs: &u64| *secs > 0)
+                .map(Duration::from_secs)
+                .unwrap_or(DEFAULT_HEADER_TIMEOUT),
+            max_connections: env_parse(ENV_MAX_CONNECTIONS)
+                .filter(|count: &usize| *count > 0)
+                .unwrap_or(DEFAULT_MAX_CONNECTIONS),
             extra_upstream_roots_pem: Vec::new(),
         }
     }
@@ -182,6 +222,33 @@ pub fn listener_port(raw: Option<&str>) -> Option<u16> {
 
 static LISTENING_PORT: OnceLock<u16> = OnceLock::new();
 static SERVING: OnceLock<std::sync::Arc<proxy::Broker>> = OnceLock::new();
+static REMOTE: OnceLock<remote::RemoteConfig> = OnceLock::new();
+
+/// The remote listener's configuration, once it is up.
+pub fn remote_listener() -> Option<&'static remote::RemoteConfig> {
+    REMOTE.get()
+}
+
+/// Start the remote listener next to the loopback one, if configured. A
+/// misconfiguration is logged and leaves it off; it never widens access.
+async fn start_remote(broker: std::sync::Arc<proxy::Broker>) {
+    let config = match remote::RemoteConfig::from_env() {
+        Ok(Some(config)) => config,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!("remote vault broker listener is off: {error:#}");
+            return;
+        }
+    };
+    match tokio::net::TcpListener::bind(config.listen).await {
+        Ok(listener) => {
+            tracing::info!(addr = %config.listen, "remote vault broker listening");
+            let _ = REMOTE.set(config.clone());
+            tokio::spawn(broker.serve_remote(listener, config));
+        }
+        Err(error) => tracing::warn!("remote vault broker failed to bind: {error}"),
+    }
+}
 
 /// The port the process-wide broker listens on, once it is up.
 pub fn listening_port() -> Option<u16> {
@@ -213,6 +280,7 @@ pub fn spawn(store: &'static PluginSecretStore) {
                 let _ = LISTENING_PORT.set(broker.port());
                 let _ = SERVING.set(broker.clone());
                 tracing::info!(port = broker.port(), "vault credential broker listening");
+                start_remote(broker.clone()).await;
                 broker.serve(listener).await;
             }
             Err(error) => tracing::warn!("vault credential broker failed to start: {error:#}"),
@@ -235,6 +303,12 @@ pub async fn maintain(store: &PluginSecretStore) {
     }
     if let Err(error) = log::prune(&conn, now, max_age_hours, max_rows) {
         tracing::warn!("pruning broker log failed: {error:#}");
+    }
+    if let Err(error) = session_log::prune(&conn, now, max_age_hours) {
+        tracing::warn!("pruning broker session logs failed: {error:#}");
+    }
+    if let Err(error) = delegation::prune(&conn) {
+        tracing::warn!("pruning broker session attributes failed: {error:#}");
     }
     if let Err(error) = crate::vault::items::cards::expire(&conn, now) {
         tracing::warn!("expiring card approvals failed: {error:#}");
@@ -262,7 +336,13 @@ pub(crate) fn local_node_id() -> String {
 /// variables, and `DENO_CERT` adds the broker CA to Deno's trust store, so
 /// neither runtime bypasses the broker.
 pub fn proxy_env(token: &str, port: u16, ca: &ca::CaFiles) -> BTreeMap<String, String> {
-    let proxy = format!("http://rvb:{token}@127.0.0.1:{port}");
+    proxy_env_at(&format!("http://rvb:{token}@127.0.0.1:{port}"), ca)
+}
+
+/// [`proxy_env`] for a proxy URL that already carries the session token (a
+/// remote agent's, see [`remote::proxy_url`]).
+pub fn proxy_env_at(proxy: &str, ca: &ca::CaFiles) -> BTreeMap<String, String> {
+    let proxy = proxy.to_owned();
     let mut env = BTreeMap::new();
     for name in ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"] {
         env.insert(name.to_owned(), proxy.clone());

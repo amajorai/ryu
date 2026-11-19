@@ -13,7 +13,7 @@
 
 import { ShuffleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -62,7 +62,7 @@ export function WallpaperPreview() {
 						? tl("Shuffles each launch · {set}", {
 								set:
 									preference.set === ALL_WALLPAPER_SETS
-										? "All wallpapers"
+										? tl("All wallpapers")
 										: preference.set,
 							})
 						: (wallpaper.attribution ?? wallpaper.set)}
@@ -78,6 +78,9 @@ export function WallpaperPreview() {
 
 export function WallpaperPicker({ className }: { className?: string }) {
 	const { preference, update } = useWallpaper();
+	// An image link (fr "Lien"), not the bare "Link" account verb.
+	const linkTab =
+		useOptionalI18n()?.t("editor.hyperlink", {}, "Link") ?? "Link";
 	return (
 		<Tabs className={className} defaultValue="gallery">
 			<div className="flex flex-col gap-3">
@@ -86,7 +89,7 @@ export function WallpaperPicker({ className }: { className?: string }) {
 					<TabsTrigger value="animated">Animated</TabsTrigger>
 					<TabsTrigger value="unsplash">Unsplash</TabsTrigger>
 					<TabsTrigger value="upload">Upload</TabsTrigger>
-					<TabsTrigger value="link">Link</TabsTrigger>
+					<TabsTrigger value="link">{linkTab}</TabsTrigger>
 				</TabsList>
 				<TabsContent value="gallery">
 					<GalleryTab preference={preference} update={update} />

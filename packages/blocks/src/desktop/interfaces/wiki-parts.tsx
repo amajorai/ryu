@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	DitherAvatar,
 	ditherAvatarSeed,
@@ -287,17 +287,21 @@ export function WikiToc({ sections }: { sections: WikiSection[] }) {
 	const nav = useWikiNav();
 	const reduceMotion = useReducedMotion();
 	const [open, setOpen] = useState(true);
+	// A table-of-contents heading (ja 目次); the bare catalog "Contents" is what
+	// something holds (ja 内容).
+	const contents =
+		useOptionalI18n()?.t("nav.tableOfContents", {}, "Contents") ?? "Contents";
 	const listId = `${nav.idPrefix}-toc`;
 	if (sections.length < 2) {
 		return null;
 	}
 	return (
 		<nav
-			aria-label="Contents"
+			aria-label={contents}
 			className="mt-4 inline-block min-w-56 border border-border bg-muted/40 px-3 py-2 text-sm"
 		>
 			<div className="flex items-baseline justify-center gap-2">
-				<h2 className="font-semibold text-sm">Contents</h2>
+				<h2 className="font-semibold text-sm">{contents}</h2>
 				<span className="text-[13px] text-muted-foreground">
 					[
 					<WikiAction

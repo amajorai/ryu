@@ -19,6 +19,7 @@ import {
 	swatchColor,
 	topicStatusNote,
 } from "./forum-model.ts";
+import { formatNameList } from "./interface-renderer.ts";
 
 /** Quiet square icon button used across the forum chrome. */
 export const ICON_BUTTON =
@@ -161,8 +162,8 @@ export function PosterList({ topic }: { topic: ForumTopic }) {
 	const shown = topic.posters.slice(0, POSTER_LIMIT);
 	const names =
 		topic.posters.length > 0
-			? topic.posters.map((agent) => agent.name).join(", ")
-			: "You";
+			? formatNameList(topic.posters.map((agent) => agent.name))
+			: tl("You");
 	return (
 		<span className="flex items-center gap-1" title={names}>
 			<span className="sr-only">{tl("Posters: {names}", { names })}</span>

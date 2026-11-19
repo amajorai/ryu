@@ -34,8 +34,8 @@ use crate::plugin_secrets::{
 };
 use crate::vault::audit::{AuditActor, AuditEntry};
 use crate::vault::broker::{
-    self, ca, catalog, log, proposals, service_key, services, sessions, settings, substitute,
-    SYS_BROKER,
+    self, ca, catalog, delegation, log, proposals, service_key, services, sessions, settings,
+    substitute, SYS_BROKER,
 };
 use crate::vault::machine::TokenPrincipal;
 use crate::vault::password_managers::{GrantMode, PmRef};
@@ -198,14 +198,20 @@ async fn agent(headers: &HeaderMap) -> Result<Agent, Response> {
 }
 
 mod agent;
+mod ca_routes;
 pub mod hosted_mcp;
+mod member_values;
 mod proposals_routes;
 mod services_routes;
+mod session_history_routes;
 mod sessions_routes;
 
 pub use agent::*;
+pub use ca_routes::*;
+pub use member_values::*;
 pub use proposals_routes::*;
 pub use services_routes::*;
+pub use session_history_routes::*;
 pub use sessions_routes::*;
 
 /// Protected routes (node bearer).
@@ -226,6 +232,17 @@ pub fn routes() -> Router<ServerState> {
                 .delete(delete_service)
                 .layer(body()),
         )
+        .route(
+            "/api/vault/broker/services/:name/member-values",
+            get(list_member_values_route)
+                .put(put_member_value_route)
+                .layer(body()),
+        )
+        .route(
+            "/api/vault/broker/ca",
+            get(ca_info).put(ca_import).layer(body()),
+        )
+        .route("/api/vault/broker/ca/rotate", post(ca_rotate))
         .route("/api/vault/broker/usage", get(service_usage))
         .route(
             "/api/vault/broker/environments/:env",
@@ -235,10 +252,14 @@ pub fn routes() -> Router<ServerState> {
             "/api/vault/broker/sessions",
             get(list_sessions).post(create_session).layer(body()),
         )
+        .route("/api/vault/broker/sessions/history", get(session_history))
         .route(
             "/api/vault/broker/sessions/:id",
-            axum::routing::delete(revoke_session),
+            axum::routing::delete(revoke_session)
+                .patch(relabel_session)
+                .layer(body()),
         )
+        .route("/api/vault/broker/sessions/:id/log", get(session_log))
         .route("/api/vault/broker/logs", get(list_logs))
         .route("/api/vault/broker/discovered-hosts", get(discovered_hosts))
         .route("/api/vault/broker/proposals", get(list_proposals))

@@ -3,6 +3,7 @@
 // Values: part of the Secret Vault client. `../vault.ts` re-exports these names
 // and documents the wire conventions.
 
+import { z } from "zod";
 import type { AppJsonValue } from "../app-request-json.ts";
 import { type ApiTarget, request } from "../client.ts";
 import {
@@ -33,6 +34,8 @@ export interface VaultListQuery {
 	path?: string;
 	/** Include sub-folders (Core default: true). */
 	recursive?: boolean;
+	/** Only values carrying every one of these tags. */
+	tags?: string[];
 }
 
 export interface VaultListResponse {
@@ -131,6 +134,7 @@ export function listVaultSecrets(
 			path: filter.path,
 			recursive: filter.recursive,
 			includeDeleted: filter.includeDeleted,
+			tag: filter.tags?.length ? filter.tags.join(",") : undefined,
 		})}`,
 		{ signal },
 		vaultHumanList
@@ -240,5 +244,132 @@ export function destroyVaultSecret(
 			body: coords,
 		},
 		vaultHumanDestroyed
+	);
+}
+
+export interface MoveVaultSecretInput extends VaultCoords {
+	toEnvironment?: string;
+	toName?: string;
+	toPath?: string;
+}
+
+/** Move or rename one value within its scope (`delete` at the old key, `write` at the new one). */
+export function moveVaultSecret(
+	target: ApiTarget,
+	name: string,
+	input: MoveVaultSecretInput
+): Promise<VaultWriteResult> {
+	return request(
+		target,
+		secretPath(name, "/move"),
+		{ method: "POST", body: input },
+		vaultHumanWrite
+	);
+}
+
+export type VaultBulkItem =
+	| ({ name: string; op: "set" } & PutVaultSecretInput)
+	| ({ name: string; op: "delete" } & VaultCoords)
+	| ({ name: string; op: "move" } & MoveVaultSecretInput);
+
+export interface VaultBulkResult {
+	error?: string;
+	index: number;
+	name: string | null;
+	ok: boolean;
+	op: string | null;
+	result?: AppJsonValue;
+	status: number;
+}
+
+const vaultBulkReply = z.object({
+	failed: z.number(),
+	ok: z.boolean(),
+	results: z.array(
+		z.object({
+			error: z.string().optional(),
+			index: z.number(),
+			name: z.string().nullable(),
+			ok: z.boolean(),
+			op: z.string().nullable(),
+			result: z.custom<AppJsonValue>().optional(),
+			status: z.number(),
+		})
+	),
+});
+
+/** Set, delete or move up to 100 values; each item gets its own result and audit row. */
+export function bulkVaultSecrets(
+	target: ApiTarget,
+	items: VaultBulkItem[]
+): Promise<{ failed: number; ok: boolean; results: VaultBulkResult[] }> {
+	return request(
+		target,
+		"/api/vault/bulk",
+		{ method: "POST", body: { items } },
+		vaultBulkReply
+	);
+}
+
+export interface VaultTag {
+	color?: string;
+	/** Values carrying the tag that the caller may list. */
+	count: number;
+	createdAt?: VaultTimestamp;
+	/** Whether a tag entity describes it (otherwise it is only in use). */
+	defined: boolean;
+	description?: string;
+	name?: string;
+	slug: string;
+	updatedAt?: VaultTimestamp;
+}
+
+const vaultTagWire = z.object({
+	color: z.string().optional(),
+	count: z.number(),
+	createdAt: z.union([z.string(), z.number()]).optional(),
+	defined: z.boolean(),
+	description: z.string().optional(),
+	name: z.string().optional(),
+	slug: z.string(),
+	updatedAt: z.union([z.string(), z.number()]).optional(),
+});
+
+export function listVaultTags(
+	target: ApiTarget
+): Promise<{ tags: VaultTag[] }> {
+	return request(
+		target,
+		"/api/vault/tags",
+		{},
+		z.object({ tags: z.array(vaultTagWire) })
+	);
+}
+
+export function putVaultTag(
+	target: ApiTarget,
+	slug: string,
+	input: { color?: string; description?: string; name?: string }
+): Promise<{ ok: boolean; tag: Omit<VaultTag, "count" | "defined"> }> {
+	return request(
+		target,
+		`/api/vault/tags/${encodeURIComponent(slug)}`,
+		{ method: "PUT", body: input },
+		z.object({
+			ok: z.boolean(),
+			tag: vaultTagWire.omit({ count: true, defined: true }),
+		})
+	);
+}
+
+export function deleteVaultTag(
+	target: ApiTarget,
+	slug: string
+): Promise<{ deleted: boolean; ok: boolean }> {
+	return request(
+		target,
+		`/api/vault/tags/${encodeURIComponent(slug)}`,
+		{ method: "DELETE" },
+		z.object({ deleted: z.boolean(), ok: z.boolean() })
 	);
 }

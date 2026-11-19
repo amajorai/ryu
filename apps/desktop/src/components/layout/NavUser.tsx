@@ -223,7 +223,7 @@ export function NavUser(props: NavUserProps) {
 		if (creditsError) {
 			return "Unavailable";
 		}
-		return "No workspace wallet";
+		return tl("No workspace wallet");
 	})();
 	const resetDate = formatDate(
 		orgBillingStatus?.subscription?.currentPeriodEnd

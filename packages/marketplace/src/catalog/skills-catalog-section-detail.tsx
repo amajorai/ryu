@@ -45,6 +45,7 @@ import { SkillDetailAside } from "./skills-catalog-section-detail-aside.tsx";
 import {
 	formatCount,
 	resolveSkillKey,
+	skillInstallsValue,
 	skillStatItems,
 	skillTrustLabel,
 } from "./skills-catalog-section-model.ts";
@@ -151,9 +152,7 @@ export function SkillDetailPanel({
 	const skillEnabled = skillKey ? (enabledByKey[skillKey] ?? false) : false;
 	const isToggling = skillKey !== null && togglingSkill === skillKey;
 	const owner = skillOrg(card);
-	const installs =
-		metadata.installs ??
-		(card.installs > 0 ? formatCount(card.installs) : null);
+	const installs = skillInstallsValue(card.installs, metadata.installs);
 	// Only show a Downloads figure when the skill actually reports one; falling
 	// back to the Installs value would render two rows with an identical number,
 	// which reads as a data error.

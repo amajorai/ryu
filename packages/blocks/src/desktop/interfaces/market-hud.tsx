@@ -176,7 +176,7 @@ export function MarketStreetHud({
 	const empty = !loading && shops.length === 0;
 	let status = loading ? undefined : streetStatus(totals, tl);
 	if (empty) {
-		status = "No shops yet";
+		status = tl("No shops yet");
 	}
 	const title = (
 		<>

@@ -1,3 +1,4 @@
+import { activeLocale, numberFormatter } from "@ryu/i18n/core";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -19,6 +20,14 @@ import {
 } from "@/src/components/gateway/budget-copy.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { BudgetChargeInclusion } from "@/src/lib/api/gateway.ts";
+
+/** The spend cap's example amount, written with the reader's decimal mark. */
+export function spendCapPlaceholder(locale: string = activeLocale()): string {
+	return numberFormatter(locale, {
+		maximumFractionDigits: 2,
+		minimumFractionDigits: 2,
+	}).format(1);
+}
 
 export function BudgetChargeInclusionFields({
 	disabled,
@@ -151,7 +160,7 @@ export function BudgetRuleFields({
 					id={`${idPrefix}-limit`}
 					min={0}
 					onChange={(event) => patch({ limitUsd: event.target.value })}
-					placeholder="1.00"
+					placeholder={spendCapPlaceholder()}
 					step="0.01"
 					type="number"
 					value={form.limitUsd}

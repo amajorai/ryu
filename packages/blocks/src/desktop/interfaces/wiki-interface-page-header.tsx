@@ -76,7 +76,7 @@ export function PageHeader({
 					</ul>
 				</nav>
 				{rightTabs.length > 0 ? (
-					<nav aria-label="Views">
+					<nav aria-label="Page tabs">
 						<ul className="-me-2 flex">
 							{rightTabs.map((tab) => (
 								<TabButton key={tab.id} tab={tab} />

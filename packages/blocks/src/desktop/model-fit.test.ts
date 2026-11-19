@@ -1,5 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { formatMessage, type LiteralMessage } from "@ryu/i18n";
+import type { MessageValuesInput } from "@ryu/i18n/core";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../i18n/src/active-locale.ts";
 import {
 	FIT_RANK,
 	fitBlockReason,
@@ -99,6 +105,79 @@ describe("fitBlockReason", () => {
 	test("returns null for verdicts that do not block", () => {
 		expect(fitBlockReason("cpu", "Runs on your CPU", null, tl)).toBeNull();
 		expect(fitBlockReason("unknown", "", null, tl)).toBeNull();
+	});
+});
+
+const GERMAN_PACK: Record<string, string> = {
+	"Not enough free disk space to download it":
+		"Nicht genug freier Speicherplatz für den Download",
+	"Too large for your device's memory": "Zu groß für den Speicher des Geräts",
+	"{verdictLabel}. Only {diskFreeHuman} is free on the models drive.":
+		"{verdictLabel}. Auf dem Modelllaufwerk sind nur {diskFreeHuman} frei.",
+	"{verdictLabel}. This device has {ramHuman} of RAM and {vramHuman} of GPU memory.":
+		"{verdictLabel}. Dieses Gerät hat {ramHuman} RAM und {vramHuman} GPU-Speicher.",
+};
+
+const germanTl: LiteralMessage = (source, values) =>
+	formatMessage(GERMAN_PACK[source] ?? source, values ?? {}, "de");
+
+const german = {
+	direction: "ltr" as const,
+	locale: "de",
+	translate(id: string, values?: MessageValuesInput, fallback?: string) {
+		const source = fallback ?? id;
+		return formatMessage(GERMAN_PACK[source] ?? source, values, "de");
+	},
+};
+
+/** Intl puts a no-break space before the unit; compare on plain spaces. */
+const plain = (text: string | null) => text?.replace(/\s/gu, " ") ?? null;
+
+describe("fitBlockReason under a German UI", () => {
+	afterEach(() => {
+		unregisterActiveI18nRuntime(german);
+	});
+
+	test("words the device's byte counts with the German decimal mark", () => {
+		registerActiveI18nRuntime(german);
+		expect(
+			plain(
+				fitBlockReason(
+					"no_space",
+					"",
+					{ diskFreeBytes: 5_261_334_937, diskFreeHuman: "4.9 GB" },
+					germanTl
+				)
+			)
+		).toBe(
+			"Nicht genug freier Speicherplatz für den Download. Auf dem Modelllaufwerk sind nur 4,9 GB frei."
+		);
+		expect(
+			plain(
+				fitBlockReason(
+					"too_big",
+					"",
+					{
+						ramHuman: "15.5 GB",
+						totalRamBytes: 16_642_998_272,
+						vramBytes: 4 * 1024 ** 3 + 300 * 1024 ** 2,
+						vramHuman: "4.3 GB",
+					},
+					germanTl
+				)
+			)
+		).toBe(
+			"Zu groß für den Speicher des Geräts. Dieses Gerät hat 15,5 GB RAM und 4,3 GB GPU-Speicher."
+		);
+	});
+
+	test("keeps Core's string when a byte count is missing", () => {
+		registerActiveI18nRuntime(german);
+		expect(
+			fitBlockReason("no_space", "", { diskFreeHuman: "3 GB" }, germanTl)
+		).toBe(
+			"Nicht genug freier Speicherplatz für den Download. Auf dem Modelllaufwerk sind nur 3 GB frei."
+		);
 	});
 });
 

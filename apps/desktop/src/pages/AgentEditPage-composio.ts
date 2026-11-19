@@ -1,5 +1,5 @@
 import type { ComposioAccountOption } from "@ryu/blocks/desktop/agent-edit.tsx";
-import { translate as tl } from "@ryu/i18n/core";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	modeHasOwnAccounts,
@@ -26,6 +26,7 @@ import type { AgentEditFormState } from "./AgentEditPage-form-state.ts";
 export type AgentEditComposio = ReturnType<typeof useAgentEditComposio>;
 
 export function useAgentEditComposio(ctx: AgentEditBase & AgentEditFormState) {
+	const tl = useLiteralMessages();
 	const {
 		composioToolkit,
 		existing,
@@ -121,6 +122,7 @@ export function useAgentEditComposio(ctx: AgentEditBase & AgentEditFormState) {
 		identityMode,
 		ownAppsAvailable,
 		ownComposioConnectionsQuery.data,
+		tl,
 	]);
 
 	// ── Composio event-trigger subscriptions for this agent ──────────────────────

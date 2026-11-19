@@ -32,6 +32,8 @@ describe("defaultInputDir", () => {
 		[{ variant: "default" }],
 		[{ variant: "muted" }],
 		[{ type: null, variant: null }],
+		// What `Input` passes when the caller sets neither (exactOptionalPropertyTypes).
+		[{ type: undefined, variant: undefined }],
 	])("%o resolves by content", (input) => {
 		expect(defaultInputDir(input)).toBe("auto");
 	});

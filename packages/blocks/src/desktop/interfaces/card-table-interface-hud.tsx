@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
 	ClockOptions,
@@ -90,6 +90,7 @@ export function CardTableHud({
 	unseated,
 }: CardTableHudProps) {
 	const tl = useLiteralMessages();
+	const i18n = useOptionalI18n();
 	const { budget, onAsk, onBlocker, queueOpener, railActs, shown, totals } =
 		tableActs;
 	const isSpread = layout === "spread";
@@ -200,7 +201,10 @@ export function CardTableHud({
 				>
 					{(
 						[
-							["poker", "Table"],
+							[
+								"poker",
+								i18n?.t("cardTable.layoutTable", {}, "Table") ?? "Table",
+							],
 							["spread", "Cards"],
 						] as const
 					).map(([value, name]) => (

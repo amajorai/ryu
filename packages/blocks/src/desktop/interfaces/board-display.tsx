@@ -1,3 +1,4 @@
+import { useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Popover,
@@ -49,12 +50,16 @@ export function BoardDisplayMenu({
 	onViewChange: (view: View) => void;
 	view: View;
 }) {
+	// The bare catalog "Display" is a monitor (zh-CN "显示器"); this button opens
+	// the view options.
+	const display =
+		useOptionalI18n()?.t("view.display", {}, "Display") ?? "Display";
 	return (
 		<Popover>
 			<PopoverTrigger
 				render={
 					<Button
-						aria-label="Display"
+						aria-label={display}
 						size="dense"
 						title="Display options"
 						type="button"
@@ -63,7 +68,7 @@ export function BoardDisplayMenu({
 				}
 			>
 				<SlidersHorizontal aria-hidden="true" data-icon="inline-start" />
-				<span className="@max-[640px]/header:hidden">Display</span>
+				<span className="@max-[640px]/header:hidden">{display}</span>
 			</PopoverTrigger>
 			<PopoverContent align="end" className={POPUP} sideOffset={6}>
 				<BoardDisplayOptions

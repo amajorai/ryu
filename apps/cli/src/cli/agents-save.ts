@@ -7,7 +7,8 @@ import {
 	accountKeyUnusedReason,
 	parseAccountKeys,
 } from "../core/agentIdentity.ts";
-import { tf } from "../i18n/translate.ts";
+import { formatCliList } from "../i18n/format.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import type { AgentsArgs } from "./agents-args.ts";
 import {
 	type AgentIdentityView,
@@ -78,7 +79,7 @@ export async function saveAgentPatch(
 		output(
 			ctx,
 			{ dry_run: true, request: body, agent: viewJson(preview) },
-			`${summary} Nothing was saved (--dry-run).\n${describeAgent(preview)}`
+			`${summary} ${tr("Nothing was saved (--dry-run).")}\n${describeAgent(preview)}`
 		);
 		return 0;
 	}
@@ -91,7 +92,9 @@ export async function saveAgentPatch(
 	const parsed = agentEnvelopeSchema.safeParse(json);
 	if (!parsed.success) {
 		throw new Error(
-			`Core saved agent '${view.id}' but returned an unreadable record.`
+			tf("Core saved agent '{id}' but returned an unreadable record.", {
+				id: view.id,
+			})
 		);
 	}
 	// The PUT answer carries no app request: saving the requested mode or
@@ -118,8 +121,13 @@ export function requireKeys(raw: string[], usage: string): string[] {
 	}
 	const { keys, invalid } = parseAccountKeys(raw);
 	if (invalid.length > 0) {
+		const refused = tf(
+			"Not an account key Core accepts: {keys}. Nothing was saved.",
+			{ keys: formatCliList(invalid) }
+		);
+		const formats = ACCOUNT_KEY_FORMATS.map((format) => `  ${format}`);
 		throw new UsageError(
-			`Not an account key Core accepts: ${invalid.join(", ")}. Nothing was saved.\nKeys look like:\n  ${ACCOUNT_KEY_FORMATS.join("\n  ")}`
+			[refused, tr("Keys look like:"), ...formats].join("\n")
 		);
 	}
 	return keys;

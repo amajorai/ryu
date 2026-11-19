@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { SpaceDocument } from "@/src/lib/api/spaces.ts";
 import { conversationSearchText } from "@/src/lib/chat-pull-request-search.ts";
+import { compareNames } from "@/src/lib/name-collator.ts";
 import { toEpoch } from "@/src/lib/sidebar/date-buckets.ts";
 import { useChatPullRequestIndex } from "@/src/store/useChatPullRequestIndex.ts";
 import type { Conversation } from "@/types/chat.ts";
@@ -82,10 +83,10 @@ export function sortItems<T>(
 			);
 			break;
 		case "name-asc":
-			copy.sort((a, b) => accessors.name(a).localeCompare(accessors.name(b)));
+			copy.sort((a, b) => compareNames(accessors.name(a), accessors.name(b)));
 			break;
 		case "name-desc":
-			copy.sort((a, b) => accessors.name(b).localeCompare(accessors.name(a)));
+			copy.sort((a, b) => compareNames(accessors.name(b), accessors.name(a)));
 			break;
 		case "status": {
 			const rank = accessors.statusRank;

@@ -83,7 +83,7 @@ export function NodeOnboardingSettings({
 	};
 
 	const setupLabel =
-		state?.setupKind === "team" ? "Team or company" : "Personal";
+		state?.setupKind === "team" ? tl("Team or company") : tl("Personal");
 	const statusLabel = state?.completed ? "Complete" : "Needs setup";
 	// The endpoint's decision is authoritative for this exact node. The parent
 	// capability is only a loading fallback and may be broader than a personal

@@ -28,6 +28,7 @@
   "Group created": "グループを作成しました",
   "Group deleted": "グループを削除しました",
   "Group updated": "グループを更新しました",
+  "Groups cannot reach its sidecar. Check the {permission} permission and try again.": "Groups がサイドカーに接続できません。{permission} 権限を確認してもう一度お試しください。",
   "Groups couldn't load": "グループを読み込めませんでした",
   "Groups loaded, but agents could not: {error}": "グループは読み込まれましたが、エージェントを読み込めませんでした: {error}",
   "Groups returned an invalid group record.": "グループから無効なグループレコードが返されました。",

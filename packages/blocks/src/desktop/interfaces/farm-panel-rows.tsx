@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { translate as tr, translateMessage } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { type CSSProperties, createContext, useContext } from "react";
 import { BoardStatusDot } from "./board-status.tsx";
@@ -112,7 +112,7 @@ export function Ledger({
 					</dd>
 				</div>
 				<div className="flex min-w-0 flex-col gap-1 py-2.5 pl-3">
-					<dt className={label}>Crop</dt>
+					<dt className={label}>{translateMessage("farm.crop", {}, "Crop")}</dt>
 					<dd className="truncate text-foreground">{fruitName(crop.fruit)}</dd>
 				</div>
 				{actMode ? null : (

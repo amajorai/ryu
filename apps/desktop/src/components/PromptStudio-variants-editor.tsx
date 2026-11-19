@@ -181,7 +181,10 @@ export function PromptVariantsEditor({
 							onChange={(event) =>
 								onUpdate(variant.id, { content: event.target.value })
 							}
-							placeholder="A second system prompt variant. {{vars}} are rendered per case."
+							placeholder={tl(
+								"A second system prompt variant. {example} are rendered per case.",
+								{ example: "{{vars}}" }
+							)}
 							size="compact"
 							value={variant.content}
 							variant="code"

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { NodeEngines } from "@/src/lib/api/models.ts";
 import {
 	type ModelEngineStatus,
@@ -121,5 +122,33 @@ describe("waitForModelEngineInstall", () => {
 				timeoutMs: 0,
 			})
 		).rejects.toThrow("Check Engines and retry");
+	});
+});
+
+describe("waitForModelEngineInstall messages", () => {
+	const sources: string[] = [];
+	const tl: LiteralMessage = (source, values) => {
+		sources.push(source);
+		const name = (values as Record<string, unknown> | undefined)?.displayName;
+		return `[${source}](${String(name)})`;
+	};
+
+	test("translates the failure and timeout as whole templates", async () => {
+		sources.length = 0;
+		await expect(
+			waitForModelEngineInstall({ displayName: "vLLM" }, async () => "failed", {
+				tl,
+			})
+		).rejects.toThrow("[{displayName} failed to install. Retry setup.](vLLM)");
+		await expect(
+			waitForModelEngineInstall(
+				{ displayName: "vLLM" },
+				async () => "not_installed",
+				{ pollIntervalMs: 0, timeoutMs: 0, tl }
+			)
+		).rejects.toThrow(
+			"[{displayName} is taking longer than expected. Check Engines and retry.](vLLM)"
+		);
+		expect(sources).toHaveLength(2);
 	});
 });

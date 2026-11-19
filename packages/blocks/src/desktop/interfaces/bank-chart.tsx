@@ -65,7 +65,7 @@ export function BankSpendChart({
 	const readDay = days[readIndex];
 	const readout = readDay
 		? dayReadout(readDay, readIndex === lastIndex, currency).join(", ")
-		: "No days";
+		: tl("No days");
 
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
 		const current = active ?? lastIndex;

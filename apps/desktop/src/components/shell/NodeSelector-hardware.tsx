@@ -33,6 +33,7 @@ import {
 	computerName,
 	type LayoutCssVariables,
 } from "./NodeSelector-status.tsx";
+import { fmtBytes, usageText } from "./NodeSelector-usage-format.ts";
 import { UsageMeter } from "./NodeSelector-usage-meter.tsx";
 
 const GPU_VENDOR_NVIDIA = /^NVIDIA\s+(GeForce\s+)?/i;
@@ -53,19 +54,6 @@ function barColor(pct: number): string {
 	return "bg-foreground/30";
 }
 
-/** `"41.3 GB"` + `"63.7 GB"` → `"41.3/63.7 GB"` (shared unit collapsed). */
-function compactUsage(usedHuman: string, totalHuman: string): string {
-	const u = usedHuman.split(" ");
-	const t = totalHuman.split(" ");
-	if (u.length === 2 && t.length === 2 && u[1] === t[1]) {
-		return `${u[0]}/${t[0]} ${t[1]}`;
-	}
-	if (usedHuman && totalHuman) {
-		return `${usedHuman} / ${totalHuman}`;
-	}
-	return totalHuman || usedHuman;
-}
-
 function UsageBar({
 	label,
 	used,
@@ -79,6 +67,7 @@ function UsageBar({
 	usedHuman: string;
 	totalHuman: string;
 }) {
+	const tl = useLiteralMessages();
 	const pct =
 		total && total > 0 && used !== null
 			? Math.min(100, Math.round((used / total) * 100))
@@ -91,7 +80,10 @@ function UsageBar({
 			<div className="flex items-center justify-between gap-2 text-muted-foreground/70 text-xs">
 				<span>{label}</span>
 				<span className="tabular-nums">
-					{compactUsage(usedHuman, totalHuman) || "—"}
+					{usageText(
+						{ totalBytes: total, totalHuman, usedBytes: used, usedHuman },
+						tl
+					) || "—"}
 				</span>
 			</div>
 			{pct !== null && (
@@ -112,6 +104,7 @@ function UsageBar({
 /** Full per-node hardware block (specs line + RAM/disk usage bars) for the sidebar. */
 export function NodeStats({ info }: { info: SystemInfo }) {
 	const tl = useLiteralMessages();
+	const vram = fmtBytes(info.vramBytes, info.vramHuman);
 	const specs: string[] = [];
 	if (info.cpuCores) {
 		specs.push(
@@ -122,8 +115,8 @@ export function NodeStats({ info }: { info: SystemInfo }) {
 	}
 	if (info.gpuName) {
 		specs.push(shortGpu(info.gpuName));
-	} else if (info.vramHuman) {
-		specs.push(tl("{vram} VRAM", { vram: info.vramHuman }));
+	} else if (vram) {
+		specs.push(tl("{vram} VRAM", { vram }));
 	}
 
 	return (
@@ -192,6 +185,8 @@ function pctOf(used: number | null, total: number | null): number | null {
 
 /** The detail body, rendered only once a snapshot has loaded. */
 function NodeHardwareBody({ info }: { info: SystemInfo }) {
+	const tl = useLiteralMessages();
+	const vram = fmtBytes(info.vramBytes, info.vramHuman);
 	const ramPct = pctOf(info.usedRamBytes, info.totalRamBytes);
 	const diskPct = pctOf(info.usedDiskBytes, info.totalDiskBytes);
 
@@ -229,7 +224,17 @@ function NodeHardwareBody({ info }: { info: SystemInfo }) {
 				<SettingsGroup>
 					<HardwareRow
 						label="RAM"
-						value={compactUsage(info.usedRamHuman, info.ramHuman) || "—"}
+						value={
+							usageText(
+								{
+									totalBytes: info.totalRamBytes,
+									totalHuman: info.ramHuman,
+									usedBytes: info.usedRamBytes,
+									usedHuman: info.usedRamHuman,
+								},
+								tl
+							) || "—"
+						}
 					/>
 					{ramPct !== null && (
 						<HardwareRow
@@ -247,7 +252,17 @@ function NodeHardwareBody({ info }: { info: SystemInfo }) {
 				<SettingsGroup>
 					<HardwareRow
 						label="Storage"
-						value={compactUsage(info.usedDiskHuman, info.diskHuman) || "—"}
+						value={
+							usageText(
+								{
+									totalBytes: info.totalDiskBytes,
+									totalHuman: info.diskHuman,
+									usedBytes: info.usedDiskBytes,
+									usedHuman: info.usedDiskHuman,
+								},
+								tl
+							) || "—"
+						}
 					/>
 					{diskPct !== null && (
 						<HardwareRow
@@ -258,15 +273,13 @@ function NodeHardwareBody({ info }: { info: SystemInfo }) {
 				</SettingsGroup>
 			</SettingsSection>
 
-			{info.gpuName || info.vramHuman ? (
+			{info.gpuName || vram ? (
 				<SettingsSection title="GPU">
 					<SettingsGroup>
 						{info.gpuName ? (
 							<HardwareRow label="Model" value={info.gpuName} />
 						) : null}
-						{info.vramHuman ? (
-							<HardwareRow label="VRAM" value={info.vramHuman} />
-						) : null}
+						{vram ? <HardwareRow label="VRAM" value={vram} /> : null}
 					</SettingsGroup>
 				</SettingsSection>
 			) : null}

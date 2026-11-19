@@ -22,7 +22,7 @@ import {
 	identityModeLabel,
 	isRemotePeerEngine,
 } from "../core/agentIdentity.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr, trMessage } from "../i18n/translate.ts";
 import type { AgentsArgs } from "./agents-args.ts";
 import { type AgentIdentityView, viewJson } from "./agents-core.ts";
 import {
@@ -32,6 +32,7 @@ import {
 	requireEditable,
 } from "./agents-output.ts";
 import { engineFlag, saveAgentPatch, warnUnusedKeys } from "./agents-save.ts";
+import { localize } from "./localizedText.ts";
 import { formatTable } from "./output.ts";
 import { type CliContext, UsageError } from "./types.ts";
 
@@ -63,24 +64,28 @@ function loadAccountsFor(
 }
 
 function accountLabel(row: AvailableAccount): string {
-	return row.status ? `${row.title} (${row.status})` : row.title;
+	const title = tr(row.title);
+	return row.status ? `${title} (${tr(row.status)})` : title;
 }
 
 function rowNote(row: AvailableAccount, view: AgentIdentityView): string {
 	if (row.section === "not-listed") {
-		return [row.detail, accountKeyUnusedReason(row.key, view.identityMode)]
+		return [
+			row.detail && tr(row.detail),
+			accountKeyUnusedReason(row.key, view.identityMode),
+		]
 			.filter(Boolean)
 			.join("; ");
 	}
-	return row.detail ?? "";
+	return row.detail ? tr(row.detail) : "";
 }
 
 /** The lines under a section with no rows, or that failed to load. */
 function sectionNotices(entry: AccountSection): string[] {
 	if (entry.error) {
-		return [entry.error];
+		return [trMessage(entry.error)];
 	}
-	return entry.rows.length === 0 && entry.empty ? [entry.empty] : [];
+	return entry.rows.length === 0 && entry.empty ? [tr(entry.empty)] : [];
 }
 
 function availableJson(view: AgentIdentityView, accounts: AvailableAccounts) {
@@ -110,7 +115,7 @@ function availableJson(view: AgentIdentityView, accounts: AvailableAccounts) {
 	};
 }
 
-function describeAvailable(
+export function describeAvailable(
 	view: AgentIdentityView,
 	accounts: AvailableAccounts
 ): string {
@@ -126,11 +131,11 @@ function describeAvailable(
 	];
 	const rows = accounts.sections.flatMap((entry) =>
 		entry.rows.map((row) => [
-			isAccountAllowed(view.accountAccess, row.key) ? "yes" : "no",
+			isAccountAllowed(view.accountAccess, row.key) ? tr("yes") : tr("no"),
 			row.key,
 			accountLabel(row),
-			entry.title,
-			row.detail ?? "",
+			tr(entry.title),
+			row.detail ? tr(row.detail) : "",
 		])
 	);
 	const notListed = keysNotListed(view.accountAccess, accounts).map(
@@ -138,10 +143,10 @@ function describeAvailable(
 	);
 	for (const row of notListed) {
 		rows.push([
-			"yes",
+			tr("yes"),
 			row.key,
-			row.title,
-			"Not listed now",
+			tr(row.title),
+			tr("Not listed now"),
 			rowNote(row, view),
 		]);
 	}
@@ -149,17 +154,20 @@ function describeAvailable(
 		formatTable(["ALLOWED", "KEY", "ACCOUNT", "SECTION", "DETAIL"], rows)
 	);
 	const notices = accounts.sections.flatMap((entry) =>
-		sectionNotices(entry).map((text) => `  ${entry.title}: ${text}`)
+		sectionNotices(entry).map((text) => `  ${tr(entry.title)}: ${text}`)
 	);
 	if (notices.length > 0) {
 		lines.push("", ...notices);
 	}
 	for (const hidden of accounts.hiddenGroups) {
-		lines.push(`  ${hidden}`);
+		lines.push(`  ${tr(hidden)}`);
 	}
 	lines.push(
 		"",
-		`Allow or remove one with: ryu-cli agents access ${view.id} <add|remove> <key>…, or tick them with: ryu-cli agents access ${view.id} pick`
+		tf(
+			"Allow or remove one with: ryu-cli agents access {id} <add|remove> <key>…, or tick them with: ryu-cli agents access {id} pick",
+			{ id: view.id }
+		)
 	);
 	return lines.join("\n");
 }
@@ -179,7 +187,7 @@ export async function availableCommand(
 }
 
 /** The numbered list the picker prints before each question. */
-function renderPickList(
+export function renderPickList(
 	view: AgentIdentityView,
 	accounts: AvailableAccounts,
 	rows: readonly AvailableAccount[],
@@ -205,26 +213,26 @@ function renderPickList(
 	for (const entry of accounts.sections) {
 		if (entry.owner !== owner) {
 			owner = entry.owner;
-			lines.push("", ACCOUNT_OWNER_HEADINGS[entry.owner]);
+			lines.push("", tr(ACCOUNT_OWNER_HEADINGS[entry.owner]));
 		}
 		// A section with nothing to tick is one line; one whose single row
 		// carries its name (Treg, Control of your desktop) has no title.
 		const notices = sectionNotices(entry);
 		if (notices.length > 0) {
-			lines.push(`  ${entry.title}: ${notices.join(" ")}`);
+			lines.push(`  ${tr(entry.title)}: ${notices.join(" ")}`);
 		} else if (entry.rows[0]?.title !== entry.title) {
-			lines.push(`  ${entry.title}`);
+			lines.push(`  ${tr(entry.title)}`);
 		}
 		for (const row of entry.rows) {
 			lines.push(line(row));
 		}
 	}
 	for (const hidden of accounts.hiddenGroups) {
-		lines.push("", hidden);
+		lines.push("", tr(hidden));
 	}
 	const kept = rows.filter((row) => row.section === "not-listed");
 	if (kept.length > 0) {
-		lines.push("", "Allowed but not listed now");
+		lines.push("", tr("Allowed but not listed now"));
 		for (const row of kept) {
 			lines.push(
 				`    ${number(row)} ${mark(row)} ${row.key} · ${rowNote(row, view)}`
@@ -234,8 +242,20 @@ function renderPickList(
 	return lines.join("\n");
 }
 
-const PICK_QUESTION =
-	"\nToggle rows (e.g. 1 3-5), or type all, none, unlimited, save or cancel: ";
+/** The picker's prompt. The words it parses stay English in every language. */
+export function pickQuestion(): string {
+	const question = tf(
+		"Toggle rows (e.g. 1 3-5), or type {all}, {none}, {unlimited}, {save} or {cancel}:",
+		{
+			all: "all",
+			cancel: "cancel",
+			none: "none",
+			save: "save",
+			unlimited: "unlimited",
+		}
+	);
+	return `\n${question} `;
+}
 
 export async function pickCommand(
 	ctx: CliContext,
@@ -244,7 +264,10 @@ export async function pickCommand(
 ): Promise<number> {
 	if (ctx.flags.json) {
 		throw new UsageError(
-			`'pick' asks on the terminal. For scripts, use 'ryu-cli agents access ${view.id} available --json', then add or remove keys.`
+			localize(
+				"'pick' asks on the terminal. For scripts, use 'ryu-cli agents access {id} available --json', then add or remove keys.",
+				{ id: view.id }
+			)
 		);
 	}
 	refuseRemotePeerChange(view, args.engine);
@@ -259,7 +282,7 @@ export async function pickCommand(
 			ctx.io.out(`${renderPickList(view, accounts, rows, draft)}\n`);
 		}
 		show = true;
-		const answer = await ctx.promptLine(PICK_QUESTION);
+		const answer = await ctx.promptLine(pickQuestion());
 		if (answer === null) {
 			throw new Error(
 				`Picking accounts needs an interactive terminal, and none answered. Nothing was saved. List them with 'ryu-cli agents access ${view.id} available', then use add or remove.`
@@ -268,11 +291,11 @@ export async function pickCommand(
 		const command = parsePickCommand(answer, rows.length);
 		switch (command.kind) {
 			case "cancel":
-				ctx.io.out("Nothing was saved.\n");
+				ctx.io.out(`${tr("Nothing was saved.")}\n`);
 				return 0;
 			case "save":
 				if (sameAccountAccess(draft, view.accountAccess)) {
-					ctx.io.out("Nothing changed, so nothing was saved.\n");
+					ctx.io.out(`${tr("Nothing changed, so nothing was saved.")}\n`);
 					return 0;
 				}
 				warnUnusedKeys(ctx, draft ?? [], view.identityMode);
@@ -316,9 +339,10 @@ export async function pickCommand(
 					break;
 				}
 				if (draft === null) {
-					ctx.io.out(
-						"Limit turned on: every listed account starts allowed, so only what you untick is taken away. Accounts you connect later won't be added automatically.\n"
+					const notice = tr(
+						"Limit turned on: every listed account starts allowed, so only what you untick is taken away. Accounts you connect later won't be added automatically."
 					);
+					ctx.io.out(`${notice}\n`);
 				}
 				for (const index of command.indexes) {
 					const row = rows[index];

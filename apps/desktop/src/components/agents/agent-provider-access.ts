@@ -1,3 +1,5 @@
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	byokProviderRegistryId,
 	COMPATIBLE_CHAT_PROVIDERS,
@@ -116,10 +118,13 @@ export function agentModelProviders(
  */
 export function engineRefusedWhenLimited(
 	engine: string | null,
-	piRouting: string | null
+	piRouting: string | null,
+	tl: LiteralMessage = translate
 ): string | null {
 	if (engine === "acp:pi" && piRouting === "direct") {
-		return "This agent's engine (Ryu in the engine list) runs on Ryu's own Pi, which is set to call its model provider directly, so Ryu can't limit which model providers it uses. It won't start while this agent's model providers are limited. Turn Gateway routing back on in Ryu's Pi settings, choose another engine, or use Acts as you or Both with Limit to selected accounts off.";
+		return tl(
+			"This agent's engine (Ryu in the engine list) runs on Ryu's own Pi, which is set to call its model provider directly, so Ryu can't limit which model providers it uses. It won't start while this agent's model providers are limited. Turn Gateway routing back on in Ryu's Pi settings, choose another engine, or use Acts as you or Both with Limit to selected accounts off."
+		);
 	}
 	return null;
 }

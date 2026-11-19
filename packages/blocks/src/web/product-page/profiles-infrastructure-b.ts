@@ -130,7 +130,7 @@ const AGENTS_AS_A_SERVICE_PROFILE: ProductProfile = {
 				],
 			},
 			{
-				label: "Where",
+				label: "Location",
 				values: ["The EU or Singapore", "Wherever you run your servers"],
 			},
 			{

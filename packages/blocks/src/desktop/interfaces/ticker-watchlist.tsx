@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { translate as tr, translateMessage } from "@ryu/i18n/lite";
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Kbd } from "@ryu/ui/components/kbd.tsx";
@@ -33,7 +33,7 @@ import { ChangePill, Sparkline, SYMBOL_TEXT } from "./ticker-parts.tsx";
 
 const SORT_LABELS: Record<TickerSortKey, string> = {
 	get change() {
-		return tr("Change");
+		return translateMessage("ticker.sortChange", {}, "Change");
 	},
 	get price() {
 		return tr("Price");

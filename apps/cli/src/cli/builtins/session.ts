@@ -4,7 +4,7 @@ import { resolveCoreBinary } from "../../core/bootstrap.ts";
 import { DEFAULT_CORE_URL } from "../../core/defaultCoreUrl.ts";
 import { loadNodes, resolveActive, setActive } from "../../core/nodes.ts";
 import { tf, tr } from "../../i18n/translate.ts";
-import { localize } from "../localizedText.ts";
+import { LocalizedError, localize } from "../localizedText.ts";
 import { formatTable } from "../output.ts";
 import { type CliContext, type Command, UsageError } from "../types.ts";
 import { VERSION } from "../version.ts";
@@ -30,8 +30,10 @@ export const acpCommand: Command = {
 	run: async (ctx) => {
 		const coreBinary = resolveCoreBinary();
 		if (!coreBinary) {
-			throw new Error(
-				"ryu-core is not installed. Install Ryu, then run 'ryu-cli' once to set it up."
+			throw new LocalizedError(
+				localize(
+					"ryu-core is not installed. Install Ryu, then run 'ryu-cli' once to set it up."
+				)
 			);
 		}
 		const cmd = [coreBinary, "acp"];

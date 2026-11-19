@@ -26,6 +26,7 @@ export type VaultDynamicProvider =
 			kind: "postgres";
 			revocationStatements?: string[];
 			usernamePrefix?: string;
+			usernameTemplate?: string;
 	  }
 	| {
 			accessKeyId: string;
@@ -35,6 +36,124 @@ export type VaultDynamicProvider =
 			roleArn: string;
 			secretAccessKey: string;
 			sessionPolicy?: string;
+	  }
+	| {
+			connectionUrl: string;
+			creationStatements: string[];
+			kind: "mysql" | "mariadb";
+			revocationStatements?: string[];
+			usernamePrefix?: string;
+			usernameTemplate?: string;
+	  }
+	| {
+			/** PEM CA for the server certificate (configuration managers only). */
+			caPem?: string;
+			/** `sqlserver://…?encrypt=true|strict|false`. */
+			connectionUrl: string;
+			creationStatements: string[];
+			kind: "mssql";
+			revocationStatements?: string[];
+			usernamePrefix?: string;
+			usernameTemplate?: string;
+	  }
+	| {
+			connectionUrl: string;
+			/** Database the users are created in (default `admin`). */
+			database?: string;
+			kind: "mongodb";
+			roles: { db?: string; role: string }[];
+			usernamePrefix?: string;
+			usernameTemplate?: string;
+	  }
+	| {
+			/** Service-account key JSON of the account Ryu acts as. */
+			credentials: string;
+			kind: "gcp";
+			secretType?: "serviceAccountKey" | "accessToken";
+			serviceAccountEmail: string;
+			tokenScopes?: string[];
+	  }
+	| {
+			applicationObjectId: string;
+			clientId: string;
+			clientSecret: string;
+			environment?: "public" | "usGovernment" | "china";
+			kind: "azure";
+			tenantId: string;
+	  }
+	| {
+			audiences?: string[];
+			/** PEM CA for the API server (configuration managers only). */
+			caPem?: string;
+			clusterRoleBinding?: boolean;
+			host: string;
+			kind: "kubernetes";
+			/** Generate an account per lease bound to this role… */
+			kubernetesRoleName?: string;
+			kubernetesRoleType?: "Role" | "ClusterRole";
+			namespace: string;
+			/** …or mint tokens for this existing account. */
+			serviceAccountName?: string;
+			serviceAccountJwt: string;
+			usernamePrefix?: string;
+	  }
+	| {
+			audiences?: string[];
+			caPem?: string;
+			clusterRoleBinding?: boolean;
+			host: string;
+			kind: "kubernetes-rules";
+			kubernetesRoleType?: "Role" | "ClusterRole";
+			namespace: string;
+			/** RBAC PolicyRule objects for the Role generated per lease. */
+			rules: {
+				apiGroups?: string[];
+				nonResourceURLs?: string[];
+				resourceNames?: string[];
+				resources?: string[];
+				verbs: string[];
+			}[];
+			serviceAccountJwt: string;
+			usernamePrefix?: string;
+	  }
+	| {
+			accessKeyId: string;
+			endpoint?: string;
+			iamGroups?: string[];
+			kind: "aws-iam";
+			permissionsBoundaryArn?: string;
+			policyArns?: string[];
+			/** Inline policy JSON put on each generated user. */
+			policyDocument?: string;
+			region?: string;
+			secretAccessKey: string;
+			userPath?: string;
+			usernamePrefix?: string;
+	  }
+	| {
+			caPem?: string;
+			/** Management API base, e.g. `https://rabbit.example.com:15671`. */
+			connectionUri: string;
+			kind: "rabbitmq";
+			password: string;
+			tags?: string;
+			username: string;
+			usernamePrefix?: string;
+			vhostTopics?: Record<
+				string,
+				Record<string, { read?: string; write?: string }>
+			>;
+			vhosts: Record<
+				string,
+				{ configure?: string; read?: string; write?: string }
+			>;
+	  }
+	| {
+			aclRules?: string[];
+			connectionUrl: string;
+			kind: "redis" | "valkey";
+			usernamePrefix?: string;
+			usernameTemplate?: string;
 	  }
 	| { kind: "webhook"; signingSecret: string; url: string }
 	| { charset: VaultCharset; field?: string; kind: "random"; length: number };

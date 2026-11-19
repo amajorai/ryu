@@ -26,85 +26,28 @@
 // The security boundary is still the null-origin `sandbox="allow-scripts"` iframe
 // (ExtensionHost) plus the host-side capability gate (rpc.ts); this file adds the
 // content-level defenses (nonce-only scripts, no eval, pinned CSP, proxied egress).
+//
+// FILE LAYOUT: the CSP lives in `widget-csp.ts` and the governed asset rewrite in
+// `widget-assets.ts`; both are re-exported here so `@ryu/app-host/widget-bootstrap`
+// stays the one public import path.
 
-import { z } from "zod";
-
+import { buildCompanionThemeLayoutCss } from "./companion-theme-style.ts";
 import { HOST_API_VERSION } from "./rpc.ts";
+import { widgetRpcResultSettleScript } from "./rpc-error-decode-script.ts";
 import { livenessResponderScript } from "./sandbox-liveness-gate.ts";
 import {
-	buildCompanionThemeLayoutCss,
-	sanitizeCspOrigin,
-} from "./third-party-plugin.ts";
+	resourceDomainHost,
+	rewriteWidgetAssets,
+	type WidgetAssetProxy,
+} from "./widget-assets.ts";
+import { buildWidgetCsp, sanitizeProxyOrigin } from "./widget-csp.ts";
 
-/** A widget's optional CSP hints (spec §1.1 `WidgetCsp`). Defined locally so this
- *  module is self-contained. `resource_domains` is the widget's declared remote
- *  passive-asset hosts; the mount rewrites matching URLs through the Core proxy
- *  (governed egress). `connect_domains` remains IGNORED — active fetch never opens
- *  (`connect-src 'none'`); a widget that needs data calls a tool via the bridge. */
-export interface WidgetCsp {
-	connect_domains?: string[];
-	resource_domains?: string[];
-}
-
-/** The Core asset-proxy wiring the host injects so a widget's DECLARED remote
- *  assets render while every egress stays governed. When present (and the widget
- *  declared `resourceDomains`), the mount widens the passive-asset CSP to the
- *  proxy origin and rewrites matching asset URLs to `/api/widgets/asset`. */
-export interface WidgetAssetProxy {
-	/** Minted widget instance id — the proxy's capability + provenance handle. */
-	instanceId: string;
-	/** The Core node origin (e.g. `http://127.0.0.1:7980`), loopback http. */
-	proxyOrigin: string;
-	/** The widget's declared remote passive-asset hosts (from `csp.resource_domains`). */
-	resourceDomains: string[];
-	/** Widget resource uri; scopes the server-side `resource_domains` allowlist. */
-	templateUri: string;
-}
-
-const proxyOriginSchema = z
-	.unknown()
-	.pipe(z.string().refine((origin) => !/[\s;'"]/.test(origin)));
-
-/** Validate the Core PROXY origin to a bare `scheme://host[:port]`, accepting
- *  loopback **http** (which {@link sanitizeCspOrigin} rejects, being public-https
- *  only). Still rejects CSP-delimiter chars so the (host-controlled, trusted) node
- *  URL can never inject extra directives. Returns null for anything unparseable. */
-export function sanitizeProxyOrigin(
-	origin: z.input<typeof proxyOriginSchema>
-): string | null {
-	const parsed = proxyOriginSchema.safeParse(origin);
-	if (!parsed.success) {
-		return null;
-	}
-	try {
-		const u = new URL(parsed.data.trim());
-		if (u.protocol !== "http:" && u.protocol !== "https:") {
-			return null;
-		}
-		return `${u.protocol}//${u.host}`;
-	} catch {
-		return null;
-	}
-}
-
-/** Normalize a declared `resource_domains` entry to its bare lowercase host, reusing
- *  the shared public-https {@link sanitizeCspOrigin} then extracting the hostname.
- *  Returns null for anything not a safe exact public host (wildcards/http rejected). */
-function resourceDomainHost(entry: string): string | null {
-	const origin = sanitizeCspOrigin(entry);
-	if (!origin) {
-		return null;
-	}
-	try {
-		return new URL(origin).hostname.toLowerCase();
-	} catch {
-		return null;
-	}
-}
-
-/** Match `url(...)` targets inside CSS text (inline `style` + `<style>` bodies) so
- *  declared remote asset URLs there are rewritten too. Top-level (never in a loop). */
-const CSS_URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi;
+export type { WidgetAssetProxy } from "./widget-assets.ts";
+export {
+	buildWidgetCsp,
+	sanitizeProxyOrigin,
+	type WidgetCsp,
+} from "./widget-csp.ts";
 
 /** The initial globals baked into the widget document synchronously (spec §1.3).
  *  Present before the widget's module script runs so top-level reads of
@@ -134,40 +77,6 @@ export interface WidgetInitialGlobals {
 	/** Apps-SDK parity globals (optional; the bridge defaults them when absent). */
 	view?: unknown;
 	widgetState: unknown;
-}
-
-/**
- * The widget CSP (decisions doc D3, governed-compat). The `nonce` gates every
- * script (bootstrap + widget module). `connect-src 'none'` is NEVER widened, so a
- * widget cannot fetch/beacon — all ACTIVE egress goes through `callTool` -> Gateway.
- *
- * `proxyOrigin` (the Core `/api/widgets/asset` origin) is the ONLY widening: when a
- * widget declared remote `resource_domains`, the mount passes it here and rewrites
- * matching asset URLs to that proxy, so `img-src`/`font-src`/`media-src` add exactly
- * that ONE Core origin (in addition to `data:`). The raw remote host is NEVER in the
- * CSP — a widget's passive assets can only load THROUGH the governed proxy, which
- * allowlists and audits every fetch server-side. Omit `proxyOrigin` (no declared
- * assets) and the CSP is the original `data:`-only egress lock, unchanged.
- */
-export function buildWidgetCsp(
-	nonce: string,
-	proxyOrigin?: string | null
-): string {
-	const origin = proxyOrigin ? sanitizeProxyOrigin(proxyOrigin) : null;
-	const passive = origin ? `data: ${origin}` : "data:";
-	return [
-		"default-src 'none'",
-		`script-src 'nonce-${nonce}'`,
-		"style-src 'unsafe-inline'",
-		`img-src ${passive}`,
-		`font-src ${passive}`,
-		`media-src ${passive}`,
-		"connect-src 'none'",
-		"webrtc 'block'",
-		"frame-src 'none'",
-		"base-uri 'none'",
-		"form-action 'none'",
-	].join("; ");
 }
 
 /** JSON literal safe to embed inside a `<script>` body: escapes `<` so a value
@@ -365,12 +274,7 @@ function bridgeSource(
     }
     if(msg.kind === "ryu-plugin-rpc-result"){
       var p = pending[msg.id]; if(!p) return; delete pending[msg.id];
-      if(msg.error){
-        var e;
-        if(typeof msg.error === "string"){ e = new Error(msg.error); }
-        else { e = new Error((msg.error && msg.error.message) || "error"); e.code = msg.error && msg.error.code; }
-        p.reject(e);
-      } else { p.resolve(msg.result); }
+${widgetRpcResultSettleScript()}
       return;
     }
     if(msg.kind === "ryu-widget-set-globals"){ setGlobals(msg.globals); }
@@ -492,111 +396,4 @@ export function widgetBootstrapSrcdoc(
 	head.insertBefore(cspMeta, head.firstChild);
 
 	return `<!doctype html>\n${doc.documentElement.outerHTML}`;
-}
-
-/** Build the `/api/widgets/asset` URL for one declared remote asset, or null if the
- *  raw value is not an absolute http(s) URL whose host is in the widget's allowlist.
- *  A non-match is left untouched (and then simply blocked by the CSP — fail-closed). */
-function proxiedAssetUrl(
-	raw: string,
-	origin: string,
-	allowHosts: ReadonlySet<string>,
-	proxy: WidgetAssetProxy
-): string | null {
-	let u: URL;
-	try {
-		u = new URL(raw);
-	} catch {
-		return null;
-	}
-	if (u.protocol !== "https:" && u.protocol !== "http:") {
-		return null;
-	}
-	if (!allowHosts.has(u.hostname.toLowerCase())) {
-		return null;
-	}
-	const q = new URLSearchParams({ instance: proxy.instanceId, url: u.href });
-	if (proxy.templateUri) {
-		q.set("template", proxy.templateUri);
-	}
-	return `${origin}/api/widgets/asset?${q.toString()}`;
-}
-
-/** Rewrite a `srcset` value, proxying each descriptor's URL that is allowlisted. */
-function rewriteSrcset(
-	value: string,
-	origin: string,
-	allowHosts: ReadonlySet<string>,
-	proxy: WidgetAssetProxy
-): string {
-	return value
-		.split(",")
-		.map((part) => {
-			const seg = part.trim();
-			if (!seg) {
-				return seg;
-			}
-			const space = seg.indexOf(" ");
-			const url = space === -1 ? seg : seg.slice(0, space);
-			const descriptor = space === -1 ? "" : seg.slice(space);
-			const proxied = proxiedAssetUrl(url, origin, allowHosts, proxy);
-			return `${proxied ?? url}${descriptor}`;
-		})
-		.join(", ");
-}
-
-/** Rewrite `url(...)` targets inside CSS text (inline style + `<style>` bodies). */
-function rewriteCssUrls(
-	css: string,
-	origin: string,
-	allowHosts: ReadonlySet<string>,
-	proxy: WidgetAssetProxy
-): string {
-	return css.replace(CSS_URL_RE, (match, quote: string, url: string) => {
-		const proxied = proxiedAssetUrl(url.trim(), origin, allowHosts, proxy);
-		return proxied ? `url(${quote}${proxied}${quote})` : match;
-	});
-}
-
-/** Point a widget's DECLARED remote passive assets at the Core proxy so they render
- *  under the governed CSP. Covers `src`/`poster` attributes, `srcset` descriptors,
- *  and `url(...)` in inline `style` attributes and `<style>` bodies — the forms a
- *  single-file widget bundle uses. Anything missed stays a raw remote URL and is
- *  blocked by the CSP (never a broken-open egress). */
-function rewriteWidgetAssets(
-	doc: Document,
-	origin: string,
-	allowHosts: ReadonlySet<string>,
-	proxy: WidgetAssetProxy
-): void {
-	for (const el of Array.from(doc.querySelectorAll("[src],[poster]"))) {
-		for (const attr of ["src", "poster"]) {
-			const v = el.getAttribute(attr);
-			if (!v) {
-				continue;
-			}
-			const proxied = proxiedAssetUrl(v, origin, allowHosts, proxy);
-			if (proxied) {
-				el.setAttribute(attr, proxied);
-			}
-		}
-	}
-	for (const el of Array.from(doc.querySelectorAll("[srcset]"))) {
-		const v = el.getAttribute("srcset");
-		if (v) {
-			el.setAttribute("srcset", rewriteSrcset(v, origin, allowHosts, proxy));
-		}
-	}
-	for (const el of Array.from(doc.querySelectorAll("[style]"))) {
-		const v = el.getAttribute("style");
-		if (v?.includes("url(")) {
-			el.setAttribute("style", rewriteCssUrls(v, origin, allowHosts, proxy));
-		}
-	}
-	for (const styleEl of Array.from(doc.querySelectorAll("style"))) {
-		const css = styleEl.textContent;
-		if (css?.includes("url(")) {
-			styleEl.textContent = rewriteCssUrls(css, origin, allowHosts, proxy);
-		}
-	}
 }

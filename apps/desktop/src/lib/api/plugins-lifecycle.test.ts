@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { formatMessage } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
+import type { DependencyError } from "@ryuhq/core-client/plugins.ts";
 import { createFetchFixture } from "../../test-fixtures/native-fetch-fixture.ts";
 import {
 	disableApp,
@@ -14,6 +15,8 @@ import {
 } from "./plugins.ts";
 import {
 	describeDependencyError,
+	describeLifecyclePermissionRefusal,
+	lifecyclePermissionRefusalOf,
 	parseLifecycleError,
 } from "./plugins-lifecycle-errors.ts";
 
@@ -205,4 +208,75 @@ test("only a 403 carrying denied_grants is a Gateway grant denial", async () => 
 	);
 	expect(gateway.grantsDenied).toBe(true);
 	expect(gateway.message).toBe("Gateway denied grants: fs:write");
+});
+
+// Stub ja strings: the generated catalog does not carry these translations yet.
+const JA_PERMISSION =
+	"このノードのアプリを変更する権限（{permission}）がありません。";
+const JA_BLOCKED =
+	"{plugin} は {names} に必要です。先に {names} を無効にしてください。";
+const JA: Record<string, string> = {
+	"You don't have permission ({permission}) to change apps on this node.":
+		JA_PERMISSION,
+	"{plugin} is needed by {names}. Disable {names} first.": JA_BLOCKED,
+};
+const japanese: LiteralMessage = (source, values) =>
+	formatMessage(JA[source] ?? source, values ?? {});
+
+test("a 403 lifecycle permission refusal re-renders in the viewer's language", async () => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = createFetchFixture(originalFetch, async () =>
+		Response.json(
+			{
+				error: "app_lifecycle_permission_denied",
+				required_permission: "apps:manage",
+			},
+			{ status: 403 }
+		)
+	);
+	let thrown: unknown = null;
+	try {
+		await disableApp(target, scopedId);
+	} catch (error) {
+		thrown = error;
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+
+	const refusal = lifecyclePermissionRefusalOf(thrown);
+	expect(refusal).toEqual({ requiredPermission: "apps:manage" });
+	expect(
+		describeLifecyclePermissionRefusal(
+			refusal?.requiredPermission ?? null,
+			japanese
+		)
+	).toBe("このノードのアプリを変更する権限（apps:manage）がありません。");
+	expect(lifecyclePermissionRefusalOf(new Error("plain"))).toBeNull();
+});
+
+test("the dependents list joins in the reader's language", async () => {
+	const blocked: DependencyError = {
+		code: "blocked_by_dependents",
+		dependents: ["@ryu/whiteboard", "@ryu/canvas"],
+		plugin: "@ryu/meetings",
+	};
+	const names: Record<string, string> = {
+		"@ryu/canvas": "キャンバス",
+		"@ryu/meetings": "会議",
+		"@ryu/whiteboard": "ホワイトボード",
+	};
+	expect(
+		describeDependencyError(blocked, japanese, (id) => names[id] ?? id, "ja")
+	).toBe(
+		"会議 は ホワイトボード、キャンバス に必要です。先に ホワイトボード、キャンバス を無効にしてください。"
+	);
+
+	// The thrown English message keeps an English list.
+	const parsed = await parseLifecycleError(
+		Response.json({ dependency_error: blocked }, { status: 409 }),
+		"/api/plugins/@ryu/meetings/disable"
+	);
+	expect(parsed.message).toBe(
+		"@ryu/meetings is needed by @ryu/whiteboard and @ryu/canvas. Disable @ryu/whiteboard and @ryu/canvas first."
+	);
 });

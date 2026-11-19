@@ -7,6 +7,7 @@ import { describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	currentPlatform,
 	groupForKey,
@@ -152,6 +153,11 @@ describe("per-OS shortcut slots", () => {
 	it("names the OS in the label so a conflict row is unambiguous", () => {
 		expect(labelForKey("keybindings:darwin")).toContain("macOS");
 		expect(labelForKey("keybindings:win32")).toContain("Windows");
+		const tl: LiteralMessage = (source, values) =>
+			`[${source}]${values ? JSON.stringify(values) : ""}`;
+		expect(labelForKey("keybindings:darwin", tl)).toBe(
+			'[Keyboard shortcuts ({platform})]{"platform":"macOS"}'
+		);
 	});
 
 	it("groups shortcut keys under shortcuts", () => {

@@ -3,8 +3,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { grantDescription, grantLabel } from "../grant-labels.ts";
+import { catalogLayerLabel } from "../layer-labels.ts";
 import type { CatalogEntry, PluginCatalogDetail } from "../types.ts";
-import { catalogLayerLabel } from "../types.ts";
 import { RequiredPluginsSection } from "./dependency-graph.tsx";
 
 /** True when there is anything to put on a Dependencies tab. */
@@ -128,7 +128,9 @@ export function DependenciesPanel({
 								key={layer.capability}
 							>
 								<div className="flex flex-wrap items-center gap-2">
-									<Badge variant="outline">{catalogLayerLabel(layer)}</Badge>
+									<Badge variant="outline">
+										{catalogLayerLabel(layer, tl)}
+									</Badge>
 									{layer.target ? (
 										<span className="text-muted-foreground text-xs">
 											{layer.target === "remote-desktop"

@@ -222,7 +222,8 @@ function TeamsBillingTabForOrg({
 		seatStatus?.billedSeats ?? seatStatus?.minRequired ?? TEAMS_MIN_SEATS;
 	const currentAmount = planMonthlyAmount(
 		subQuery.data?.plan,
-		organizationPlanId ? { seats: currentSeats } : {}
+		organizationPlanId ? { seats: currentSeats } : {},
+		tl
 	);
 	const currentDetail = isOrganizationPlan
 		? seatStatus?.bonusSeats

@@ -20,6 +20,14 @@ import {
 	vaultAccountsSchema,
 } from "./agentAccountCatalog-wire.ts";
 
+// English row copy, named so the catalog extractor collects it. Rows stay
+// English (they also feed `--json`); the TUI panel and the CLI picker
+// translate a title or status when they render it.
+export const SIGN_IN_AGAIN_STATUS = "Sign in again";
+export const CORE_SUBSCRIPTIONS_LABEL =
+	"Subscriptions you signed in to through Ryu, if any";
+export const KIRO_SIGN_IN_LABEL = "Kiro sign-in, if any";
+
 // ── Row builders (pure) ─────────────────────────────────────────────────────
 
 function capitalized(value: string): string {
@@ -90,7 +98,7 @@ export function mcpSignInRows(
 					.join(" · "),
 				key: accountKey.mcp(connection.profile_id, app.id, server.server_name),
 				section: "mcp-sign-ins",
-				status: connection.status === "connected" ? null : "Sign in again",
+				status: connection.status === "connected" ? null : SIGN_IN_AGAIN_STATUS,
 				title: `${app.name ?? app.id} · ${server.server_name}`,
 			});
 		}
@@ -207,8 +215,8 @@ export function modelProviders(
 		}
 	}
 	if (providers.core?.has_token) {
-		add("core", "Subscriptions you signed in to through Ryu, if any");
-		add("kiro", "Kiro sign-in, if any");
+		add("core", CORE_SUBSCRIPTIONS_LABEL);
+		add("kiro", KIRO_SIGN_IN_LABEL);
 	}
 	return rows;
 }
@@ -221,7 +229,8 @@ export function modelProviders(
 export function modelProviderRows(
 	providers: GatewayProvidersWire | null,
 	engine: string | null,
-	vendorProvider?: string | null
+	vendorProvider?: string | null,
+	tf: typeof cliTf = cliTf
 ): AvailableAccount[] {
 	const rows: AvailableAccount[] = modelProviders(providers).map(
 		(provider) => ({
@@ -242,7 +251,7 @@ export function modelProviderRows(
 	const key = accountKey.provider(vendor.id);
 	const existing = rows.find((row) => row.key === key);
 	if (existing) {
-		existing.detail = `Also covers ${vendor.label}`;
+		existing.detail = tf("Also covers {label}", { label: vendor.label });
 		return rows;
 	}
 	return [

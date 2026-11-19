@@ -149,16 +149,38 @@ const LOGIN_PATHS: [&str; 5] = [
     "/api/vault/auth/aws/login",
     "/api/vault/auth/kubernetes/login",
 ];
-const COMPAT_LOGIN_PATHS: [&str; 2] = ["/v1/auth/approle/login", "/v1/auth/jwt/login"];
+const COMPAT_LOGIN_PATHS: [&str; 5] = [
+    "/v1/auth/approle/login",
+    "/v1/auth/jwt/login",
+    "/v1/auth/cert/login",
+    "/v1/auth/aws/login",
+    "/v1/auth/kubernetes/login",
+];
 const WRAP_PATHS: [&str; 3] = [
     "/api/vault/sys/wrapping/unwrap",
     "/api/vault/sys/wrapping/lookup",
     "/api/vault/sys/wrapping/rewrap",
 ];
-const PUBLIC_BY_DESIGN: [&str; 3] = [
+const PUBLIC_BY_DESIGN: [&str; 7] = [
     CA_PATH,
     "/api/vault/identity/.well-known/openid-configuration",
     "/api/vault/identity/.well-known/keys",
+    // OCSP GET form (RFC 6960 Appendix A); `MAMCAQA=` is not a valid request.
+    "/api/vault/pki/issuers/:name/ocsp/MAMCAQA=",
+    // Unauthenticated in HashiCorp Vault too; they reveal no key material.
+    "/v1/sys/health",
+    "/v1/sys/seal-status",
+    "/v1/sys/leader",
+];
+/// Credential-free POST routes and a body each must answer without
+/// changing vault state: the SSH OTP helper's verify (an unknown OTP is
+/// refused) and the OCSP responder (a malformed request is an OCSP status).
+const ANONYMOUS_POSTS: [(&str, &str); 2] = [
+    (
+        "/api/vault/ssh/verify",
+        r#"{"otp":"00000000-0000-0000-0000-000000000000"}"#,
+    ),
+    ("/api/vault/pki/issuers/sample/ocsp", "not a DER request"),
 ];
 
 struct Reply {
@@ -166,8 +188,13 @@ struct Reply {
     text: String,
 }
 
-/// Every vault table's rows, except the audit log and its chain head,
-/// rendered to strings.
+/// Every vault table's rows, except the audit log and its chain head, and the
+/// login-lockout tables, rendered to strings. A refused login of an existing
+/// machine identity is meant to count toward its lockout
+/// (`vault/policy_ext/login_lockout.rs`, tested there), so those tables move
+/// on purpose.
+const LOCKOUT_TABLES: [&str; 2] = ["vault_login_lockout_config", "vault_login_lockouts"];
+
 async fn fingerprint(store: &PluginSecretStore) -> BTreeMap<String, Vec<String>> {
     let conn = store.conn.lock().await;
     let tables: Vec<String> = conn
@@ -179,7 +206,7 @@ async fn fingerprint(store: &PluginSecretStore) -> BTreeMap<String, Vec<String>>
         .unwrap();
     let mut dump = BTreeMap::new();
     for table in tables {
-        if table == "vault_audit" {
+        if LOCKOUT_TABLES.contains(&table.as_str()) || table == "vault_audit" {
             continue;
         }
         // The chain head of the audit log lives in `vault_meta`; it moves with
@@ -350,7 +377,7 @@ fn public_routers() -> [PublicRouter<'static>; 7] {
             module: "vault_engines_api",
             source: include_str!("vault_engines_api.rs"),
             function: "fn public_routes()",
-            routes: 12,
+            routes: 15,
         },
         PublicRouter {
             module: "vault_broker_api",
@@ -386,7 +413,7 @@ fn public_routers() -> [PublicRouter<'static>; 7] {
             module: "vault_compat_api",
             source: include_str!("vault_compat_api.rs"),
             function: "fn router_with<",
-            routes: 9,
+            routes: 30,
         },
     ]
 }

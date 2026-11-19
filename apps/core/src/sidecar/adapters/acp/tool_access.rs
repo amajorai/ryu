@@ -259,6 +259,9 @@ pub async fn run_acp_instance(
     // What the OS sandbox hides because of the agent's account access. Part
     // of the pool key, so a policy change starts a fresh process.
     account_confinement: crate::agent_access::AccountConfinement,
+    // The resolved agent id; selects the run's agent identity for the
+    // credential broker.
+    agent_id: String,
 ) -> anyhow::Result<()> {
     let mut turns_rx = turns_rx;
     let mut session_live = false;
@@ -275,6 +278,7 @@ pub async fn run_acp_instance(
         &mut first_turn,
         activity,
         account_confinement,
+        &agent_id,
     )
     .await;
     if let Err(error) = &result {

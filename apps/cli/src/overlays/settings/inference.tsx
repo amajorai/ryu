@@ -7,7 +7,7 @@ import { type Engine, fetchEngines } from "@ryuhq/core-client/engines";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCore } from "../../core/CoreContext.tsx";
 import { errorText } from "../../i18n/error-text.ts";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 import {
 	editorText,
 	type InferenceValue,
@@ -261,7 +261,9 @@ export function InferenceSettingsPanel({
 		);
 		setEditing(false);
 		setEditError(null);
-		setNotice(tf("{label} updated in draft.", { label: selectedField.label }));
+		setNotice(
+			tf("{label} updated in draft.", { label: tr(selectedField.label) })
+		);
 	}, [editText, selectedField, setCurrentDraft]);
 
 	const cancelEdit = useCallback(() => {
@@ -354,7 +356,9 @@ export function InferenceSettingsPanel({
 			withFieldValue(current, selectedField.key, undefined)
 		);
 		setCurrentSaveError(null);
-		setNotice(tf("{label} cleared in draft.", { label: selectedField.label }));
+		setNotice(
+			tf("{label} cleared in draft.", { label: tr(selectedField.label) })
+		);
 	}, [
 		currentLoading,
 		currentError,

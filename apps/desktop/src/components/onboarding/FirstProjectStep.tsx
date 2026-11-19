@@ -144,7 +144,7 @@ export function FirstProjectStep({
 				skipPending.current
 					? tl("Setup could not skip this project: {reason}", {
 							reason:
-								cause instanceof Error ? cause.message : "Retry skipping.",
+								cause instanceof Error ? cause.message : tl("Retry skipping."),
 						})
 					: acknowledgedReceipt.current
 						? tl(
@@ -153,7 +153,7 @@ export function FirstProjectStep({
 									reason:
 										cause instanceof Error
 											? cause.message
-											: "Retry continuation.",
+											: tl("Retry continuation."),
 								}
 							)
 						: errorMessage(cause, tl)

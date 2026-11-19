@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	InputGroup,
@@ -78,6 +78,9 @@ export function KnowledgeControls({
 	topicCount: number;
 }) {
 	const tl = useLiteralMessages();
+	// The view options, not a monitor (the bare catalog "Display", zh-CN "显示器").
+	const display =
+		useOptionalI18n()?.t("view.display", {}, "Display") ?? "Display";
 	const listRef = useRef<HTMLUListElement>(null);
 	const matchCount = results.length;
 	const local = settings.mode === "local";
@@ -317,7 +320,7 @@ export function KnowledgeControls({
 				<Section
 					onToggle={() => toggle("display")}
 					open={open.display}
-					title="Display"
+					title={display}
 				>
 					<SliderRow
 						label="Text fade threshold"

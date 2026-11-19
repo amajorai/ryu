@@ -42,14 +42,22 @@ export interface NotificationOnboardingCopy {
 	supported: boolean;
 }
 
-function desktopSettingsPath(os: DeviceOs): string {
+/** Where to allow Ryu, one whole sentence per OS so translators can use the
+ *  OS's own localized menu names. */
+function desktopBlockedHelp(os: DeviceOs, tl: LiteralMessage): string {
 	switch (os) {
 		case "macos":
-			return "System Settings → Notifications → Ryu";
+			return tl(
+				"If no banner appears, allow Ryu in System Settings → Notifications → Ryu."
+			);
 		case "windows":
-			return "Settings → System → Notifications → Ryu";
+			return tl(
+				"If no banner appears, allow Ryu in Settings → System → Notifications → Ryu."
+			);
 		default:
-			return "your desktop's notification settings";
+			return tl(
+				"If no banner appears, allow Ryu in your desktop's notification settings."
+			);
 	}
 }
 
@@ -69,9 +77,7 @@ export function notificationOnboardingCopy(
 			enableLabel: "Turn on notifications",
 			subtitle:
 				"Get a desktop notification with the agent's avatar when it replies, needs approval or finishes a run.",
-			blockedHelp: tl("If no banner appears, allow Ryu in {settingsPath}.", {
-				settingsPath: desktopSettingsPath(os),
-			}),
+			blockedHelp: desktopBlockedHelp(os, tl),
 		};
 	}
 	if (platform === "extension") {

@@ -50,8 +50,15 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
              created_at  INTEGER NOT NULL
          );",
     )
-    .context("initializing broker CA schema")
+    .context("initializing broker CA schema")?;
+    crate::vault::ensure_columns(conn, "vault_broker_ca", manage::ADDED_COLUMNS)
 }
+
+#[path = "ca_manage.rs"]
+mod manage;
+pub use manage::{
+    generation, import, info, rotate, validate_import, CaInfo, PreviousCa, PREVIOUS_GRACE_MILLIS,
+};
 
 /// The CA certificate and its (unsealed) PKCS#8 key.
 pub struct CaMaterial {
@@ -136,23 +143,20 @@ fn load_locked(store: &PluginSecretStore, conn: &Connection) -> Result<Option<Ca
     }))
 }
 
-/// The CA certificate PEM (public), generating the CA if needed.
+/// The certificates agents trust (public), generating the CA if needed: the
+/// CA, plus a replaced CA during its grace period ([`manage`]).
 pub async fn certificate_pem(store: &PluginSecretStore) -> Result<String> {
-    Ok(ensure(store).await?.certificate_pem)
+    let material = ensure(store).await?;
+    let conn = store.conn.lock().await;
+    Ok(manage::trust_pem_locked(&conn)?.unwrap_or(material.certificate_pem))
 }
 
-/// The CA certificate PEM if the CA exists. Reads only the public column:
-/// it never generates the CA, unseals its key, or writes an audit row, so it
-/// is safe behind an unauthenticated route.
+/// [`certificate_pem`] if the CA exists. Reads only public columns: it never
+/// generates the CA, unseals its key, or writes an audit row, so it is safe
+/// behind an unauthenticated route.
 pub async fn existing_certificate_pem(store: &PluginSecretStore) -> Result<Option<String>> {
     let conn = store.conn.lock().await;
-    Ok(conn
-        .query_row(
-            "SELECT certificate FROM vault_broker_ca WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?)
+    manage::trust_pem_locked(&conn)
 }
 
 /// Where the broker CA was written for child processes.
@@ -234,6 +238,9 @@ pub struct LeafCache {
     entries: Mutex<HashMap<String, CachedLeaf>>,
     clock: AtomicU64,
     capacity: usize,
+    /// The CA [`generation`] this cache was built for; a replaced CA
+    /// invalidates it.
+    pub(super) generation: u64,
 }
 
 impl std::fmt::Debug for LeafCache {
@@ -255,6 +262,7 @@ impl LeafCache {
             entries: Mutex::new(HashMap::new()),
             clock: AtomicU64::new(0),
             capacity: LEAF_CACHE_CAPACITY,
+            generation: generation(),
         })
     }
 
@@ -370,96 +378,5 @@ pub fn pem_to_der(pem: &str) -> Result<CertificateDer<'static>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn provider() -> Arc<CryptoProvider> {
-        Arc::new(rustls::crypto::ring::default_provider())
-    }
-
-    #[tokio::test]
-    async fn the_ca_is_created_once_and_sealed() {
-        let store = PluginSecretStore::in_memory().unwrap();
-        let first = certificate_pem(&store).await.unwrap();
-        let second = certificate_pem(&store).await.unwrap();
-        assert_eq!(first, second);
-        assert!(first.starts_with("-----BEGIN CERTIFICATE-----"));
-        let conn = store.conn.lock().await;
-        let ciphertext: Vec<u8> = conn
-            .query_row("SELECT ciphertext FROM vault_broker_ca", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        let material = load_locked(&store, &conn).unwrap().unwrap();
-        assert_ne!(ciphertext, material.key_der);
-    }
-
-    #[tokio::test]
-    async fn the_public_read_never_creates_the_ca() {
-        let store = PluginSecretStore::in_memory().unwrap();
-        assert!(existing_certificate_pem(&store).await.unwrap().is_none());
-        let created = certificate_pem(&store).await.unwrap();
-        assert_eq!(
-            existing_certificate_pem(&store).await.unwrap(),
-            Some(created.clone())
-        );
-        store.keyring.seal();
-        // The certificate is public: reading it needs no unsealed key.
-        assert_eq!(
-            existing_certificate_pem(&store).await.unwrap(),
-            Some(created)
-        );
-    }
-
-    #[test]
-    fn the_combined_bundle_keeps_system_roots_and_adds_the_broker_ca() {
-        let system = CertificateDer::from(vec![1u8, 2, 3, 4]);
-        let bundle = combined_bundle(
-            &[system],
-            "-----BEGIN CERTIFICATE-----\nQUJD\n-----END CERTIFICATE-----\n",
-        );
-        assert_eq!(bundle.matches("-----BEGIN CERTIFICATE-----").count(), 2);
-        assert!(bundle.starts_with("-----BEGIN CERTIFICATE-----\nAQIDBA==\n"));
-        assert!(bundle.ends_with("QUJD\n-----END CERTIFICATE-----\n"));
-    }
-
-    #[tokio::test]
-    async fn a_sealed_vault_cannot_load_the_ca_key() {
-        let store = PluginSecretStore::in_memory().unwrap();
-        ensure(&store).await.unwrap();
-        store.keyring.seal();
-        assert!(ensure(&store).await.is_err());
-    }
-
-    #[tokio::test]
-    async fn leaves_chain_to_the_ca_and_are_cached() {
-        let store = PluginSecretStore::in_memory().unwrap();
-        let material = ensure(&store).await.unwrap();
-        let cache = LeafCache::new(&material, provider()).unwrap();
-        let first = cache.leaf("api.example.com").unwrap();
-        let again = cache.leaf("API.example.com").unwrap();
-        assert!(Arc::ptr_eq(&first, &again));
-        assert_eq!(first.cert.len(), 2);
-        assert_eq!(
-            first.cert[1],
-            pem_to_der(&material.certificate_pem).unwrap()
-        );
-        let ip = cache.leaf("127.0.0.1").unwrap();
-        assert!(!Arc::ptr_eq(&first, &ip));
-        assert!(cache.leaf("bad host").is_err());
-    }
-
-    #[tokio::test]
-    async fn the_cache_evicts_the_least_recently_used_leaf() {
-        let store = PluginSecretStore::in_memory().unwrap();
-        let material = ensure(&store).await.unwrap();
-        let mut cache = LeafCache::new(&material, provider()).unwrap();
-        cache.capacity = 2;
-        let a = cache.leaf("a.example.com").unwrap();
-        cache.leaf("b.example.com").unwrap();
-        cache.leaf("a.example.com").unwrap();
-        cache.leaf("c.example.com").unwrap();
-        assert_eq!(cache.len(), 2);
-        assert!(Arc::ptr_eq(&a, &cache.leaf("a.example.com").unwrap()));
-    }
-}
+#[path = "ca_tests.rs"]
+mod tests;

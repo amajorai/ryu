@@ -102,6 +102,8 @@ fn the_shipped_browser_layer_serves_the_whole_verb_set() {
         ("browser.click_at", "chromium.click_at"),
         ("browser.key", "chromium.key"),
         ("browser.drag", "chromium.drag"),
+        ("browser.list_webmcp_tools", "chromium.list_webmcp_tools"),
+        ("browser.execute_webmcp_tool", "chromium.execute_webmcp_tool"),
     ] {
         assert_eq!(
             served.get(verb),

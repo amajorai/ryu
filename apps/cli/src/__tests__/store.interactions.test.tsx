@@ -1,31 +1,29 @@
 /* @jsxImportSource @opentui/react */
+// Store sections, search, and the catalog surfaces (Sidecars, Models, Skills,
+// Engines, Agents). Plugins lifecycle and cascade flows live in
+// store.plugins-lifecycle.interactions.test.tsx.
 
-import { afterEach, expect, test } from "bun:test";
-import { KeyEvent, TextAttributes } from "@opentui/core";
+import { expect, test } from "bun:test";
 import {
 	type appRequestValueSchema,
 	appResponseValueSchema,
 } from "@ryuhq/core-client/app-request-json";
 import { act } from "react";
 import { z } from "zod";
-import { ThemeProvider } from "@/components/ui/theme-provider.tsx";
-import { ChatIntentProvider } from "../core/ChatIntentContext.tsx";
-import { ContributionsProvider } from "../core/ContributionsContext.tsx";
-import { CoreProvider } from "../core/CoreContext.tsx";
-import {
-	InputFocusProvider,
-	useInputFocused,
-} from "../core/InputFocusContext.tsx";
-import { OverlayProvider } from "../overlays/OverlayHost.tsx";
 import { STORE_SECTIONS } from "../surfaces/store/sections.ts";
-import { ryuTheme } from "../ui/theme.ts";
-import { ToastHost, ToastProvider } from "../ui/toast.tsx";
-import { resolveSurface } from "../workspace/router.ts";
 import {
-	useWorkspace,
-	WorkspaceProvider,
-} from "../workspace/WorkspaceContext.tsx";
-import { testRender } from "./cli-test-render.ts";
+	activeSection,
+	currentSetup,
+	installResponse,
+	isStoreInputFocused,
+	press,
+	registerStoreHarnessHooks,
+	renderStore,
+	type StoreActionObservation,
+	waitFor,
+} from "./store-interactions.harness.tsx";
+
+registerStoreHarnessHooks();
 
 // The SDK engine activation publisher sends exactly the complete name envelope.
 const engineActivationFields = z.looseObject({ name: z.string() });
@@ -36,152 +34,6 @@ const engineActivationObservation = z.custom<
 		appResponseValueSchema.safeParse(value).success &&
 		engineActivationFields.safeParse(value).success
 );
-interface StoreActionObservation {
-	body: z.infer<typeof appResponseValueSchema>;
-	path: string;
-}
-function installResponse(
-	provide: (
-		...args: Parameters<typeof realFetch>
-	) => ReturnType<typeof realFetch>
-): void {
-	globalThis.fetch = Object.assign(provide, {
-		preconnect: realFetch.preconnect,
-	});
-}
-const LOCAL_TARGET = { url: "http://127.0.0.1:7980", token: null };
-const realFetch = globalThis.fetch;
-let testSetup: Awaited<ReturnType<typeof testRender>> | null = null;
-let storeInputFocused = false;
-
-function CaptureFocus() {
-	storeInputFocused = useInputFocused();
-	return null;
-}
-
-function StorePane() {
-	const { focusedPaneId } = useWorkspace();
-	const surface = resolveSurface("/store");
-	if (!surface) {
-		return null;
-	}
-	const Store = surface.Component;
-	return <Store active={true} paneId={focusedPaneId} />;
-}
-
-function Harness() {
-	return (
-		<ThemeProvider theme={ryuTheme}>
-			<CoreProvider initial={LOCAL_TARGET}>
-				<ContributionsProvider>
-					<InputFocusProvider>
-						<ToastProvider>
-							<ChatIntentProvider>
-								<WorkspaceProvider>
-									<OverlayProvider>
-										<CaptureFocus />
-										<StorePane />
-										<ToastHost />
-									</OverlayProvider>
-								</WorkspaceProvider>
-							</ChatIntentProvider>
-						</ToastProvider>
-					</InputFocusProvider>
-				</ContributionsProvider>
-			</CoreProvider>
-		</ThemeProvider>
-	);
-}
-
-afterEach(async () => {
-	globalThis.fetch = realFetch;
-	await act(async () => {
-		testSetup?.renderer.destroy();
-		await Promise.resolve();
-	});
-	testSetup = null;
-	storeInputFocused = false;
-});
-
-async function press(
-	setup: Awaited<ReturnType<typeof testRender>>,
-	name: string,
-	ctrl = false,
-	shift = false
-): Promise<void> {
-	if (name === "right" || name === "left") {
-		await act(async () => {
-			setup.mockInput.pressArrow(name);
-			await new Promise((resolve) => setTimeout(resolve, 0));
-		});
-		await setup.flush({ maxPasses: 12 });
-		return;
-	}
-	const keyInput = setup.renderer.keyInput;
-	await act(async () => {
-		keyInput.emit(
-			"keypress",
-			new KeyEvent({
-				name,
-				sequence: name.length === 1 ? name : "",
-				ctrl,
-				shift,
-				meta: false,
-				option: false,
-				eventType: "press",
-				repeated: false,
-				number: false,
-				raw: name.length === 1 ? name : "",
-				source: "raw",
-			})
-		);
-		await new Promise((resolve) => setTimeout(resolve, 0));
-	});
-	await setup.renderOnce();
-}
-
-async function renderStore(width = 120): Promise<void> {
-	testSetup = await testRender(<Harness />, { width, height: 36 });
-	await waitFor(testSetup, (frame) => frame.includes("refresh"));
-}
-
-function currentSetup(): Awaited<ReturnType<typeof testRender>> {
-	if (!testSetup) {
-		throw new Error("Store renderer is not mounted");
-	}
-	return testSetup;
-}
-
-async function waitFor(
-	setup: Awaited<ReturnType<typeof testRender>>,
-	predicate: (frame: string) => boolean
-): Promise<string> {
-	let frame = setup.captureCharFrame();
-	for (let pass = 0; pass < 30 && !predicate(frame); pass += 1) {
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		await setup.renderOnce();
-		frame = setup.captureCharFrame();
-	}
-	if (!predicate(frame)) {
-		throw new Error(`Store render did not match: ${frame}`);
-	}
-	return frame;
-}
-
-function activeSection(
-	setup: Awaited<ReturnType<typeof testRender>>
-): string | undefined {
-	const labels = new Set(STORE_SECTIONS.map((section) => section.label));
-	for (const line of setup.captureSpans().lines) {
-		for (const span of line.spans) {
-			const label = span.text.trim();
-			if (labels.has(label) && (span.attributes & TextAttributes.BOLD) !== 0) {
-				return label;
-			}
-		}
-	}
-	return undefined;
-}
 
 test("left and right move through all Store sections and wrap at both ends", async () => {
 	installResponse(
@@ -287,7 +139,7 @@ test("Store search tracks typed input and Enter opens the selected result realm"
 		await setup.mockInput.typeText("/");
 	});
 	await setup.flush({ maxPasses: 12 });
-	await waitFor(setup, () => storeInputFocused);
+	await waitFor(setup, () => isStoreInputFocused());
 	await act(async () => {
 		await setup.mockInput.typeText("needle", 50);
 	});
@@ -298,7 +150,7 @@ test("Store search tracks typed input and Enter opens the selected result realm"
 	expect(results).not.toContain("Edle decoy");
 
 	await press(setup, "escape");
-	await waitFor(setup, () => !storeInputFocused);
+	await waitFor(setup, () => !isStoreInputFocused());
 	await press(setup, "r");
 	await waitFor(setup, () => modelReads >= 2);
 	await press(setup, "k");
@@ -308,259 +160,6 @@ test("Store search tracks typed input and Enter opens the selected result realm"
 	await press(setup, "return");
 	await waitFor(setup, () => activeSection(setup) === "Models");
 	expect(activeSection(setup)).toBe("Models");
-});
-
-function pluginWire(installed: boolean, enabled: boolean) {
-	return {
-		built_in: false,
-		enabled,
-		id: "plugin-one",
-		installed,
-		installed_version: installed ? "1.0.0" : null,
-		local_only: false,
-		name: "Lifecycle plugin",
-		permission_grants: [],
-		runnables: [],
-		sidecar_name: null,
-		version: "1.1.0",
-		windows_first: false,
-	};
-}
-
-test("Store Plugins install, toggle, update, uninstall, and refresh through Core lifecycle actions", async () => {
-	let installed = false;
-	let enabled = false;
-	let reads = 0;
-	const actions: string[] = [];
-	installResponse(async (input, init) => {
-		const url = new URL(String(input));
-		if (
-			url.pathname === "/api/plugins" &&
-			(!init?.method || init.method === "GET")
-		) {
-			reads += 1;
-			return new Response(
-				JSON.stringify({ apps: [pluginWire(installed, enabled)] }),
-				{ status: 200, headers: { "content-type": "application/json" } }
-			);
-		}
-		if (url.pathname.startsWith("/api/plugins/plugin-one/")) {
-			const action = url.pathname.split("/").at(-1) ?? "";
-			actions.push(action);
-			if (action === "install") {
-				installed = true;
-				enabled = false;
-			} else if (action === "enable") {
-				enabled = true;
-			} else if (action === "disable") {
-				enabled = false;
-			} else if (action === "uninstall") {
-				installed = false;
-				enabled = false;
-				return new Response(
-					JSON.stringify({ success: true, removed: "plugin-one" }),
-					{
-						status: 200,
-						headers: { "content-type": "application/json" },
-					}
-				);
-			}
-			return new Response(
-				JSON.stringify({
-					app: {
-						id: "plugin-one",
-						version: "1.1.0",
-						enabled,
-						approved_grants: [],
-						created_at: null,
-						updated_at: null,
-					},
-				}),
-				{ status: 200, headers: { "content-type": "application/json" } }
-			);
-		}
-		return new Response("not found", { status: 404 });
-	});
-
-	await renderStore();
-	const setup = currentSetup();
-	expect(
-		await waitFor(setup, (frame) => frame.includes("available"))
-	).toContain("Lifecycle plugin");
-
-	await press(setup, "i");
-	await waitFor(setup, (frame) => frame.includes("disabled"));
-	await press(setup, "e");
-	await waitFor(setup, (frame) => frame.includes("enabled"));
-	await press(setup, "e");
-	await waitFor(setup, (frame) => frame.includes("disabled"));
-	await press(setup, "u");
-	await waitFor(
-		setup,
-		() => actions.filter((action) => action === "update").length === 1
-	);
-	await press(setup, "D");
-	await waitFor(setup, (frame) =>
-		frame.includes("Uninstall Lifecycle plugin?")
-	);
-	expect(actions).not.toContain("uninstall");
-	await press(setup, "y");
-	await waitFor(setup, (frame) => frame.includes("available"));
-	await press(setup, "r");
-	await waitFor(setup, () => reads >= 7);
-
-	expect(actions).toEqual([
-		"install",
-		"enable",
-		"disable",
-		"update",
-		"uninstall",
-	]);
-	expect(reads).toBeGreaterThanOrEqual(7);
-});
-
-test("Store keeps the Plugins uninstall prompt open on arrows and / and fits a narrow pane", async () => {
-	const posts: string[] = [];
-	installResponse(async (input, init) => {
-		const url = new URL(String(input));
-		if (init?.method === "POST") {
-			posts.push(url.pathname);
-			return Response.json({ success: true, removed: "plugin-one" });
-		}
-		if (url.pathname === "/api/plugins") {
-			return Response.json({ apps: [pluginWire(true, true)] });
-		}
-		return new Response("not found", { status: 404 });
-	});
-	// 56 columns is what the Store gets beside the sidebar in an 80x24 terminal.
-	testSetup = await testRender(<Harness />, { width: 56, height: 22 });
-	const setup = testSetup;
-	await waitFor(setup, (frame) => frame.includes("Lifecycle plugin"));
-
-	await press(setup, "D");
-	await waitFor(setup, (frame) =>
-		frame.includes("Uninstall Lifecycle plugin?")
-	);
-	// The arrows move button focus inside the prompt instead of switching the
-	// Store section (which would silently drop the pending uninstall), and /
-	// does not steal focus into the search box.
-	await press(setup, "right");
-	await press(setup, "/");
-	const frame = await waitFor(setup, (current) =>
-		current.includes("Uninstall Lifecycle plugin?")
-	);
-	expect(activeSection(setup)).toBe("Plugins");
-	expect(storeInputFocused).toBe(false);
-	// The buttons stay whole on one line and the prompt replaces the tab's
-	// key-hint footer, so nothing overlaps the Store hint line below it.
-	expect(frame).toMatch(/\[ Cancel \] \[ Uninstall \]/);
-	expect(frame).not.toContain("e enable/disable");
-	expect(frame).toContain("/ search");
-	expect(posts).toEqual([]);
-
-	// → moved focus to Uninstall, so Enter confirms.
-	await press(setup, "return");
-	await waitFor(setup, () => posts.length === 1);
-	expect(posts).toEqual(["/api/plugins/plugin-one/uninstall"]);
-	// With the prompt closed the Store owns the arrows again.
-	await press(setup, "right");
-	await waitFor(setup, (current) => current.includes("/api/catalog"));
-});
-
-test("Store Plugins offer C after a dependent refusal and retry the uninstall with cascade", async () => {
-	const actions: string[] = [];
-	let reads = 0;
-	let enabled = true;
-	installResponse(async (input, init) => {
-		const url = new URL(String(input));
-		if (
-			url.pathname === "/api/plugins" &&
-			(!init?.method || init.method === "GET")
-		) {
-			reads += 1;
-			return new Response(
-				JSON.stringify({ apps: [pluginWire(true, enabled)] }),
-				{
-					status: 200,
-					headers: { "content-type": "application/json" },
-				}
-			);
-		}
-		if (
-			url.pathname === "/api/plugins/plugin-one/disable" ||
-			url.pathname === "/api/plugins/plugin-one/uninstall"
-		) {
-			const verb = url.pathname.endsWith("/disable") ? "disable" : "uninstall";
-			const cascade = url.searchParams.get("cascade") === "true";
-			actions.push(`${verb}:${cascade}`);
-			if (url.searchParams.get("cascade") !== "true") {
-				return new Response(
-					JSON.stringify({
-						message: "blocked",
-						dependency_error: {
-							code: "blocked_by_dependents",
-							plugin: "plugin-one",
-							dependents: ["dependent"],
-						},
-					}),
-					{ status: 409, headers: { "content-type": "application/json" } }
-				);
-			}
-			if (verb === "disable") {
-				enabled = false;
-				return new Response(
-					JSON.stringify({
-						app: {
-							id: "plugin-one",
-							version: "1.0.0",
-							enabled,
-							approved_grants: [],
-							created_at: null,
-							updated_at: null,
-						},
-					}),
-					{ status: 200, headers: { "content-type": "application/json" } }
-				);
-			}
-			return new Response(
-				JSON.stringify({ success: true, removed: "plugin-one" }),
-				{
-					status: 200,
-					headers: { "content-type": "application/json" },
-				}
-			);
-		}
-		return new Response("not found", { status: 404 });
-	});
-
-	await renderStore();
-	const setup = currentSetup();
-	await waitFor(setup, (frame) => frame.includes("enabled"));
-	await press(setup, "e");
-	await waitFor(setup, (frame) =>
-		frame.includes("press C to disable dependents too")
-	);
-	await press(setup, "C");
-	await waitFor(setup, (frame) => frame.includes("and its dependents?"));
-	await press(setup, "y");
-	await waitFor(setup, (frame) => frame.includes("disabled") && reads >= 2);
-	await press(setup, "D");
-	await press(setup, "y");
-	await waitFor(setup, (frame) =>
-		frame.includes("press C to uninstall dependents too")
-	);
-	await press(setup, "C");
-	await waitFor(setup, (frame) => frame.includes("and its dependents?"));
-	expect(actions).toHaveLength(3);
-	await press(setup, "y");
-	await waitFor(setup, () => actions.length === 4 && reads >= 3);
-
-	expect(actions).toEqual([
-		"disable:false",
-		"disable:true",
-		"uninstall:false",
-		"uninstall:true",
-	]);
 });
 
 test("Store Sidecars install and uninstall the selected catalog item", async () => {

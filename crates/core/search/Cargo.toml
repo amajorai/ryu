@@ -11,7 +11,7 @@ repository = "https://github.com/amajorai/ryu"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 sqlite-vec = "=0.1.6"
 # `rt` for `spawn_blocking`: a search that opens a whole sealed partition
 # runs on a blocking thread, never on a runtime worker.

@@ -14,6 +14,7 @@ import { useChatDisplayPrefs } from "../chat-display-prefs.tsx";
 import { areToolPropsEqual, getToolStatus } from "../utils/format-tool.ts";
 import { unwrapMcpOutput } from "../utils/unwrap-mcp-output.ts";
 import { ToolApprovalFooter } from "./tool-approval-footer.tsx";
+import { mcpToolLabel } from "./tool-mcp-name.ts";
 import type { McpToolInfo } from "./tool-registry.ts";
 
 export interface McpToolProps {
@@ -181,7 +182,7 @@ function formatOutputForDisplay(output: any): string {
 
 export const McpTool = memo(function McpTool({
 	part,
-	mcpInfo,
+	mcpInfo: rawInfo,
 	chatStatus,
 	defaultOpen,
 }: McpToolProps) {
@@ -189,6 +190,14 @@ export const McpTool = memo(function McpTool({
 	const { expandCodeBlocks } = useChatDisplayPrefs();
 	const tl = useLiteralMessages();
 	const english = isEnglishLocale(useOptionalI18n()?.locale ?? activeLocale());
+	// Other locales name the built-in resource tools in their own words.
+	const mcpInfo = useMemo(
+		() =>
+			english
+				? rawInfo
+				: { ...rawInfo, displayName: mcpToolLabel(rawInfo, tl) },
+		[rawInfo, english, tl]
+	);
 
 	const preparing = tl("Preparing {tool}", { tool: mcpInfo.displayName });
 	const title = useMemo(() => {

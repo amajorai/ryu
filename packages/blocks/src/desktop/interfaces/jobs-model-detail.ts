@@ -1,5 +1,6 @@
 import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
+import { formatNameList } from "./interface-renderer.ts";
 import type { JobRow, JobStatus } from "./jobs-model-core.ts";
 
 // ---------------------------------------------------------------------------
@@ -51,7 +52,13 @@ export interface JobTimelineEntry {
 	state: "current" | "done";
 }
 
-/** "Atlas", "Atlas and Brook", "Atlas, Brook and Cipher". */
+/**
+ * "Atlas", "Atlas and Brook", "Atlas, Brook and Cipher".
+ *
+ * @deprecated Glues an English comma onto a translated "and", so it lists
+ * names in English punctuation in every language. Use `formatNameList`, which
+ * follows the UI locale's list pattern.
+ */
 export function nameList(names: readonly string[]): string {
 	if (names.length <= 1) {
 		return names[0] ?? "";
@@ -66,7 +73,7 @@ function hiredDetail(row: JobRow): string {
 		return "No freelancer hired";
 	}
 	return tr("Hired {names}", {
-		names: nameList(row.agents.map((agent) => agent.name)),
+		names: formatNameList(row.agents.map((agent) => agent.name)),
 	});
 }
 

@@ -1,3 +1,4 @@
+import { translateMessage } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -126,7 +127,8 @@ function QuestFaces({
 
 function actionLabel(action: QuestAction, complete: boolean): string {
 	if (complete) {
-		return "Claim";
+		// Take the reward (de "Abholen"); the bare "Claim" reserves an alias.
+		return translateMessage("lobby.claimReward", {}, "Claim");
 	}
 	return action.kind === "open" ? "Open" : "Start";
 }

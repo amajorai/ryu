@@ -31,12 +31,21 @@ import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs.tsx";
 
 import { SettingsSection } from "@/src/components/settings/shared/settings-items.tsx";
+import { VaultAuditDevices } from "@/src/components/vault/VaultAuditDevices.tsx";
 import { VaultAuditPanel } from "@/src/components/vault/VaultAuditPanel.tsx";
 import { VaultBrokerPanel } from "@/src/components/vault/VaultBrokerPanel.tsx";
 import { VaultChangeRequests } from "@/src/components/vault/VaultChangeRequests.tsx";
+import { VaultControlGroups } from "@/src/components/vault/VaultControlGroups.tsx";
+import { VaultDynamicPanel } from "@/src/components/vault/VaultDynamicPanel.tsx";
+import { VaultItemsPanel } from "@/src/components/vault/VaultItemsPanel.tsx";
+import { VaultLockoutsPanel } from "@/src/components/vault/VaultLockoutsPanel.tsx";
+import { VaultMachinesPanel } from "@/src/components/vault/VaultMachinesPanel.tsx";
+import { VaultPoliciesPanel } from "@/src/components/vault/VaultPoliciesPanel.tsx";
 import { VaultSealControl } from "@/src/components/vault/VaultSealControl.tsx";
 import { VaultSecretDialog } from "@/src/components/vault/VaultSecretDialog.tsx";
+import { VaultDeleteUsageWarning } from "@/src/components/vault/VaultSecretUsage.tsx";
 import { VaultSyncsPanel } from "@/src/components/vault/VaultSyncsPanel.tsx";
+import { VaultTokenRolesPanel } from "@/src/components/vault/VaultTokenRolesPanel.tsx";
 import { VaultTransferDialog } from "@/src/components/vault/VaultTransferDialog.tsx";
 import { vaultErrorMessage } from "@/src/components/vault/vault-errors.ts";
 import { callerSubject } from "@/src/components/vault/vault-view.ts";
@@ -143,6 +152,11 @@ export default function VaultPage() {
 					>
 						<TabsList variant="pills">
 							<TabsTrigger value="secrets">Secrets</TabsTrigger>
+							<TabsTrigger value="items">Items</TabsTrigger>
+							<TabsTrigger value="dynamic">Leases</TabsTrigger>
+							<TabsTrigger value="machines">Machines</TabsTrigger>
+							<TabsTrigger value="tokens">Tokens</TabsTrigger>
+							<TabsTrigger value="policies">Policies</TabsTrigger>
 							<TabsTrigger value="broker">Broker</TabsTrigger>
 							<TabsTrigger value="syncs">Syncs</TabsTrigger>
 							<TabsTrigger value="audit">Audit</TabsTrigger>
@@ -151,7 +165,21 @@ export default function VaultPage() {
 				) : null}
 
 				{isAdmin && tab === "audit" ? (
-					<VaultAuditPanel target={target} />
+					<>
+						<VaultAuditPanel target={target} />
+						<VaultAuditDevices target={target} />
+						<VaultLockoutsPanel target={target} />
+					</>
+				) : isAdmin && tab === "items" ? (
+					<VaultItemsPanel environment={activeEnvironment} target={target} />
+				) : isAdmin && tab === "dynamic" ? (
+					<VaultDynamicPanel target={target} />
+				) : isAdmin && tab === "machines" ? (
+					<VaultMachinesPanel target={target} />
+				) : isAdmin && tab === "tokens" ? (
+					<VaultTokenRolesPanel target={target} />
+				) : isAdmin && tab === "policies" ? (
+					<VaultPoliciesPanel target={target} />
 				) : isAdmin && tab === "broker" ? (
 					<VaultBrokerPanel environment={activeEnvironment} target={target} />
 				) : isAdmin && tab === "syncs" ? (
@@ -212,6 +240,10 @@ export default function VaultPage() {
 							callerSubject={callerSubject(state)}
 							target={target}
 						/>
+						<VaultControlGroups
+							callerSubject={callerSubject(state)}
+							target={target}
+						/>
 
 						{renderVaultSecretForm({
 							tl,
@@ -240,6 +272,7 @@ export default function VaultPage() {
 
 						{renderVaultSecretList({
 							tl,
+							activeEnvironment,
 							deleteMutation,
 							folder,
 							folderTree,
@@ -250,6 +283,7 @@ export default function VaultPage() {
 							setShowDeleted,
 							showDeleted,
 							state,
+							target,
 							vaultQuery,
 							visibleSecrets,
 						})}
@@ -314,6 +348,10 @@ export default function VaultPage() {
 							)}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
+					<VaultDeleteUsageWarning
+						name={deleteTarget?.name ?? null}
+						target={target}
+					/>
 					{deleteMutation.error ? (
 						<p className="text-sm text-status-destructive" role="alert">
 							{vaultErrorMessage(deleteMutation.error, "Could not delete.", tl)}

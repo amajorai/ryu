@@ -12,6 +12,7 @@ import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
 import {
 	compactAge,
+	formatNameList,
 	fullTimestamp,
 	threadStatusLabel,
 } from "./interface-renderer.ts";
@@ -50,7 +51,7 @@ function CardFaces({ agents }: { agents: InterfaceAgent[] }) {
 	}
 	const shown = agents.slice(0, FACE_LIMIT);
 	const extra = agents.length - shown.length;
-	const names = agents.map((agent) => agent.name).join(", ");
+	const names = formatNameList(agents.map((agent) => agent.name));
 	return (
 		<span className="flex min-w-0 items-center" title={names}>
 			<span aria-hidden="true" className="flex shrink-0 -space-x-1">

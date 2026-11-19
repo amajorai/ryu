@@ -58,7 +58,7 @@ export function TicketsViewsPanel({
 			data-testid="tickets-views"
 		>
 			<div className="flex h-12 shrink-0 items-center px-4">
-				<h2 className="font-semibold text-sm">Views</h2>
+				<h2 className="font-semibold text-sm">Saved views</h2>
 			</div>
 			<ul className="flex flex-col gap-px px-2" onKeyDown={onKeyDown}>
 				{TICKET_VIEWS.map((view) => {

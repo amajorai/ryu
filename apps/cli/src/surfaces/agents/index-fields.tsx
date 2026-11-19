@@ -28,17 +28,17 @@ export function ToggleField({
 	return (
 		<box flexDirection="row" gap={1}>
 			<text fg={focused ? theme.colors.primary : theme.colors.mutedForeground}>
-				{`${focused ? "›" : " "} ${label.padEnd(EDIT_LABEL_WIDTH)}`}
+				{`${focused ? "›" : " "} ${tr(label).padEnd(EDIT_LABEL_WIDTH)}`}
 			</text>
 			<text fg={focused ? theme.colors.primary : theme.colors.foreground}>
-				{enabled ? "● On   ○ Off" : "○ On   ● Off"}
+				{`${enabled ? "●" : "○"} ${tr("On")}   ${enabled ? "○" : "●"} ${tr("Off")}`}
 			</text>
 		</box>
 	);
 }
 
 export function PickerField({
-	action = "Enter to choose",
+	action = tr("Enter to choose"),
 	focused,
 	label,
 	value,
@@ -53,10 +53,10 @@ export function PickerField({
 	return (
 		<box flexDirection="row" gap={1}>
 			<text fg={focused ? theme.colors.primary : theme.colors.mutedForeground}>
-				{`${focused ? "›" : " "} ${label.padEnd(EDIT_LABEL_WIDTH)}`}
+				{`${focused ? "›" : " "} ${tr(label).padEnd(EDIT_LABEL_WIDTH)}`}
 			</text>
 			<text fg={focused ? theme.colors.primary : theme.colors.foreground}>
-				{`${action} · ${value}`}
+				{`${action} · ${tr(value)}`}
 			</text>
 		</box>
 	);
@@ -148,7 +148,11 @@ export function AgentCapabilityPicker({
 				})}
 				{rows.length > PICKER_HEIGHT ? (
 					<text fg={theme.colors.mutedForeground}>
-						{`${start + 1}–${Math.min(start + PICKER_HEIGHT, rows.length)} of ${rows.length}`}
+						{tf("Showing {start}–{end} of {total}", {
+							end: Math.min(start + PICKER_HEIGHT, rows.length),
+							start: start + 1,
+							total: rows.length,
+						})}
 					</text>
 				) : null}
 			</box>
@@ -174,7 +178,7 @@ export function EditField({
 	return (
 		<box flexDirection="row" gap={1}>
 			<text fg={focused ? theme.colors.primary : theme.colors.mutedForeground}>
-				{`${focused ? "›" : " "} ${label.padEnd(EDIT_LABEL_WIDTH)}`}
+				{`${focused ? "›" : " "} ${tr(label).padEnd(EDIT_LABEL_WIDTH)}`}
 			</text>
 			<box flexBasis={0} flexGrow={1}>
 				<input

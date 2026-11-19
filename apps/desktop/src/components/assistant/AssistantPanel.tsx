@@ -7,6 +7,7 @@ import {
 } from "@ryu/assistant-widget/surface";
 import { AgentUiStateHostContext } from "@ryu/blocks/desktop/agent-elements/agent-ui/state-host-context.tsx";
 import { ModelContextAttachments } from "@ryu/blocks/desktop/agent-elements/model-context-attachments.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { AgentChat } from "@/components/agent-elements/agent-chat.tsx";
@@ -29,6 +30,7 @@ import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { markRunStopped } from "@/src/lib/sounds/play-sound.ts";
 import { useChatTurnSounds } from "@/src/lib/sounds/use-chat-turn-sounds.ts";
 import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
+import { builderPanelTitle } from "./AssistantPanel-builder-title.ts";
 import { useAssistantComposers } from "./AssistantPanel-composers.ts";
 import { useAssistantConversation } from "./AssistantPanel-conversation.ts";
 import {
@@ -82,6 +84,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 	const interfaceLevel = useInterfaceLevel();
 	const mode = useAssistantStore((s) => s.mode);
 	const builder = useAssistantStore((s) => s.builder);
+	const tl = useLiteralMessages();
 	const storeConvId = useAssistantStore((s) => s.conversationId);
 	const pageContext = useAssistantStore((s) => s.pageContext);
 	const hasAppContext = useModelContextStore((store) =>
@@ -342,10 +345,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 	const divider = bare ? "" : "border-border border-b";
 	// An app-defined surface names itself (`label`); the built-in builders keep
 	// the "Build <target>" wording.
-	const builderTitle = builder
-		? builder.label?.trim() ||
-			`Build ${builder.targetName.trim() || (builder.kind === "agent" ? "this agent" : builder.kind === "workflow" ? "this workflow" : "this")}`
-		: null;
+	const builderTitle = builder ? builderPanelTitle(builder, tl) : null;
 
 	// Builder threads get a worded prompt; the generic assistant reuses the main
 	// chat's `EmptyStateHeader` so the driving agent's logo sits behind the

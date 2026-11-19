@@ -23,6 +23,7 @@ import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useSurfaceView } from "../../core/ContributionsContext.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import { useInputFocused } from "../../core/InputFocusContext.tsx";
+import { tr } from "../../i18n/translate.ts";
 import { ContributedViewPanel } from "../../ui/ContributedView.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
@@ -120,7 +121,7 @@ function TimelineBody({ shadow }: { shadow: ShadowState }) {
 		return (
 			<Card
 				borderColor={theme.colors.success}
-				subtitle="recording"
+				subtitle={tr("recording")}
 				title="Shadow"
 			>
 				<text fg={theme.colors.foreground}>

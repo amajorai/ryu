@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::target_guard::{self, TargetEgress};
+use super::username_template::{render_username, TemplateContext};
 use super::{random_suffix, Issued};
 
 const DEFAULT_REVOCATION: &[&str] = &[
@@ -40,6 +41,11 @@ pub struct PostgresConfig {
     /// Username prefix (default `ryu`).
     #[serde(default)]
     pub username_prefix: Option<String>,
+    /// Username template (see [`super::username_template`]), instead of
+    /// `usernamePrefix`. It must render 1-63 lowercase letters, digits, or
+    /// underscores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username_template: Option<String>,
     /// How connections are made (set from the role's writer; never stored).
     #[serde(skip)]
     pub(crate) egress: TargetEgress,
@@ -71,7 +77,33 @@ impl PostgresConfig {
                 bail!("usernamePrefix must be 1-16 lowercase letters, digits, or underscores");
             }
         }
+        if self.username_template.is_some() {
+            if self.username_prefix.is_some() {
+                bail!("set usernamePrefix or usernameTemplate, not both");
+            }
+            self.username_for("sample_role", "token")?;
+        }
         Ok(())
+    }
+
+    /// The username for a new lease: the template's output, or
+    /// `<prefix>_<role>_<random>`.
+    pub(super) fn username_for(&self, role: &str, display_name: &str) -> Result<String> {
+        if let Some(template) = &self.username_template {
+            let context = TemplateContext {
+                role_name: role.to_owned(),
+                display_name: display_name.to_owned(),
+            };
+            return render_username(template, &context, 63, valid_username);
+        }
+        let prefix = self.username_prefix.as_deref().unwrap_or("ryu");
+        let role_part: String = role
+            .bytes()
+            .filter(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            .take(16)
+            .map(char::from)
+            .collect();
+        Ok(format!("{prefix}_{role_part}_{}", random_suffix(10)))
     }
 
     /// `host:port/db` without credentials.
@@ -185,15 +217,19 @@ async fn run_in_transaction(
         .map_err(|error| anyhow!("postgres commit failed: {error}"))
 }
 
-pub(super) async fn issue(config: &PostgresConfig, role: &str, ttl_secs: i64) -> Result<Issued> {
-    let prefix = config.username_prefix.as_deref().unwrap_or("ryu");
-    let role_part: String = role
-        .bytes()
-        .filter(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        .take(16)
-        .map(char::from)
-        .collect();
-    let name = format!("{prefix}_{role_part}_{}", random_suffix(10));
+/// Postgres role names Core creates and later quotes into SQL.
+fn valid_username(name: &str) -> bool {
+    name.bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+pub(super) async fn issue(
+    config: &PostgresConfig,
+    role: &str,
+    display_name: &str,
+    ttl_secs: i64,
+) -> Result<Issued> {
+    let name = config.username_for(role, display_name)?;
     let password = random_suffix(32);
     let expires = expiration(ttl_secs);
     let statements: Vec<String> = config
@@ -230,10 +266,7 @@ fn username(revoke_data: &Value) -> Result<&str> {
         .get("username")
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("lease has no username"))?;
-    if !name
-        .bytes()
-        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-    {
+    if !valid_username(name) {
         bail!("lease username is malformed");
     }
     Ok(name)
@@ -284,6 +317,7 @@ mod tests {
             ],
             revocation_statements: vec![],
             username_prefix: None,
+            username_template: None,
             egress: TargetEgress::Trusted,
         }
     }
@@ -332,7 +366,7 @@ mod tests {
         };
         let mut config = config();
         config.connection_url = url;
-        let issued = issue(&config, "test", 60).await.unwrap();
+        let issued = issue(&config, "test", "token", 60).await.unwrap();
         renew(&config, &issued.revoke_data, 120).await.unwrap();
         revoke(&config, &issued.revoke_data).await.unwrap();
     }

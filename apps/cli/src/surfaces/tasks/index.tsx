@@ -14,11 +14,13 @@
 
 import type { ScheduledJob } from "@ryuhq/core-client/schedules";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { displayWidth } from "../../sidebar/rows.ts";
 import type { SurfaceModule } from "../../workspace/router.ts";
 import {
 	type ScheduledJobRowProps,
 	scheduledJobsSurface,
 } from "../ScheduledJobsSurface.tsx";
+import { everyIntervalLabel } from "../schedule-labels.ts";
 
 const NAME_WIDTH = 20;
 const SCHEDULE_WIDTH = 22;
@@ -29,7 +31,9 @@ function scheduleLabel(job: ScheduledJob): string {
 	if (schedule.kind === "cron") {
 		return schedule.expr.length > 0 ? schedule.expr : "—";
 	}
-	return schedule.interval.length > 0 ? `every ${schedule.interval}` : "—";
+	return schedule.interval.length > 0
+		? everyIntervalLabel(schedule.interval)
+		: "—";
 }
 
 function lastRunLabel(job: ScheduledJob): string {
@@ -41,7 +45,8 @@ function lastRunLabel(job: ScheduledJob): string {
 }
 
 function pad(value: string, width: number): string {
-	return value.length >= width ? value : value.padEnd(width, " ");
+	const used = displayWidth(value);
+	return used >= width ? value : value + " ".repeat(width - used);
 }
 
 function JobRow({ job, selected }: ScheduledJobRowProps) {

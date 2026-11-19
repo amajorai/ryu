@@ -163,7 +163,7 @@ export function DraftCard({
 	const tl = useLiteralMessages();
 	const { draft, pose, zone } = placed;
 	const frame = useCardMove<HTMLButtonElement>(pose, transition);
-	const preview = draft.preview || "Empty draft";
+	const preview = draft.preview || tl("Empty draft");
 	const hidden = zone === "deck";
 	const leave = () => onHover(null);
 	const initial = from ?? pose;

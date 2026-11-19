@@ -27,7 +27,10 @@ import {
 	setLaneAgentSelection,
 } from "@/src/lib/api/preferences.ts";
 import { triggerAgentsRefresh } from "@/src/lib/core-refresh.ts";
-import { agentSuggestionsFailureMessage } from "./OnboardingPage.copy.ts";
+import {
+	agentRefusalSentence,
+	agentSuggestionsFailureMessage,
+} from "./OnboardingPage.copy.ts";
 import type { useOnboardingNodeSetup } from "./OnboardingPage.node-setup.ts";
 import type { useOnboardingPhase } from "./OnboardingPage.phase.ts";
 import type { useOnboardingSetupState } from "./OnboardingPage.setup-state.ts";
@@ -283,13 +286,16 @@ export function useOnboardingProfileFlow({
 							.then((check) =>
 								check.launchable
 									? null
-									: (check.reason ?? "Ryu won't start this agent.")
+									: agentRefusalSentence(
+											tlRef.current,
+											suggestion.name,
+											AGENT_IDENTITY_MODE_OPTIONS[identityMode].title,
+											check.reason
+										)
 							)
 							.catch(() => null);
 			if (refusal) {
-				refused.push(
-					`${suggestion.name} can't start as "${AGENT_IDENTITY_MODE_OPTIONS[identityMode].title}": ${refusal}`
-				);
+				refused.push(refusal);
 				failed.push(suggestion);
 				continue;
 			}

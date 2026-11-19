@@ -30,7 +30,7 @@ import {
 	accountKeyUnusedReason,
 } from "../../core/agentIdentity.ts";
 import { HINT, hintText } from "../../core/keymap.ts";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr, trMessage } from "../../i18n/translate.ts";
 
 const ACCESS_LIST_HEIGHT = 12;
 
@@ -98,7 +98,7 @@ export function AgentIdentityStep({
 						>
 							<text fg={color}>{option.glyph}</text>
 							<text fg={color}>
-								<b>{`${isSelected ? "● " : "○ "}${option.title}`}</b>
+								<b>{`${isSelected ? "● " : "○ "}${tr(option.title)}`}</b>
 							</text>
 							<text fg={theme.colors.mutedForeground}>{option.summary}</text>
 							<text fg={theme.colors.mutedForeground}>{`${index + 1}`}</text>
@@ -139,15 +139,20 @@ export function accessPanelLines(
 		}
 		// One line for a section with nothing to tick; a section whose single
 		// row carries its name (Treg, Control of your desktop) has no title.
-		const notice =
-			entry.error ?? (entry.rows.length === 0 ? entry.empty : null);
+		const title = tr(entry.title);
+		let notice: string | null = null;
+		if (entry.error) {
+			notice = trMessage(entry.error);
+		} else if (entry.rows.length === 0 && entry.empty) {
+			notice = tr(entry.empty);
+		}
 		if (entry.rows.length === 0 || entry.error) {
 			lines.push({
 				kind: "note",
-				text: notice ? `${entry.title}: ${notice}` : entry.title,
+				text: notice ? tf("{title}: {notice}", { notice, title }) : title,
 			});
 		} else if (entry.rows[0]?.title !== entry.title) {
-			lines.push({ kind: "note", text: entry.title });
+			lines.push({ kind: "note", text: title });
 		}
 		for (const row of entry.rows) {
 			const index = indexOf.get(row.key);
@@ -165,7 +170,7 @@ export function accessPanelLines(
 	if (kept.length > 0) {
 		lines.push({
 			kind: "heading",
-			text: accounts ? "Allowed but not listed now" : "Allowed",
+			text: accounts ? tr("Allowed but not listed now") : tr("Allowed"),
 		});
 		for (const { index, row } of kept) {
 			lines.push({ index, kind: "row", row });
@@ -217,10 +222,11 @@ export function AgentAccountAccessPanel({
 	const rowText = (row: AvailableAccount): string => {
 		const allowed =
 			accountAccess === null || accountAccess.includes(row.key) ? "[x]" : "[ ]";
-		const label = row.status ? `${row.title} (${row.status})` : row.title;
+		const title = tr(row.title);
+		const label = row.status ? `${title} (${tr(row.status)})` : title;
 		if (row.section === "not-listed") {
 			const unused = accountKeyUnusedReason(row.key, identityMode);
-			return `${allowed} ${row.key} · ${accountKeyKind(row.key)?.label ?? "Other"}${unused ? ` · ${unused}` : ""}`;
+			return `${allowed} ${row.key} · ${tr(accountKeyKind(row.key)?.label ?? "Other")}${unused ? ` · ${unused}` : ""}`;
 		}
 		return `${allowed} ${label} · ${row.key}`;
 	};
@@ -231,7 +237,7 @@ export function AgentAccountAccessPanel({
 					<b>Account access</b>
 				</text>
 				<text fg={theme.colors.mutedForeground}>
-					{`${accountAccessHeadline(accountAccess)} · ${AGENT_IDENTITY_MODE_OPTIONS[identityMode].title}`}
+					{`${accountAccessHeadline(accountAccess)} · ${tr(AGENT_IDENTITY_MODE_OPTIONS[identityMode].title)}`}
 				</text>
 				<text fg={theme.colors.mutedForeground}>
 					{adding ? ACCESS_ADD_HINT : ACCESS_PANEL_HINT}

@@ -174,7 +174,9 @@ const searchSummary = (input: ChatToolArguments): string | undefined => {
 		return undefined;
 	}
 	const path = stringArg(input, ["path", "cwd", "directory", "dir"]);
-	return summaryLine(`"${pattern}"${path ? ` in ${path}` : ""}`);
+	return summaryLine(
+		path ? tf('"{pattern}" in {path}', { pattern, path }) : `"${pattern}"`
+	);
 };
 
 const fetchSummary = (input: ChatToolArguments): string | undefined => {
@@ -292,8 +294,8 @@ export const toolDiffStat = (
 const TOOL_PENDING_LABELS: Record<ToolKind, string> = {
 	read: "Reading",
 	bash: "Running",
-	edit: "Editing",
-	write: "Writing",
+	edit: "Editing file",
+	write: "Writing file",
 	search: "Searching",
 	fetch: "Fetching",
 };

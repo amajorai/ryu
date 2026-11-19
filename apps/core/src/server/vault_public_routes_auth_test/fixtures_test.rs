@@ -67,7 +67,57 @@ pub(super) const ROUTES: &[Route] = &[
     route!(Compat, "GET", "/v1/auth/token/lookup-self"),
     route!(Compat, "POST", "/v1/auth/token/lookup-self"),
     route!(Compat, "POST", "/v1/auth/token/revoke-self"),
+    route!(Compat, "POST", "/v1/auth/token/renew-self", "{}"),
+    route!(Compat, "POST", "/v1/auth/token/create", "{}"),
+    route!(Compat, "POST", "/v1/auth/token/create/:role_name", "{}"),
+    route!(
+        Compat,
+        "POST",
+        "/v1/transit/encrypt/:name",
+        r#"{"plaintext":"eA=="}"#
+    ),
+    route!(
+        Compat,
+        "POST",
+        "/v1/transit/decrypt/:name",
+        r#"{"ciphertext":"vault:v1:eA=="}"#
+    ),
+    route!(
+        Compat,
+        "POST",
+        "/v1/transit/rewrap/:name",
+        r#"{"ciphertext":"vault:v1:eA=="}"#
+    ),
+    route!(Compat, "POST", "/v1/transit/datakey/:kind/:name", "{}"),
+    route!(
+        Compat,
+        "POST",
+        "/v1/transit/sign/:name",
+        r#"{"input":"eA=="}"#
+    ),
+    route!(
+        Compat,
+        "POST",
+        "/v1/transit/verify/:name",
+        r#"{"input":"eA==","signature":"vault:v1:eA=="}"#
+    ),
+    route!(
+        Compat,
+        "POST",
+        "/v1/transit/hmac/:name",
+        r#"{"input":"eA=="}"#
+    ),
+    route!(Compat, "POST", "/v1/transit/keys/:name/rotate", "{}"),
     route!(Compat, "GET", "/v1/sys/internal/ui/mounts/secret/app/db"),
+    route!(Compat, "POST", "/v1/sys/tools/random", "{}"),
+    route!(Compat, "POST", "/v1/sys/tools/random/16", "{}"),
+    route!(Compat, "POST", "/v1/sys/tools/hash", r#"{"input":"eA=="}"#),
+    route!(
+        Compat,
+        "POST",
+        "/v1/sys/tools/hash/sha2-256",
+        r#"{"input":"eA=="}"#
+    ),
     route!(Compat, "GET", "/v1/secret/data/app/db"),
     route!(
         Compat,

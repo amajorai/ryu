@@ -80,7 +80,7 @@ export function GatewayNodeScopePicker({
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					aria-label={tl("Settings for {computerName}. Choose a computer", {
-						computerName: nodeSettingsLabel(activeNode),
+						computerName: tl(nodeSettingsLabel(activeNode)),
 					})}
 					className="flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-start text-sm outline-none transition-colors duration-150 hover:bg-sidebar-accent/60 hover:duration-0 focus-visible:ring-2 focus-visible:ring-ring"
 				>
@@ -131,8 +131,8 @@ export function GatewayNodeScopePicker({
 							{tl(
 								"Changes here apply only to {computerName}. Chats keep using {chatComputerName}.",
 								{
-									computerName: nodeSettingsLabel(activeNode),
-									chatComputerName: nodeSettingsLabel(chatNode),
+									computerName: tl(nodeSettingsLabel(activeNode)),
+									chatComputerName: tl(nodeSettingsLabel(chatNode)),
 								}
 							)}
 						</p>

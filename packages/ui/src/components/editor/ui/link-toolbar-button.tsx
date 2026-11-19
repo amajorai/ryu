@@ -7,6 +7,7 @@ import {
 import { Link } from "lucide-react";
 import type * as React from "react";
 
+import { useHyperlinkLabel } from "./hyperlink-label.ts";
 import { ToolbarButton } from "./toolbar.tsx";
 
 export function LinkToolbarButton(
@@ -14,9 +15,15 @@ export function LinkToolbarButton(
 ) {
 	const state = useLinkToolbarButtonState();
 	const { props: buttonProps } = useLinkToolbarButton(state);
+	const tooltip = useHyperlinkLabel();
 
 	return (
-		<ToolbarButton {...props} {...buttonProps} data-plate-focus tooltip="Link">
+		<ToolbarButton
+			{...props}
+			{...buttonProps}
+			data-plate-focus
+			tooltip={tooltip}
+		>
 			<Link />
 		</ToolbarButton>
 	);

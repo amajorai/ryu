@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import type {
 	InterfaceAgentAct,
 	InterfaceSnapshot,
@@ -12,6 +12,7 @@ import {
 	REVEALED_STORAGE_KEY,
 	type RevealedMap,
 } from "./quiz-model.ts";
+import { useI18nRevision } from "./use-localized-snapshot.ts";
 
 export function readRevealed(): RevealedMap {
 	try {
@@ -63,24 +64,25 @@ function clueWord(
 		stopped: Map<string, string>;
 	},
 	/** A delivered answer's headline: the flipped tile says it. */
-	headline?: string
+	headline: string | undefined,
+	tl: LiteralMessage
 ): string {
 	if (state.blocking.has(thread.id)) {
-		return tr("Needs you");
+		return tl("Needs you");
 	}
 	if ((thread.unread ?? 0) > 0) {
 		return headline
-			? tr("Answer ready: {headline}", { headline })
-			: tr("Answer ready");
+			? tl("Answer ready: {headline}", { headline })
+			: tl("Answer ready");
 	}
 	if (thread.running) {
-		return tr("Working");
+		return tl("Working");
 	}
 	const stopped = state.stopped.get(thread.id);
 	if (stopped) {
 		return stopped;
 	}
-	return state.asked.has(thread.id) ? tr("Waiting on you") : tr("Done");
+	return state.asked.has(thread.id) ? tl("Waiting on you") : tl("Done");
 }
 
 /** World units kept round the plates when the act layer frames the set. */
@@ -96,6 +98,9 @@ export function useQuizBoardState(
 	withActs: boolean,
 	round: Parameters<typeof buildQuizBoard>[1]
 ) {
+	// The hook translator: a language switch changes it, so the memos below
+	// rebuild their words in the new language.
+	const tl = useLiteralMessages();
 	// What the act layer says about each clue's thread: an open ask (a
 	// blocking one lights the clue), a run, a counted stop, an answer to read.
 	const clueState = useMemo(() => {
@@ -118,22 +123,22 @@ export function useQuizBoardState(
 				if (!(thread.blocker && actHasBlocker(act, thread))) {
 					continue;
 				}
-				let word = "Stopped";
+				let word = tl("Stopped");
 				if (act.act === "limited") {
-					word = "Sitting out";
+					word = tl("Sitting out");
 				} else if (thread.blocker.kind === "interrupted") {
-					word = "Paused";
+					word = tl("Paused");
 				}
 				stopped.set(thread.id, word);
 			}
 			// A limit on the agent (not on a thread) sits out the clue it was
 			// on; its played clues stay played.
 			if (act.act === "limited" && act.threadId && !stopped.has(act.threadId)) {
-				stopped.set(act.threadId, "Sitting out");
+				stopped.set(act.threadId, tl("Sitting out"));
 			}
 		}
 		return { asked, blocking, stopped };
-	}, [acts, snapshot.asks, snapshot.threads]);
+	}, [acts, snapshot.asks, snapshot.threads, tl]);
 	// With acts, a delivered answer flips its clue to the answer's headline.
 	const headlines = useMemo(() => {
 		const out = new Map<string, string>();
@@ -151,9 +156,11 @@ export function useQuizBoardState(
 		}
 		return out;
 	}, [acts, snapshot.threads, withActs]);
+	const revision = useI18nRevision();
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `revision` is the key: buildQuizBoard translates the round and column names.
 	const legacyBoard = useMemo(
 		() => buildQuizBoard(snapshot, round),
-		[round, snapshot]
+		[round, snapshot, revision]
 	);
 	// With acts a clue is lit (needs you) only while a blocking ask waits on it.
 	const board = useMemo(
@@ -171,7 +178,8 @@ export function useQuizBoardState(
 											statusWord: clueWord(
 												tile.thread,
 												clueState,
-												headlines.get(tile.thread.id)
+												headlines.get(tile.thread.id),
+												tl
 											),
 										})),
 									}
@@ -179,7 +187,7 @@ export function useQuizBoardState(
 						),
 					}
 				: legacyBoard,
-		[clueState, headlines, legacyBoard, withActs]
+		[clueState, headlines, legacyBoard, tl, withActs]
 	);
 	return { board, clueState, headlines };
 }

@@ -7,6 +7,7 @@ import {
 } from "@ryuhq/core-client/troubleshoot";
 import { z } from "zod";
 import { formatCliBytes } from "../i18n/format.ts";
+import { localize } from "./localizedText.ts";
 import {
 	CORE_TIMEOUT_MS,
 	INSTALL_PS1,
@@ -171,7 +172,10 @@ export function hostOf(url: string): string {
 }
 
 export function tokenFix(host: TroubleshootHost): string {
-	return `Set RYU_CORE_TOKEN to the node's token, or pick a saved node with \`${host.commandName} node use <name>\`.`;
+	return localize(
+		"Set RYU_CORE_TOKEN to the node's token, or pick a saved node with `{commandName} node use {name}`.",
+		{ commandName: host.commandName, name: "<name>" }
+	).english;
 }
 
 export function installCommand(host: TroubleshootHost): string {

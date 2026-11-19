@@ -28,6 +28,8 @@ struct Dispatch<'a> {
     account_policy: Option<crate::agent_access::AgentAccountPolicy>,
     connection_action: crate::identity::ConnectionAction,
     injected_credential: Option<crate::identity::SecretState>,
+    /// Where an app-tool alias hands its target back to the dispatch wrapper.
+    alias_reentry: app_alias::AppAliasSlot,
 }
 
 impl McpRegistry {
@@ -45,6 +47,7 @@ impl McpRegistry {
         composio_connection_scope: Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
         conversation_scope: Option<&[String]>,
         configure_approved: bool,
+        alias_reentry: app_alias::AppAliasSlot,
     ) -> Result<Value> {
         let normalized_tool_id = self.canonical_tool_id_for_registry(tool_id);
         let tool_id = normalized_tool_id.as_str();
@@ -267,6 +270,7 @@ impl McpRegistry {
             account_policy,
             connection_action,
             injected_credential,
+            alias_reentry,
         };
 
         // Built-in Composio provider (#474): searchable-not-listed, executed by

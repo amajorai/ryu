@@ -18,7 +18,7 @@ import {
 	corePreferenceResponseSchema,
 } from "../../core/settings-response-codecs.ts";
 import { errorText } from "../../i18n/error-text.ts";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 
 const MODEL = "context.compact-model";
 const EFFORT = "context.compact-effort";
@@ -270,16 +270,26 @@ export function MemoryAdvancedPanel({
 		"Include sensitive topics",
 	];
 	const values = [
-		model || "Use default model",
-		effort || "Provider default",
+		model || tr("Use default model"),
+		effort || tr("Provider default"),
 		longTerm ? "ON" : "OFF",
-		consentReady ? (sensitive ? "ON" : "OFF") : "Unavailable · OFF",
+		consentReady
+			? sensitive
+				? "ON"
+				: "OFF"
+			: `${tr("Unavailable")} · ${tr("OFF")}`,
 	];
 	const descriptions = [
-		"Blank inherits the node default, then the chat model. e enters a custom routable model.",
-		"Choices come from this node's model catalog.",
-		"CLI consent applies to subsequent chat requests and survives restarts.",
-		"Core verifies the user and memory permissions. Existing sensitive memories are hidden while off.",
+		tr(
+			"Blank inherits the node default, then the chat model. e enters a custom routable model."
+		),
+		tr("Choices come from this node's model catalog."),
+		tr(
+			"CLI consent applies to subsequent chat requests and survives restarts."
+		),
+		tr(
+			"Core verifies the user and memory permissions. Existing sensitive memories are hidden while off."
+		),
 	];
 	return (
 		<Card

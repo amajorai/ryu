@@ -54,10 +54,13 @@ pub(super) fn runtime_launch(
     is_claude_code: bool,
     trusted: bool,
     account: crate::agent_access::AccountConfinement,
+    agent_id: &str,
     core_env: impl Fn(&str) -> Option<String>,
 ) -> RuntimeLaunch {
+    let agent_id = agent_id.trim();
     RuntimeLaunch {
         kind: runtime_kind(is_managed_pi, is_claude_code),
+        agent: (!agent_id.is_empty()).then(|| agent_id.to_owned()),
         trusted_workspace: trusted,
         account_confined: account.is_confined(),
         model_via_loopback: model_via_loopback(stdio),
@@ -125,9 +128,22 @@ mod tests {
             true,
             false,
             crate::agent_access::AccountConfinement::None,
+            "reviewer",
             |_| None,
         );
         assert_eq!(launch.kind, "claude-code");
+        // The resolved agent id reaches the broker; none means the kind's.
+        assert_eq!(launch.agent.as_deref(), Some("reviewer"));
+        let unnamed = runtime_launch(
+            &stdio(&[]),
+            true,
+            false,
+            true,
+            crate::agent_access::AccountConfinement::None,
+            " ",
+            |_| None,
+        );
+        assert_eq!(unnamed.agent, None);
         assert!(!launch.trusted_workspace);
         assert!(!launch.account_confined);
         // Signs in to its provider directly: not loopback.

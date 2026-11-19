@@ -13,9 +13,12 @@ import {
 	type TroubleshootReport,
 	troubleshootCounts,
 } from "@ryuhq/core-client/troubleshoot";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr, trMessage } from "../i18n/translate.ts";
+import { localize } from "./localizedText.ts";
+import { padCell } from "./migrate-render.ts";
 import { GITHUB_TIMEOUT_MS } from "./troubleshoot-constants.ts";
 import type { TroubleshootHost } from "./troubleshoot-host.ts";
+import { machineLabel, machineValue } from "./troubleshoot-machine-text.ts";
 import { gib, type TroubleshootOptions } from "./troubleshoot-probes.ts";
 import type { CliContext } from "./types.ts";
 import { VERSION } from "./version.ts";
@@ -30,12 +33,18 @@ export function machineInfo(
 		["CPU", `${host.cpu.model ?? "unknown"} × ${host.cpu.count}`],
 		[
 			"Memory",
-			tf("{total} total, {free} free", {
+			localize("{total} total, {free} free", {
 				free: gib(host.memory.freeBytes),
 				total: gib(host.memory.totalBytes),
-			}),
+			}).english,
 		],
-		["CLI", `ryu-cli ${VERSION} on ${host.runtime}`],
+		[
+			"CLI",
+			localize("ryu-cli {version} on {runtime}", {
+				runtime: host.runtime,
+				version: VERSION,
+			}).english,
+		],
 		["Profile", ryuProfile(env)],
 		["Core URL", redactDiagnosticText(ctx.target.url)],
 		["Data dir", redactDiagnosticText(host.dataDir, { homeDir: host.homeDir })],
@@ -48,7 +57,12 @@ export function machineInfo(
 		rows.push(["Terminal", env.TERM_PROGRAM]);
 	}
 	if (env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY) {
-		rows.push(["Proxy", "HTTPS_PROXY/HTTP_PROXY is set"]);
+		rows.push([
+			"Proxy",
+			localize("{variables} is set", {
+				variables: "HTTPS_PROXY/HTTP_PROXY",
+			}).english,
+		]);
 	}
 	return rows;
 }
@@ -99,6 +113,15 @@ export interface TroubleshootResult {
 	similarIssuesError: string | null;
 }
 
+/**
+ * A check's title in the CLI's language. The RAM check stays English: the
+ * literal-only CLI translator would read its bare "Memory" title as Ryu's AI
+ * memory feature (de "Gedächtnis", zh-CN 记忆).
+ */
+function checkTitle(check: { id: string; title: string }): string {
+	return check.id === "memory" ? check.title : tr(check.title);
+}
+
 export function renderHuman(
 	result: TroubleshootResult,
 	host: TroubleshootHost
@@ -109,34 +132,52 @@ export function renderHuman(
 	const lines = [
 		tf("Ryu troubleshooter · ryu-cli {version}", { version: report.version }),
 		"",
-		"Machine",
+		tr("Machine"),
 	];
-	const labelWidth = Math.max(...report.machine.map(([label]) => label.length));
-	for (const [label, value] of report.machine) {
-		lines.push(`  ${label.padEnd(labelWidth)}  ${value}`);
+	// Columns pad by terminal width, so CJK text keeps them aligned; --json and
+	// the Markdown stay English.
+	const translator = { tr, trMessage };
+	const machine = report.machine.map(([label, value]) => [
+		machineLabel(label, translator),
+		machineValue(label, value, translator),
+	]);
+	const labelWidth = Math.max(
+		...machine.map(([label = ""]) => Bun.stringWidth(label))
+	);
+	for (const [label = "", value] of machine) {
+		lines.push(`  ${padCell(label, labelWidth)}  ${value}`);
 	}
 	if (result.fixes.length > 0) {
-		lines.push("", "Fixes");
+		lines.push("", tr("Fixes"));
 		for (const fix of result.fixes) {
 			lines.push(`  → ${fix}`);
 		}
 	}
-	lines.push("", "Checks");
+	lines.push("", tr("Checks"));
 	const titleWidth = Math.max(
-		...report.checks.map((check) => check.title.length)
+		...report.checks.map((check) => Bun.stringWidth(checkTitle(check)))
 	);
 	for (const check of report.checks) {
 		lines.push(
-			`  ${statusMark(check.status)} ${check.title.padEnd(titleWidth)}  ${check.detail}`
+			`  ${statusMark(check.status)} ${padCell(checkTitle(check), titleWidth)}  ${trMessage(check.detail)}`
 		);
 		if (check.fix && (check.status === "fail" || check.status === "warn")) {
-			lines.push(`    ${" ".repeat(titleWidth)}  Fix: ${check.fix}`);
+			const fix = trMessage(check.fix);
+			lines.push(`    ${" ".repeat(titleWidth)}  ${tf("Fix: {fix}", { fix })}`);
 		}
 	}
 	const counts = troubleshootCounts(report.checks);
 	lines.push(
 		"",
-		`${counts.pass} passed · ${counts.warn} warnings · ${counts.fail} failed · ${counts.skip} skipped`
+		tf(
+			"{pass, plural, one {# passed} other {# passed}} · {warn, plural, one {# warning} other {# warnings}} · {fail, plural, one {# failed} other {# failed}} · {skip, plural, one {# skipped} other {# skipped}}",
+			{
+				fail: counts.fail,
+				pass: counts.pass,
+				skip: counts.skip,
+				warn: counts.warn,
+			}
+		)
 	);
 
 	if (report.similarIssues.length > 0) {
@@ -151,7 +192,7 @@ export function renderHuman(
 			);
 		}
 		lines.push(
-			"  If one matches, add your report there (a 👍 or a comment) instead of opening a new issue."
+			`  ${tr("If one matches, add your report there (a 👍 or a comment) instead of opening a new issue.")}`
 		);
 	} else if (result.similarIssuesError) {
 		lines.push(
@@ -171,15 +212,19 @@ export function renderHuman(
 	const problems = problemChecks(report.checks);
 	lines.push(
 		problems.length > 0
-			? "Still stuck after the fixes above? File a bug report. The form is prefilled; review it before you submit:"
-			: "Every check passed. If something is still wrong, describe it and file a bug report:",
+			? tr(
+					"Still stuck after the fixes above? File a bug report. The form is prefilled; review it before you submit:"
+				)
+			: tr(
+					"Every check passed. If something is still wrong, describe it and file a bug report:"
+				),
 		`  ${result.issueUrl}`
 	);
 	if (result.opened) {
-		lines.push("  (Opened in your browser.)");
+		lines.push(`  ${tr("(Opened in your browser.)")}`);
 	} else if (!report.description) {
 		lines.push(
-			`  Tip: describe the problem to improve the search and the report: ${host.commandName} troubleshoot "what went wrong"`
+			`  ${tf('Tip: describe the problem to improve the search and the report: {command} troubleshoot "what went wrong"', { command: host.commandName })}`
 		);
 	}
 	return `${lines.join("\n")}\n`;

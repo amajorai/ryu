@@ -63,7 +63,7 @@ export function ReportDialog({
 		}
 	}, [open, target?.id, target?.kind]);
 
-	const name = target?.itemName?.trim() || target?.id || "this item";
+	const name = target?.itemName?.trim() || target?.id || tl("this item");
 	const selectedOption = REPORT_REASON_OPTIONS.find(
 		(option) => option.value === reason
 	);

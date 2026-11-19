@@ -7,7 +7,7 @@ import { useListWindow } from "../ui/useListWindow.ts";
 import {
 	chipFor,
 	NAME_WIDTH,
-	STATE_WIDTH,
+	stateColumn,
 	type ThemeValue,
 } from "./plugins-lifecycle.ts";
 
@@ -24,7 +24,7 @@ function PluginRow({
 }) {
 	const chip = chipFor(app);
 	const name = app.name.padEnd(NAME_WIDTH);
-	const stateText = (busy ? "working" : chip.label).padEnd(STATE_WIDTH);
+	const stateText = stateColumn(chip, busy);
 	const version = app.installedVersion ?? app.version ?? "";
 	const muted = selected
 		? theme.colors.selectionForeground

@@ -9,6 +9,7 @@ export {
 	activeLocale,
 	subscribeLocale,
 	translate,
+	translateMessage,
 } from "./active-locale.ts";
 export {
 	BUILT_IN_LANGUAGE_PACK_INFO,

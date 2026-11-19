@@ -1,3 +1,5 @@
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 // apps/desktop/src/lib/api/workspace.ts
 //
@@ -97,6 +99,16 @@ export function gitRepositoryName(source: string): string | null {
  * Throws with the status code on a non-2xx (404 not-a-dir, 403 unreadable) so
  * the browser can show the node's error inline.
  */
+/** The folder browser's error when Core gave no reason of its own. */
+export function directoryListFailure(
+	status: number,
+	tl: LiteralMessage = translate
+): string {
+	return tl("Couldn't list this folder ({status}).", {
+		status: String(status),
+	});
+}
+
 export async function listDirectory(
 	target: ApiTarget,
 	path?: string
@@ -109,7 +121,7 @@ export async function listDirectory(
 		directoryListingSchema
 	);
 	if (error || !data) {
-		throw new Error(error ?? `list failed: ${resp.status}`);
+		throw new Error(error ?? directoryListFailure(resp.status));
 	}
 	return data;
 }

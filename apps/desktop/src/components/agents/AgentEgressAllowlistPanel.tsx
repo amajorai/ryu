@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
@@ -22,11 +22,28 @@ import { ApiError, toTarget } from "@/src/lib/api/client.ts";
 
 const HOSTS_FIELD_ID = "agent-egress-allowlist-hosts";
 
-function errorText(cause: unknown, fallback: string): string {
+const ICU_SYNTAX = /[{}]/;
+
+interface Failure {
+	cause: unknown;
+	during: "load" | "save";
+}
+
+/**
+ * Core's refusal, translated: the extractor catalogs the allowlist routes'
+ * sentences as sent. A brace would make the sentence parse as a message, so
+ * that stays as sent.
+ */
+function errorText(
+	cause: unknown,
+	fallback: string,
+	tl: LiteralMessage
+): string {
 	if (cause instanceof ApiError && cause.serverMessage) {
-		return cause.serverMessage;
+		const message = cause.serverMessage;
+		return ICU_SYNTAX.test(message) ? message : tl(message);
 	}
-	return cause instanceof Error ? cause.message : fallback;
+	return cause instanceof Error && cause.message ? cause.message : fallback;
 }
 
 /**
@@ -51,7 +68,9 @@ export function AgentEgressAllowlistPanel({
 	const [text, setText] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+	// The failure is kept raw and worded at render, so the effect below does
+	// not depend on `tl` and a locale change rewords a shown error.
+	const [failure, setFailure] = useState<Failure | null>(null);
 	const [saved, setSaved] = useState(false);
 
 	const show = useCallback((allowlist: string[] | null) => {
@@ -63,7 +82,7 @@ export function AgentEgressAllowlistPanel({
 	useEffect(() => {
 		let cancelled = false;
 		setLoading(true);
-		setError(null);
+		setFailure(null);
 		setSaved(false);
 		fetchAgentEgressAllowlist(target, agentId)
 			.then((allowlist) => {
@@ -73,9 +92,7 @@ export function AgentEgressAllowlistPanel({
 			})
 			.catch((cause: unknown) => {
 				if (!cancelled) {
-					setError(
-						errorText(cause, "The agent's allowed sites could not be loaded.")
-					);
+					setFailure({ cause, during: "load" });
 				}
 			})
 			.finally(() => {
@@ -94,7 +111,7 @@ export function AgentEgressAllowlistPanel({
 	const handleSave = async () => {
 		setSaving(true);
 		setSaved(false);
-		setError(null);
+		setFailure(null);
 		try {
 			if (limited) {
 				show(await saveAgentEgressAllowlist(target, agentId, entries));
@@ -104,13 +121,23 @@ export function AgentEgressAllowlistPanel({
 			}
 			setSaved(true);
 		} catch (cause) {
-			setError(errorText(cause, "The agent's allowed sites were not saved."));
+			setFailure({ cause, during: "save" });
 		} finally {
 			setSaving(false);
 		}
 	};
 
 	const busy = disabled || saving;
+	let error: string | null = null;
+	if (failure) {
+		error = errorText(
+			failure.cause,
+			failure.during === "load"
+				? tl("The agent's allowed sites could not be loaded.")
+				: tl("The agent's allowed sites were not saved."),
+			tl
+		);
+	}
 	const unchanged =
 		limited === (stored !== null) &&
 		formatAllowlistText(entries) === formatAllowlistText(stored ?? []);

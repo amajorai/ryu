@@ -1,6 +1,6 @@
 import { activeLocale, numberFormatter } from "@ryu/i18n/core";
 import { formatDurationUnit } from "@ryu/i18n/format-intl";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Table,
 	TableBody,
@@ -28,17 +28,21 @@ import { formatTime as formatDisplayTime } from "@/src/lib/timezone.ts";
 /** How many traffic rows the dashboard keeps in memory. */
 const TRAFFIC_WINDOW = 50;
 
-function trafficSubject(event: TrafficEvent): string {
+/** The row's subject: the model for a model call, or the named web service. */
+export function trafficSubject(
+	event: TrafficEvent,
+	tl: LiteralMessage
+): string {
 	if (event.event_type !== "service_call") {
 		return event.model ?? "";
 	}
 	switch (event.command) {
 		case "web.search":
-			return "Web search";
+			return tl("Web search");
 		case "web.fetch":
-			return "Web fetch";
+			return tl("Web fetch");
 		default:
-			return "Web service";
+			return tl("Web service");
 	}
 }
 // ── Live traffic dashboard ───────────────────────────────────────────────────
@@ -203,9 +207,9 @@ export function LiveTraffic({
 										CELL,
 										"max-w-[220px] truncate font-mono text-xs"
 									)}
-									title={trafficSubject(e)}
+									title={trafficSubject(e, tl)}
 								>
-									{trafficSubject(e)}
+									{trafficSubject(e, tl)}
 								</TableCell>
 								<TableCell className={CELL}>{e.provider}</TableCell>
 								<TableCell className={cn(CELL, "tabular-nums")}>

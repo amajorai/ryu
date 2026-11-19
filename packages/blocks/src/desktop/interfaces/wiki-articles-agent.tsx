@@ -52,7 +52,7 @@ export function AgentArticle({
 	const tl = useLiteralMessages();
 	const article = wikiAgentArticle(snapshot, agentId);
 	if (!article) {
-		return <Missing noun="agent" />;
+		return <Missing article="agent" />;
 	}
 	const { agent, collaborators, counts, teams, projects, threads } = article;
 	const groups = [...teams, ...projects];

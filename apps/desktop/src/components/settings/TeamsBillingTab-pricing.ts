@@ -9,7 +9,7 @@ import {
 } from "@ryu/auth/lib/plans";
 import { SELF_SERVE_MAX_SEATS } from "@ryu/auth/lib/seat-tiers";
 import { TEAMS_MIN_SEATS } from "@ryu/blocks/web/pricing.tsx";
-import { translate as tl } from "@ryu/i18n/core";
+import { translate } from "@ryu/i18n/core";
 import { formatPerPeriod } from "@ryu/i18n/format-intl";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
@@ -85,13 +85,14 @@ export function planMonthlyAmount(
 	contract: {
 		planVersion?: number | string | null;
 		seats?: number | null;
-	} = {}
+	} = {},
+	tl: LiteralMessage = translate
 ): string {
 	if (plan === "desktop-license") {
-		return "Paid once";
+		return tl("Paid once");
 	}
 	if (!(plan && isCatalogPlanId(plan))) {
-		return "$0/mo";
+		return formatPerPeriod(formatMicroUsd(0), "month");
 	}
 	const catalogPlan = PLANS[plan];
 	const rows = PLAN_VERSIONS[plan];
@@ -106,7 +107,7 @@ export function planMonthlyAmount(
 		rows.find((row) => row.version === currentPlanVersionFor(plan)) ??
 		rows[0];
 	if (isUnpriceableLegacyVersion(plan, version)) {
-		return "Contract pricing";
+		return tl("Contract pricing");
 	}
 	const minimumSeats =
 		catalogPlan.seatModel.kind === "per_seat"
@@ -119,7 +120,7 @@ export function planMonthlyAmount(
 			: null;
 	if (billedSeats !== null && billedSeats > SELF_SERVE_MAX_SEATS) {
 		// Seat counts beyond self-serve are contracted, whatever the row's formula.
-		return "Contract pricing";
+		return tl("Contract pricing");
 	}
 	let amountMicroUsd: number;
 	try {
@@ -130,7 +131,7 @@ export function planMonthlyAmount(
 		});
 	} catch {
 		// Seat counts beyond the self-serve price bands are contracted.
-		return "Contract pricing";
+		return tl("Contract pricing");
 	}
 	const amount = formatPerPeriod(
 		formatMicroUsd(amountMicroUsd, "USD", 2),
@@ -139,7 +140,7 @@ export function planMonthlyAmount(
 	if (!perSeat || billedSeats !== null) {
 		return amount;
 	}
-	return `${amount} minimum`;
+	return tl("{amount} minimum", { amount });
 }
 
 /** How an organization plan's shared pool grows with billed seats. */
@@ -152,7 +153,10 @@ export function poolBundleRule(
 		: tl("each started five-seat bundle");
 }
 
-export function formatCreditExpiry(value: string | null): string | null {
+export function formatCreditExpiry(
+	value: string | null,
+	tl: LiteralMessage = translate
+): string | null {
 	if (!value) {
 		return null;
 	}

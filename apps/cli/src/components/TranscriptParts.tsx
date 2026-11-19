@@ -20,9 +20,10 @@ import {
 	toolPendingLabel,
 	toolSummary,
 } from "../core/transcriptPresentation.ts";
-import { CLI_LOCALE, tf, tr } from "../i18n/translate.ts";
+import { CLI_LOCALE, tf, tr, trMessage } from "../i18n/translate.ts";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { ReasoningRow } from "./ReasoningRow.tsx";
+import { toolCallLabels } from "./tool-call-labels.ts";
 
 // Memoized: a streamed token replaces only the last message, so earlier
 // messages keep their `parts` array and skip re-rendering entirely.
@@ -103,6 +104,7 @@ export const TranscriptParts = memo(function TranscriptParts({
 										: undefined
 								}
 								key={`tool-${part.toolCallId ?? index}`}
+								labels={toolCallLabels()}
 								name={part.name}
 								pendingLabel={toolPendingLabel(part.name)}
 								result={formatToolOutput(part.result)}
@@ -130,7 +132,7 @@ export const TranscriptParts = memo(function TranscriptParts({
 /** Recovery hint under a failed turn: up-arrow recalls the prompt to resend. */
 const ERROR_PART_HINT = tr("↑ edit & resend · /model switch");
 const ERROR_PART_HINT_ASCII = tr("up edit & resend - /model switch");
-const CORE_ERROR_TRANSLATOR = { locale: CLI_LOCALE, tf, tr };
+const CORE_ERROR_TRANSLATOR = { locale: CLI_LOCALE, tf, tr, trMessage };
 
 function ErrorPart({
 	hint,
@@ -177,7 +179,7 @@ function TodoPart({ todos }: { todos: { content: string; status: string }[] }) {
 		>
 			<box flexDirection="row" gap={1} height={1}>
 				<text fg={theme.colors.primary}>
-					<b>Plan</b>
+					<b>Agent plan</b>
 				</text>
 				<text fg={theme.colors.mutedForeground}>
 					{tf("{completed}/{total} complete", {

@@ -7,14 +7,17 @@ export type Drawer = { kind: "barn" } | { kind: "plot"; plotId: string | null };
 
 export const STAGE_FALLBACK = { height: 808, width: 1200 };
 
+/** Marks catalog copy; the DOM localizer translates it once rendered. */
+const tl = (source: string): string => source;
+
 /** An empty farm still has a bed waiting by the barn for the first seed. */
 const FIRST_PLOT_ID = "plot-first";
 export const FIRST_FIELDS: FarmField[] = [
 	{
 		fenced: false,
 		id: OPEN_FIELD_ID,
-		name: "Open plots",
-		plots: [{ ...makePlot(FIRST_PLOT_ID, null, []), name: "New plot" }],
+		name: tl("Open plots"),
+		plots: [{ ...makePlot(FIRST_PLOT_ID, null, []), name: tl("New plot") }],
 	},
 ];
 

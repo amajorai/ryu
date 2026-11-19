@@ -309,6 +309,7 @@ async fn a_failed_profile_draft_is_reported_and_discarded_without_materializing(
     let job = job_snapshot(&id).await;
     assert_eq!(job.state, JobState::Failed);
     assert_eq!(job.error.as_deref(), Some("model unavailable"));
+    assert_eq!(job.error_code, Some("failed"));
     assert!(!job.materialized);
     assert!(job.conversation_id.is_none());
     assert!(PhaseLog::get(&log.discarded).is_some());
@@ -344,4 +345,51 @@ async fn a_cancelled_profile_job_never_starts_drafting() {
     assert_eq!(job.state, JobState::Cancelled);
     assert_eq!(PhaseLog::get(&log.drafted), None);
     assert_eq!(PhaseLog::get(&log.discarded), None);
+}
+
+#[tokio::test]
+async fn an_empty_profile_draft_fails_with_the_empty_draft_code() {
+    let id = insert_test_job().await;
+    let log = PhaseLog::default();
+    drive_job(
+        &id,
+        |_, _| async { Err::<ProfileDraft, _>(anyhow::anyhow!(ProfileBuildError::EmptyDraft)) },
+        |_, _, _| async { anyhow::Ok(()) },
+        log.discard(),
+        no_stop,
+        TEST_GRACE,
+    )
+    .await;
+
+    let job = job_snapshot(&id).await;
+    assert_eq!(job.state, JobState::Failed);
+    assert_eq!(job.error_code, Some("empty_draft"));
+    assert_eq!(
+        job.error.as_deref(),
+        Some("the profile agent returned no profile draft")
+    );
+}
+
+#[tokio::test]
+async fn a_context_change_while_materializing_fails_with_its_code() {
+    let id = insert_test_job().await;
+    let log = PhaseLog::default();
+    drive_job(
+        &id,
+        |_, _| async { anyhow::Ok(test_draft()) },
+        |_, _, _| async {
+            Err::<(), _>(
+                anyhow::Error::from(ProfileBuildError::ContextChanged)
+                    .context("writing the profile memory"),
+            )
+        },
+        log.discard(),
+        no_stop,
+        TEST_GRACE,
+    )
+    .await;
+
+    let job = job_snapshot(&id).await;
+    assert_eq!(job.state, JobState::Failed);
+    assert_eq!(job.error_code, Some("context_changed"));
 }

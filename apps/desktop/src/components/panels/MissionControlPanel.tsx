@@ -45,12 +45,12 @@ import { useMemo, useState } from "react";
 import {
 	buildMissionDigest,
 	type MissionCommand,
-	type MissionFileTouch,
 	type MissionStreamMessage,
 	type MissionTodo,
 	type MissionTurn,
 	type MissionTurnStatus,
 } from "@/src/lib/mission-control/turn-groups.ts";
+import { FileRow } from "./MissionControlPanel-file-row.tsx";
 
 const STATUS_META = {
 	ok: {
@@ -71,18 +71,6 @@ const STATUS_META = {
 } satisfies Record<
 	MissionTurnStatus,
 	{ className: string; icon: typeof CheckmarkCircle02Icon; label: string }
->;
-
-const TOUCH_META = {
-	create: {
-		className: "text-status-success",
-		label: "new",
-	},
-	edit: { className: "text-status-warning", label: "edit" },
-	read: { className: "text-muted-foreground", label: "read" },
-} satisfies Record<
-	MissionFileTouch["kind"],
-	{ className: string; label: string }
 >;
 
 /** Chips beyond this are collapsed into a "+N" count — a turn that grepped
@@ -136,25 +124,6 @@ function ChipList({
 			))}
 			{hidden > 0 && (
 				<span className="text-muted-foreground text-xs">+{hidden}</span>
-			)}
-		</div>
-	);
-}
-
-function FileRow({ touch }: { touch: MissionFileTouch }) {
-	const meta = TOUCH_META[touch.kind];
-	return (
-		<div className="flex items-center gap-2 py-0.5">
-			<span className={cn("w-8 shrink-0 text-xs", meta.className)}>
-				{meta.label}
-			</span>
-			<span className="min-w-0 flex-1 truncate text-xs" title={touch.path}>
-				{touch.path}
-			</span>
-			{touch.count > 1 && (
-				<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
-					×{formatCount(touch.count) ?? "—"}
-				</span>
 			)}
 		</div>
 	);

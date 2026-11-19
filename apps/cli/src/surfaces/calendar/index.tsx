@@ -12,40 +12,19 @@
 // last outcome, Calendar emphasises the cadence/what-runs. Enter opens Tasks for the
 // run history. The screen itself is shared with Tasks (../ScheduledJobsSurface.tsx).
 
-import {
-	type ScheduledJob,
-	systemTargetLabel,
-} from "@ryuhq/core-client/schedules";
+import type { ScheduledJob } from "@ryuhq/core-client/schedules";
 import { Badge } from "@/components/ui/badge.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { tr } from "../../i18n/translate.ts";
 import type { SurfaceModule } from "../../workspace/router.ts";
 import {
 	type ScheduledJobRowProps,
 	scheduledJobsSurface,
 } from "../ScheduledJobsSurface.tsx";
+import { scheduleTargetLabel } from "../schedule-labels.ts";
+import { cadenceLabel } from "./cadence.ts";
 
 const SURFACE_ID = "calendar";
-
-function cadenceLabel(job: ScheduledJob): string {
-	const { schedule } = job;
-	if (schedule.kind === "cron") {
-		return schedule.expr.length > 0 ? schedule.expr : "cron";
-	}
-	return schedule.interval.length > 0
-		? `every ${schedule.interval}`
-		: "interval";
-}
-
-function targetLabel(job: ScheduledJob): string {
-	const { target } = job;
-	if (target.type === "workflow") {
-		return `workflow ${target.workflowId}`;
-	}
-	if (target.type === "system") {
-		return systemTargetLabel(target);
-	}
-	return `agent ${target.agentId}`;
-}
 
 function sortByName(a: ScheduledJob, b: ScheduledJob): number {
 	return a.name.localeCompare(b.name);
@@ -75,14 +54,14 @@ function AgendaRow({ job, selected }: ScheduledJobRowProps) {
 						</Badge>
 					)}
 				</box>
-				<text fg={cadenceColor}>{targetLabel(job)}</text>
+				<text fg={cadenceColor}>{scheduleTargetLabel(job)}</text>
 			</box>
 		</box>
 	);
 }
 
 const CalendarSurface = scheduledJobsSurface({
-	cardTitle: "agenda",
+	cardTitle: tr("agenda"),
 	emptyText: "nothing scheduled — schedule a job to see it here",
 	hint: "agenda · ↑↓ nav · Enter open Tasks · r refresh",
 	loadingLabel: "Loading schedule…",

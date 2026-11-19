@@ -65,9 +65,12 @@ function bucketMetricValue(
 	return tokensUnknown ? null : historyProcessedTokens(bucket.totals);
 }
 
-function forecastChange(forecast: DailyForecast["forecast"]) {
+function forecastChange(
+	forecast: DailyForecast["forecast"],
+	tl: ReturnType<typeof useLiteralMessages>
+) {
 	return {
-		label: formatForecastChange(forecast),
+		label: formatForecastChange(forecast, tl),
 		tone:
 			forecast.direction === "up"
 				? "text-status-warning"
@@ -376,7 +379,7 @@ export function DailyChart({
 							{series.map((source) => {
 								const forecast = forecasts.get(source.key);
 								const change = forecast
-									? forecastChange(forecast.forecast)
+									? forecastChange(forecast.forecast, tl)
 									: null;
 								return (
 									<span className="flex items-center gap-1.5" key={source.key}>
@@ -439,8 +442,10 @@ export function DailyChart({
 										upper: format(totalForecast.forecast.total.upper),
 									})}
 								</span>
-								<span className={forecastChange(totalForecast.forecast).tone}>
-									{forecastChange(totalForecast.forecast).label}
+								<span
+									className={forecastChange(totalForecast.forecast, tl).tone}
+								>
+									{forecastChange(totalForecast.forecast, tl).label}
 								</span>
 							</div>
 						) : null}

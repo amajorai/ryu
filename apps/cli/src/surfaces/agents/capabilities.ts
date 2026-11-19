@@ -157,7 +157,9 @@ export function skillPickerRows(
 		description: skill.description,
 		enabled: skill.enabled,
 		id: skill.id,
-		label: `${skill.name} · ${skill.enabled ? "enabled" : "disabled"}`,
+		label: skill.enabled
+			? tf("{name} · enabled", { name: skill.name })
+			: tf("{name} · disabled", { name: skill.name }),
 		missing: false,
 	}));
 	if (isNoCapabilities(allowlist)) {

@@ -22,6 +22,7 @@ import {
 	explainUnknown,
 	openedLine,
 	startThread as startThreadCommand,
+	statusNoticeSegments,
 } from "./terminal-interface-commands.ts";
 import {
 	error,
@@ -47,6 +48,7 @@ import {
 	statusChanges,
 	statusMap,
 	TERMINAL_STATUS_GLYPHS,
+	TERMINAL_STATUS_WORDS,
 	terminalCounts,
 	threadOwnerLabel,
 	threadsNeedingYou,
@@ -183,15 +185,17 @@ export function TerminalInterface({
 						tone: STATUS_GLYPH_TONE[status],
 					},
 					{ text: `${threadOwnerLabel(snapshot, thread)} `, tone: "muted" },
-					{
-						action: { kind: "open", threadId: thread.id },
-						label: tlRef.current("Open thread: {title}", {
-							title: threadTitle(thread),
-						}),
-						text: threadTitle(thread),
-					},
-					{ text: " is now ", tone: "muted" },
-					{ text: status, tone: STATUS_TONE[status] }
+					...statusNoticeSegments(
+						tlRef.current,
+						{
+							action: { kind: "open", threadId: thread.id },
+							label: tlRef.current("Open thread: {title}", {
+								title: threadTitle(thread),
+							}),
+							text: threadTitle(thread),
+						},
+						{ text: TERMINAL_STATUS_WORDS[status], tone: STATUS_TONE[status] }
+					)
 				)
 			);
 		if (notices.length > 0) {

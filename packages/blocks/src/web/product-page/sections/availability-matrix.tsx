@@ -3,6 +3,7 @@ import type {
 	ProductAvailabilityRow,
 	ProductAvailabilityState,
 } from "../profile-types.ts";
+import { AvailabilityPlatformName } from "./availability-platform-name.tsx";
 import {
 	ProductSection,
 	ProductSectionHeader,
@@ -76,7 +77,12 @@ export function ProductAvailabilityMatrix({
 						}
 						key={row.platform}
 					>
-						<h3 className={sectionItemTitleClass}>{row.platform}</h3>
+						<h3 className={sectionItemTitleClass}>
+							<AvailabilityPlatformName
+								platform={row.platform}
+								senseId={row.senseId}
+							/>
+						</h3>
 						<p className="flex items-center gap-2 font-medium text-foreground text-sm">
 							<StateGlyph state={row.state} />
 							{AVAILABILITY_STATE_LABELS[row.state]}

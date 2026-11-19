@@ -21,6 +21,7 @@ import {
 	leadingOverflowLabel,
 	PIN_GLYPH,
 	tabRowWidth,
+	tabTitleText,
 	trailingOverflowLabel,
 	visibleTabWindow,
 	windowColumns,
@@ -107,7 +108,7 @@ function chipModels(pane: Pane, tabs: readonly Tab[]): ChipModel[] {
 		const active = tab.id === pane.activeTabId;
 		const label = formatTabLabel(
 			position + 1,
-			tab.title,
+			tabTitleText(tab.title),
 			undefined,
 			tab.pinned
 		);
@@ -135,7 +136,7 @@ function fitLoneChip(shown: ChipModel[], excess: number): ChipModel[] {
 	}
 	const label = formatTabLabel(
 		chip.index,
-		chip.tab.title,
+		tabTitleText(chip.tab.title),
 		Math.max(0, displayWidth(chip.label) - excess),
 		chip.tab.pinned
 	);

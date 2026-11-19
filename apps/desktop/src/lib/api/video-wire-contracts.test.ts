@@ -109,7 +109,7 @@ describe("Video JSON and media projection", () => {
 			await expect(generateVideo(target, "prompt")).rejects.toThrow("42");
 			scenario = "empty-error";
 			await expect(generateVideo(target, "prompt")).rejects.toThrow(
-				"video generation failed: 503"
+				"Video generation failed: 503"
 			);
 			scenario = "job-failure";
 			await expect(

@@ -7,8 +7,11 @@
 // organization project (`orgProject`) whose values they include. Removals (`delete`, `destroy`) never
 // take their target from the file: they need the flags. The file names coordinates only, never a value, so it is
 // meant to be committed. `--no-project` ignores it for one invocation.
+// The file may also live at `.ryu/vault.json` (`init --out .ryu/vault.json`).
+// Its optional `broker` block names the services `run` brokers by default and
+// extra placeholder variables; `run --no-broker` passes values instead.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { listVaultEnvironments } from "@ryuhq/core-client/vault";
 import { z } from "zod";
@@ -18,7 +21,28 @@ import { printJson } from "./secrets-output.ts";
 import { type CliContext, UsageError } from "./types.ts";
 
 export const PROJECT_FILE = ".ryu-vault.json";
+/** The same file inside a project's `.ryu/` directory. */
+export const PROJECT_DIR_FILE = join(".ryu", "vault.json");
+/** Names looked for in each directory, in order. */
+export const PROJECT_FILES = [PROJECT_FILE, PROJECT_DIR_FILE];
 export const NO_PROJECT_FLAG = "--no-project";
+
+const brokerSchema = z.strictObject({
+	/** Services `run` brokers by default (`--no-broker` opts out). */
+	services: z
+		.array(
+			z
+				.string()
+				.trim()
+				.min(1)
+				.regex(/^[^,\s]+$/u)
+		)
+		.min(1),
+	/** Extra variables a broker run sets to the dummy `__ryu_broker__`. */
+	placeholders: z
+		.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u))
+		.optional(),
+});
 
 const projectSchema = z.strictObject({
 	version: z.literal(1),
@@ -27,6 +51,7 @@ const projectSchema = z.strictObject({
 	tags: z.array(z.string().trim().min(1)).optional(),
 	/** Control-plane project whose values `export`/`run` include. */
 	orgProject: z.string().trim().min(1).max(256).regex(/^\S+$/u).optional(),
+	broker: brokerSchema.optional(),
 });
 
 export type VaultProject = z.infer<typeof projectSchema>;
@@ -41,6 +66,7 @@ export interface FoundProject {
 const COORDINATE_SUBCOMMANDS = new Set([
 	"delete",
 	"destroy",
+	"example-env",
 	"export",
 	"get",
 	"import",
@@ -56,7 +82,7 @@ const COORDINATE_SUBCOMMANDS = new Set([
 ]);
 
 /** Subcommands whose value selection a project's tag filter narrows. */
-const TAG_SUBCOMMANDS = new Set(["export", "run"]);
+const TAG_SUBCOMMANDS = new Set(["example-env", "export", "run"]);
 
 function isMissing(error: unknown): boolean {
 	return (
@@ -87,18 +113,33 @@ export function parseProject(text: string, file: string): VaultProject {
 	return parsed.data;
 }
 
-/** The nearest `.ryu-vault.json` from `start` up to the filesystem root. */
+/** The nearest `.ryu-vault.json` or `.ryu/vault.json` from `start` up to the
+ *  filesystem root. Both in one directory is ambiguous and refused. */
 export async function findProject(start: string): Promise<FoundProject | null> {
 	let directory = start;
 	while (true) {
-		const file = join(directory, PROJECT_FILE);
-		try {
-			const text = await readFile(file, "utf8");
-			return { config: parseProject(text, file), file };
-		} catch (error) {
-			if (!isMissing(error)) {
-				throw error;
+		const found: FoundProject[] = [];
+		for (const name of PROJECT_FILES) {
+			const file = join(directory, name);
+			try {
+				const text = await readFile(file, "utf8");
+				found.push({ config: parseProject(text, file), file });
+			} catch (error) {
+				if (!isMissing(error)) {
+					throw error;
+				}
 			}
+		}
+		if (found.length > 1) {
+			throw new UsageError(
+				tf("Both {first} and {second} exist. Keep one of them.", {
+					first: found[0]?.file ?? "",
+					second: found[1]?.file ?? "",
+				})
+			);
+		}
+		if (found[0]) {
+			return found[0];
 		}
 		const parent = dirname(directory);
 		if (parent === directory) {
@@ -202,7 +243,65 @@ export async function applyProjectDefaults(
 			})}\n`
 		);
 	}
+	if (subcommand === "run") {
+		applyBrokerDefaults(ctx, args, config, file);
+	}
 	return file;
+}
+
+/** A project's `broker` block makes `run` broker its services unless the
+ *  invocation picks its own (`--broker`), asks for values (`--no-broker`), or
+ *  takes a dynamic credential (`--lease`, which needs a value run). */
+function applyBrokerDefaults(
+	ctx: CliContext,
+	args: SecretsArgs,
+	config: VaultProject,
+	file: string
+): void {
+	const broker = config.broker;
+	if (!broker || args.booleans.has("--no-broker")) {
+		return;
+	}
+	if (!(args.values.has("--broker") || args.values.has("--lease"))) {
+		args.values.set("--broker", [broker.services.join(",")]);
+		ctx.io.err(
+			`${tf("ryu: brokering {services} from {file} (--no-broker to pass values instead).", { services: broker.services.join(", "), file })}\n`
+		);
+	}
+	if (
+		broker.placeholders?.length &&
+		args.values.has("--broker") &&
+		!args.values.has("--placeholder")
+	) {
+		args.values.set("--placeholder", [broker.placeholders.join(",")]);
+	}
+}
+
+/** A comma-separated, repeatable flag as a de-duplicated list. */
+function listFlag(args: SecretsArgs, name: string): string[] {
+	const values = (args.values.get(name) ?? []).flatMap((value) =>
+		value
+			.split(",")
+			.map((entry) => entry.trim())
+			.filter(Boolean)
+	);
+	return [...new Set(values)];
+}
+
+/** `init --out` - the project file name, `.ryu-vault.json` by default. */
+function projectFileName(out: string | undefined): string {
+	if (out === undefined || out === PROJECT_FILE) {
+		return PROJECT_FILE;
+	}
+	if (out.replaceAll("\\", "/") === ".ryu/vault.json") {
+		return PROJECT_DIR_FILE;
+	}
+	throw new UsageError(
+		tf("--out must be {file} or {dirFile}.", {
+			file: PROJECT_FILE,
+			dirFile: ".ryu/vault.json",
+		})
+	);
 }
 
 /** `--tags a,b` (repeatable) as a de-duplicated list. */
@@ -216,8 +315,8 @@ export function tagFilter(args: SecretsArgs): string[] {
 	return [...new Set(tags)];
 }
 
-/** `ryu secrets init --env E [--path P] [--tags a,b] [--org-project ID]`:
- *  write the project file in the working directory after checking the
+/** `ryu secrets init --env E [--path P] [--tags a,b] [--org-project ID]
+ *  [--broker S,…] [--placeholder V,…] [--out .ryu/vault.json]` - write the project file in the working directory after checking the
  *  environment exists. */
 export async function init(
 	ctx: CliContext,
@@ -226,7 +325,7 @@ export async function init(
 	const environment = flag(args, "--env");
 	if (!environment) {
 		throw new UsageError(
-			"Usage: ryu-cli secrets init --env ENV [--path /folder] [--tags a,b] [--org-project ID]"
+			"Usage: ryu-cli secrets init --env ENV [--path /folder] [--tags a,b] [--org-project ID] [--broker SVC,…] [--placeholder VAR,…] [--out .ryu/vault.json]"
 		);
 	}
 	const config: VaultProject = { version: 1, environment };
@@ -242,7 +341,18 @@ export async function init(
 	if (orgProject !== undefined) {
 		config.orgProject = orgProject;
 	}
-	const file = join(workingDirectory(ctx), PROJECT_FILE);
+	const services = listFlag(args, "--broker");
+	const placeholders = listFlag(args, "--placeholder");
+	if (services.length > 0) {
+		config.broker = { services };
+		if (placeholders.length > 0) {
+			config.broker.placeholders = placeholders;
+		}
+	} else if (placeholders.length > 0) {
+		throw new UsageError("--placeholder needs --broker.");
+	}
+	const name = projectFileName(flag(args, "--out"));
+	const file = join(workingDirectory(ctx), name);
 	parseProject(JSON.stringify(config), file);
 	const { environments } = await listVaultEnvironments(ctx.target);
 	if (!environments.some((entry) => entry.slug === environment)) {
@@ -255,6 +365,9 @@ export async function init(
 				}
 			)
 		);
+	}
+	if (name === PROJECT_DIR_FILE) {
+		await mkdir(dirname(file), { recursive: true });
 	}
 	try {
 		await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, {

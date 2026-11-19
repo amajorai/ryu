@@ -184,3 +184,11 @@ test("displayHostPort strips scheme and path", () => {
 	expect(displayHostPort("http://127.0.0.1:7980/api")).toBe("127.0.0.1:7980");
 	expect(displayHostPort("not a url")).toBe("not a url");
 });
+
+test("Core's identity check failure reads as unreachable at its address", () => {
+	expect(
+		humanizeError(
+			new TypeError("Ryu Core is not reachable at http://10.0.0.2:7979")
+		)
+	).toBe("Core isn't reachable at 10.0.0.2:7979");
+});

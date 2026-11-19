@@ -24,12 +24,15 @@ const { MemoryDreamReview } = await import("./MemoryDreamReview.tsx");
 
 const JA: Record<string, string> = {
 	"About me": "私について",
+	"Last run {date}": "前回の実行: {date}",
+	"Not run yet": "未実行",
 	"Just me": "自分だけ",
 	"User fact": "ユーザーの事実",
 	User: "ユーザー",
 };
 
 // Core's Dream review: one pending proposal carrying raw category/scope ids.
+let generatedAt = 1;
 const core = Bun.serve({
 	port: 0,
 	fetch(request) {
@@ -40,7 +43,7 @@ const core = Bun.serve({
 		if (pathname === "/api/memory/dream/review") {
 			return NativeResponse.json({
 				review: {
-					generated_at: 1,
+					generated_at: generatedAt,
 					proposals: [
 						{
 							id: "proposal-1",
@@ -79,6 +82,7 @@ afterEach(async () => {
 	container.remove();
 	registerLiteralCatalogLoader(null);
 	setFriendlyMode(true);
+	generatedAt = 1;
 });
 
 async function mountInJapanese(): Promise<void> {
@@ -128,4 +132,13 @@ test("a proposal shows the technical labels translated when friendly names are o
 	expect(text).toContain("ユーザーの事実");
 	expect(text).toContain("ユーザー");
 	expect(text).not.toContain("user fact");
+});
+
+test("a review that never ran says so in one translated sentence", async () => {
+	generatedAt = 0;
+	await mountInJapanese();
+	const text = container.textContent ?? "";
+	expect(text).toContain("未実行");
+	expect(text).not.toContain("前回の実行");
+	expect(text).not.toContain("Not run yet");
 });

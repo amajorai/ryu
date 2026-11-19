@@ -34,7 +34,8 @@ use crate::vault::dynamic::ProviderConfig;
 use crate::vault::machine::{AuthMethod, TokenPrincipal};
 use crate::vault::policy::{Capability, CapabilitySet, Policy};
 use crate::vault::transit::{
-    TransitConfigUpdate, TransitKeyOptions, TransitKeyType, TransitOpOptions,
+    TransitBatchItem, TransitBatchOp, TransitConfigUpdate, TransitKeyOptions, TransitKeyType,
+    TransitOpOptions,
 };
 use crate::vault::{dotenv, ROOT_PATH};
 
@@ -116,7 +117,7 @@ impl Who {
         }
     }
 
-    /// The first parameter-constraint violation a write of `value` to the
+    /// The first parameter-constraint or value-rule violation a write of `value` to the
     /// policy key `key` would commit, if any. Same parameter extraction as
     /// `Ctx::write_parameters_violation`: a JSON-object value contributes its
     /// top-level keys; any other value is the single parameter `value`.
@@ -147,6 +148,9 @@ impl Who {
             &context,
             &parameters,
         )
+        .and_then(|()| {
+            crate::vault::policy_ext::check_value_rules(policies.iter(), key, &context, value)
+        })
         .err()
     }
 
@@ -261,16 +265,25 @@ mod agent;
 mod dynamic;
 #[path = "vault_engines_machines.rs"]
 mod machines;
+#[path = "vault_engines_pki_ocsp.rs"]
+mod pki_ocsp;
 #[path = "vault_engines_pki_ssh.rs"]
 mod pki_ssh;
+#[path = "vault_engines_ssh_otp.rs"]
+mod ssh_otp;
 #[path = "vault_engines_transit.rs"]
 mod transit;
+#[path = "vault_engines_transit_batch.rs"]
+mod transit_batch;
 
 pub use agent::*;
 pub use dynamic::*;
 pub use machines::*;
+pub use pki_ocsp::*;
 pub use pki_ssh::*;
+pub use ssh_otp::*;
 pub use transit::*;
+pub use transit_batch::*;
 
 fn node_coords(
     node_id: &str,
@@ -319,7 +332,19 @@ pub fn public_routes() -> axum::Router<ServerState> {
         .route("/api/vault/agent/transit/:op/:name", post(agent_transit))
         .route("/api/vault/agent/pki/:op/:role", post(agent_pki))
         .route("/api/vault/agent/ssh/sign/:role", post(agent_ssh_sign))
+        // The SSH OTP helper and OCSP relying parties hold no credential.
+        .route("/api/vault/ssh/verify", post(ssh_otp_verify))
         .layer(limit)
+        .route(
+            "/api/vault/pki/issuers/:name/ocsp",
+            post(pki_ocsp_post).layer(axum::extract::DefaultBodyLimit::max(
+                crate::vault::pki::MAX_OCSP_REQUEST_BYTES,
+            )),
+        )
+        .route(
+            "/api/vault/pki/issuers/:name/ocsp/*request",
+            get(pki_ocsp_get),
+        )
 }
 
 #[cfg(test)]

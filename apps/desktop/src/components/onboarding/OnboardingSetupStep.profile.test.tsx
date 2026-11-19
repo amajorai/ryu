@@ -22,6 +22,8 @@ const { ProfileSetup, profileLines } = await import(
 // character, so the line must already be Japanese when it renders.
 const JA: Record<string, string> = {
 	"Reviewing your connected sources": "接続したソースを確認しています",
+	"The profile build took too long and was stopped. Try again to start a new build.":
+		"プロファイルの作成に時間がかかりすぎたため停止しました。もう一度お試しください。",
 };
 
 const BUILDING: ProfileJobStatus = {
@@ -29,6 +31,7 @@ const BUILDING: ProfileJobStatus = {
 	background: false,
 	conversationId: null,
 	error: null,
+	errorCode: null,
 	id: "job-1",
 	materialized: false,
 	startedAtMs: 0,
@@ -57,7 +60,7 @@ test("profile progress lines are whole tl() messages", () => {
 	expect(lines[0]).toBe("Reviewing your connected sources");
 });
 
-test("the first profile progress line renders in Japanese", async () => {
+async function renderInJapanese(job: ProfileJobStatus) {
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
@@ -72,7 +75,7 @@ test("the first profile progress line renders in Japanese", async () => {
 			>
 				<ProfileSetup
 					alreadyBuilt={false}
-					job={BUILDING}
+					job={job}
 					nodeSetupKind={null}
 					onBackground={noop}
 					onCancel={noop}
@@ -88,7 +91,26 @@ test("the first profile progress line renders in Japanese", async () => {
 	await act(async () => {
 		await Bun.sleep(50);
 	});
+	return container;
+}
+
+test("the first profile progress line renders in Japanese", async () => {
+	const container = await renderInJapanese(BUILDING);
 	const status = container.querySelector('[role="status"]');
 	expect(status?.textContent ?? "").toContain("接続したソースを確認しています");
 	expect(status?.textContent ?? "").not.toContain("Reviewing");
+});
+
+test("a failed build explains its error code in Japanese, not Core's English", async () => {
+	const container = await renderInJapanese({
+		...BUILDING,
+		error: "profile job expired; start onboarding again",
+		errorCode: "expired",
+		state: "failed",
+	});
+	const text = container.textContent ?? "";
+	expect(text).toContain(
+		"プロファイルの作成に時間がかかりすぎたため停止しました。もう一度お試しください。"
+	);
+	expect(text).not.toContain("profile job expired");
 });

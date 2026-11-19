@@ -27,7 +27,7 @@ export function ChapterComposer({
 	defaultAgentId,
 	fieldRef,
 	onSubmit,
-	subject,
+	placeholder,
 }: {
 	/** Offer a picker when more than one agent can write the chapter. */
 	authors: InterfaceAgent[];
@@ -35,8 +35,8 @@ export function ChapterComposer({
 	defaultAgentId: string | null;
 	fieldRef: RefObject<HTMLTextAreaElement | null>;
 	onSubmit: (input: { agentId: string | null; prompt: string }) => void;
-	/** Whom or what the chapter is for, as the placeholder names it. */
-	subject: string;
+	/** The field's placeholder, naming whom or what the chapter is for. */
+	placeholder: string;
 }) {
 	const fieldId = useId();
 	const hintId = useId();
@@ -94,7 +94,7 @@ export function ChapterComposer({
 				maxLength={MAX_PROMPT_LENGTH}
 				onChange={(event) => setPrompt(event.target.value)}
 				onKeyDown={onKeyDown}
-				placeholder={tl("Start a new conversation with {subject}", { subject })}
+				placeholder={placeholder}
 				ref={fieldRef}
 				value={prompt}
 			/>

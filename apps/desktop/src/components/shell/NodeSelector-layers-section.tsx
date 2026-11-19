@@ -258,7 +258,7 @@ export function DecisionModelsSection({
 	return (
 		<PanelSection title="Decision Models">
 			{decisionModels.map((entry) => {
-				const label = capabilityLabel(entry, "Typed Decisions");
+				const label = capabilityLabel(entry, tl("Typed Decisions"));
 				return (
 					<NodeLayerMenu
 						available={entry.available.map(

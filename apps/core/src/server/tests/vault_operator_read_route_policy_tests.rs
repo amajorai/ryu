@@ -8,13 +8,15 @@ use crate::authorization::{
 };
 use axum::http::Method;
 
-const OPERATOR_READS: [&str; 8] = [
+const OPERATOR_READS: [&str; 10] = [
     "/api/vault/audit",
     "/api/vault/audit/verify",
     "/api/vault/audit/devices",
     "/api/vault/events",
     "/api/vault/policies",
+    "/api/vault/capabilities-accessor",
     "/api/vault/broker/sessions",
+    "/api/vault/sys/metrics",
     "/api/vault/sys/seal-provider",
     "/api/vault/sys/rekey",
 ];

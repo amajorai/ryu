@@ -8,7 +8,7 @@ import {
 	revokeVaultBrokerSession,
 } from "@ryuhq/core-client/vault";
 import { z } from "zod";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { formatTable, truncate } from "./output.ts";
 import {
 	arg,
@@ -18,7 +18,10 @@ import {
 	type SecretsArgs,
 } from "./secrets-args.ts";
 import { brokerAgentCommand } from "./secrets-broker-agent.ts";
+import { brokerReview } from "./secrets-broker-review.ts";
+import { brokerServiceCommand } from "./secrets-broker-service.ts";
 import { machineTarget, printJson } from "./secrets-output.ts";
+import { noProposalsText } from "./secrets-status-copy.ts";
 import { type CliContext, UsageError } from "./types.ts";
 
 async function brokerServicesCommand(
@@ -33,14 +36,14 @@ async function brokerServicesCommand(
 		return 0;
 	}
 	if (services.length === 0) {
-		ctx.io.out("No broker services.\n");
+		ctx.io.out(`${tr("No broker services.")}\n`);
 		return 0;
 	}
 	const rows = services.map((service) => [
 		service.name,
 		service.environment,
 		`${service.host}${service.port ? `:${service.port}` : ""}${service.pathPrefix === "/" ? "" : service.pathPrefix}`,
-		service.enabled ? "enabled" : "disabled",
+		service.enabled ? tr("enabled") : tr("disabled"),
 		truncate(service.description ?? "", 40),
 	]);
 	ctx.io.out(
@@ -61,7 +64,7 @@ async function brokerSessionsCommand(
 		} else {
 			ctx.io.out(
 				result.revoked
-					? `Revoked ${id}.\n`
+					? `${tf("Revoked {id}.", { id })}\n`
 					: `${tf("{id} was already revoked.", { id })}\n`
 			);
 		}
@@ -73,7 +76,7 @@ async function brokerSessionsCommand(
 		return 0;
 	}
 	if (sessions.length === 0) {
-		ctx.io.out("No live broker sessions.\n");
+		ctx.io.out(`${tr("No live broker sessions.")}\n`);
 		return 0;
 	}
 	const rows = sessions.map((session) => [
@@ -105,7 +108,7 @@ async function brokerLogsCommand(
 		return 0;
 	}
 	if (logs.length === 0) {
-		ctx.io.out("No brokered requests.\n");
+		ctx.io.out(`${tr("No brokered requests.")}\n`);
 		return 0;
 	}
 	const rows = logs.map((row) => [
@@ -175,7 +178,7 @@ async function brokerProposalsCommand(
 		return 0;
 	}
 	if (proposals.length === 0) {
-		ctx.io.out(`${tf("No {status} proposals.", { status: status.data })}\n`);
+		ctx.io.out(`${noProposalsText(status.data)}\n`);
 		return 0;
 	}
 	const rows = proposals.map((proposal) => [
@@ -201,7 +204,7 @@ async function brokerCaCommand(ctx: CliContext): Promise<number> {
 }
 
 const BROKER_USAGE =
-	"Usage: ryu-cli secrets broker services|sessions [revoke ID]|logs|proposals [approve|reject ID]|ca|discover|propose|proposal ID";
+	"Usage: ryu-cli secrets broker services|service show|apply|add|enable|disable|delete|review|sessions [revoke ID]|logs|proposals [approve|reject ID]|ca|discover|propose|proposal ID";
 
 export async function broker(
 	ctx: CliContext,
@@ -214,6 +217,10 @@ export async function broker(
 	switch (args.positional[1]) {
 		case "services":
 			return await brokerServicesCommand(ctx, args);
+		case "service":
+			return await brokerServiceCommand(ctx, args);
+		case "review":
+			return await brokerReview(ctx);
 		case "sessions":
 			return await brokerSessionsCommand(ctx, args);
 		case "logs":

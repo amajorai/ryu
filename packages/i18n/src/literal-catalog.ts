@@ -1,4 +1,5 @@
 import { EN_MESSAGES } from "./en-messages.ts";
+import { EN_SENSE_MESSAGES } from "./en-messages-senses.ts";
 import { literalMessageId } from "./message-id.ts";
 import { MAX_MESSAGE_LENGTH } from "./pack.ts";
 
@@ -16,13 +17,20 @@ export function collapseLiteralWhitespace(value: string): string {
 }
 
 /** Exact (whitespace-collapsed) English source → canonical id, built once on
- * first lookup. The first id for a duplicated English message wins. */
+ * first lookup. The first id for a duplicated English message wins. A sense id
+ * (`en-messages-senses.ts`) is one meaning of a bare word, so the word itself
+ * never resolves to it. */
 function canonicalLiteralIndex(): Map<string, string> {
 	if (canonicalLiteralIds === null) {
 		canonicalLiteralIds = new Map();
 		for (const [id, message] of Object.entries(EN_MESSAGES)) {
 			const collapsed = collapseLiteralWhitespace(message);
-			if (!canonicalLiteralIds.has(collapsed)) {
+			if (
+				!(
+					Object.hasOwn(EN_SENSE_MESSAGES, id) ||
+					canonicalLiteralIds.has(collapsed)
+				)
+			) {
 				canonicalLiteralIds.set(collapsed, id);
 			}
 		}

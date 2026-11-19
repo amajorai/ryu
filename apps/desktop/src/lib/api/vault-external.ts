@@ -8,6 +8,7 @@ import type {
 	VaultExternalDestination,
 	VaultExternalDestinationInput,
 	VaultExternalSource,
+	VaultExternalSourceInput,
 	VaultExternalStore,
 	VaultExternalStoreInput,
 	VaultExternalSyncReport,
@@ -19,6 +20,7 @@ export type {
 	VaultExternalDestination,
 	VaultExternalDestinationInput,
 	VaultExternalSource,
+	VaultExternalSourceInput,
 	VaultExternalStore,
 	VaultExternalStoreInput,
 } from "@ryuhq/core-client/vault-external";
@@ -76,6 +78,7 @@ const destinationsSchema = z.object({
 });
 const destinationReply = z.object({ destination: destinationSchema });
 const sourcesSchema = z.object({ sources: z.array(sourceSchema) });
+const sourceReply = z.object({ source: sourceSchema });
 const deletedSchema = z.object({ deleted: z.boolean() });
 const testSchema = z.object({ error: z.string().optional(), ok: z.boolean() });
 const pushSchema = z.object({ pushed: z.number() });
@@ -195,6 +198,19 @@ export async function listVaultExternalSources(
 		sourcesSchema
 	);
 	return raw.sources as VaultExternalSource[];
+}
+
+export async function createVaultExternalSource(
+	target: ApiTarget,
+	input: VaultExternalSourceInput
+): Promise<VaultExternalSource> {
+	const raw = await request(
+		target,
+		`${BASE}/sources`,
+		{ method: "POST", body: input },
+		sourceReply
+	);
+	return raw.source as VaultExternalSource;
 }
 
 export async function syncVaultExternalSource(

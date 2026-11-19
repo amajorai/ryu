@@ -2,6 +2,9 @@
 
 use super::*;
 
+mod moves;
+pub(crate) use moves::*;
+
 /// GET /api/vault/environments.
 #[utoipa::path(get, path = "/api/vault/environments", tag = "Vault",
     summary = "List environments",

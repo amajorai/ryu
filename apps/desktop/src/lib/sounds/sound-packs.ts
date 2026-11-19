@@ -58,7 +58,7 @@ export const SOUND_PACKS: Readonly<Record<SoundPackId, SoundPack>> = {
 	retro: {
 		id: "retro",
 		label: "Retro",
-		description: "8-bit square waves on a chiptune grid.",
+		description: "Square waves on an 8-bit chiptune grid.",
 		wave: "square",
 		attack: 0.002,
 		release: "step",

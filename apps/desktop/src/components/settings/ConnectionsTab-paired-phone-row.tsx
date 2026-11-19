@@ -1,7 +1,7 @@
 import { Cancel01Icon, SmartPhone01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { SettingsIconTile } from "@ryu/blocks/desktop/settings-nav.tsx";
-import { activeLocale, dateFormatter } from "@ryu/i18n/core";
+import { activeLocale, dateFormatter, translateMessage } from "@ryu/i18n/core";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
@@ -31,15 +31,24 @@ export interface PairedPhoneActions {
 	revokeGrant: (device: PairedDevice, tool: string) => void;
 }
 
-function platformLabel(platform: string): string {
+export function platformLabel(platform: string): string {
 	switch (platform) {
 		case "ios":
 			return "iPhone";
 		case "android":
 			return "Android";
 		default:
-			return platform || "Phone";
+			// The device, not a phone number (the bare catalog "Phone", ja "電話番号").
+			return platform || translateMessage("hardware.devicePhone", {}, "Phone");
 	}
+}
+
+/**
+ * A phone with the Ryu app open right now (ja アプリを使用中), through the
+ * keyed `devices.foreground`; the bare "Open now" is open for entries (ja 受付中).
+ */
+export function foregroundLabel(): string {
+	return translateMessage("devices.foreground", {}, "Open now");
 }
 
 function RenameField({
@@ -300,7 +309,7 @@ export function PairedPhoneRow({
 	const status = pending
 		? tl("Waiting for approval")
 		: device.foreground
-			? tl("Open now")
+			? foregroundLabel()
 			: tl("Active {when}", { when: presenceAgo(device.last_seen_ms) });
 	const detail = [tl(platformLabel(device.platform)), status];
 	if (device.check_code) {

@@ -106,6 +106,17 @@ describe("parseModelSize", () => {
 		expect(parseModelSize("giant-120B", tl)?.tier).toBe("Extra Large");
 	});
 
+	test("the tier word comes from the translator, not hard-coded English", () => {
+		const german: Record<string, string> = {
+			"Extra Large": "Extragroß",
+			Medium: "Mittel",
+		};
+		const deTl: LiteralMessage = (source, values) =>
+			formatMessage(german[source] ?? source, values ?? {}, "de");
+		expect(parseModelSize("giant-120B", deTl)?.tier).toBe("Extragroß");
+		expect(parseModelSize("llama-3-8b", deTl)?.tier).toBe("Mittel");
+	});
+
 	test("million-scale token maps below 3B (Small)", () => {
 		const size = parseModelSize("gemma-270M", tl);
 		expect(size?.raw).toBe("270M");

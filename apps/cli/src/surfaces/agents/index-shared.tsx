@@ -1,7 +1,7 @@
 /* @jsxImportSource @opentui/react */
-import { z } from "zod";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { HINT, hintText } from "../../core/keymap.ts";
+import { failureText } from "../../i18n/failure-text.ts";
 
 export const EDIT_LABEL_WIDTH = 16;
 export const PICKER_HEIGHT = 11;
@@ -16,13 +16,9 @@ export const PICKER_HINT = hintText([
 
 export type Theme = ReturnType<typeof useTheme>;
 
-const agentErrorSchema = z.instanceof(Error);
-export function errText(
-	err: Parameters<typeof agentErrorSchema.safeParse>[0]
-): string {
-	const parsed = agentErrorSchema.safeParse(err);
-	return parsed.success ? parsed.data.message : String(err);
-}
+/** A caught failure's reason in the CLI's language (catalogued copy and the
+ *  unreachable sentence translate; server text passes through). */
+export const errText: (err: unknown) => string = failureText;
 
 // A page header echoing the desktop page chrome: a bold title, a muted subtitle,
 // and a muted key-hint line so the surface is self-describing without the shell.

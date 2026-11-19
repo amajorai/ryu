@@ -40,6 +40,7 @@ import {
 	vaultCoordsOf,
 } from "@/src/lib/api/vault.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
+import { VaultUsedBy } from "./VaultSecretUsage.tsx";
 import { VaultValueTypeSelect } from "./VaultValueTypeSelect.tsx";
 import {
 	isStaleVersion,
@@ -178,7 +179,7 @@ function SecretDetail({
 		onSuccess: async (kind) => {
 			await invalidate();
 			sileo.success({
-				title: kind === "pending" ? "Sent for approval" : "Details saved",
+				title: tl(kind === "pending" ? "Sent for approval" : "Details saved"),
 			});
 			onDone();
 		},
@@ -200,7 +201,7 @@ function SecretDetail({
 		mutationFn: () => restoreVaultSecret(target, secret.name, coords),
 		onSuccess: async () => {
 			await invalidate();
-			sileo.success({ title: "Secret restored" });
+			sileo.success({ title: tl("Secret restored") });
 			onDone();
 		},
 	});
@@ -408,6 +409,8 @@ function SecretDetail({
 				) : null}
 			</section>
 
+			<VaultUsedBy name={secret.name} target={target} />
+
 			<section aria-labelledby="vault-detail-versions" className="space-y-2">
 				<h3 className="font-semibold text-sm" id="vault-detail-versions">
 					Versions
@@ -472,7 +475,7 @@ function SecretDetail({
 				<div className="flex items-center justify-between gap-6 border-border border-t pt-4">
 					<p className="text-muted-foreground text-xs">
 						{tl("Deleted {when}. Restore it to use it again.", {
-							when: formatWhen(secret.deletedAt),
+							when: tl(formatWhen(secret.deletedAt)),
 						})}
 					</p>
 					<Button

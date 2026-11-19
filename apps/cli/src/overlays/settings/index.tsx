@@ -4,12 +4,11 @@
 // a panel area. The OverlayHost supplies the centered modal chrome (title bar +
 // Esc-to-close) and claims raw input; this body owns only its inner nav.
 //
-// Profile and Sessions use the existing authenticated account contracts;
-// Account and Services retain their data-backed panels. Features, Meetings,
-// Tasks, Storage and Danger Zone add read-only Core data views. Memory and
-// Privacy retain their canonical editable preference/library surfaces.
-// Native host features and remaining account surfaces use labeled handoffs.
-// Updates uses Core's shared preference and the CLI updater.
+// Profile and Sessions use the authenticated account contracts; Account and
+// Services keep data-backed panels. Features, Meetings, Tasks, Storage and
+// Danger Zone are read-only Core views. Memory and Privacy keep their editable
+// surfaces; native host features use labeled handoffs. Updates uses Core's
+// shared preference and the CLI updater.
 //
 // Keyboard: up/down and j/k move the nav selection. Account and Sessions own
 // up/down for their rows while j/k move the Settings nav; ServicesTab suppresses
@@ -17,26 +16,22 @@
 
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge.tsx";
-import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { useCore } from "../../core/CoreContext.tsx";
-import { useCliProductMode } from "../../core/ProductModeContext.tsx";
-import { STARTUP_REALM_OPTIONS } from "../../core/productMode.ts";
+import { sectionHeading } from "../../sidebar/section-heading.ts";
 import { AccountTab } from "../../tabs/account.tsx";
 import { ServicesTab } from "../../tabs/services.tsx";
-import { type ListLoader, ListTab } from "../../ui/ListTab.tsx";
 import type { OverlayModule } from "../registry.ts";
 import { AuthorizedAppsPanel } from "./authorized-apps.tsx";
 import { ConnectionsPanel } from "./connections.tsx";
+import { GeneralPanel } from "./general-panel.tsx";
 import { InferenceSettingsPanel } from "./inference.tsx";
 import {
-	loadDataCounts,
-	loadFeatures,
-	loadMeetings,
-	loadQuests,
-	loadStorage,
-} from "./loaders.ts";
+	DATA_PANELS,
+	DataPanel,
+	fallbackPanelMeta,
+	PANEL_META,
+	PlaceholderPanel,
+} from "./info-panels.tsx";
 import { MemoryPanel } from "./memory.tsx";
 import { PrivacyPanel } from "./privacy.tsx";
 import { ProfileTab } from "./profile.tsx";
@@ -111,110 +106,6 @@ const INDEX_BY_ID = new Map(FLAT_ITEMS.map((item, i) => [item.id, i]));
 // remains the security, session, and account-switching surface.
 const ACCOUNT_IDS = new Set(["account", "sessions", "authorized-apps"]);
 const SERVICE_IDS = new Set(["integrations"]);
-
-type Tone = "default" | "desktop" | "account" | "danger";
-
-interface DataPanelMeta {
-	description: string;
-	emptyLabel: string;
-	load: ListLoader;
-	note: string;
-	tone?: Tone;
-}
-
-// Read-only views over Core endpoints. `note` says where the writes live.
-const DATA_PANELS = new Map<string, DataPanelMeta>(
-	Object.entries({
-		features: {
-			description: "Apps and features installed on this node.",
-			emptyLabel: "No apps installed",
-			load: loadFeatures,
-			note: "Enable or disable apps from the Store or the desktop app.",
-		},
-		meetings: {
-			description: "Captured meetings and their status.",
-			emptyLabel: "No meetings",
-			load: loadMeetings,
-			note: "Open the Meetings surface for notes and transcripts.",
-		},
-		quests: {
-			description: "Background tasks, captures, and their status.",
-			emptyLabel: "No tasks",
-			load: loadQuests,
-			note: "Manage tasks from the Tasks surface or the desktop app.",
-		},
-		storage: {
-			description: "The data folder this node uses and its disk usage.",
-			emptyLabel: "No storage info",
-			load: loadStorage,
-			note: "Relocate or import the data folder from the desktop app.",
-		},
-		danger: {
-			description: "Deletable data on this node, by category.",
-			emptyLabel: "No deletable data",
-			load: loadDataCounts,
-			note: "Deletion is only available from the desktop app's Danger Zone.",
-			tone: "danger",
-		},
-	} satisfies Record<string, DataPanelMeta>)
-);
-
-interface PanelMeta {
-	description: string;
-	note?: string;
-	tone?: Tone;
-}
-
-// Pointers for the surfaces the terminal client does not drive directly: native
-// desktop features, and control-plane account surfaces that Core does not serve.
-const PANEL_META = new Map<string, PanelMeta>(
-	Object.entries({
-		appearance: {
-			description:
-				"Terminal appearance follows the active theme preference. Use /theme in Chat to choose system, light, dark, Ryu, or Ryu Mono.",
-		},
-		shadow: {
-			description: "Shadow screen capture runs as a native agent.",
-			tone: "desktop",
-			note: "Open the desktop app to configure Shadow.",
-		},
-		voice: {
-			description:
-				"Voice Recognition, audio devices, and Audio engines are native audio features.",
-			tone: "desktop",
-			note: "Open the desktop app to configure Voice.",
-		},
-		predict: {
-			description: "Autocomplete suggestions are a native input feature.",
-			tone: "desktop",
-			note: "Open the desktop app to configure Autocomplete.",
-		},
-		"authorized-apps": {
-			description:
-				"Applications authorized against your account. These live on your Ryu account backend, not on this node.",
-			tone: "account",
-			note: "Review and revoke authorized apps from the desktop app.",
-		},
-		billing: {
-			description:
-				"Subscription and plan billing is handled by your Ryu account. See Account for your current plan.",
-			tone: "account",
-		},
-		teams: {
-			description:
-				"Team membership and team billing. Managed from your Ryu account.",
-			tone: "account",
-		},
-		credits: {
-			description:
-				"Prepaid credits and auto top-up. Managed from your Ryu account.",
-			tone: "account",
-		},
-		updates: {
-			description: "Manage automatic updates for the terminal client.",
-		},
-	} satisfies Record<string, PanelMeta>)
-);
 
 function SettingsBody() {
 	const [selIndex, setSelIndex] = useState(0);
@@ -382,7 +273,7 @@ function NavColumn({ selIndex }: { selIndex: number }) {
 				>
 					{group.title ? (
 						<text fg={theme.colors.mutedForeground}>
-							<b>{group.title.toUpperCase()}</b>
+							<b>{sectionHeading(group.title)}</b>
 						</text>
 					) : null}
 					{group.items.map((item) => (
@@ -504,195 +395,8 @@ function Panel({
 			/>
 		);
 	}
-	const meta = PANEL_META.get(id) ?? { description: `${label} settings.` };
+	const meta = PANEL_META.get(id) ?? fallbackPanelMeta(label);
 	return <PlaceholderPanel meta={meta} title={label} />;
-}
-
-function GeneralPanel() {
-	const { url, token } = useCore();
-	const theme = useTheme();
-	// The card is taller than the Settings body on short terminals; scroll it
-	// instead of letting Yoga shrink its rows onto each other.
-	return (
-		<scrollbox flexGrow={1}>
-			<Card subtitle="Ryu Core node" title="General">
-				<InfoLine
-					label="Node"
-					value={url}
-					valueColor={theme.colors.foreground}
-				/>
-				<InfoLine
-					label="Auth"
-					value={token ? "token set" : "no token"}
-					valueColor={token ? theme.colors.success : theme.colors.warning}
-				/>
-				<StartupRealmSetting />
-				<box marginTop={1}>
-					<text fg={theme.colors.mutedForeground}>
-						Node connection is managed from the Gateway overlay and the node
-						picker.
-					</text>
-				</box>
-			</Card>
-		</scrollbox>
-	);
-}
-
-function StartupRealmSetting() {
-	const { modePreference, setStartupRealm, startupRealmSaveError } =
-		useCliProductMode();
-	const theme = useTheme();
-	const selectedIndex = Math.max(
-		0,
-		STARTUP_REALM_OPTIONS.findIndex(
-			(option) => option.value === modePreference.startupRealm
-		)
-	);
-	useKeyboard((key) => {
-		if (key.name !== "left" && key.name !== "right") {
-			return;
-		}
-		const direction = key.name === "right" ? 1 : -1;
-		const nextIndex =
-			(selectedIndex + direction + STARTUP_REALM_OPTIONS.length) %
-			STARTUP_REALM_OPTIONS.length;
-		const option = STARTUP_REALM_OPTIONS[nextIndex];
-		if (option) {
-			setStartupRealm(option.value);
-		}
-	});
-
-	return (
-		<box flexDirection="column" gap={1} marginTop={1}>
-			<text fg={theme.colors.mutedForeground}>Startup realm</text>
-			{/* Wrap the choices in a narrow pane rather than crushing each one. */}
-			<box flexDirection="row" flexWrap="wrap" gap={1}>
-				{STARTUP_REALM_OPTIONS.map((option, optionIndex) => {
-					const selected = selectedIndex === optionIndex;
-					return (
-						<box
-							borderColor={
-								selected ? theme.colors.focusRing : theme.colors.border
-							}
-							borderStyle={selected ? "rounded" : "single"}
-							key={option.value}
-							onMouseDown={() => setStartupRealm(option.value)}
-							paddingLeft={1}
-							paddingRight={1}
-						>
-							<text
-								fg={selected ? theme.colors.primary : theme.colors.foreground}
-							>
-								{selected ? `› ${option.label}` : option.label}
-							</text>
-						</box>
-					);
-				})}
-			</box>
-			<text fg={theme.colors.mutedForeground}>
-				← / → or click · applies on next launch
-			</text>
-			{startupRealmSaveError ? (
-				<text fg={theme.colors.error}>{startupRealmSaveError}</text>
-			) : null}
-		</box>
-	);
-}
-
-function InfoLine({
-	label,
-	value,
-	valueColor,
-}: {
-	label: string;
-	value: string;
-	valueColor: string;
-}) {
-	const theme = useTheme();
-	return (
-		<box flexDirection="row" gap={1}>
-			<text fg={theme.colors.mutedForeground}>{label.padEnd(6, " ")}</text>
-			<text fg={valueColor}>{value}</text>
-		</box>
-	);
-}
-
-function DataPanel({
-	height,
-	meta,
-	title,
-}: {
-	height: number;
-	meta: DataPanelMeta;
-	title: string;
-}) {
-	const theme = useTheme();
-	return (
-		<box flexDirection="column" flexGrow={1}>
-			<box flexDirection="column" paddingLeft={1}>
-				<text fg={theme.colors.foreground}>
-					<b>{title}</b>
-				</text>
-				<ToneBadge tone={meta.tone} />
-				<text fg={theme.colors.mutedForeground}>{meta.description}</text>
-				<text fg={theme.colors.mutedForeground}>{meta.note}</text>
-			</box>
-			<ListTab
-				active
-				emptyLabel={meta.emptyLabel}
-				height={height}
-				load={meta.load}
-			/>
-		</box>
-	);
-}
-
-function PlaceholderPanel({ meta, title }: { meta: PanelMeta; title: string }) {
-	const theme = useTheme();
-	const borderColor =
-		meta.tone === "danger" ? theme.colors.error : theme.colors.border;
-	return (
-		<Card borderColor={borderColor} title={title}>
-			<ToneBadge tone={meta.tone} />
-			<text fg={theme.colors.mutedForeground}>{meta.description}</text>
-			{meta.note ? (
-				<box marginTop={1}>
-					<text fg={theme.colors.mutedForeground}>{meta.note}</text>
-				</box>
-			) : null}
-		</Card>
-	);
-}
-
-function ToneBadge({ tone }: { tone?: Tone }) {
-	if (tone === "desktop") {
-		return (
-			<box marginBottom={1}>
-				<Badge bordered={false} variant="secondary">
-					Desktop only
-				</Badge>
-			</box>
-		);
-	}
-	if (tone === "account") {
-		return (
-			<box marginBottom={1}>
-				<Badge bordered={false} variant="secondary">
-					Account only
-				</Badge>
-			</box>
-		);
-	}
-	if (tone === "danger") {
-		return (
-			<box marginBottom={1}>
-				<Badge bordered={false} variant="error">
-					Danger zone
-				</Badge>
-			</box>
-		);
-	}
-	return null;
 }
 
 /** The Settings overlay module. The Integrate step calls registerOverlay to swap

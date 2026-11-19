@@ -3,6 +3,7 @@ import {
 	DESKTOP_ACCOUNT_KEY,
 	TREG_ACCOUNT_KEY,
 } from "@ryu/blocks/desktop/agent-account-access.tsx";
+import { translate as tl } from "@ryu/i18n/core";
 import { appUsesSavedKeys } from "@ryuhq/core-client/agent-account-access";
 import {
 	agentEngineModelProvider,
@@ -129,7 +130,9 @@ export function engineProviderRows(
 	const key = accountKey.provider(engineProvider.id);
 	const existing = rows.find((row) => row.key === key);
 	if (existing) {
-		existing.detail = `Also covers ${engineProvider.label}`;
+		existing.detail = tl("Also covers {provider}", {
+			provider: engineProvider.label,
+		});
 		return rows;
 	}
 	return [{ key, title: engineProvider.label }, ...rows];

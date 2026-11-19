@@ -364,7 +364,7 @@ export function AccountRow({
 						{account.active || account.gatewayActive ? (
 							<span className="text-muted-foreground text-xs">
 								{[
-									account.active ? "For you" : null,
+									account.active ? tl("For you") : null,
 									account.gatewayActive ? "Gateway" : null,
 								]
 									.filter(Boolean)

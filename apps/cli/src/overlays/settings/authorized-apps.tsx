@@ -11,6 +11,7 @@ import { accountBackendTarget } from "../../core/authBackend.ts";
 import { useCore } from "../../core/CoreContext.tsx";
 import { errorText } from "../../i18n/error-text.ts";
 import { tf } from "../../i18n/translate.ts";
+import { PanelNoticeText, usePanelNotice } from "./panel-notice.tsx";
 
 const authorizedAppSchema = z.object({
 	clientId: z.string(),
@@ -52,7 +53,7 @@ export function AuthorizedAppsPanel({ active }: { active: boolean }) {
 	const [state, setState] = useState<
 		"loading" | "ready" | "signedOut" | "error"
 	>("loading");
-	const [message, setMessage] = useState("");
+	const { notice, setFailure, setMessage } = usePanelNotice();
 	const [confirm, setConfirm] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const controllerRef = useRef<AbortController | null>(null);
@@ -92,10 +93,10 @@ export function AuthorizedAppsPanel({ active }: { active: boolean }) {
 		} catch (error) {
 			if (!controller.signal.aborted) {
 				setState("error");
-				setMessage(String(error instanceof Error ? error.message : error));
+				setFailure(String(error instanceof Error ? error.message : error));
 			}
 		}
-	}, [target]);
+	}, [target, setFailure, setMessage]);
 	useEffect(() => {
 		if (!active) {
 			return;
@@ -141,7 +142,7 @@ export function AuthorizedAppsPanel({ active }: { active: boolean }) {
 			setMessage("Authorization revoked and confirmed.");
 		} catch (error) {
 			if (!controller.signal.aborted) {
-				setMessage(
+				setFailure(
 					tf("Could not revoke: {error}", {
 						error: errorText(error),
 					})
@@ -212,17 +213,7 @@ export function AuthorizedAppsPanel({ active }: { active: boolean }) {
 					))}
 				</scrollbox>
 			) : null}
-			{message ? (
-				<text
-					fg={
-						state === "error" || message.startsWith("Could not")
-							? theme.colors.error
-							: theme.colors.success
-					}
-				>
-					{message}
-				</text>
-			) : null}
+			<PanelNoticeText error={state === "error"} notice={notice} />
 			<text fg={theme.colors.mutedForeground}>
 				{busy
 					? "Revoking…"

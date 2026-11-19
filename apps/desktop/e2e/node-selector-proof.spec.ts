@@ -249,9 +249,12 @@ test("selects and persists a remote node, shows offline health, recovers, and ap
 	await expect(autoSelect).not.toBeChecked();
 	await autoSelect.click();
 	await expect(
-		menu.getByText("No remote computer reachable — using your computer", {
-			exact: true,
-		})
+		menu.getByText(
+			"No remote computer is reachable, so Ryu is using your computer",
+			{
+				exact: true,
+			}
+		)
 	).toBeVisible();
 	expect((await readState(page)).autoSelectedNode).toBe("local");
 

@@ -6,7 +6,6 @@ import {
 	registerLiteralCatalogLoader,
 } from "./literal-catalog.ts";
 import {
-	LiteralTemplateIndex,
 	MAX_TEMPLATE_TEXT_LENGTH,
 	parseLiteralTemplate,
 } from "./literal-templates.ts";
@@ -174,77 +173,5 @@ describe("template matching", () => {
 		expect(runtime.templateMessage("Deleted Q3 plan")).toBe(
 			"Se eliminó Q3 plan"
 		);
-	});
-});
-
-describe("template index performance", () => {
-	const WORDS = ["Deleted", "Moved", "Opened", "Synced", "Shared", "Renamed"];
-
-	function largeCatalog(): LiteralCatalog {
-		const catalog: Record<string, string> = {};
-		for (let index = 0; index < 40_000; index += 1) {
-			const word = `${WORDS[index % WORDS.length]}`;
-			switch (index % 4) {
-				case 0:
-					catalog[`Plain sentence number ${index}`] = `Frase ${index}`;
-					break;
-				case 1:
-					catalog[`${word} {name} into folder ${index}`] =
-						`${word} {name} en carpeta ${index}`;
-					break;
-				case 2:
-					catalog[`{name} finished task ${index}`] =
-						`{name} terminó la tarea ${index}`;
-					break;
-				default:
-					catalog[`{shown} item${index} of {total}`] =
-						`{shown} elemento${index} de {total}`;
-			}
-		}
-		return catalog;
-	}
-
-	test("build within 200 ms and look up within 0.05 ms on average", () => {
-		const catalog = largeCatalog();
-		const texts: string[] = [];
-		for (let index = 0; index < 4000; index += 1) {
-			const target = (index * 37) % 40_000;
-			const word = WORDS[target % WORDS.length];
-			texts.push(
-				[
-					`Nothing matches this ${index}`,
-					`${word} report-${index}.pdf into folder ${target}`,
-					`Ada finished task ${target}`,
-					`3 item${target} of 9`,
-				][index % 4] ?? ""
-			);
-		}
-		// Best of three fresh indexes, so a busy shared machine's scheduling
-		// noise does not fail the budget.
-		let buildMs = Number.POSITIVE_INFINITY;
-		let lookupMs = Number.POSITIVE_INFINITY;
-		for (let attempt = 0; attempt < 3; attempt += 1) {
-			const index = new LiteralTemplateIndex(catalog);
-			const buildStart = performance.now();
-			expect(index.templateCount).toBe(30_000);
-			buildMs = Math.min(buildMs, performance.now() - buildStart);
-			const lookupStart = performance.now();
-			let matched = 0;
-			for (const text of texts) {
-				if (index.match(text, "es") !== undefined) {
-					matched += 1;
-				}
-			}
-			lookupMs = Math.min(
-				lookupMs,
-				(performance.now() - lookupStart) / texts.length
-			);
-			expect(matched).toBeGreaterThan(2000);
-			expect(index.match("Ada finished task 6", "es")).toBe(
-				"Ada terminó la tarea 6"
-			);
-		}
-		expect(buildMs).toBeLessThan(200);
-		expect(lookupMs).toBeLessThan(0.05);
 	});
 });

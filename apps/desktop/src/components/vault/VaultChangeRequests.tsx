@@ -7,7 +7,7 @@ import {
 	CheckmarkCircle02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,7 +34,7 @@ const DECISION_TOAST = {
 	cancel: "Request canceled",
 } satisfies Record<Decision, string>;
 
-function describe(request: VaultChangeRequest): string {
+function describe(request: VaultChangeRequest, tl: LiteralMessage): string {
 	const { coords } = request;
 	const where =
 		coords.path === ROOT_FOLDER
@@ -42,10 +42,10 @@ function describe(request: VaultChangeRequest): string {
 			: `${coords.environment} · ${coords.path}`;
 	const what =
 		request.operation === "delete"
-			? "Delete"
+			? tl("Delete")
 			: request.hasValue
-				? "New value"
-				: "Details";
+				? tl("New value")
+				: tl("Details");
 	return `${what} · ${where}`;
 }
 
@@ -72,11 +72,11 @@ export function VaultChangeRequests({
 			decideVaultChangeRequest(target, id, decision),
 		onSuccess: async (_, { decision }) => {
 			await queryClient.invalidateQueries({ queryKey: ["vault"] });
-			sileo.success({ title: DECISION_TOAST[decision] });
+			sileo.success({ title: tl(DECISION_TOAST[decision]) });
 		},
 		onError: (error) => {
 			sileo.error({
-				title: "Could not update the request",
+				title: tl("Could not update the request"),
 				description: vaultErrorMessage(error, "Try again.", tl),
 			});
 		},
@@ -116,8 +116,13 @@ export function VaultChangeRequests({
 									</Badge>
 								</div>
 								<p className="mt-1 truncate text-muted-foreground text-xs">
-									{describe(request)} · {mine ? "you" : request.requestedBy} ·{" "}
-									{whenLabel(request.requestedAt)}
+									{describe(request, tl)} ·{" "}
+									{mine
+										? tl("Requested by you")
+										: tl("Requested by {name}", {
+												name: request.requestedBy,
+											})}{" "}
+									· {whenLabel(request.requestedAt)}
 								</p>
 							</div>
 							<div className="flex shrink-0 gap-1">

@@ -1,3 +1,4 @@
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { useQuery } from "@tanstack/react-query";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -20,6 +21,11 @@ import { type LayerOption, NodeLayerMenu } from "./NodeLayerMenu.tsx";
 /** The voice + sandbox poll behind {@link VoiceAndSandboxSection}: Audio
  *  engines, Voice Recognition and Speech Processing preferences, and sandbox
  *  backends in one request. */
+/** The Audio sidecar's name, translated before it goes into "Install {label}". */
+export function ryuAudioEngineLabel(tl: LiteralMessage): string {
+	return tl("Ryu Audio engine");
+}
+
 export function useVoiceAndSandboxQuery(target: ApiTarget, enabled: boolean) {
 	const query = useQuery({
 		queryKey: ["node-voice-sandbox", target.url],

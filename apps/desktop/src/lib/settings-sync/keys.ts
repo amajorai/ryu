@@ -25,6 +25,8 @@
 // `keybindings:darwin` only, and every Mac the user signs into shares that one
 // set while their Windows machines share `keybindings:win32`.
 
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { isSealedLocalKey } from "../content-seal.ts";
 
 /** The platforms whose shortcuts are stored separately. */
@@ -411,7 +413,10 @@ export function isSyncableKey(key: string): boolean {
 }
 
 /** Human label for a wire key, including the per-OS shortcut slots. */
-export function labelForKey(key: string): string {
+export function labelForKey(
+	key: string,
+	tl: LiteralMessage = translate
+): string {
 	if (isKeybindingsKey(key)) {
 		const platform = platformOfKeybindingsKey(key);
 		const name =
@@ -420,7 +425,7 @@ export function labelForKey(key: string): string {
 				: platform === "win32"
 					? "Windows"
 					: "Linux";
-		return `Keyboard shortcuts (${name})`;
+		return tl("Keyboard shortcuts ({platform})", { platform: name });
 	}
 	return SYNCABLE_KEYS.find((k) => k.key === key)?.label ?? key;
 }

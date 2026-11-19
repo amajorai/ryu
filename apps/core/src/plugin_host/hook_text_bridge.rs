@@ -153,8 +153,8 @@ mod tests {
             "Tool Firewall blocked rm for this chat."
         );
         assert_eq!(
-            render_hook_text("Goal cleared.", None, "de"),
-            "Goal cleared."
+            render_hook_text("A sentence no catalog carries.", None, "de"),
+            "A sentence no catalog carries."
         );
     }
 
@@ -178,7 +178,9 @@ mod tests {
             Some(&json!({ "advice": advice })),
             "ja",
         );
-        assert_eq!(rendered, format!("Advisor: {advice}"));
+        // A hook sentence, so ja gets the catalog translation around the value.
+        assert_ne!(rendered, format!("Advisor: {advice}"));
+        assert!(rendered.contains(&advice), "the value must not be clipped");
         assert_eq!(
             render_hook_text(
                 "{a}-{b}-{a}",
@@ -197,3 +199,7 @@ mod tests {
         assert_eq!(render_hook_text("Hi {name}", None, "en"), "Hi {name}");
     }
 }
+
+#[cfg(test)]
+#[path = "hook_notes_runtime_test.rs"]
+mod hook_notes_runtime_test;

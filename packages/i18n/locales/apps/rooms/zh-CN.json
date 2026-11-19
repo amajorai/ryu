@@ -65,6 +65,7 @@
   "The room is generating…": "房间正在生成…",
   "The room is ready. Send the first prompt.": "房间已就绪。发送第一条提示吧。",
   "The room is temporarily unavailable. Try again.": "房间暂时不可用。请重试。",
+  "The room request was not accepted.": "房间请求未被接受。",
   "The turn response was not a valid room.": "轮次响应不是有效的房间。",
   "This closes the room and revokes its current guest sessions.": "这将关闭房间并撤销其当前的访客会话。",
   "This invite is invalid, expired, or revoked.": "此邀请无效、已过期或已被撤销。",

@@ -260,7 +260,7 @@ export function PatchDiffPanel({
 
 	const modeLabel = (() => {
 		if (reviewActive) {
-			return "Files from this turn";
+			return tl("Files from this turn");
 		}
 		if (mode === "staged") {
 			return "Staged";

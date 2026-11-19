@@ -34,9 +34,11 @@ const { LocalizedNoticeboardInterface } = await import(
 );
 const { AgentActor } = await import("./world-2d-actors.tsx");
 const { useLocalizedSnapshot } = await import("./use-localized-snapshot.ts");
+const { useQuizBoardState } = await import("./quiz-interface-state.ts");
 
 const JA: Record<string, string> = {
 	"Number {rank}": "{rank} 位",
+	"Round 1": "第1ラウンド",
 	"Talk to {name}": "{name} と話す",
 	Team: "チーム",
 	"Your turn": "あなたの番",
@@ -352,4 +354,16 @@ describe("memoized interface copy follows the catalog", () => {
 		expect(last?.threads).toBe(SNAPSHOT.threads);
 		expect(last?.agents).toBe(SNAPSHOT.agents);
 	});
+});
+
+function QuizRound() {
+	const { board } = useQuizBoardState(SNAPSHOT, new Map(), false, "auto");
+	return <output>{board.round}</output>;
+}
+
+test("the quiz board's round name follows a late catalog in place", async () => {
+	const { arrive, container } = await mountBeforeCatalog(<QuizRound />);
+	expect(labelled(container, "output").textContent).toBe("Round 1");
+	await arrive();
+	expect(labelled(container, "output").textContent).toBe("第1ラウンド");
 });

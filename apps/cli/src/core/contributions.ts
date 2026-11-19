@@ -37,6 +37,7 @@ import {
 	makeHeaders,
 } from "@ryuhq/core-client/client";
 import { z } from "zod";
+import { tf } from "../i18n/translate.ts";
 import type { RawViewSpec } from "./views.ts";
 import {
 	isKnownViewKind,
@@ -316,7 +317,7 @@ function readCommandArguments(
 		const result: SlashCommandArgument = {
 			name:
 				nonEmptyString(argument.name ?? argument.label ?? argument.id) ??
-				`Argument ${index + 1}`,
+				tf("Argument {number}", { number: index + 1 }),
 			options: rawOptions.success
 				? rawOptions.data.flatMap((value) => {
 						const option = readCommandOption(value);

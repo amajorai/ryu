@@ -1,110 +1,185 @@
-export const SUBCOMMAND_HELP = [
-	"ryu-cli secrets — manage the Secret Vault on the target Core node.",
-	"",
-	"Values:",
-	"  list [--env E] [--path P]                 List visible values (metadata only)",
-	"  get NAME [VERSION]                        Reveal one value (requires read)",
-	"  confirm [CODE] [--method totp|backup|password|otp]",
-	"                                            Confirm it's you so get/export/run can read shared",
-	"                                            team and org values for 10 minutes (password on stdin)",
-	"  set NAME [VALUE|-] [metadata flags]       Write a value (stdin when VALUE is - or omitted)",
-	"      --description T --tag T (repeatable) --expires-at RFC3339 --rotate-every 30d",
-	"      --type config|secret|sealed (sealed is use-only and one-way)",
-	"  delete NAME                               Soft-delete (restorable)",
-	"  destroy NAME VERSION… | destroy NAME --all  Permanently erase versions (not restorable)",
-	"  versions NAME                             List versions (never values)",
-	"  rollback NAME VERSION                     Make an older version current",
-	"  restore NAME                              Undo a soft delete",
-	"  Coordinates: --scope user|node|team|org --scope-id ID --env E --path /folder",
-	"",
-	"Developer workflow:",
-	"  init --env E [--path P] [--tags T,…] [--org-project ID] [--force]",
-	"                                            Write .ryu-vault.json here; commands in this directory and",
-	"                                            below default to its environment, folder, tags, and project",
-	"                                            (--no-project ignores it)",
-	"  run [--env E] [--path P] -- CMD ARGS…     Run CMD with values in its environment",
-	"      --tags T,…                            Only values tagged with one of these tags",
-	"      --org-project ID                      Also include this organization project's values (export too)",
-	"      --lease ROLE[=PREFIX]… [--lease-ttl 1h]",
-	"                                            Add a dynamic credential (PREFIX_FIELD); revoked on exit",
-	"      --watch                               Restart CMD when its values or leases change",
-	"  run --broker SVC[,SVC…] [--env E] [--ttl 15m] -- CMD ARGS…",
-	"                                            Run CMD through the credential broker (no values in its env)",
-	"      --isolation=container (or --container) [--image REF] [--mount SRC:DST[:ro]]…",
-	"                                            Run it in a Docker container whose only egress is the broker",
-	"  export [--format dotenv|json|yaml|shell|k8s] [--name NAME]… [--tags T,…] [--k8s-name N] [--k8s-namespace NS]",
-	"  snapshot [--out FILE] [--env E] [--path P]  Passphrase-sealed export (RYU_VAULT_PASSPHRASE)",
-	"  import FILE [--format dotenv|json|snapshot] [--on-conflict skip|overwrite] [--passphrase P]",
-	"  scan [PATHS…] [--allow FINGERPRINT]       Find leaked credentials; exit 1 on findings",
-	"",
-	"AI coding agents (CLAUDECODE, CURSOR_AGENT, CODEX_*, AGENT set):",
-	"  get and export show config values only; snapshot, unwrap, dynamic issue, items reveal, and",
-	"  pm read refuse to print values. run uses --broker with every available service (plus the",
-	"  config values in its env), and refuses commands that print their env.",
-	"  --human                                   A person at a terminal confirms and lifts the guard once",
-	"",
-	"Administration:",
-	"  env list | env set SLUG [--name N] [--protected|--unprotected] [--approvals N] | env delete SLUG",
-	"  policy list | policy set NAME FILE | policy delete NAME",
-	"  policy bind POLICY SUBJECT [--expires-at T] | policy unbind BINDING_ID",
-	"  approvals list [--status S] | approvals approve ID | approvals reject ID [--reason R]",
-	"  audit [--verify] [--limit N] [--name NAME] [--before SEQ]",
-	"  status | seal | unseal [SHARE]",
-	"",
-	"Credential broker:",
-	"  broker services [--env E] | broker sessions [revoke ID] | broker logs [--service S] [--limit N]",
-	"  broker proposals [--status S] | broker proposals approve ID [--grant G] | broker proposals reject ID [--reason R]",
-	"  broker ca                                 Print the broker CA certificate (PEM)",
-	"  Agents (RYU_VAULT_TOKEN, or the broker session the agent runs under):",
-	"  broker discover [--env E]                 List the services and placeholders this agent may use",
-	"  broker propose --message WHY [--host H [--name N] [--auth bearer|api_key|passthrough] [--header H]]",
-	"      [--credential secret:NAME [--instructions TEXT]]…   Ask a person for a host or credential",
-	"  broker proposal ID                        Show a proposal (exit 3 while pending, 1 if rejected)",
-	"",
-	"Password managers (1Password, Bitwarden Secrets Manager):",
-	"  pm accounts | pm test NAME | pm remove NAME",
-	"  pm add NAME --provider 1password-connect|1password-service-account|bitwarden-sm [--address URL]",
-	"                                            Token on stdin, never as an argument",
-	"  pm reconnect NAME                         Replace the token (stdin)",
-	"  pm read REF [--env E]                     Read op://… or bws://… (exit 3 while approval is pending)",
-	"  pm approvals [--status S] | pm approvals approve ID [--grant once|1h|24h|30d] | pm approvals reject ID",
-	"  pm grants [--all] | pm grants revoke ID",
-	"",
-	"External stores and secret syncs (credentials come from FILE or stdin, never arguments):",
-	"  external stores | external add FILE|- | external test STORE | external remove STORE",
-	'      FILE: {"name": "ci", "kind": "github-actions"|"vercel"|"aws-secrets-manager"|"gcp-secret-manager"|',
-	'             "openbao"|"hashicorp-vault"|"infisical", "authMethod": …, "credentials": {…}, …}',
-	"  external sync STORE --env E [--path P] [--remote PREFIX] [--interval 1h]",
-	"                                            Push a folder to the store after every write and on an interval",
-	"  external syncs | external push ID | external unsync ID",
-	"  external source STORE --env E [--path P] [--remote R] [--mode live|sync]",
-	"  external sources | external pull ID | external unsource ID",
-	"",
-	"Dynamic secrets and leases:",
-	"  dynamic roles | dynamic put ROLE FILE | dynamic delete ROLE | dynamic revoke-all ROLE",
-	'      FILE: {"provider": {"kind": "postgres"|"aws-sts"|"webhook"|"random", …}, "defaultTtl": "1h", "maxTtl": "24h"}',
-	"  dynamic issue ROLE [--ttl 1h]             Print a new credential and its lease id",
-	"  lease list [--name ROLE] [--all] | lease renew ID [--increment 1h] | lease revoke ID",
-	"",
-	"TOTP and typed items:",
-	"  totp code NAME | totp validate NAME CODE  Print a current code; validate exits 1 when invalid",
-	"  items list [--env E] [--path P] | items get KEY | items reveal KEY FIELD | items delete KEY",
-	"  items put KEY --type T --field name=value[:plain]…   (:plain stores a non-sensitive text field)",
-	"",
-	"Payment cards (number and CVC are read from stdin, never from arguments):",
-	'  printf \'%s\\n%s\\n\' "$NUMBER" "$CVC" | ryu-cli secrets items put KEY --type card --cardholder NAME',
-	"      --exp MM/YY --merchant HOST… [--postal-code P] [--country CC] [--address-line1 A] [--city C]",
-	"  cards approvals [--status S] [--env E]     List spend approvals (default: pending)",
-	"  cards approvals approve ID [--mode once|grant] [--subject session|agent] [--ttl 15m] [--max-uses N]",
-	"      (once: one use within --ttl; requesters cannot approve their own fill or reveal)",
-	"  cards approvals reject ID [--reason R] | cards approvals revoke ID [--reason R]",
-	"",
-	"Machine tokens:",
-	"  login --approle ROLE_ID SECRET_ID | login --jwt IDENTITY JWT   Print a vault token",
-	"  logout                                    Revoke RYU_VAULT_TOKEN",
-	"  token lookup [ACCESSOR] | token renew [ACCESSOR] [--increment 1h]   (RYU_VAULT_TOKEN when omitted)",
-	"  wrap NAME --ttl 5m                        Print a single-use wrapping token for one value",
-	"  unwrap TOKEN                              Print the wrapped value (consumes the token)",
-	"  With RYU_VAULT_TOKEN set, get/export/run/wrap/totp read node-scoped values with that token.",
-	"  HashiCorp Vault/OpenBao clients: VAULT_ADDR=<node URL> VAULT_TOKEN=<vault token> (the /v1 API).",
-].join("\n");
+// `ryu-cli secrets help`: usages and flags stay verbatim; headings and
+// descriptions render in the CLI locale (`secrets-help-format.ts` lays them
+// out). Administration, broker and machine sections live in
+// `secrets-help-admin.ts` and `secrets-help-machines.ts`.
+
+import { CLI_TRANSLATOR, type CliTranslator } from "../i18n/translate.ts";
+import { adminHelpEntries } from "./secrets-help-admin.ts";
+import { devloopHelpEntries } from "./secrets-help-devloop.ts";
+import { engineHelpEntries } from "./secrets-help-engines.ts";
+import { type HelpEntry, renderHelpEntries } from "./secrets-help-format.ts";
+import { machineHelpEntries } from "./secrets-help-machines.ts";
+
+type HelpTranslator = Pick<CliTranslator, "tr">;
+
+function valueEntries({ tr }: HelpTranslator): HelpEntry[] {
+	return [
+		`ryu-cli secrets — ${tr("manage the Secret Vault on the target Core node.")}`,
+		"",
+		tr("Values:"),
+		["list [--env E] [--path P]", tr("List visible values (metadata only)")],
+		["get NAME [VERSION]", tr("Reveal one value (requires read)")],
+		[
+			"confirm [CODE] [--method totp|backup|password|otp]",
+			tr(
+				"Confirm it's you so get/export/run can read shared team and org values for 10 minutes (password on stdin)"
+			),
+		],
+		[
+			"set NAME [VALUE|-] [metadata flags]",
+			tr("Write a value (stdin when VALUE is - or omitted)"),
+		],
+		"      --description T --tag T (repeatable) --expires-at RFC3339 --rotate-every 30d",
+		`      --type config|secret|sealed (${tr("sealed is use-only and one-way")})`,
+		[
+			"--random [--length 32] [--charset alphanumeric|hex|base64url|symbols]",
+			tr("Generate the value here (never printed); rotation reuses it"),
+			6,
+		],
+		[
+			"delete NAME [--force]",
+			tr("Soft-delete (restorable); refused while broker services use it"),
+		],
+		[
+			"destroy NAME VERSION… | destroy NAME --all",
+			tr("Permanently erase versions (not restorable)"),
+		],
+		["versions NAME", tr("List versions (never values)")],
+		["rollback NAME VERSION", tr("Make an older version current")],
+		["restore NAME", tr("Undo a soft delete")],
+		`  ${tr("Coordinates:")} --scope user|node|team|org --scope-id ID --env E --path /folder`,
+	];
+}
+
+function workflowEntries({ tr }: HelpTranslator): HelpEntry[] {
+	return [
+		"",
+		tr("Developer workflow:"),
+		"  init --env E [--path P] [--tags T,…] [--org-project ID] [--broker SVC,…] [--placeholder VAR,…]",
+		[
+			"[--out .ryu/vault.json] [--force]",
+			tr(
+				"Write .ryu-vault.json here; commands in this directory and below default to its environment, folder, tags, and project (--no-project ignores it); with --broker, run brokers those services by default (--no-broker passes values instead)"
+			),
+			6,
+		],
+		[
+			"run [--env E] [--path P] -- CMD ARGS…",
+			tr("Run CMD with values in its environment"),
+		],
+		["--tags T,…", tr("Only values tagged with one of these tags"), 6],
+		[
+			"--org-project ID",
+			tr("Also include this organization project's values (export too)"),
+			6,
+		],
+		[
+			"--lease ROLE[=PREFIX]… [--lease-ttl 1h]",
+			tr(
+				"Add a dynamic credential (PREFIX_FIELD); renewed while CMD runs, revoked on exit"
+			),
+			6,
+		],
+		["--watch", tr("Restart CMD when its values or leases change"), 6],
+		[
+			"--allow-env-dump",
+			tr("Allow a CMD that prints its env (printenv, env, set, export -p)"),
+			6,
+		],
+		[
+			"shell [--env E] [--path P] [--tags T,…] [--lease ROLE[=PREFIX]]…",
+			tr("Start $SHELL with values in its env; leases revoked on exit"),
+		],
+		[
+			"run --broker SVC[,SVC…] [--env E] [--ttl 15m] -- CMD ARGS…",
+			tr("Run CMD through the credential broker (no values in its env)"),
+		],
+		[
+			"[--placeholder VAR,…] [--no-placeholders]",
+			tr("Brokered API keys are set to __ryu_broker__ so SDKs start"),
+			6,
+		],
+		[
+			"--isolation=container (or --container) [--image REF] [--mount SRC:DST[:ro]]…",
+			tr("Run it in a Docker container whose only egress is the broker"),
+			6,
+		],
+		"  export [--format dotenv|json|yaml|shell|k8s|csv|toml|hcl|ini] [--name NAME]… [--tags T,…] [--k8s-name N] [--k8s-namespace NS]",
+		[
+			"snapshot [--out FILE] [--env E] [--path P]",
+			tr("Passphrase-sealed export (RYU_VAULT_PASSPHRASE)"),
+		],
+		"  import FILE [--format dotenv|json|snapshot|doppler|envkey] [--on-conflict skip|overwrite] [--passphrase P]",
+	];
+}
+
+function scanEntries({ tr }: HelpTranslator): HelpEntry[] {
+	return [
+		[
+			"scan [PATHS…] [--allow FINGERPRINT]",
+			tr(
+				"Find leaked credentials; exit 1 on findings, 3 if the scan cannot run (Core unreachable, git error)"
+			),
+		],
+		["scan --staged", tr("Scan the staged blobs the next commit would record")],
+		[
+			"scan --history [REV-RANGE] [--max-commits N]",
+			tr("Scan lines added by the newest N commits (default 1000)"),
+		],
+		[
+			"--allow-offline",
+			tr(
+				"Exit 0 instead of 3 when Core is unreachable (or RYU_SECRETS_SCAN_ALLOW_OFFLINE=1)"
+			),
+			6,
+		],
+		[
+			"scan install-hook [--force] | scan uninstall-hook",
+			tr(
+				"Add or remove a git pre-commit hook that runs scan --staged (--force keeps an existing hook and runs it first)"
+			),
+		],
+	];
+}
+
+function agentEntries({ tr }: HelpTranslator): HelpEntry[] {
+	return [
+		"",
+		tr(
+			"Client agent (machine identity; like the HashiCorp Vault, OpenBao and Infisical agents):"
+		),
+		[
+			"agent --config FILE [--once]",
+			tr(
+				"Log in and keep the token renewed, write it to sink files, render {{secret:REF}} and {{lease:NAME.FIELD}} templates, render again on vault changes and lease replacement, and run each template's command when its file changed"
+			),
+		],
+		["--once", tr("Render once and exit (no watching or renewal)"), 6],
+		"",
+		tr("AI coding agents (CLAUDECODE, CURSOR_AGENT, CODEX_*, AGENT set):"),
+		{
+			prose: tr(
+				"get and export show config values only; snapshot, unwrap, share, dynamic issue, items reveal, pm read, machine secret-id, token create, and control-group redeem refuse to print values. run uses --broker with every available service (plus the config values in its env), and refuses commands that print their env."
+			),
+		},
+		["--human", tr("A person at a terminal confirms and lifts the guard once")],
+	];
+}
+
+/** The full `ryu-cli secrets help` text in the translator's locale. */
+export function renderSecretsHelp(
+	translator: HelpTranslator = CLI_TRANSLATOR
+): string {
+	return renderHelpEntries([
+		...valueEntries(translator),
+		...workflowEntries(translator),
+		...scanEntries(translator),
+		...agentEntries(translator),
+		...adminHelpEntries(translator),
+		...machineHelpEntries(translator),
+		...devloopHelpEntries(translator),
+		...engineHelpEntries(translator),
+	]).join("\n");
+}
+
+export const SUBCOMMAND_HELP = renderSecretsHelp();

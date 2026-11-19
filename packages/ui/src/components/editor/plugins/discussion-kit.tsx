@@ -68,6 +68,9 @@ export const getDiscussionBlockClickTarget = ({
 		target,
 	});
 
+/** Marks catalog copy; the DOM localizer translates it once rendered. */
+const tl = (source: string): string => source;
+
 export const discussionPlugin = createPlatePlugin<
 	"discussion",
 	DiscussionOptions
@@ -80,7 +83,7 @@ export const discussionPlugin = createPlatePlugin<
 		users: {
 			"local-user": {
 				id: "local-user",
-				name: "Local user",
+				name: tl("Local user"),
 			},
 		},
 	},

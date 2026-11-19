@@ -97,8 +97,33 @@ fn delegate_targets_must_be_public_at_write_time() {
         json!({ "kind": "aws-sts", "accessKeyId": "A", "secretAccessKey": "S",
                 "roleArn": "arn:aws:iam::1:role/r", "region": "us-east-1",
                 "endpoint": "http://127.0.0.1:9000" }),
+        json!({ "kind": "mysql", "connectionUrl": "mysql://u:p@127.0.0.1/db",
+                "creationStatements": ["CREATE USER '{{name}}'"] }),
+        json!({ "kind": "mssql", "connectionUrl": "sqlserver://sa:p@10.0.0.5/db",
+                "creationStatements": ["CREATE LOGIN [{{name}}]"] }),
+        // A delegate may not pin its own trust anchor.
+        json!({ "kind": "mssql", "connectionUrl": "sqlserver://sa:p@sql.example.com/db",
+                "creationStatements": ["CREATE LOGIN [{{name}}]"], "caPem": "pem" }),
+        json!({ "kind": "mongodb", "connectionUrl": "mongodb://u:p@localhost/",
+                "roles": [{ "role": "read" }] }),
+        json!({ "kind": "kubernetes", "host": "https://192.168.1.10:6443", "serviceAccountJwt": "t",
+                "namespace": "apps", "serviceAccountName": "ci" }),
+        json!({ "kind": "kubernetes", "host": "https://k8s.example.com", "serviceAccountJwt": "t",
+                "namespace": "apps", "serviceAccountName": "ci", "caPem": "pem" }),
+        json!({ "kind": "kubernetes", "host": "http://k8s.example.com", "serviceAccountJwt": "t",
+                "namespace": "apps", "serviceAccountName": "ci" }),
     ] {
         assert!(precheck_provider(&provider(bad.clone())).is_err(), "{bad}");
+    }
+    for fixed_endpoint in [
+        json!({ "kind": "gcp", "credentials": "{}", "serviceAccountEmail": "a@p.iam.gserviceaccount.com" }),
+        json!({ "kind": "azure", "tenantId": "contoso.com", "clientId": "c", "clientSecret": "s",
+                "applicationObjectId": "o" }),
+    ] {
+        assert!(
+            precheck_provider(&provider(fixed_endpoint.clone())).is_ok(),
+            "{fixed_endpoint}"
+        );
     }
     for good in [
         json!({ "kind": "postgres", "connectionUrl": "postgres://u:p@db.example.com:6543/db",

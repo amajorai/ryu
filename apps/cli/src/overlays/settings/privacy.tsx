@@ -8,8 +8,8 @@ import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import { errorText } from "../../i18n/error-text.ts";
-import { formatCliDateTime } from "../../i18n/format.ts";
 import { tf } from "../../i18n/translate.ts";
+import { privacySaveLabel, supportStateLabel } from "./privacy-labels.ts";
 import {
 	DEFAULTS,
 	type DiagnosticsContentMode,
@@ -204,8 +204,7 @@ export function PrivacyPanel({
 				| "crashReports"
 				| "diagnosticsExport"
 				| "supportAccess",
-			key: string,
-			label: string
+			key: string
 		) => {
 			const previousValue = preferences[field];
 			const nextValue = !previousValue;
@@ -224,7 +223,12 @@ export function PrivacyPanel({
 			}
 			writes.push({ key, value: String(nextValue) });
 			setPreferences((current) => ({ ...current, ...next }));
-			void saveIntent({ label, writes, previous, next });
+			void saveIntent({
+				label: privacySaveLabel(field, preferences.supportAccess),
+				writes,
+				previous,
+				next,
+			});
 		},
 		[preferences, saveIntent, supportDurationHours]
 	);
@@ -247,7 +251,7 @@ export function PrivacyPanel({
 			const previous = preferences.diagnosticsEndpoint;
 			setEndpointDraft(endpoint);
 			void saveIntent({
-				label: "the diagnostics endpoint",
+				label: privacySaveLabel("diagnosticsEndpoint", false),
 				writes: [{ key: PRIVACY_KEYS.diagnosticsEndpoint, value: endpoint }],
 				previous: { diagnosticsEndpoint: previous },
 				next: { diagnosticsEndpoint: endpoint },
@@ -263,7 +267,7 @@ export function PrivacyPanel({
 			previous === "content" ? "metadata_only" : "content";
 		setPreferences((current) => ({ ...current, diagnosticsContentMode: next }));
 		void saveIntent({
-			label: "the diagnostics content mode",
+			label: privacySaveLabel("diagnosticsContentMode", false),
 			writes: [{ key: PRIVACY_KEYS.diagnosticsContentMode, value: next }],
 			previous: { diagnosticsContentMode: previous },
 			next: { diagnosticsContentMode: next },
@@ -328,47 +332,21 @@ export function PrivacyPanel({
 			return;
 		}
 		if (selected === "analytics") {
-			toggleBoolean(
-				"analytics",
-				PRIVACY_KEYS.analytics,
-				"the analytics choice"
-			);
+			toggleBoolean("analytics", PRIVACY_KEYS.analytics);
 		} else if (selected === "community") {
-			toggleBoolean(
-				"community",
-				PRIVACY_KEYS.community,
-				"the community-stats choice"
-			);
+			toggleBoolean("community", PRIVACY_KEYS.community);
 		} else if (selected === "profileActivity") {
-			toggleBoolean(
-				"profileActivity",
-				PRIVACY_KEYS.profileActivity,
-				"the profile-activity choice"
-			);
+			toggleBoolean("profileActivity", PRIVACY_KEYS.profileActivity);
 		} else if (selected === "crashReports") {
-			toggleBoolean(
-				"crashReports",
-				PRIVACY_KEYS.crashReports,
-				"the crash-report choice"
-			);
+			toggleBoolean("crashReports", PRIVACY_KEYS.crashReports);
 		} else if (selected === "diagnosticsExport") {
-			toggleBoolean(
-				"diagnosticsExport",
-				PRIVACY_KEYS.diagnosticsExport,
-				"the diagnostics-export choice"
-			);
+			toggleBoolean("diagnosticsExport", PRIVACY_KEYS.diagnosticsExport);
 		} else if (selected === "diagnosticsEndpoint") {
 			editEndpoint();
 		} else if (selected === "diagnosticsContentMode") {
 			toggleContentMode();
 		} else if (selected === "supportAccess") {
-			toggleBoolean(
-				"supportAccess",
-				PRIVACY_KEYS.supportAccess,
-				preferences.supportAccess
-					? "ending support access"
-					: "granting support access"
-			);
+			toggleBoolean("supportAccess", PRIVACY_KEYS.supportAccess);
 		} else {
 			setNotice("Use ← / → to choose the support-access duration.");
 		}
@@ -376,7 +354,6 @@ export function PrivacyPanel({
 		busy,
 		editEndpoint,
 		loadState,
-		preferences.supportAccess,
 		selected,
 		toggleBoolean,
 		toggleContentMode,
@@ -448,18 +425,7 @@ export function PrivacyPanel({
 		}
 	});
 
-	const supportIsActive =
-		preferences.supportAccess &&
-		(preferences.supportExpiry === 0 || Date.now() < preferences.supportExpiry);
-	const supportState = supportIsActive
-		? preferences.supportExpiry === 0
-			? "ON · no expiry"
-			: tf("ON until {date}", {
-					date: formatCliDateTime(preferences.supportExpiry) ?? "",
-				})
-		: preferences.supportAccess
-			? "Expired"
-			: "OFF";
+	const supportState = supportStateLabel(preferences, Date.now());
 	const themeColor = theme.colors;
 
 	return (

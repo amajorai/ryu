@@ -9,7 +9,7 @@ import {
 import { ApiError } from "@ryuhq/core-client/client";
 import { z } from "zod";
 import { RYU_ENGINE_ID } from "../core/agentIdentity.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr, trMessage } from "../i18n/translate.ts";
 import type { CliContext } from "./types.ts";
 
 // ── Core records ─────────────────────────────────────────────────────────────
@@ -171,8 +171,8 @@ export async function launchRefusal(
 	} catch (error) {
 		const detail =
 			error instanceof ApiError && error.status === 404
-				? "this Core has no launch check"
-				: coreError(error, input.agentId).message;
+				? tr("this Core has no launch check")
+				: trMessage(coreError(error, input.agentId).message);
 		ctx.io.err(
 			`${tf("Note: could not ask Core whether the engine will start ({detail}). Saving anyway; Core still checks when the agent starts.", { detail })}\n`
 		);
@@ -181,22 +181,26 @@ export async function launchRefusal(
 	const parsed = agentLaunchCheckResponseSchema.safeParse(json);
 	if (!parsed.success) {
 		ctx.io.err(
-			"Note: Core's launch check gave an unreadable answer. Saving anyway; Core still checks when the agent starts.\n"
+			`${tr("Note: Core's launch check gave an unreadable answer. Saving anyway; Core still checks when the agent starts.")}\n`
 		);
 		return null;
 	}
 	const check = toAgentLaunchCheck(parsed.data);
 	if (check.modelWarning) {
-		ctx.io.err(`Warning: ${check.modelWarning}\n`);
+		ctx.io.err(
+			`${tf("Warning: {warning}", { warning: trMessage(check.modelWarning) })}\n`
+		);
 	}
 	if (check.launchable) {
 		return null;
 	}
 	const reason =
-		check.reason ?? "Core says this agent's engine would not start.";
+		check.reason == null
+			? tr("Core says this agent's engine would not start.")
+			: trMessage(check.reason);
 	const hint =
 		input.engine === RYU_ENGINE_ID
 			? ""
 			: ` ${tf("To run it on Ryu instead, add --engine {RYU_ENGINE_ID}.", { RYU_ENGINE_ID })}`;
-	return `${reason} Nothing was saved.${hint}`;
+	return `${reason} ${tr("Nothing was saved.")}${hint}`;
 }

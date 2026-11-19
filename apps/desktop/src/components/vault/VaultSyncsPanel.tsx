@@ -5,11 +5,16 @@
 // `sys/external/<store>`; syncing a folder also needs `read` and `list` on it.
 // No credential or value is shown.
 
-import { Add01Icon } from "@hugeicons/core-free-icons";
+import {
+	Add01Icon,
+	ArrowLeft02Icon,
+	ArrowRight02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -21,6 +26,7 @@ import {
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	deleteVaultExternalDestination,
+	deleteVaultExternalSource,
 	deleteVaultExternalStore,
 	listVaultExternalDestinations,
 	listVaultExternalSources,
@@ -29,10 +35,13 @@ import {
 	syncVaultExternalSource,
 	testVaultExternalStore,
 } from "@/src/lib/api/vault-external.ts";
+import { VaultExternalSourceDialog } from "./VaultExternalSourceDialog.tsx";
+import { VaultExternalStoreDialog } from "./VaultExternalStoreDialog.tsx";
 import { VaultSyncDialog } from "./VaultSyncDialog.tsx";
 import { VaultSyncTargetDialog } from "./VaultSyncTargetDialog.tsx";
 import { vaultErrorMessage } from "./vault-errors.ts";
 import {
+	SYNC_TARGETS,
 	storeSummary,
 	syncStatus,
 	syncTargetLabel,
@@ -73,6 +82,8 @@ export function VaultSyncsPanel({
 	const queryClient = useQueryClient();
 	const [connecting, setConnecting] = useState(false);
 	const [syncing, setSyncing] = useState(false);
+	const [connectingStore, setConnectingStore] = useState(false);
+	const [sourcing, setSourcing] = useState(false);
 	const storesQuery = useQuery({
 		queryKey: [...KEY, "stores", target.url],
 		queryFn: () => listVaultExternalStores(target),
@@ -96,7 +107,7 @@ export function VaultSyncsPanel({
 					const result = await testVaultExternalStore(target, action.id);
 					if (!result.ok) {
 						throw new Error(
-							result.error ?? "The store refused the credentials"
+							result.error ?? tl("The store refused the credentials")
 						);
 					}
 					return tl("{name} is reachable", { name: action.name });
@@ -116,9 +127,14 @@ export function VaultSyncsPanel({
 				case "remove-store":
 					await deleteVaultExternalStore(target, action.id);
 					return tl("Removed {name}", { name: action.name });
+				case "remove-source":
+					await deleteVaultExternalSource(target, action.id);
+					return tl("{folder} no longer reads from the store", {
+						folder: action.name,
+					});
 				default:
 					await deleteVaultExternalDestination(target, action.id);
-					return "Sync removed; values already pushed stay in place";
+					return tl("Sync removed; values already pushed stay in place");
 			}
 		},
 		onSuccess: async (title) => {
@@ -128,8 +144,8 @@ export function VaultSyncsPanel({
 		onError: async (error) => {
 			await queryClient.invalidateQueries({ queryKey: [...KEY] });
 			sileo.error({
-				title: "That did not work",
-				description: vaultErrorMessage(error, "Try again.", tl),
+				title: tl("That did not work"),
+				description: vaultErrorMessage(error, tl("Try again."), tl),
 			});
 		},
 	});
@@ -138,16 +154,33 @@ export function VaultSyncsPanel({
 	const names = new Map(stores.map((store) => [store.id, store.name]));
 	const syncs = syncsQuery.data ?? [];
 	const sources = sourcesQuery.data ?? [];
+	const readableStores = stores.filter(
+		(store) => !SYNC_TARGETS.some((item) => item.kind === store.kind)
+	);
 
 	return (
 		<div className="flex flex-col gap-6">
 			<SettingsSection
-				caption="Platforms and stores this node can push folders to. Credentials are never shown again after you connect one."
+				caption="Platforms and stores this node can push folders to or read them from. Credentials are never shown again after you connect one."
 				headerAction={
-					<Button onClick={() => setConnecting(true)} size="sm" variant="ghost">
-						<HugeiconsIcon className="size-4" icon={Add01Icon} />
-						Connect target
-					</Button>
+					<div className="flex items-center gap-1">
+						<Button
+							onClick={() => setConnecting(true)}
+							size="sm"
+							variant="ghost"
+						>
+							<HugeiconsIcon className="size-4" icon={Add01Icon} />
+							Connect target
+						</Button>
+						<Button
+							onClick={() => setConnectingStore(true)}
+							size="sm"
+							variant="ghost"
+						>
+							<HugeiconsIcon className="size-4" icon={Add01Icon} />
+							Connect store
+						</Button>
+					</div>
 				}
 				title="Sync targets"
 			>
@@ -299,7 +332,11 @@ export function VaultSyncsPanel({
 										title={
 											<>
 												<span className="font-medium">{folder}</span>
-												<span className="text-muted-foreground">→</span>
+												<DirectionalIcon
+													aria-hidden="true"
+													className="size-3.5 shrink-0 text-muted-foreground"
+													icon={ArrowRight02Icon}
+												/>
 												<span>{names.get(sync.storeId) ?? sync.storeId}</span>
 												{sync.remotePath ? (
 													<code className="font-mono text-xs">
@@ -316,33 +353,66 @@ export function VaultSyncsPanel({
 				</SettingsCard>
 			</SettingsSection>
 
-			{sources.length > 0 ? (
+			{sources.length > 0 || readableStores.length > 0 ? (
 				<SettingsSection
 					caption="Folders read from OpenBao, HashiCorp Vault or Infisical. Change these values in the store."
+					headerAction={
+						<Button
+							disabled={readableStores.length === 0}
+							onClick={() => setSourcing(true)}
+							size="sm"
+							variant="ghost"
+						>
+							<HugeiconsIcon className="size-4" icon={Add01Icon} />
+							Read a folder
+						</Button>
+					}
 					title="Sources"
 				>
 					<SettingsCard className="p-0">
+						{sources.length === 0 ? (
+							<p className="p-6 text-center text-muted-foreground text-sm">
+								No folders read from a store.
+							</p>
+						) : null}
 						<ul className="divide-y">
 							{sources.map((source) => {
 								const folder = `${source.environment}:${source.path}`;
 								return (
 									<Row
 										actions={
-											<Button
-												aria-label={tl("Pull {folder} now", { folder })}
-												disabled={busy(source.id)}
-												onClick={() =>
-													act.mutate({
-														id: source.id,
-														kind: "pull",
-														name: folder,
-													})
-												}
-												size="sm"
-												variant="ghost"
-											>
-												Pull now
-											</Button>
+											<>
+												<Button
+													aria-label={tl("Pull {folder} now", { folder })}
+													disabled={busy(source.id)}
+													onClick={() =>
+														act.mutate({
+															id: source.id,
+															kind: "pull",
+															name: folder,
+														})
+													}
+													size="sm"
+													variant="ghost"
+												>
+													Pull now
+												</Button>
+												<Button
+													aria-label={tl("Stop reading {folder}", { folder })}
+													disabled={busy(source.id)}
+													onClick={() =>
+														act.mutate({
+															id: source.id,
+															kind: "remove-source",
+															name: folder,
+														})
+													}
+													size="sm"
+													variant="ghost"
+												>
+													Stop
+												</Button>
+											</>
 										}
 										detail={
 											source.lastStatus === "error"
@@ -356,7 +426,11 @@ export function VaultSyncsPanel({
 										title={
 											<>
 												<span className="font-medium">{folder}</span>
-												<span className="text-muted-foreground">←</span>
+												<DirectionalIcon
+													aria-hidden="true"
+													className="size-3.5 shrink-0 text-muted-foreground"
+													icon={ArrowLeft02Icon}
+												/>
 												<span>
 													{names.get(source.storeId) ?? source.storeId}
 												</span>
@@ -380,6 +454,18 @@ export function VaultSyncsPanel({
 				onOpenChange={setSyncing}
 				open={syncing}
 				stores={stores}
+				target={target}
+			/>
+			<VaultExternalStoreDialog
+				onOpenChange={setConnectingStore}
+				open={connectingStore}
+				target={target}
+			/>
+			<VaultExternalSourceDialog
+				environment={environment}
+				onOpenChange={setSourcing}
+				open={sourcing}
+				stores={readableStores}
 				target={target}
 			/>
 		</div>

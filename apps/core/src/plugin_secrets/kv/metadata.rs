@@ -2,6 +2,9 @@
 
 use super::*;
 
+mod tags;
+pub use tags::*;
+
 /// Character set for generated values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

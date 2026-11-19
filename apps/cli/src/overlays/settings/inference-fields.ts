@@ -1,3 +1,5 @@
+import { tf } from "../../i18n/translate.ts";
+
 type FieldKind = "number" | "text" | "string-array" | "object" | "logit-bias";
 
 export interface SamplingField {
@@ -11,76 +13,92 @@ export interface SamplingField {
 	min?: number;
 }
 
+/** One field; `label` sits in the options so the catalog extractor sees it. */
 function field(
 	key: string,
-	label: string,
-	options: Omit<SamplingField, "key" | "label"> = {
-		group: "Sampling",
-		kind: "number",
-	}
+	options: Omit<SamplingField, "key">
 ): SamplingField {
-	return { key, label, ...options };
+	return { key, ...options };
 }
 
+/** "Applies on the next engine start (--ctx-size)": the flag stays verbatim. */
+const engineStartHint = (flag: string) =>
+	tf("Applies on the next engine start ({flag})", { flag });
+
+/** "Sets the Modelfile PARAMETER num_ctx": the Modelfile line stays verbatim. */
+const modelfileHint = (parameter: string) =>
+	tf("Sets the Modelfile {parameter}", { parameter });
+
 const COMMON_FIELDS: readonly SamplingField[] = [
-	field("temperature", "Temperature", {
+	field("temperature", {
+		label: "Temperature",
 		group: "Sampling",
 		hint: "0 = deterministic, higher = more random",
 		kind: "number",
 		max: 2,
 		min: 0,
 	}),
-	field("top_p", "Top P", {
+	field("top_p", {
+		label: "Top P",
 		group: "Sampling",
 		kind: "number",
 		max: 1,
 		min: 0,
 	}),
-	field("max_tokens", "Max tokens", {
+	field("max_tokens", {
+		label: "Max tokens",
 		group: "Sampling",
 		integer: true,
 		kind: "number",
 		min: 1,
 	}),
-	field("seed", "Seed", {
+	field("seed", {
+		label: "Seed",
 		group: "Sampling",
 		hint: "Reproducible output when set",
 		integer: true,
 		kind: "number",
 	}),
-	field("stop", "Stop sequences (JSON array)", {
+	field("stop", {
+		label: "Stop sequences (JSON array)",
 		group: "Sampling",
 		hint: 'Example: ["###", "</s>"]',
 		kind: "string-array",
 	}),
-	field("frequency_penalty", "Frequency penalty", {
+	field("frequency_penalty", {
+		label: "Frequency penalty",
 		group: "Penalties",
 		kind: "number",
 		max: 2,
 		min: -2,
 	}),
-	field("presence_penalty", "Presence penalty", {
+	field("presence_penalty", {
+		label: "Presence penalty",
 		group: "Penalties",
 		kind: "number",
 		max: 2,
 		min: -2,
 	}),
-	field("prefill", "Prefill", {
+	field("prefill", {
+		label: "Prefill",
 		group: "Output control",
 		hint: "Text the assistant reply must start with",
 		kind: "text",
 	}),
-	field("response_format", "Response format (JSON)", {
+	field("response_format", {
+		label: "Response format (JSON)",
 		group: "Output control",
 		hint: 'Example: {"type":"json_object"}',
 		kind: "object",
 	}),
-	field("logit_bias", "Logit bias (JSON)", {
+	field("logit_bias", {
+		label: "Logit bias (JSON)",
 		group: "Output control",
 		hint: "Token IDs map to a bias from -100 to 100; -100 bans a token.",
 		kind: "logit-bias",
 	}),
-	field("extra", "Extra body fields (JSON)", {
+	field("extra", {
+		label: "Extra body fields (JSON)",
 		group: "Raw passthrough",
 		hint: "Merged verbatim into the request body; supported fields depend on the engine.",
 		kind: "object",
@@ -88,100 +106,121 @@ const COMMON_FIELDS: readonly SamplingField[] = [
 ];
 
 const EXTENDED_LOCAL_FIELDS: readonly SamplingField[] = [
-	field("top_k", "Top K", {
+	field("top_k", {
+		label: "Top K",
 		group: "Sampling",
 		hint: "0 = off",
 		integer: true,
 		kind: "number",
 		min: 0,
 	}),
-	field("min_p", "Min P", {
+	field("min_p", {
+		label: "Min P",
 		group: "Sampling",
 		kind: "number",
 		max: 1,
 		min: 0,
 	}),
-	field("typical_p", "Typical P", {
+	field("typical_p", {
+		label: "Typical P",
 		group: "Sampling",
 		kind: "number",
 		max: 1,
 		min: 0,
 	}),
-	field("top_n_sigma", "Top-N sigma", {
+	field("top_n_sigma", {
+		label: "Top-N sigma",
 		group: "Sampling",
 		kind: "number",
 	}),
-	field("repeat_penalty", "Repeat penalty", {
+	field("repeat_penalty", {
+		label: "Repeat penalty",
 		group: "Penalties",
 		hint: "1.0 = off",
 		kind: "number",
 		min: 0,
 	}),
-	field("repeat_last_n", "Repeat last N", {
+	field("repeat_last_n", {
+		label: "Repeat last N",
 		group: "Penalties",
 		hint: "Tokens to scan; -1 uses context",
 		integer: true,
 		kind: "number",
 	}),
-	field("mirostat", "Mirostat mode", {
+	field("mirostat", {
+		label: "Mirostat mode",
 		group: "Mirostat",
 		integer: true,
 		kind: "number",
 		max: 2,
 		min: 0,
 	}),
-	field("mirostat_tau", "Mirostat tau", {
+	field("mirostat_tau", {
+		label: "Mirostat tau",
 		group: "Mirostat",
 		kind: "number",
 		min: 0,
 	}),
-	field("mirostat_eta", "Mirostat eta", {
+	field("mirostat_eta", {
+		label: "Mirostat eta",
 		group: "Mirostat",
 		kind: "number",
 		min: 0,
 	}),
-	field("dynatemp_range", "DynaTemp range", {
+	field("dynatemp_range", {
+		label: "DynaTemp range",
 		group: "Advanced samplers",
 		kind: "number",
 	}),
-	field("dynatemp_exponent", "DynaTemp exponent", {
+	field("dynatemp_exponent", {
+		label: "DynaTemp exponent",
 		group: "Advanced samplers",
 		kind: "number",
 	}),
-	field("xtc_probability", "XTC probability", {
+	field("xtc_probability", {
+		label: "XTC probability",
 		group: "Advanced samplers",
 		kind: "number",
 		max: 1,
 		min: 0,
 	}),
-	field("xtc_threshold", "XTC threshold", {
+	field("xtc_threshold", {
+		label: "XTC threshold",
 		group: "Advanced samplers",
 		kind: "number",
 	}),
-	field("dry_multiplier", "DRY multiplier", {
+	field("dry_multiplier", {
+		label: "DRY multiplier",
 		group: "Advanced samplers",
 		kind: "number",
 	}),
-	field("dry_base", "DRY base", {
+	field("dry_base", {
+		label: "DRY base",
 		group: "Advanced samplers",
 		kind: "number",
 	}),
-	field("dry_allowed_length", "DRY allowed length", {
+	field("dry_allowed_length", {
+		label: "DRY allowed length",
 		group: "Advanced samplers",
 		integer: true,
 		kind: "number",
 	}),
-	field("dry_penalty_last_n", "DRY penalty last N", {
+	field("dry_penalty_last_n", {
+		label: "DRY penalty last N",
 		group: "Advanced samplers",
 		integer: true,
 		kind: "number",
 	}),
-	field("samplers", "Sampler order", {
+	field("samplers", {
+		label: "Sampler order",
 		group: "Advanced samplers",
-		hint: "Example: penalties;dry;top_k;top_p;min_p;temperature",
+		hint: tf("Example: {example}", {
+			example: "penalties;dry;top_k;top_p;min_p;temperature",
+		}),
 		kind: "text",
 	}),
-	field("grammar", "Grammar (GBNF)", {
+	field("grammar", {
+		label: "Grammar (GBNF)",
 		group: "Output control",
 		hint: "llama.cpp grammar syntax; only llama.cpp consumes this field.",
 		kind: "text",
@@ -189,54 +228,63 @@ const EXTENDED_LOCAL_FIELDS: readonly SamplingField[] = [
 ];
 
 const OLLAMA_FIELDS: readonly SamplingField[] = [
-	field("top_k", "Top K", {
+	field("top_k", {
+		label: "Top K",
 		group: "Ollama Modelfile sampling",
 		integer: true,
 		kind: "number",
 		min: 0,
 	}),
-	field("min_p", "Min P", {
+	field("min_p", {
+		label: "Min P",
 		group: "Ollama Modelfile sampling",
 		kind: "number",
 		max: 1,
 		min: 0,
 	}),
-	field("typical_p", "Typical P", {
+	field("typical_p", {
+		label: "Typical P",
 		group: "Ollama Modelfile sampling",
 		kind: "number",
 		max: 1,
 		min: 0,
 	}),
-	field("repeat_penalty", "Repeat penalty", {
+	field("repeat_penalty", {
+		label: "Repeat penalty",
 		group: "Ollama Modelfile sampling",
 		kind: "number",
 		min: 0,
 	}),
-	field("repeat_last_n", "Repeat window", {
+	field("repeat_last_n", {
+		label: "Repeat window",
 		group: "Ollama Modelfile sampling",
 		integer: true,
 		kind: "number",
 		min: 0,
 	}),
-	field("mirostat", "Mirostat mode", {
+	field("mirostat", {
+		label: "Mirostat mode",
 		group: "Ollama Modelfile sampling",
 		integer: true,
 		kind: "number",
 		max: 2,
 		min: 0,
 	}),
-	field("mirostat_tau", "Mirostat tau", {
+	field("mirostat_tau", {
+		label: "Mirostat tau",
 		group: "Ollama Modelfile sampling",
 		kind: "number",
 	}),
-	field("mirostat_eta", "Mirostat eta", {
+	field("mirostat_eta", {
+		label: "Mirostat eta",
 		group: "Ollama Modelfile sampling",
 		kind: "number",
 	}),
 ];
 
 const MLX_FIELDS: readonly SamplingField[] = [
-	field("repeat_penalty", "Repetition penalty", {
+	field("repeat_penalty", {
+		label: "Repetition penalty",
 		group: "MLX",
 		kind: "number",
 	}),
@@ -290,26 +338,30 @@ const ENGINE_LAUNCH_ADAPTERS = new Set([
 ]);
 
 const LLAMACPP_LAUNCH_FIELDS: readonly SamplingField[] = [
-	field("ctx_size", "Context size", {
+	field("ctx_size", {
+		label: "Context size",
 		group: "Context & hardware",
-		hint: "--ctx-size · applies on the next engine start",
+		hint: engineStartHint("--ctx-size"),
 		integer: true,
 		kind: "number",
 		min: 0,
 	}),
-	field("gpu_layers", "GPU layers", {
+	field("gpu_layers", {
+		label: "GPU layers",
 		group: "Context & hardware",
 		hint: "-ngl · -1 means all layers on GPU",
 		integer: true,
 		kind: "number",
 		min: -1,
 	}),
-	field("threads", "Threads", {
+	field("threads", {
+		label: "CPU Threads",
 		group: "Context & hardware",
 		integer: true,
 		kind: "number",
 	}),
-	field("extra_args", "Extra launch arguments (JSON array)", {
+	field("extra_args", {
+		label: "Extra launch arguments (JSON array)",
 		group: "Raw launch arguments",
 		hint: 'Example: ["--mlock", "--no-mmap"]',
 		kind: "string-array",
@@ -317,48 +369,55 @@ const LLAMACPP_LAUNCH_FIELDS: readonly SamplingField[] = [
 ];
 
 const OLLAMA_LAUNCH_FIELDS: readonly SamplingField[] = [
-	field("ctx_size", "Context size", {
+	field("ctx_size", {
+		label: "Context size",
 		group: "Context & hardware",
-		hint: "Modelfile PARAMETER num_ctx",
+		hint: modelfileHint("PARAMETER num_ctx"),
 		integer: true,
 		kind: "number",
 		min: 0,
 	}),
-	field("gpu_layers", "GPU layers", {
+	field("gpu_layers", {
+		label: "GPU layers",
 		group: "Context & hardware",
 		hint: "Modelfile PARAMETER num_gpu · -1 means all layers on GPU",
 		integer: true,
 		kind: "number",
 		min: -1,
 	}),
-	field("threads", "Threads", {
+	field("threads", {
+		label: "CPU Threads",
 		group: "Context & hardware",
-		hint: "Modelfile PARAMETER num_thread",
+		hint: modelfileHint("PARAMETER num_thread"),
 		integer: true,
 		kind: "number",
 	}),
 ];
 
 const VLLM_LAUNCH_FIELDS: readonly SamplingField[] = [
-	field("ctx_size", "Context size", {
+	field("ctx_size", {
+		label: "Context size",
 		group: "Context & hardware",
-		hint: "--max-model-len · applies on the next engine start",
+		hint: engineStartHint("--max-model-len"),
 		integer: true,
 		kind: "number",
 		min: 0,
 	}),
-	field("gpu_memory_utilization", "GPU memory utilization", {
+	field("gpu_memory_utilization", {
+		label: "GPU memory utilization",
 		group: "Context & hardware",
 		kind: "number",
 		max: 1,
 		min: 0,
 	}),
-	field("tensor_parallel", "Tensor parallel", {
+	field("tensor_parallel", {
+		label: "Tensor parallel",
 		group: "Context & hardware",
 		integer: true,
 		kind: "number",
 	}),
-	field("extra_args", "Extra launch arguments (JSON array)", {
+	field("extra_args", {
+		label: "Extra launch arguments (JSON array)",
 		group: "Raw launch arguments",
 		hint: 'Example: ["--disable-log-requests"]',
 		kind: "string-array",
@@ -366,25 +425,29 @@ const VLLM_LAUNCH_FIELDS: readonly SamplingField[] = [
 ];
 
 const SGLANG_LAUNCH_FIELDS: readonly SamplingField[] = [
-	field("ctx_size", "Context size", {
+	field("ctx_size", {
+		label: "Context size",
 		group: "Context & hardware",
-		hint: "--context-length · applies on the next engine start",
+		hint: engineStartHint("--context-length"),
 		integer: true,
 		kind: "number",
 		min: 0,
 	}),
-	field("mem_fraction_static", "Memory fraction static", {
+	field("mem_fraction_static", {
+		label: "Memory fraction static",
 		group: "Context & hardware",
 		kind: "number",
 		max: 1,
 		min: 0,
 	}),
-	field("tensor_parallel", "Tensor parallel", {
+	field("tensor_parallel", {
+		label: "Tensor parallel",
 		group: "Context & hardware",
 		integer: true,
 		kind: "number",
 	}),
-	field("extra_args", "Extra launch arguments (JSON array)", {
+	field("extra_args", {
+		label: "Extra launch arguments (JSON array)",
 		group: "Raw launch arguments",
 		hint: 'Example: ["--disable-cuda-graph"]',
 		kind: "string-array",
@@ -392,7 +455,8 @@ const SGLANG_LAUNCH_FIELDS: readonly SamplingField[] = [
 ];
 
 const RAW_LAUNCH_ARGUMENT_FIELDS: readonly SamplingField[] = [
-	field("extra_args", "Extra launch arguments (JSON array)", {
+	field("extra_args", {
+		label: "Extra launch arguments (JSON array)",
 		group: "Raw launch arguments",
 		hint: "Arguments are forwarded when Ryu starts this engine.",
 		kind: "string-array",

@@ -42,7 +42,7 @@ export function accountOptionLabel(
 	account: UsageAccountOption,
 	tl: LiteralMessage
 ): string {
-	const name = account.label ?? "Saved account";
+	const name = account.label ?? tl("Saved account");
 	if (account.needsReauth) {
 		return tl("{name} (sign in again)", { name });
 	}

@@ -1,12 +1,38 @@
-import { activeLocale } from "@ryu/i18n/lite";
+import { activeLocale, translate as tl } from "@ryu/i18n/lite";
 import { formatCount as formatSharedCount } from "@ryu/ui/lib/number-format.ts";
 import type { ListingStat } from "./detail/listing-detail-shell.tsx";
 import type { CatalogHost } from "./host.tsx";
+import { parseSkillCount } from "./skill-scorecard.ts";
 import type { SkillCard, SkillDetail } from "./types.ts";
 
 /** Shared count policy, exported for the catalog helper tests. */
 export function formatCount(n: number): string {
 	return formatSharedCount(n) ?? "—";
+}
+
+/** A source-reported count string in the reader's number format ("1500" reads
+ *  "1.500" in German). A value that is not a count is shown as the source gave
+ *  it; an empty one is `null`. */
+export function formatSkillCount(
+	value: string | null | undefined
+): string | null {
+	const parsed = parseSkillCount(value);
+	if (parsed !== null) {
+		return formatCount(parsed);
+	}
+	return value?.trim() || null;
+}
+
+/** The detail's Installs figure: the card's numeric count, formatted for the
+ *  reader, wins over the detail's source-reported string, which is only the
+ *  fallback when the card has no count. */
+export function skillInstallsValue(
+	cardInstalls: number,
+	reported: string | null | undefined
+): string | null {
+	return cardInstalls > 0
+		? formatCount(cardInstalls)
+		: formatSkillCount(reported);
 }
 
 export function skillTrustLabel(
@@ -133,25 +159,22 @@ export function skillStatItems({
 }): ListingStat[] {
 	const audits = metadata.securityAudits;
 	const passed = audits.filter((a) => a.status.toLowerCase() === "pass").length;
+	const stars = formatSkillCount(metadata.githubStars);
+	const lastPush = formatDateLabel(metadata.githubPushedAt);
+	const firstSeen = formatDateLabel(metadata.firstSeen);
 	const cells: (ListingStat | null)[] = [
 		installs ? { label: "Installs", value: installs } : null,
 		downloads ? { label: "Downloads", value: downloads } : null,
-		metadata.githubStars
-			? { label: "Stars", value: metadata.githubStars }
-			: null,
-		formatDateLabel(metadata.githubPushedAt)
-			? {
-					label: "Last push",
-					value: formatDateLabel(metadata.githubPushedAt),
-				}
-			: null,
-		metadata.firstSeen
-			? { label: "First seen", value: metadata.firstSeen }
-			: null,
+		stars ? { label: "Stars", value: stars } : null,
+		lastPush ? { label: "Last push", value: lastPush } : null,
+		firstSeen ? { label: "First seen", value: firstSeen } : null,
 		audits.length > 0
 			? {
 					label: "Audits",
-					sub: `${passed}/${audits.length} pass`,
+					sub: tl("{passed}/{total} pass", {
+						passed,
+						total: audits.length,
+					}),
 					value: formatCount(audits.length) ?? "—",
 				}
 			: null,

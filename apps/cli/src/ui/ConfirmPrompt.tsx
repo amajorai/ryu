@@ -25,6 +25,7 @@ import type { KeyEvent } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { createContext, useContext, useEffect, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { tr } from "../i18n/translate.ts";
 
 /** Lets a hosting surface know a ConfirmPrompt is open below it, so it can
  *  leave the keys the prompt uses (←/→ in particular) alone. */
@@ -135,7 +136,7 @@ export function ConfirmPrompt({
 					flexShrink={0}
 					wrapMode="none"
 				>
-					{`[ ${cancelLabel} ]`}
+					{`[ ${tr(cancelLabel)} ]`}
 				</text>
 				<text
 					bg={cancelFocused ? undefined : theme.colors.error}
@@ -143,7 +144,7 @@ export function ConfirmPrompt({
 					flexShrink={0}
 					wrapMode="none"
 				>
-					{`[ ${confirmLabel} ]`}
+					{`[ ${tr(confirmLabel)} ]`}
 				</text>
 				<text
 					fg={theme.colors.mutedForeground}

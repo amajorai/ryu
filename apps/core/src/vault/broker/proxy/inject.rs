@@ -48,7 +48,7 @@ impl Broker {
             .filter_map(|subject| subject.strip_prefix("role:"))
             .map(str::to_owned)
             .collect();
-        let context = SecretResolutionContext {
+        let mut context = SecretResolutionContext {
             user_id: session.user_id().map(str::to_owned),
             environment: Some(session.environment.clone()),
             conversation_id: Some(format!("broker:{}", session.id)),
@@ -60,6 +60,15 @@ impl Broker {
                 .unwrap_or_default(),
             ..SecretResolutionContext::node_only(super::super::local_node_id(), Vec::new())
         };
+        // A delegated session resolves as its member: their personal values
+        // first and their `user:`/`role:`/`team:` policies. The minter's own
+        // limits (machine policies, a human minter's denies) still apply in
+        // `Resolver::resolve`, so reach is the intersection.
+        if let Some(member) = self.delegated_member(session).await? {
+            context.user_id = Some(member.user_id.clone());
+            context.roles = member.roles();
+            context.minted_subjects = member.subjects;
+        }
         Ok(Resolver {
             store: self.store,
             context,
@@ -70,6 +79,25 @@ impl Broker {
             subject: session.minted_by.clone(),
             session_id: session.id.clone(),
         })
+    }
+
+    /// The member a delegated session acts for. An unreadable attribute row
+    /// refuses the request rather than falling back to the minter's reach.
+    pub(super) async fn delegated_member(
+        &self,
+        session: &BrokerSession,
+    ) -> Result<Option<super::super::delegation::Member>, Refusal> {
+        let conn = self.store.conn.lock().await;
+        super::super::delegation::get(&conn, &session.id)
+            .map(|attrs| attrs.on_behalf_of)
+            .map_err(|error| {
+                tracing::warn!("broker session attribute lookup failed: {error:#}");
+                Refusal::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "broker_internal",
+                    "session lookup failed",
+                )
+            })
     }
 
     /// For a machine-minted session, the minting token's current policies

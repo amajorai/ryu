@@ -19,6 +19,7 @@ import {
 	rpcJsonResponseSchema,
 } from "@ryu/app-host/rpc";
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
+import { mediaStatusFailure } from "./media-status-failure.ts";
 import {
 	videoClipsSchema,
 	videoFailureSchema,
@@ -145,7 +146,7 @@ export async function generateVideo(
 	});
 
 	if (!resp.ok) {
-		let detail = `video generation failed: ${resp.status}`;
+		let detail = mediaStatusFailure("video", resp.status);
 		try {
 			const errorBody = videoFailureSchema.parse(await resp.json());
 			if (errorBody.error) {

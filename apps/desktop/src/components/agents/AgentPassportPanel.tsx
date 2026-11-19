@@ -411,7 +411,9 @@ export function AgentPassportPanel({
 							value={capabilityValue(
 								detail,
 								detailQuery.isLoading,
-								detail?.memory.write_enabled ? "Read + write" : "Read only"
+								detail?.memory.write_enabled
+									? tl("Read + write")
+									: tl("Read only")
 							)}
 						/>
 					</dl>

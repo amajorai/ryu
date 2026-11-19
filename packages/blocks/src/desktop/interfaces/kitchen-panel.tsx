@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -131,6 +131,7 @@ function ChefPane({
 }) {
 	const tl = useLiteralMessages();
 	const now = useNow();
+	const i18n = useOptionalI18n();
 	const { agent } = station;
 	const open = orders.filter((order) => order.state !== "served");
 	const served = orders.filter((order) => order.state === "served");
@@ -159,7 +160,12 @@ function ChefPane({
 				<GameAgentCard
 					description={agent.description}
 					stats={[
-						{ key: "open", label: "Open", value: open.length },
+						{
+							key: "open",
+							// Open orders, not the open verb the bare word translates as.
+							label: i18n?.t("status.open", {}, "Open") ?? "Open",
+							value: open.length,
+						},
 						{ key: "served", label: "Served", value: served.length },
 						{
 							key: "usual",

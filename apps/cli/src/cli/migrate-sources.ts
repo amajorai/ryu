@@ -1,13 +1,14 @@
 // Source, item-kind, and Core import-API schemas for `ryu migrate`.
 
 import { z } from "zod";
+import { type LocalizedText, localize } from "./localizedText.ts";
 
 export interface SourceSpec {
 	/** Folders tried in order when no path is given (`~` expands on the node). */
 	defaults: readonly string[];
 	label: string;
-	/** Shown when no default exists and no path was given. */
-	needsPath?: string;
+	/** Shown (in the CLI locale) when no default exists and no path was given. */
+	needsPath?: LocalizedText;
 }
 
 export const SOURCES = {
@@ -19,28 +20,32 @@ export const SOURCES = {
 	chatgpt: {
 		label: "ChatGPT",
 		defaults: [],
-		needsPath:
-			"Export your data from ChatGPT (Settings → Data controls → Export data), unzip the download, and pass the folder that holds conversations.json.",
+		needsPath: localize(
+			"Export your data from ChatGPT (Settings → Data controls → Export data), unzip the download, and pass the folder that holds conversations.json."
+		),
 	},
 	claude: {
 		label: "Claude",
 		defaults: [],
-		needsPath:
-			"Export your data from Claude (Settings → Privacy → Export data), unzip the download, and pass the folder that holds conversations.json.",
+		needsPath: localize(
+			"Export your data from Claude (Settings → Privacy → Export data), unzip the download, and pass the folder that holds conversations.json."
+		),
 	},
 	muse: {
 		label: "Muse",
 		defaults: [],
-		needsPath:
-			"Download your Muse data (Settings → Data controls → Download your Muse data), extract it, and pass the folder that holds SOUL.md and MEMORY.md.",
+		needsPath: localize(
+			"Download your Muse data (Settings → Data controls → Download your Muse data), extract it, and pass the folder that holds SOUL.md and MEMORY.md."
+		),
 	},
 	mastra: { label: "Mastra", defaults: ["."] },
 	langchain: { label: "LangChain", defaults: ["."] },
 	dots: {
 		label: "Dots",
 		defaults: [],
-		needsPath:
-			"OpenAI Dots has no setup export. Save the dot's instructions as SOUL.md (add IDENTITY.md with `Name: <name>` to keep its name) and anything you want it to remember as MEMORY.md in one folder, then pass that folder.",
+		needsPath: localize(
+			"OpenAI Dots has no setup export. Save the dot's instructions as SOUL.md (add IDENTITY.md with `Name: <name>` to keep its name) and anything you want it to remember as MEMORY.md in one folder, then pass that folder."
+		),
 	},
 } as const satisfies Record<string, SourceSpec>;
 

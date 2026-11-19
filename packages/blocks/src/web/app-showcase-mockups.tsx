@@ -16,6 +16,7 @@ import {
 	MockupWindow,
 } from "./app-showcase-primitives.tsx";
 import { LinkArrow } from "./link-arrow.tsx";
+import { SenseLabel } from "./sense-label.tsx";
 
 /* -------------------------------------------------------------------------- */
 /* App-specific mockups                                                       */
@@ -124,7 +125,12 @@ export function DashboardsMockup() {
 		[tl("Open runs"), "12", "↑ 18%"],
 		[tl("Needs review"), "04", tl("today")],
 		[tl("Healthy sources"), "96%", tl("live")],
-		[tl("Credits used"), "38%", tl("this week")],
+		// A neutral period; the bare "this week" is a pitch deadline (ja 今週中に).
+		[
+			tl("Credits used"),
+			"38%",
+			<SenseLabel id="showcase.thisWeek">this week</SenseLabel>,
+		],
 	] as const;
 	return (
 		<MockupWindow label="Dashboards / home">

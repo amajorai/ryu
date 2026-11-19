@@ -1,4 +1,5 @@
 import { Badge, Button } from "@ryu/blocks/companion/controls";
+import { useHyperlinkLabel } from "@ryu/ui/components/editor/ui/hyperlink-label.ts";
 import { ROOT_NODE_ID, type VisualOperation } from "./core.ts";
 import { attributeFields, STYLE_FIELDS } from "./visual-editor-config.ts";
 import { InspectorField } from "./visual-editor-inspector-field.tsx";
@@ -24,6 +25,9 @@ export function VisualEditorInspector({
 	selectedStyle: CSSStyleDeclaration | undefined;
 	selectedTag: string;
 }) {
+	// A link's address field is the hyperlink noun (fr "Lien"); the bare catalog
+	// "Link" is the account-linking verb (fr "Associer").
+	const hyperlink = useHyperlinkLabel();
 	return (
 		<section
 			aria-label="Inspector"
@@ -97,7 +101,7 @@ export function VisualEditorInspector({
 							defaultValue={selected.getAttribute(name) ?? ""}
 							disabled={disabled}
 							key={`${name}:${fieldKey}`}
-							label={label}
+							label={name === "href" ? hyperlink : label}
 							onCommit={(value) =>
 								apply(
 									[

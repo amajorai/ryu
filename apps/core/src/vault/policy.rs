@@ -23,8 +23,9 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 use super::now_millis;
-use super::policy_ext::{ControlGroupSpec, TemplateContext};
+use super::policy_ext::{ControlGroupSpec, TemplateContext, ValueRules};
 
+pub mod namespace_locks;
 pub mod wrap_requirement;
 
 /// Maximum rules per policy.
@@ -119,6 +120,9 @@ pub struct PolicyRule {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_wrapping_ttl_secs: Option<i64>,
+    /// Length and character-class rules a written value must meet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_rules: Option<ValueRules>,
 }
 
 /// A stored policy.

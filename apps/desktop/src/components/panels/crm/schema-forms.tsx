@@ -21,6 +21,7 @@ import type {
 	ObjectWithFields,
 	SelectOption,
 } from "@/src/lib/api/crm.ts";
+import { defaultPlural, schemaSlug, slugify } from "./schema-slug.ts";
 
 /** Every type a user may create, with the label the picker shows.
  *
@@ -53,18 +54,6 @@ export const OPTION_TYPES = new Set<FieldType>([
 	"multi_select",
 	"status",
 ]);
-
-/** A slug the store will accept, derived from the display name so nobody has to
- *  think about it — but shown, because it is what agent tools and CSV mappings
- *  address the field by. */
-function slugify(name: string): string {
-	return name
-		.trim()
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "_")
-		.replace(/^_+|_+$/g, "")
-		.slice(0, 48);
-}
 
 function uniqueOptionId(label: string, options: SelectOption[]): string {
 	const base = slugify(label);
@@ -100,7 +89,7 @@ export function ObjectForm({
 	const tl = useLiteralMessages();
 	const [singular, setSingular] = useState("");
 	const [plural, setPlural] = useState("");
-	const slug = slugify(singular);
+	const slug = schemaSlug(singular, "object");
 
 	return (
 		<div className="mb-4 rounded-lg border bg-card p-3">
@@ -135,7 +124,7 @@ export function ObjectForm({
 					disabled={busy || slug === ""}
 					onClick={() =>
 						onSubmit({
-							plural: plural.trim() || `${singular.trim()}s`,
+							plural: plural.trim() || defaultPlural(singular),
 							singular: singular.trim(),
 							slug,
 						})
@@ -183,7 +172,7 @@ export function FieldForm({
 	);
 	const [optionDraft, setOptionDraft] = useState("");
 
-	const slug = existing?.slug ?? slugify(name);
+	const slug = existing?.slug ?? schemaSlug(name, "field");
 	const needsOptions = OPTION_TYPES.has(fieldType);
 
 	// Retyping an existing field would reinterpret every value already stored under

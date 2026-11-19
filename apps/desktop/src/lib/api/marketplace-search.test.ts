@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { MarketplaceKind } from "@ryu/marketplace/types";
 import {
 	fetchCatalogPage,
-	type MarketplaceKind,
 	searchMarketplaceCatalog,
-} from "./marketplace.ts";
+} from "./marketplace-catalog.ts";
 
 const originalFetch = globalThis.fetch;
 

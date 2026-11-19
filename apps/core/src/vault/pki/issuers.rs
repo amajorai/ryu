@@ -1,14 +1,96 @@
-//! Issuer lifecycle: roots, intermediates, imports, and tidy.
+//! PKI issuers: roots, intermediates, imports, CA signing, and tidy.
 
 use super::*;
 
+pub(super) struct LoadedIssuer {
+    pub(super) key: KeyPair,
+    pub(super) certificate: String,
+    pub(super) ca_chain: Vec<String>,
+    pub(super) not_after: i64,
+}
+
+impl LoadedIssuer {
+    /// An rcgen issuer whose subject and key identifier come from the stored
+    /// certificate, so roots, intermediates, and imports all sign correctly.
+    pub(super) fn signer(&self) -> Result<Issuer<'static, &KeyPair>> {
+        Issuer::from_ca_cert_pem(&self.certificate, &self.key).map_err(pki_error)
+    }
+
+    /// The issuing CA and its chain, nearest first.
+    pub(super) fn chain(&self) -> Vec<String> {
+        std::iter::once(self.certificate.clone())
+            .chain(self.ca_chain.iter().cloned())
+            .collect()
+    }
+}
+
 impl PluginSecretStore {
-    /// Generate a self-signed root CA.
+    pub(super) fn load_issuer(&self, conn: &Connection, name: &str) -> Result<LoadedIssuer> {
+        #[allow(clippy::type_complexity)]
+        let (nonce, ciphertext, key_version, certificate, not_after, ca_chain, csr): (
+            Vec<u8>,
+            Vec<u8>,
+            u32,
+            String,
+            i64,
+            String,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT nonce, ciphertext, key_version, certificate, not_after, ca_chain, csr
+                 FROM vault_pki_issuers WHERE name = ?1",
+                params![name],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or_else(|| VaultError::NotFound(format!("PKI issuer `{name}`")))?;
+        if csr.is_some() {
+            return Err(VaultError::Invalid(format!(
+                "PKI issuer `{name}` is waiting for its signed certificate (set-signed)"
+            ))
+            .into());
+        }
+        let der = self.open_row(key_version, &nonce, &ciphertext)?;
+        let key = KeyPair::try_from(der.as_slice()).map_err(pki_error)?;
+        Ok(LoadedIssuer {
+            key,
+            certificate: lf_pem(certificate),
+            ca_chain: split_chain(&ca_chain),
+            not_after,
+        })
+    }
+
+    /// Generate a self-signed root CA with an ECDSA P-256 key. Test-only:
+    /// request handlers pass the requested key type to `pki_create_root_with`.
+    #[cfg(test)]
     pub async fn pki_create_root(
         &self,
         name: &str,
         common_name: &str,
         ttl_secs: i64,
+        actor: &AuditActor,
+    ) -> Result<IssuerInfo> {
+        self.pki_create_root_with(name, common_name, ttl_secs, KeySpec::default(), actor)
+            .await
+    }
+
+    /// Generate a self-signed root CA with a key of type `spec`.
+    pub async fn pki_create_root_with(
+        &self,
+        name: &str,
+        common_name: &str,
+        ttl_secs: i64,
+        spec: KeySpec,
         actor: &AuditActor,
     ) -> Result<IssuerInfo> {
         if !crate::vault::transit::is_valid_key_name(name) {
@@ -23,7 +105,7 @@ impl PluginSecretStore {
                 VaultError::Invalid("root TTL must be between 1 hour and 10 years".into()).into(),
             );
         }
-        let key = KeyPair::generate().map_err(pki_error)?;
+        let key = generate_key_blocking(spec).await?;
         let now = OffsetDateTime::now_utc();
         let not_after = now + Duration::seconds(ttl_secs);
         let mut params = ca_params(common_name, now - Duration::minutes(1), not_after);
@@ -51,8 +133,9 @@ impl PluginSecretStore {
         }
         self.audit_locked(
             &conn,
-            &AuditEntry::new(actor, "pki.root.create", "ok")
-                .details(serde_json::json!({ "issuer": name, "commonName": common_name })),
+            &AuditEntry::new(actor, "pki.root.create", "ok").details(serde_json::json!({
+                "issuer": name, "commonName": common_name, "keyType": spec.key_type.as_str(),
+            })),
         );
         Ok(IssuerInfo {
             name: name.to_owned(),
@@ -60,6 +143,7 @@ impl PluginSecretStore {
             certificate,
             not_after: not_after.unix_timestamp() * 1000,
             kind: "root".into(),
+            key_type: spec.key_type.as_str().into(),
             ca_chain: Vec::new(),
             csr: None,
         })
@@ -86,6 +170,18 @@ impl PluginSecretStore {
         common_name: &str,
         actor: &AuditActor,
     ) -> Result<IssuerInfo> {
+        self.pki_generate_intermediate_with(name, common_name, KeySpec::default(), actor)
+            .await
+    }
+
+    /// [`Self::pki_generate_intermediate`] with a key of type `spec`.
+    pub async fn pki_generate_intermediate_with(
+        &self,
+        name: &str,
+        common_name: &str,
+        spec: KeySpec,
+        actor: &AuditActor,
+    ) -> Result<IssuerInfo> {
         if !crate::vault::transit::is_valid_key_name(name) {
             return Err(VaultError::Invalid("invalid issuer name".into()).into());
         }
@@ -93,7 +189,7 @@ impl PluginSecretStore {
         if common_name.is_empty() || common_name.len() > 64 {
             return Err(VaultError::Invalid("commonName must be 1-64 characters".into()).into());
         }
-        let key = KeyPair::generate().map_err(pki_error)?;
+        let key = generate_key_blocking(spec).await?;
         let mut params = CertificateParams::default();
         let mut dn = DistinguishedName::new();
         dn.push(DnType::CommonName, common_name);
@@ -356,7 +452,3 @@ impl PluginSecretStore {
         Ok(removed)
     }
 }
-
-#[cfg(test)]
-#[path = "issuers_tests.rs"]
-mod tests;

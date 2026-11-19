@@ -11,6 +11,7 @@ import {
 import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import type { ReactNode } from "react";
 import { Pie, PieChart } from "recharts";
+import { useHeatmapLegendWords } from "./heatmap-legend.ts";
 import { SettingsCard, SettingsSection } from "./settings-items.tsx";
 import {
 	isLabelledPurposeKey,
@@ -134,6 +135,7 @@ export function UsageDonut({
 
 export function ActivityHeatmap({ data }: { data: UsageAnalyticsData }) {
 	const tl = useLiteralMessages();
+	const legend = useHeatmapLegendWords();
 	const points = data.buckets.slice(-56);
 	const max = points.reduce(
 		(highest, point) => Math.max(highest, point.requests),
@@ -165,7 +167,7 @@ export function ActivityHeatmap({ data }: { data: UsageAnalyticsData }) {
 			>
 				<SettingsCard className="flex flex-col gap-3">
 					<div className="type-caption flex items-center justify-end gap-2 text-muted-foreground">
-						<span>Less</span>
+						<span>{legend.less}</span>
 						{[0.08, 0.3, 0.55, 0.8, 1].map((opacity) => (
 							<UsageMarker
 								aria-hidden="true"
@@ -174,7 +176,7 @@ export function ActivityHeatmap({ data }: { data: UsageAnalyticsData }) {
 								opacity={opacity}
 							/>
 						))}
-						<span>More</span>
+						<span>{legend.more}</span>
 					</div>
 					<div
 						aria-label="Usage activity heatmap"

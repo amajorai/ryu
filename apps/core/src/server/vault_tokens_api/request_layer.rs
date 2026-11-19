@@ -198,12 +198,20 @@ pub async fn request_layer(request: Request, next: Next) -> Response {
         Ok(active) => active,
         Err(error) => return vault_error(error),
     };
-    let client_key = client.map_or_else(|| "unknown".to_owned(), |ip| ip.to_string());
+    // An in-process caller (an ACP run's bridge) names its own bucket, so
+    // local runs do not share the loopback address's.
+    let named = request
+        .extensions()
+        .get::<crate::server::vault_broker_api::hosted_mcp::QuotaClientKey>()
+        .map(|key| key.0.clone());
+    let keyed = named.is_some();
+    let client_key = named
+        .unwrap_or_else(|| client.map_or_else(|| "unknown".to_owned(), |ip| ip.to_string()));
     for quota in quotas::rate_quotas_for(&active, &path) {
         // An unknown address would put every tunneled and local caller in one
         // bucket a single client could drain, so the built-in per-client
         // login quota skips it.
-        if client.is_none() && quota.builtin {
+        if client.is_none() && !keyed && quota.builtin {
             continue;
         }
         if let Err(denied) = quotas::limiter().check(
@@ -239,12 +247,17 @@ pub async fn request_layer(request: Request, next: Next) -> Response {
         }
         _ => None,
     };
+    let (request, login) = match super::lockout_routes::before_login(store, request).await {
+        Ok(prepared) => prepared,
+        Err(response) => return response,
+    };
     let context = RequestContext::new(client);
     let (response, violations) = wrap_requirement::scope(
         wrap_ttl,
         tokens::with_request_context(context.clone(), next.run(request)),
     )
     .await;
+    super::lockout_routes::after_login(store, login, response.status()).await;
     let response = explain_wrapping_refusal(store, response, &violations, &path, &context).await;
     match wrap_ttl {
         Some(ttl) => wrap_body(store, response, ttl, &path, &context).await,

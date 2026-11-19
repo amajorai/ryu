@@ -1,4 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { formatMessage, type MessageValuesInput } from "@ryu/i18n/core";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../i18n/src/active-locale.ts";
 import {
 	MARKETPLACE_PUBLISH_PACKAGE_KINDS,
 	runMarketplacePublishPreflight,
@@ -151,5 +157,31 @@ describe("Marketplace publish preflight", () => {
 		expect(
 			report.checks.find((check) => check.id === "listing-identity")?.status
 		).toBe("pass");
+	});
+});
+
+describe("Marketplace publish preflight wording", () => {
+	const marking = {
+		direction: "ltr" as const,
+		locale: "ja",
+		translate(_id: string, values?: MessageValuesInput, fallback?: string) {
+			return `«${formatMessage(fallback ?? "", values, "ja")}»`;
+		},
+	};
+	afterEach(() => {
+		unregisterActiveI18nRuntime(marking);
+	});
+
+	test("the listing-namespace check label goes through the catalog", () => {
+		registerActiveI18nRuntime(marking);
+		const report = runMarketplacePublishPreflight({
+			...baseInput,
+			listingIdentity: { detail: "ok", passed: true },
+			packageKind: "workflow",
+			presentArtifactCount: 1,
+		});
+		expect(
+			report.checks.find((check) => check.id === "listing-identity")?.label
+		).toBe("«Uses its own listing namespace»");
 	});
 });

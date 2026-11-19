@@ -79,7 +79,7 @@ export async function watchMeshInstall(
 			? "Cloudflared"
 			: backend === MESH_BACKEND_OPENTUNNEL
 				? "OpenTunnel"
-				: "Tailscale client";
+				: tl("Tailscale client");
 	progressToastId = sileo.info({
 		title: tl("Installing {clientLabel}…", { clientLabel }),
 		description: tl(

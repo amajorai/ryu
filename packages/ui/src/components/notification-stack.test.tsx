@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { I18nProvider } from "@ryu/i18n/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NotificationStack } from "./notification-stack.tsx";
 
@@ -77,5 +78,25 @@ describe("NotificationStack", () => {
 			)
 		);
 		expect(collapsed).not.toContain("Second notice");
+	});
+
+	it("translates the expanded label inside the count sentence", () => {
+		const html = renderToStaticMarkup(
+			<I18nProvider
+				autoLocalizeDom={false}
+				initialLocale="de"
+				manageDocument={false}
+				overlays={{
+					de: {
+						"View all": "Alle anzeigen",
+						"{count} notifications. {expandedLabel}.":
+							"{count} Benachrichtigungen. {expandedLabel}.",
+					},
+				}}
+			>
+				<NotificationStack defaultExpanded items={[{ id: "a", title: "A" }]} />
+			</I18nProvider>
+		);
+		expect(html).toContain('aria-label="1 Benachrichtigungen. Alle anzeigen."');
 	});
 });

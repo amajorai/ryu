@@ -196,18 +196,18 @@ function billions(num: string, unit: string): number {
 	return unit.toLowerCase() === "m" ? n / 1000 : n;
 }
 
-/** Tier word for a billions-equivalent param count. */
-function tierFor(b: number): string {
+/** Tier word for a billions-equivalent param count, in the UI language. */
+function tierFor(b: number, tl: LiteralMessage): string {
 	if (b < 3) {
-		return "Small";
+		return tl("Small");
 	}
 	if (b < 20) {
-		return "Medium";
+		return tl("Medium");
 	}
 	if (b < 70) {
-		return "Large";
+		return tl("Large");
 	}
-	return "Extra Large";
+	return tl("Extra Large");
 }
 
 /**
@@ -254,7 +254,7 @@ export function parseModelSize(
 	}
 	const raw = `${headline.prefix.toUpperCase()}${headline.num}${headline.unit.toUpperCase()}`;
 	return {
-		tier: tierFor(headline.b),
+		tier: tierFor(headline.b, tl),
 		raw,
 		tooltip: descriptions.join(" · "),
 	};

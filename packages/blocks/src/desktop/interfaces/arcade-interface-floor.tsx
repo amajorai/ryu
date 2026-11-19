@@ -123,9 +123,9 @@ export function ArcadeFloorView({
 				) : null}
 				{empty && floor.filter ? (
 					<ArcadeEmpty
-						action="Show every machine"
+						action={tl("Show every machine")}
 						body="None of its agents have a machine on the floor yet."
-						marquee="NO MACHINES"
+						marquee={tl("NO MACHINES")}
 						onAction={clearFilter}
 						palette={palette}
 						title={tl("No machines in {name}", {
@@ -137,7 +137,7 @@ export function ArcadeFloorView({
 					<ArcadeEmpty
 						action="New game"
 						body="Each agent gets a slot machine here, with its three latest conversations on the reels. Start a conversation to open the floor."
-						marquee="OPENING SOON"
+						marquee={tl("OPENING SOON")}
 						onAction={newGame}
 						palette={palette}
 						title="The floor is empty"

@@ -12,45 +12,40 @@ import {
 	type TDiscussion,
 } from "@ryu/ui/components/editor/plugins/discussion-kit.tsx";
 import type { TComment } from "@ryu/ui/components/editor/ui/comment.tsx";
+import {
+	accumulateElementSuggestion,
+	accumulateTextSuggestion,
+	type IndexSuggestionData,
+	type SuggestionAccumulator,
+} from "@ryu/ui/lib/block-suggestion-text.ts";
 import { useDisplayDayRevision } from "@ryu/ui/lib/display-day.ts";
-import { formatDate, resolveTimeZone } from "@ryu/ui/lib/timezone.ts";
 import {
 	ElementApi,
-	KEYS,
-	NodeApi,
 	type NodeEntry,
 	type Path,
 	PathApi,
 	type TCommentText,
 	type TElement,
 	TextApi,
-	type TSuggestionElement,
 	type TSuggestionText,
 	type TText,
 } from "platejs";
 import type { PlateEditor } from "platejs/react";
 import { useEditorRef, useEditorVersion, usePluginOption } from "platejs/react";
 import { useMemo } from "react";
-import { z } from "zod";
+
+// The summary token lives with the suggestion text; re-exported for the UI.
+export { BLOCK_SUGGESTION_TOKEN } from "@ryu/ui/lib/block-suggestion-text.ts";
 
 export interface ResolvedSuggestion extends TResolvedSuggestion {
 	comments: TComment[];
 }
-
-export const BLOCK_SUGGESTION_TOKEN = "__block__";
 
 type BlockDiscussionEntry = NodeEntry<
 	TCommentText | TElement | TSuggestionText
 >;
 type SuggestionEntry = NodeEntry<TElement | TText>;
 type SuggestionApi = BaseSuggestionConfig["api"]["suggestion"];
-type TimestampProjection<T> = {
-	[K in keyof T]: K extends "createdAt" ? Date | number | string : T[K];
-};
-type IndexSuggestionData = TimestampProjection<
-	NonNullable<ReturnType<SuggestionApi["suggestionData"]>>
-> &
-	Pick<TSuggestionElement["suggestion"], "isLineBreak">;
 /** Plate's installed readers accept ordinary Text leaves, including leaves without a suggestion mark. */
 interface NativeTextSuggestionApi extends SuggestionApi {
 	dataList: (node: TText) => ReturnType<SuggestionApi["dataList"]>;
@@ -59,17 +54,6 @@ interface NativeTextSuggestionApi extends SuggestionApi {
 		node: TElement | TText
 	) => ReturnType<SuggestionApi["suggestionData"]>;
 }
-const inlineTextSchema = z.string();
-const isInlineText = (value: TElement["value"]): value is string =>
-	inlineTextSchema.safeParse(value).success;
-
-interface SuggestionAccumulator {
-	newProperties: object;
-	newText: string;
-	properties: object;
-	text: string;
-}
-
 interface BlockDiscussionIndex {
 	discussionsByBlock: Map<string, TDiscussion[]>;
 	suggestionsByBlock: Map<string, ResolvedSuggestion[]>;
@@ -82,7 +66,7 @@ interface DiscussionEntryScan {
 	suggestionOwnerById: Map<string, Path>;
 }
 
-interface BuildBlockDiscussionIndexOptions {
+export interface BuildBlockDiscussionIndexOptions {
 	discussions: TDiscussion[];
 	entries: BlockDiscussionEntry[];
 	getCommentId: (node: TCommentText) => string | undefined;
@@ -104,46 +88,6 @@ const discussionIndexCache = new WeakMap<
 		version: number;
 	}
 >();
-
-interface BlockTypeLabels {
-	[type: string]: (node?: TElement) => string;
-}
-
-const TYPE_TEXT_MAP: BlockTypeLabels = {
-	[KEYS.audio]: () => "Audio",
-	[KEYS.blockquote]: () => "Blockquote",
-	[KEYS.callout]: () => "Callout",
-	[KEYS.codeBlock]: () => "Code Block",
-	[KEYS.column]: () => "Column",
-	[KEYS.equation]: () => "Equation",
-	[KEYS.file]: () => "File",
-	[KEYS.h1]: () => "Heading 1",
-	[KEYS.h2]: () => "Heading 2",
-	[KEYS.h3]: () => "Heading 3",
-	[KEYS.h4]: () => "Heading 4",
-	[KEYS.h5]: () => "Heading 5",
-	[KEYS.h6]: () => "Heading 6",
-	[KEYS.hr]: () => "Horizontal Rule",
-	[KEYS.img]: () => "Image",
-	[KEYS.mediaEmbed]: () => "Media",
-	[KEYS.p]: (node) => {
-		if (node?.[KEYS.listType] === KEYS.listTodo) {
-			return "Todo List";
-		}
-		if (node?.[KEYS.listType] === KEYS.ol) {
-			return "Ordered List";
-		}
-		if (node?.[KEYS.listType] === KEYS.ul) {
-			return "List";
-		}
-
-		return "Paragraph";
-	},
-	[KEYS.table]: () => "Table",
-	[KEYS.toc]: () => "Table of Contents",
-	[KEYS.toggle]: () => "Toggle",
-	[KEYS.video]: () => "Video",
-};
 
 const appendByKey = <T>(map: Map<string, T[]>, key: string, value: T) => {
 	const values = map.get(key);
@@ -189,200 +133,6 @@ const getSuggestionIds = (
 
 	return [];
 };
-
-const suggestionTypeText = (node: TElement) =>
-	(TYPE_TEXT_MAP[node.type] ?? (() => node.type))(node);
-
-const CANONICAL_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const MS_PER_DAY = 86_400_000;
-
-interface CivilDate {
-	day: number;
-	month: number;
-	year: number;
-}
-
-/** Whole days since 1970-01-01 for a civil date; no time zone is involved. */
-const civilDayNumber = ({ year, month, day }: CivilDate) =>
-	Date.UTC(year, month - 1, day) / MS_PER_DAY;
-
-/**
- * A date element's civil date. Plate stores `YYYY-MM-DD`, which must never be
- * parsed as UTC midnight (that moves it a day back west of UTC); a legacy
- * `toDateString()` value parses as local midnight.
- */
-function elementCivilDate(value: string): CivilDate | null {
-	const canonical = CANONICAL_DATE.exec(value);
-	if (canonical) {
-		const civil = {
-			year: Number(canonical[1]),
-			month: Number(canonical[2]),
-			day: Number(canonical[3]),
-		};
-		const check = new Date(Date.UTC(civil.year, civil.month - 1, civil.day));
-		return check.getUTCMonth() === civil.month - 1 &&
-			check.getUTCDate() === civil.day
-			? civil
-			: null;
-	}
-	const parsed = new Date(value);
-	return Number.isNaN(parsed.getTime())
-		? null
-		: {
-				year: parsed.getFullYear(),
-				month: parsed.getMonth() + 1,
-				day: parsed.getDate(),
-			};
-}
-
-/** Today's civil date in the selected display zone (machine zone for System). */
-function displayCivilToday(now: number): CivilDate {
-	const read = (timeZone: string | undefined) => {
-		const parts = new Intl.DateTimeFormat("en-US", {
-			day: "numeric",
-			month: "numeric",
-			numberingSystem: "latn",
-			timeZone,
-			year: "numeric",
-		}).formatToParts(now);
-		const field = (type: Intl.DateTimeFormatPartTypes) =>
-			Number(parts.find((part) => part.type === type)?.value);
-		return { year: field("year"), month: field("month"), day: field("day") };
-	};
-	try {
-		return read(resolveTimeZone());
-	} catch {
-		// An unsupported stored zone falls back to the machine zone.
-		return read(undefined);
-	}
-}
-
-const formatSuggestionDateText = (date: string, now = Date.now()) => {
-	const civil = elementCivilDate(date);
-	if (!civil) {
-		return date;
-	}
-	const offset = civilDayNumber(civil) - civilDayNumber(displayCivilToday(now));
-	if (offset === 0) {
-		return "Today";
-	}
-	if (offset === -1) {
-		return "Yesterday";
-	}
-	if (offset === 1) {
-		return "Tomorrow";
-	}
-	const pad = (part: number) => String(part).padStart(2, "0");
-	// A calendar string formats as that civil date in the display locale.
-	return formatDate(`${civil.year}-${pad(civil.month)}-${pad(civil.day)}`, {
-		day: "numeric",
-		month: "long",
-		year: "numeric",
-	});
-};
-
-const getInlineSuggestionElementText = (node: TElement) => {
-	if (isInlineText(node.value) && node.value.length > 0) {
-		return node.value;
-	}
-	if (isInlineText(node.date) && node.date.length > 0) {
-		return formatSuggestionDateText(node.date);
-	}
-	if (
-		node.type === KEYS.inlineEquation &&
-		isInlineText(node.texExpression) &&
-		node.texExpression.length > 0
-	) {
-		return node.texExpression;
-	}
-	const nodeText = NodeApi.string(node);
-	if (nodeText.length > 0) {
-		return nodeText;
-	}
-};
-
-function applySuggestionData(
-	accumulator: SuggestionAccumulator,
-	text: string,
-	data: IndexSuggestionData
-): void {
-	switch (data.type) {
-		case "insert": {
-			accumulator.newText += text;
-			break;
-		}
-		case "remove": {
-			accumulator.text += text;
-			break;
-		}
-		case "update": {
-			accumulator.properties = {
-				...accumulator.properties,
-				...data.properties,
-			};
-			accumulator.newProperties = {
-				...accumulator.newProperties,
-				...data.newProperties,
-			};
-			accumulator.newText += text;
-			break;
-		}
-		default:
-			break;
-	}
-}
-
-function accumulateTextSuggestion({
-	accumulator,
-	getSuggestionDataList,
-	id,
-	node,
-}: {
-	accumulator: SuggestionAccumulator;
-	getSuggestionDataList: BuildBlockDiscussionIndexOptions["getSuggestionDataList"];
-	id: string;
-	node: TText;
-}): void {
-	for (const data of getSuggestionDataList(node)) {
-		if (data.id === id) {
-			applySuggestionData(accumulator, node.text, data);
-		}
-	}
-}
-
-function accumulateElementSuggestion({
-	accumulator,
-	getSuggestionData,
-	id,
-	isBlockSuggestion,
-	node,
-}: {
-	accumulator: SuggestionAccumulator;
-	getSuggestionData: BuildBlockDiscussionIndexOptions["getSuggestionData"];
-	id: string;
-	isBlockSuggestion: BuildBlockDiscussionIndexOptions["isBlockSuggestion"];
-	node: TElement;
-}): void {
-	const suggestionData = getSuggestionData(node);
-	if (suggestionData?.id !== keyId2SuggestionId(id)) {
-		return;
-	}
-
-	const inlineSuggestionText = getInlineSuggestionElementText(node);
-	if (inlineSuggestionText) {
-		applySuggestionData(accumulator, inlineSuggestionText, suggestionData);
-		return;
-	}
-
-	if (!isBlockSuggestion(node)) {
-		return;
-	}
-
-	const nextText = suggestionData.isLineBreak
-		? BLOCK_SUGGESTION_TOKEN
-		: `${BLOCK_SUGGESTION_TOKEN}${suggestionTypeText(node)}`;
-	applySuggestionData(accumulator, nextText, suggestionData);
-}
 
 const toResolvedSuggestion = ({
 	discussionsById,

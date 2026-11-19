@@ -2,6 +2,7 @@
 //
 // Option tables and defaults for the Privacy settings tab.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	DiagnosticsContentMode,
 	DiagnosticsExporterField,
@@ -90,3 +91,28 @@ export const EMPTY_EXPORTER: DiagnosticsExporterSettings = {
 	publicKeyRef: "",
 	region: "",
 };
+
+/** An exporter field's accessible name in the UI language. */
+export function exporterFieldLabel(
+	field: DiagnosticsExporterField,
+	tl: LiteralMessage
+): string {
+	return tl(EXPORTER_FIELD_COPY[field].label);
+}
+
+/**
+ * An exporter field's placeholder ("Region or site: us, eu, or us5"), composed
+ * through one catalog template from a translated label and example. Reference
+ * and project examples are literal values and stay as typed.
+ */
+export function exporterFieldPlaceholder(
+	field: DiagnosticsExporterField,
+	tl: LiteralMessage
+): string {
+	const copy = EXPORTER_FIELD_COPY[field];
+	const example = field === "region" ? tl(copy.placeholder) : copy.placeholder;
+	return tl("{label}: {example}", {
+		label: exporterFieldLabel(field, tl),
+		example,
+	});
+}

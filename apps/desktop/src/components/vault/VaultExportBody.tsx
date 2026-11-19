@@ -22,7 +22,6 @@ import {
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { sileo } from "sileo";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { sharedValuesMissingMessage } from "@/src/lib/access-refusal.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -30,6 +29,7 @@ import {
 	exportVaultSecrets,
 	type VaultExportFormat,
 } from "@/src/lib/api/vault.ts";
+import { copyWithToast } from "./vault-copy.ts";
 import { readWithStepUp, vaultErrorMessage } from "./vault-errors.ts";
 import { listMappedOrgProjects } from "./vault-org-projects.ts";
 import { exportFileName } from "./vault-view.ts";
@@ -106,12 +106,7 @@ export function VaultExportBody({
 		if (content === null) {
 			return;
 		}
-		try {
-			await navigator.clipboard.writeText(content);
-			sileo.success({ title: "Copied" });
-		} catch {
-			sileo.error({ title: "Could not copy" });
-		}
+		await copyWithToast(content, tl);
 	};
 
 	const download = () => {

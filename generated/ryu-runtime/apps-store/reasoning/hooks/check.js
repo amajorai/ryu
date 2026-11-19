@@ -36,6 +36,13 @@
 // reply with an earlier marker (an echoed claim, an injected line) is reported as
 // ambiguous, never silenced as `valid`.
 
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
+
 const KNOWN_VERDICTS = [
 	"valid",
 	"invalid",
@@ -64,9 +71,9 @@ const policyId = await host.getPreference({ key: "reasoning-active-policy" });
 if (!(policyId && String(policyId).trim())) {
 	return {
 		kind: "note",
-		text:
-			"Policy check skipped: no policy is selected. Pick one in Settings → Automated " +
-			"Reasoning (the id of a policy from the Reasoning companion).",
+		text: await host.t(
+			"Policy check skipped: no policy is selected. Pick one in Settings → Automated Reasoning (the id of a policy from the Reasoning companion).",
+		),
 	};
 }
 
@@ -104,7 +111,7 @@ try {
 		wall_time_secs: 120,
 	});
 } catch (e) {
-	return { kind: "note", text: `Policy check could not run: ${e}` };
+	return { kind: "note", text: await host.t("Policy check could not run: {error}", { error: String(e) }) };
 }
 
 // The bridge hands back the sub-agent's final text; coerce defensively so a
@@ -115,11 +122,14 @@ const marker = /^SOLVER:[ \t]*([a-z_]+)$/.exec((lines[lines.length - 1] || "").t
 if (!(marker && KNOWN_VERDICTS.includes(marker[1]))) {
 	return {
 		kind: "note",
-		text:
-			"Policy check did not run: the verifier could not reach the reasoning tool, so " +
-			"nothing was checked against the policy. (Its reply: " +
-			(text || "empty") +
-			")",
+		text: text
+			? await host.t(
+					"Policy check did not run: the verifier could not reach the reasoning tool, so nothing was checked against the policy. (Its reply: {reply})",
+					{ reply: text },
+				)
+			: await host.t(
+					"Policy check did not run: the verifier could not reach the reasoning tool, so nothing was checked against the policy. (Its reply: empty)",
+				),
 	};
 }
 
@@ -128,8 +138,10 @@ if (/SOLVER\s*:/i.test(body)) {
 	return {
 		kind: "note",
 		text:
-			"Policy check result was ambiguous: the verifier's reply carried more than one " +
-			"SOLVER marker, so treat the answer as unverified against the policy.\n" +
+			(await host.t(
+				"Policy check result was ambiguous: the verifier's reply carried more than one SOLVER marker, so treat the answer as unverified against the policy.",
+			)) +
+			"\n" +
 			text,
 	};
 }
@@ -143,8 +155,27 @@ if (verdict === "valid" || verdict === "no_translations") {
 
 return {
 	kind: "note",
-	text: `Policy check (${policyId}) — ${verdict}\n${body}`,
+	text: `${await verdictHeader(verdict, String(policyId))}\n${body}`,
 };
+
+// The header for a verdict worth reporting: one whole sentence per verdict id, so
+// a translation never splices a bare solver word into a frame.
+function verdictHeader(verdict, policy) {
+	switch (verdict) {
+		case "invalid":
+			return host.t("Policy check ({policy}) — invalid", { policy });
+		case "satisfiable":
+			return host.t("Policy check ({policy}) — satisfiable", { policy });
+		case "impossible":
+			return host.t("Policy check ({policy}) — impossible", { policy });
+		case "translation_ambiguous":
+			return host.t("Policy check ({policy}) — translation ambiguous", { policy });
+		case "too_complex":
+			return host.t("Policy check ({policy}) — too complex", { policy });
+		default:
+			return host.t("Policy check ({policy}) — {verdict}", { policy, verdict });
+	}
+}
 
 // Quote attacker-influenced text for the task: drop chat-template control tokens
 // and neutralise the quoting tags and the SOLVER marker so the quoted text cannot

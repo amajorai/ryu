@@ -350,7 +350,7 @@ export function PolicyWorkspace({
 							onClick={() => navigate({ kind: "effective" }, "effective")}
 							tint="red"
 							title="Effective policy"
-							value="By scope"
+							value={tl("By scope")}
 						/>
 					</SettingsGroup>
 				</div>

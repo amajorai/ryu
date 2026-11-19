@@ -37,6 +37,10 @@ import { Fragment, useEffect, useState } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { type Split, useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import {
+	presetDisplayName,
+	suggestPresetName,
+} from "@/src/lib/split-preset-name.ts";
 import { presetSummaryMessage } from "@/src/lib/split-preset-summary.ts";
 import {
 	BUILTIN_PRESETS,
@@ -60,21 +64,9 @@ const useSaveSplitPresetDialog = create<SaveSplitPresetDialogState>((set) => ({
 	close: () => set({ splitId: null }),
 }));
 
-/** Suggest a name from the shape, so saving is one keystroke for most users. */
-function suggestName(split: Split, taken: string[]): string {
-	const base = `${leafOrder(split.root).length}-pane layout`;
-	if (!taken.some((n) => n.toLowerCase() === base.toLowerCase())) {
-		return base;
-	}
-	let n = 2;
-	while (taken.some((t) => t.toLowerCase() === `${base} ${n}`.toLowerCase())) {
-		n += 1;
-	}
-	return `${base} ${n}`;
-}
-
 /** Mounted once (Layout). Names the current pane layout and stores it. */
 export function SaveSplitPresetDialog() {
+	const tl = useLiteralMessages();
 	const { splitId, close } = useSaveSplitPresetDialog();
 	const { tabs, splits } = useTabsContext();
 	const { presets, savePreset } = useSplitPresetStore(
@@ -90,9 +82,10 @@ export function SaveSplitPresetDialog() {
 		if (split) {
 			setError(null);
 			setName(
-				suggestName(
-					split,
-					presets.map((p) => p.name)
+				suggestPresetName(
+					leafOrder(split.root).length,
+					presets.map((p) => p.name),
+					tl
 				)
 			);
 			setPinRoutes(false);
@@ -236,8 +229,11 @@ function ApplyPresetSubmenu({ split }: { split: Split | null }) {
 								}
 							>
 								<span className="flex min-w-0 flex-col">
-									<span className="truncate" title={preset.name}>
-										{preset.name}
+									<span
+										className="truncate"
+										title={presetDisplayName(tl, preset)}
+									>
+										{presetDisplayName(tl, preset)}
 									</span>
 									<span className="text-muted-foreground text-xs">
 										{retiles

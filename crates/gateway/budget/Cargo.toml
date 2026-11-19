@@ -10,7 +10,7 @@ description = "Ryu Gateway charged-spend stage: per-user / per-agent / per-sessi
 serde = { version = "1", features = ["derive"] }
 dashmap = "6"
 ryu-gw-contracts = { path = "../contracts", version = "0.5.1" }
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 tracing = "0.1"
 # Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
 # backend: the key arrives from Core (RYU_SEAL_KEY) or RYU_MASTER_KEY.

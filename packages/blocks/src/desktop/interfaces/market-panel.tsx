@@ -327,7 +327,8 @@ export function MarketPanel({
 							const working = state
 								? state.working
 								: agent.status === "working";
-							const words = state?.words ?? (working ? "working" : "idle");
+							const words =
+								state?.words ?? (working ? tl("working") : tl("idle"));
 							const picked = agent.id === keeper;
 							return (
 								<li key={agent.id}>

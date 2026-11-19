@@ -53,6 +53,7 @@ import {
 	POLL_INTERVAL_MS,
 	usePreflightHealth,
 } from "./PreflightPage.health.ts";
+import { gatewayRestartNotice } from "./PreflightPage.notices.ts";
 import { ComponentRow, StatusDot, type Tone } from "./PreflightPage.parts.tsx";
 
 export function PreflightPage({
@@ -333,11 +334,8 @@ export function PreflightPage({
 							label="Restart Gateway"
 							onRun={async () => {
 								const ok = await restartGateway(target);
-								toast[ok ? "info" : "warning"](
-									ok
-										? "Restarting Gateway…"
-										: "Gateway can't be restarted from here"
-								);
+								const notice = gatewayRestartNotice(ok, tl);
+								toast[notice.tone](notice.message);
 								await refresh();
 							}}
 						/>

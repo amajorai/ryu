@@ -163,3 +163,20 @@ export function translate(
 		? formatMessage(source, values, runtime.formatLocale ?? runtime.locale)
 		: translated;
 }
+
+/**
+ * Translate a message id (a word sense such as `tools.readDone`) outside
+ * React, as `useI18n().t(id, values, fallback)` does inside it. Before a
+ * provider mounts (and on the server) it formats `fallback`, the English.
+ */
+export function translateMessage(
+	id: string,
+	values: MessageValuesInput = {},
+	fallback: string = id
+): string {
+	const runtime = current();
+	if (!runtime) {
+		return formatMessage(fallback, values, DEFAULT_LOCALE);
+	}
+	return runtime.translate(id, values, fallback);
+}

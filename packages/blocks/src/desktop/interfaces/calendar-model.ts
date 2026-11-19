@@ -31,10 +31,10 @@ export {
 	shiftDay,
 	startOfWeek,
 	visibleDays,
-	WEEK_START,
 	weekDays,
 	weekdayNames,
 	weekdayShort,
+	weekStart,
 } from "./calendar-model-dates.ts";
 
 export {

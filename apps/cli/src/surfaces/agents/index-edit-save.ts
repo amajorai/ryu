@@ -15,11 +15,10 @@ import {
 	type SetStateAction,
 	useCallback,
 } from "react";
-import { RYU_ENGINE_ID } from "../../core/agentIdentity.ts";
-import { tf } from "../../i18n/translate.ts";
+import { errorText } from "../../i18n/error-text.ts";
 import type { JsonObject } from "../../overlays/settings/inference.tsx";
 import type { useToast } from "../../ui/toast.tsx";
-import { errText } from "./index-shared.tsx";
+import { launchRefusalMessage } from "./index-edit-launch-refusal.ts";
 
 /** The agent editor's save: a launch check, then create or update in Core. */
 export function useAgentSave({
@@ -153,15 +152,15 @@ export function useAgentSave({
 		check
 			.then((result) => {
 				if (result && !result.launchable) {
-					const reason =
-						result.reason ?? "Core says this agent's engine would not start.";
-					const hint =
-						engineValue === RYU_ENGINE_ID
-							? ""
-							: isNew
-								? ` ${tf("Set the engine to {engineId} to run it on Ryu instead.", { engineId: RYU_ENGINE_ID })}`
-								: ` ${tf("Change how it works or its account access, or switch its engine with '{command}'.", { command: `ryu-cli agents identity ${agentId} ${identityMode} --engine ${RYU_ENGINE_ID}` })}`;
-					throw new Error(`${reason} Nothing was saved.${hint}`);
+					throw new Error(
+						launchRefusalMessage({
+							agentId,
+							engine: engineValue,
+							identityMode,
+							isNew,
+							reason: result.reason,
+						})
+					);
 				}
 				return isNew
 					? createAgent(target, input)
@@ -171,7 +170,7 @@ export function useAgentSave({
 				notify(isNew ? "Agent created" : "Agent saved", "success");
 				onClose();
 			})
-			.catch((err) => setError(errText(err)))
+			.catch((err) => setError(errorText(err)))
 			.finally(() => setSaving(false));
 	}, [
 		target,

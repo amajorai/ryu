@@ -65,6 +65,7 @@
   "The room is generating…": "ルームで生成しています…",
   "The room is ready. Send the first prompt.": "ルームの準備ができました。最初のプロンプトを送信してください。",
   "The room is temporarily unavailable. Try again.": "ルームは一時的に利用できません。もう一度お試しください。",
+  "The room request was not accepted.": "ルームのリクエストは受け付けられませんでした。",
   "The turn response was not a valid room.": "ターンのレスポンスが有効なルームではありませんでした。",
   "This closes the room and revokes its current guest sessions.": "ルームを閉じ、現在のゲストセッションを取り消します。",
   "This invite is invalid, expired, or revoked.": "この招待は無効か、期限切れか、取り消されています。",

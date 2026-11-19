@@ -16,6 +16,7 @@ import {
 } from "@ryu/app-host/rpc";
 import { z } from "zod";
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
+import { mediaStatusFailure } from "./media-status-failure.ts";
 
 /** One generated audio file, ready for an `<audio src>`. */
 export interface GeneratedAudio {
@@ -136,7 +137,7 @@ export async function pollAudioJob(
 			// Non-JSON error body — keep the status-based message.
 		}
 		throw new Error(
-			failureReason(body, `audio job poll failed: ${resp.status}`)
+			failureReason(body, mediaStatusFailure("audio-poll", resp.status))
 		);
 	}
 	return rpcJsonResponseSchema.parse(await resp.json());

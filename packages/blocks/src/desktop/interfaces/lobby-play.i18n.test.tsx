@@ -77,3 +77,37 @@ test("the Japanese lobby heads the open brief as a briefing", async () => {
 	await act(async () => root.unmount());
 	container.remove();
 });
+
+test("the Japanese Play button is the game sense, not media playback", async () => {
+	// The bare word is media playback (再生); the lobby keys its own sense.
+	registerLiteralCatalogLoader((locale) =>
+		locale.startsWith("ja") ? { Play: "再生" } : null
+	);
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	await act(async () => {
+		root.render(
+			<I18nProvider initialLocale="ja" initialPackId="official/ja">
+				<LobbyPlay
+					members={[]}
+					onPick={() => undefined}
+					onStart={() => undefined}
+					selected={undefined}
+					squadIds={[]}
+				/>
+			</I18nProvider>
+		);
+	});
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	});
+	const play = [...container.querySelectorAll("button")].find(
+		(button) => button.getAttribute("aria-label") === "プレイ"
+	);
+	expect(play?.textContent).toBe("プレイ");
+	expect(container.textContent).not.toContain("再生");
+
+	await act(async () => root.unmount());
+	container.remove();
+});

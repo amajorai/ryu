@@ -55,8 +55,17 @@ export interface ObservabilitySummary {
 	totalRequests: number;
 }
 
+/** What one request did with the provider's prompt cache. */
+export type PromptCacheStatus =
+	| "cache-write"
+	| "hit"
+	| "hit-write"
+	| "miss"
+	| "miss-write"
+	| "no-cached-tokens";
+
 /** A zero read count is a miss only when this request had a cache policy. */
-export function promptCacheStatus(entry: AuditEntry): string | null {
+export function promptCacheStatus(entry: AuditEntry): PromptCacheStatus | null {
 	const readTokens = isNativeNumber(entry.prompt_cache_read_tokens)
 		? entry.prompt_cache_read_tokens
 		: null;
@@ -69,18 +78,48 @@ export function promptCacheStatus(entry: AuditEntry): string | null {
 		entry.prompt_cache_outcome !== "below-minimum";
 
 	if (readTokens !== null && readTokens > 0) {
-		return writeTokens !== null && writeTokens > 0 ? "Hit + write" : "Hit";
+		return writeTokens !== null && writeTokens > 0 ? "hit-write" : "hit";
 	}
 	if (readTokens === 0 && policyEnabled) {
-		return writeTokens !== null && writeTokens > 0 ? "Miss + write" : "Miss";
+		return writeTokens !== null && writeTokens > 0 ? "miss-write" : "miss";
 	}
 	if (writeTokens !== null && writeTokens > 0) {
-		return "Cache write";
+		return "cache-write";
 	}
 	if (readTokens !== null || writeTokens !== null) {
-		return "No cached tokens";
+		return "no-cached-tokens";
 	}
 	return null;
+}
+
+/** The words a prompt cache status reads as, each a whole catalog literal. */
+export function promptCacheStatusLabel(
+	status: PromptCacheStatus,
+	tl: (source: string) => string
+): string {
+	switch (status) {
+		case "hit":
+			return tl("Hit");
+		case "hit-write":
+			return tl("Hit + write");
+		case "miss":
+			return tl("Miss");
+		case "miss-write":
+			return tl("Miss + write");
+		case "cache-write":
+			return tl("Cache write");
+		default:
+			return tl("No cached tokens");
+	}
+}
+
+/** A request's prompt cache status in words, or null when unreported. */
+export function promptCacheStatusText(
+	entry: AuditEntry,
+	tl: (source: string) => string
+): string | null {
+	const status = promptCacheStatus(entry);
+	return status === null ? null : promptCacheStatusLabel(status, tl);
 }
 
 /** OpenRouter reports total prompt tokens plus cache reads and writes. The
@@ -153,9 +192,10 @@ export function summarizeAudit(entries: AuditEntry[]): ObservabilitySummary {
 		promptCacheHitRequests: entries.filter(
 			(entry) => (entry.prompt_cache_read_tokens ?? 0) > 0
 		).length,
-		promptCacheMissRequests: entries.filter((entry) =>
-			promptCacheStatus(entry)?.startsWith("Miss")
-		).length,
+		promptCacheMissRequests: entries.filter((entry) => {
+			const status = promptCacheStatus(entry);
+			return status === "miss" || status === "miss-write";
+		}).length,
 		promptCacheReadTokens,
 		promptCacheWriteTokens,
 		costMicroUsd: entries.reduce(

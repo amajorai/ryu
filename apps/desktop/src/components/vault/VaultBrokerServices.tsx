@@ -64,7 +64,7 @@ function DeleteServiceDialog({
 		mutationFn: (name: string) => deleteVaultBrokerService(target, name),
 		onSuccess: async (_, name) => {
 			await queryClient.invalidateQueries({ queryKey: ["vault", "broker"] });
-			sileo.success({ title: "Service deleted", description: name });
+			sileo.success({ title: tl("Service deleted"), description: name });
 			onClose();
 		},
 	});

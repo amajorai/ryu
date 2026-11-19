@@ -74,13 +74,13 @@ async function footerLinksIn(locale: string): Promise<string[]> {
 	);
 }
 
-test("German footer translates Marketplace, Skills and Academy", async () => {
+test("German footer translates Marketplace and Academy, keeps Skills", async () => {
 	const links = await footerLinksIn("de");
 	expect(links).toContain("Marktplatz");
-	expect(links).toContain("Fähigkeiten");
+	expect(links).toContain("Skills");
 	expect(links).toContain("Akademie");
 	expect(links).not.toContain("Marketplace");
-	expect(links).not.toContain("Skills");
+	expect(links).not.toContain("Fähigkeiten");
 });
 
 test("English footer keeps the source labels", async () => {

@@ -3,7 +3,7 @@
 // RYU_LOCALE and LANGUAGE.
 
 import { type ByteSizeOptions, formatByteSize } from "@ryu/i18n/format-intl";
-import { CLI_FORMAT_LOCALE } from "./translate.ts";
+import { CLI_FORMAT_LOCALE, CLI_LOCALE } from "./translate.ts";
 
 type DateInput = Date | number | string;
 
@@ -144,4 +144,21 @@ export function formatCliElapsed(
 		locale,
 		options.trimZeros
 	);
+}
+
+/**
+ * A list the way the CLI's language writes one ("a, b and c", "a、b、c"), so a
+ * translated sentence never carries an English comma join. An unusable tag
+ * falls back to English rather than throwing.
+ */
+export function formatCliList(
+	items: readonly string[],
+	type: "conjunction" | "disjunction" | "unit" = "conjunction",
+	locale: string = CLI_LOCALE
+): string {
+	try {
+		return new Intl.ListFormat(locale, { type }).format(items);
+	} catch {
+		return new Intl.ListFormat("en", { type }).format(items);
+	}
 }

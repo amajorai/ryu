@@ -5,8 +5,10 @@
 // the already-ranked cards and its next-page callback.
 
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { Children, type ReactNode } from "react";
 import InfiniteSentinel from "./infinite-sentinel.tsx";
 import { StoreCardGrid } from "./store-catalog-layout.tsx";
@@ -28,28 +30,35 @@ export default function StoreCategoryPage<T>({
 	loadingMore?: boolean;
 	onLoadMore?: () => void;
 }) {
+	const tl = useLiteralMessages();
+	// A category label is English catalog copy (a Store shelf name): translate
+	// it once, so the breadcrumb and the heading read the same words.
+	const shownCategory = isNativeText(category) ? tl(category) : category;
 	return (
 		<div className="flex flex-col gap-4">
-			<nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm">
+			<nav
+				aria-label={tl("Breadcrumb")}
+				className="flex items-center gap-1 text-sm"
+			>
 				<Button
-					aria-label="Back to categories"
+					aria-label={tl("Back to categories")}
 					className="-ms-2"
 					onClick={onBack}
 					size="sm"
 					variant="ghost-muted"
 				>
 					<DirectionalIcon className="size-4" icon={ArrowLeft01Icon} />
-					<span>Categories</span>
+					<span>{tl("Categories")}</span>
 				</Button>
 				<span aria-hidden="true" className="text-muted-foreground/70">
 					/
 				</span>
 				<span aria-current="page" className="truncate text-foreground">
-					{category}
+					{shownCategory}
 				</span>
 			</nav>
 
-			<h2 className="px-1 font-semibold text-sm">{category}</h2>
+			<h2 className="px-1 font-semibold text-sm">{shownCategory}</h2>
 			<StoreCardGrid>
 				{Children.toArray(items.map((item) => renderItem(item)))}
 			</StoreCardGrid>

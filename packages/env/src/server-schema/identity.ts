@@ -73,6 +73,14 @@ export const identityServerEnv = {
 			message: "RYU_DB_MASTER_KEY must decode to exactly 32 bytes",
 		})
 		.optional(),
+	// Further master key versions for rotation, `<version>:<base64>` entries
+	// separated by commas (`2:<new key>`). The newest version seals new
+	// values and every listed version opens; RYU_DB_MASTER_KEY is version 1.
+	// `@ryu/db/crypto-keyring` parses and validates it on use.
+	RYU_DB_MASTER_KEYS: z.string().optional(),
+	// The key version lookup digests, blind tokens and content keys derive
+	// from (default: the lowest configured version).
+	RYU_DB_ROOT_KEY_VERSION: z.string().optional(),
 	// PKCS#8 DER Ed25519 private key, base64 encoded. Signs canonical fleet
 	// desired-state snapshots; fleet enrollment/reconciliation is unavailable
 	// when it is absent rather than falling back to an ephemeral trust root.

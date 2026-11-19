@@ -278,7 +278,7 @@ export function WorkspacePicker({
 	const handleCreateBranch = useCallback(
 		async (name: string): Promise<string | null> => {
 			if (!folder) {
-				return "No folder selected";
+				return tl("No folder selected");
 			}
 			setCreatingBranch(true);
 			const result = await createBranch(target, folder, name);
@@ -289,9 +289,9 @@ export function WorkspacePicker({
 				closeMenus();
 				return null;
 			}
-			return result.error ?? "Failed to create branch";
+			return result.error ?? tl("Failed to create branch");
 		},
-		[folder, target, loadBranches, closeMenus]
+		[folder, target, loadBranches, closeMenus, tl]
 	);
 
 	// The worktree segment shows ONLY when the chat actually runs in a worktree:

@@ -216,3 +216,28 @@ async fn crud_round_trips_and_rejects_duplicates() {
     assert!(delete(&conn, "svc").unwrap());
     assert!(!delete(&conn, "svc").unwrap());
 }
+
+pub(crate) fn test_service(
+    name: &str,
+    host: &str,
+    port: Option<u16>,
+    prefix: &str,
+) -> ServiceInput {
+    ServiceInput {
+        name: name.to_owned(),
+        environment: "default".to_owned(),
+        host: host.to_owned(),
+        port,
+        path_prefix: prefix.to_owned(),
+        auth: ServiceAuth::Bearer {
+            token: "secret:API_TOKEN".to_owned(),
+        },
+        substitutions: Vec::new(),
+        enabled: true,
+        allow_insecure_http: false,
+        box_relay: false,
+        description: String::new(),
+        notes: String::new(),
+        mcp_tools: None,
+    }
+}

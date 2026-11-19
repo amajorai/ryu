@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
+import { officialCliLiteralCatalog } from "@ryu/i18n/official-catalog/cli";
+import { createCliTranslator } from "../i18n/translate.ts";
 import {
 	allocatePaneBudgets,
 	formatTabLabel,
 	tabRowWidth,
+	tabTitleText,
 	visibleTabWindow,
 } from "../workspace/tabStripLayout.ts";
 
@@ -64,4 +67,43 @@ test("allocatePaneBudgets lends a short pane's spare columns to a crowded one", 
 	expect(allocatePaneBudgets([100], 60)).toEqual([60]);
 	// Never hands a pane zero columns.
 	expect(allocatePaneBudgets([100, 100], 0)).toEqual([1, 1]);
+});
+
+test("tabTitleText translates a surface title before the chip joins its index", () => {
+	const german = createCliTranslator("de", officialCliLiteralCatalog("de"));
+	// The joined label never matches a catalog entry, so it must not be the
+	// string that gets translated.
+	expect(german.tr("1:New chat")).toBe("1:New chat");
+	expect(formatTabLabel(1, tabTitleText("New chat", german))).toBe(
+		"1:Neuer Chat"
+	);
+	expect(formatTabLabel(2, tabTitleText("Agents", german), 20, true)).toBe(
+		"2:*Agenten"
+	);
+	// Names and conversation titles have no entry and stay as typed.
+	expect(tabTitleText("Quarterly plan draft", german)).toBe(
+		"Quarterly plan draft"
+	);
+});
+
+test("every official CLI catalog translates the default chat tab title", () => {
+	for (const locale of [
+		"ar",
+		"de",
+		"es",
+		"fr",
+		"hi",
+		"it",
+		"ja",
+		"ko",
+		"pt-BR",
+		"ru",
+		"zh-CN",
+	]) {
+		const translator = createCliTranslator(
+			locale,
+			officialCliLiteralCatalog(locale)
+		);
+		expect(tabTitleText("New chat", translator)).not.toBe("New chat");
+	}
 });

@@ -33,6 +33,7 @@ import {
 	SANDBOX_INSTALL_DOCS,
 	TOGGLE_LABELS,
 } from "./EnginesCatalogSection-model.ts";
+import { sandboxNotDetected } from "./EnginesCatalogSection-sandbox-copy.ts";
 
 /**
  * The inline lifecycle control on an engine card — the SAME {@link StoreItemAction}
@@ -178,13 +179,8 @@ export function EngineCardAction({
 					<StatusBadge
 						kind="unavailable"
 						label={
-							docs
-								? (docs.notDetected ??
-									tl(
-										"Not detected. Ryu does not install {displayName} — it needs elevated privileges on every platform. Install {what} and it is picked up automatically.",
-										{ displayName: item.displayName, what: docs.what }
-									))
-								: "Not detected on this node"
+							sandboxNotDetected(tl, item.name) ??
+							tl("Not detected on this node")
 						}
 					/>
 					{docs ? (

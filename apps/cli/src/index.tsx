@@ -13,6 +13,7 @@ import { createRoot } from "@opentui/react";
 import { type ApiTarget, setSurfaceProvider } from "@ryuhq/core-client/client";
 import { App } from "./App.tsx";
 import { requiresWaitlistAccess } from "./cli/access.ts";
+import { waitlistRefusal } from "./cli/access-message.ts";
 import { isInteractive, parseArgs, runCli } from "./cli/dispatch.ts";
 import { ensureCoreRunning } from "./core/bootstrap.ts";
 import { herdrReporter } from "./core/herdr.ts";
@@ -26,6 +27,7 @@ import {
 } from "./core/self-update.ts";
 import { buildInteractiveTarget, buildTarget } from "./core/target.ts";
 import { resolveCliWaitlistAccess } from "./core/waitlist.ts";
+import { tf } from "./i18n/translate.ts";
 
 // Declare the calling surface once, at entry, so EVERY core-client request carries
 // `X-Ryu-Surface: cli` (makeHeaders reads the provider). Core filters the plugin
@@ -89,13 +91,7 @@ async function runOneShotWithAccessGate(): Promise<number> {
 		const access = await resolveCliWaitlistAccess(target, controller.signal);
 		clearTimeout(timeout);
 		if (access !== "approved") {
-			const message =
-				access === "unauthenticated"
-					? "Sign in first with `ryu-cli login`."
-					: access === "pending"
-						? "Your account is still on the waitlist."
-						: "Ryu could not verify waitlist access. Try again when the control plane is reachable.";
-			process.stderr.write(`${message}\n`);
+			process.stderr.write(`${waitlistRefusal(access)}\n`);
 			return 1;
 		}
 	}
@@ -123,7 +119,9 @@ if (argv.length === 1 && argv[0] === "--internal-cli-update") {
 } else if (isInteractive(argv)) {
 	bootInteractive().catch((err) => {
 		void herdrReporter?.release();
-		process.stderr.write(`ryu-cli failed to start: ${String(err)}\n`);
+		process.stderr.write(
+			`${tf("ryu-cli failed to start: {error}", { error: String(err) })}\n`
+		);
 		process.exitCode = 1;
 	});
 } else {

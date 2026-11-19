@@ -129,7 +129,7 @@ export function ShareConversationDialog({
 	const ownerName =
 		ownerMember?.name ||
 		(ownerIsCurrentUser ? owner?.name || owner?.email : ownerUserId) ||
-		"Local owner";
+		tl("Local owner");
 	const ownerEmail =
 		ownerMember?.email ||
 		(ownerIsCurrentUser ? owner?.email : ownerUserId) ||

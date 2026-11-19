@@ -17,6 +17,7 @@ pub mod agent_inbox_tool;
 #[cfg(test)]
 mod agent_react_registry_runtime_test;
 mod agent_tools;
+mod app_alias;
 pub(crate) mod app_tool_namespace;
 pub(crate) mod app_visibility;
 pub mod artifact_tool;

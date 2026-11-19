@@ -23,8 +23,10 @@ import type { ListRow } from "../core/featureList.ts";
 import { useInputFocused } from "../core/InputFocusContext.tsx";
 import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
 import { sanitizeTerminalText } from "../core/transcriptPresentation.ts";
+import { trMessage } from "../i18n/translate.ts";
 import { ErrorView } from "./ErrorView.tsx";
 import { Loading } from "./Loading.tsx";
+import { listActionErrorNotice } from "./list-notices.ts";
 import { ListPosition, SelectableRow } from "./SelectableRow.tsx";
 import { useListWindow } from "./useListWindow.ts";
 
@@ -148,7 +150,7 @@ export function ListTab({
 					}
 				})
 				.catch((err) => {
-					setNotice(`error: ${nativeErrorMessage(err)}`);
+					setNotice(listActionErrorNotice(trMessage(nativeErrorMessage(err))));
 				});
 		},
 		[selected, target]

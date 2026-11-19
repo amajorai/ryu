@@ -1,5 +1,6 @@
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -34,6 +35,7 @@ export function AddMarketplaceDialog({
 	onOpenChange: (open: boolean) => void;
 	open: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const [displayName, setDisplayName] = useState("");
 	const [id, setId] = useState("");
 	const [baseUrl, setBaseUrl] = useState("");
@@ -111,7 +113,7 @@ export function AddMarketplaceDialog({
 							/>
 						</div>
 						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="marketplace-id">Id</Label>
+							<Label htmlFor="marketplace-id">{tl("ID")}</Label>
 							<Input
 								id="marketplace-id"
 								onChange={(event) => setId(event.target.value)}

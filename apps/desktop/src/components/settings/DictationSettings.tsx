@@ -122,7 +122,9 @@ export function DictationSettings() {
 					<span>
 						{tl("Could not save {surface} settings.", {
 							surface:
-								saveError === "dictation" ? "Dictation" : "Speech Processing",
+								saveError === "dictation"
+									? tl("Dictation")
+									: tl("Speech Processing"),
 						})}
 					</span>
 					<Button onClick={retryFailedSave} size="sm" variant="outline">
@@ -146,7 +148,9 @@ export function DictationSettings() {
 							"Dictation is on because the <strong>Dictation</strong> plugin is enabled. To turn it off everywhere, disable the plugin in <strong>Gateway settings → Plugins</strong>. {islandNote} The settings below tune what it does once it is on.",
 							{
 								islandNote: ISLAND_ENABLED
-									? "The island companion hosts the OS surface (global shortcuts, capture, insert)."
+									? tl(
+											"The island companion hosts the OS surface (global shortcuts, capture, insert)."
+										)
 									: tl(
 											"{ISLAND_UNAVAILABLE_NOTE} System-wide dictation shortcuts start working once it ships.",
 											{ ISLAND_UNAVAILABLE_NOTE }

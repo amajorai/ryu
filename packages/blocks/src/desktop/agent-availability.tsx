@@ -1,13 +1,24 @@
 "use client";
 
+import { translateMessage } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { createContext, type ReactNode, useContext } from "react";
+
+/** The presence word for "online" ("Online", ar "متصل", zh-CN "在线"). */
+export function onlineLabel(): string {
+	return translateMessage("status.online", {}, "Online");
+}
 
 /** Availability states that can change how an agent asks for human input. */
 export const AGENT_AVAILABILITY_OPTIONS = [
 	{
 		value: "online",
-		label: "Online",
+		// Read at render: the presence status reads through the keyed
+		// `status.online`, since the bare catalog "Online" is an online event
+		// (ar "عبر الإنترنت", zh-CN "线上").
+		get label() {
+			return onlineLabel();
+		},
 		description: "Ask questions and surface prompts as soon as they are ready.",
 	},
 	{
@@ -59,7 +70,7 @@ export function agentAvailabilityLabel(
 ): string {
 	return (
 		AGENT_AVAILABILITY_OPTIONS.find((option) => option.value === status)
-			?.label ?? "Online"
+			?.label ?? onlineLabel()
 	);
 }
 

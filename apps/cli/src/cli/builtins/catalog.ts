@@ -8,7 +8,7 @@ import {
 	parseGatewayConfigPatch,
 	redactGatewayConfig,
 } from "../gatewayConfig.ts";
-import { LocalizedError, localize } from "../localizedText.ts";
+import { LocalizedError, localize, localizedTextOf } from "../localizedText.ts";
 import { type CliContext, type Command, UsageError } from "../types.ts";
 import { type CommandJsonRecord, callCore, rawCommand } from "./shared.ts";
 
@@ -140,7 +140,11 @@ async function readGatewayPatch(ctx: CliContext, command: "apply" | "diff") {
 	try {
 		return parseGatewayConfigPatch(source);
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
+		// Keep a nested LocalizedText so the reason renders in the CLI locale too.
+		const message =
+			error instanceof Error
+				? (localizedTextOf(error) ?? error.message)
+				: String(error);
 		throw new UsageError(
 			localize("Invalid gateway config '{path}': {message}", { message, path })
 		);

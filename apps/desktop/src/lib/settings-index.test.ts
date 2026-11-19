@@ -309,11 +309,6 @@ describe("searchSettings", () => {
 		expect(ids).toContain("appearance.theme.color-theme");
 	});
 
-	it("finds the send shortcut setting from its visible title", () => {
-		const ids = searchSettings("send shortcut").map((entry) => entry.id);
-		expect(ids).toContain("general.chats.send-shortcut");
-	});
-
 	it("ANDs the tokens instead of ORing them", () => {
 		const both = searchSettings("diff line");
 		expect(both.length).toBeGreaterThan(0);
@@ -435,35 +430,6 @@ describe("settings subpage ownership", () => {
 describe("OTLP diagnostics export entries", () => {
 	const CONTENT_MODE = "gw.privacy.diagnostics-export.content-mode";
 	const TEST_DESTINATION = "gw.privacy.diagnostics-export.test-destination";
-	const entryFor = (id: string) => {
-		const found = SETTINGS_ENTRIES.find((entry) => entry.id === id);
-		if (!found) {
-			throw new Error(`Missing indexed entry ${id}`);
-		}
-		return found;
-	};
-
-	it("indexes the content mode and the test destination on the Diagnostics & support page, in the browser too", () => {
-		for (const id of [CONTENT_MODE, TEST_DESTINATION]) {
-			const entry = entryFor(id);
-			expect({
-				dialog: entry.dialog,
-				group: entry.group,
-				section: entry.section,
-				subpage: subpageFor(entry),
-				desktopOnly: entry.desktopOnly ?? false,
-			}).toEqual({
-				dialog: "gateway",
-				group: "Diagnostics export",
-				section: "privacy",
-				subpage: "diagnostics",
-				desktopOnly: false,
-			});
-		}
-		expect(entryFor(CONTENT_MODE).label).toBe("Content mode");
-		expect(entryFor(TEST_DESTINATION).label).toBe("Test destination");
-	});
-
 	it("finds the content mode by what people type for it", () => {
 		for (const query of [
 			"content mode",

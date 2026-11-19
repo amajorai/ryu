@@ -23684,7 +23684,7 @@
           "Vault"
         ],
         "summary": "Set or replace the login URLs of an agent's website account",
-        "description": "Login URLs decide where a session Box fill may submit the account's password. Validated like account create: https, the account's host, its www. variant or a subdomain, no user name, port, query or fragment, at most four. Audited with the URLs before and after.",
+        "description": "Login URLs decide where a session Box fill may submit the account's password. Validated like account create: https, the account's host, its www. variant or a subdomain, no user name, port, query or fragment, at most four. Audited with the URLs before and after. An account created before login URLs gains the field on its first set.",
         "operationId": "login_urls_set",
         "parameters": [
           {
@@ -23721,7 +23721,7 @@
             "description": "No such account for this agent"
           },
           "409": {
-            "description": "The account predates login URLs"
+            "description": "The account changed while it was updated; retry"
           }
         }
       }
@@ -24945,6 +24945,50 @@
         }
       }
     },
+    "/api/vault/broker/ca": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Broker CA status: fingerprint, subject, expiry, source, and a still-trusted previous CA (list on sys/broker)",
+        "operationId": "broker_ca_info",
+        "responses": {
+          "200": {
+            "description": "CA status (null before first use)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Use an operator CA (PEM certificate and PKCS#8 key) for broker interception; the key is sealed and never returned (admin on sys/broker)",
+        "operationId": "broker_ca_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The imported CA",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vault/broker/ca.pem": {
       "get": {
         "tags": [
@@ -24965,6 +25009,25 @@
           },
           "404": {
             "description": "No broker CA exists yet"
+          }
+        }
+      }
+    },
+    "/api/vault/broker/ca/rotate": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Replace the broker CA with a new generated one; the old one stays trusted for 24 hours (admin on sys/broker)",
+        "operationId": "broker_ca_rotate",
+        "responses": {
+          "200": {
+            "description": "The new CA",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           }
         }
       }
@@ -25416,16 +25479,93 @@
         }
       }
     },
+    "/api/vault/broker/services/{name}/member-values": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Which credential slots of a service the caller filled with a personal value (use on sys/broker/<name>)",
+        "operationId": "broker_list_member_values",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Service name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Slots, never values",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Set or clear the caller's personal value for one credential slot of a service (use on sys/broker/<name>)",
+        "operationId": "broker_put_member_value",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Service name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vault/broker/sessions": {
       "get": {
         "tags": [
           "Vault"
         ],
-        "summary": "List live broker sessions (admin on sys/broker)",
+        "summary": "List live broker sessions, optionally with one label (admin on sys/broker)",
         "operationId": "list_sessions",
+        "parameters": [
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Exact session label",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Sessions (no tokens)",
+            "description": "Sessions with status and neverExpires (no tokens)",
             "content": {
               "application/json": {
                 "schema": {}
@@ -25460,6 +25600,74 @@
         }
       }
     },
+    "/api/vault/broker/sessions/history": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Every broker session, live and ended, newest first (admin on sys/broker)",
+        "operationId": "broker_session_history",
+        "parameters": [
+          {
+            "name": "label",
+            "in": "query",
+            "description": "Exact session label",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "live, expired, revoked, or ended",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "description": "Environment",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Sessions created before this time (ms)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (max 200)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sessions with status (no tokens)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vault/broker/sessions/{id}": {
       "delete": {
         "tags": [
@@ -25481,6 +25689,82 @@
         "responses": {
           "200": {
             "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Change a broker session's label (its minter, or admin on sys/broker)",
+        "operationId": "broker_relabel_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Relabeled",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/broker/sessions/{id}/log": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "A session's sealed request log, newest first: request metadata and MCP tool calls, never values (its minter, or list on sys/broker)",
+        "operationId": "broker_session_log",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Entries (default 200, max 2048)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entries",
             "content": {
               "application/json": {
                 "schema": {}
@@ -25530,6 +25814,96 @@
         "responses": {
           "200": {
             "description": "Services",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/bulk": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Set, delete or move up to 100 values, with a result per item",
+        "operationId": "bulk",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "One result per item, in request order",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/capabilities-accessor": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "A machine token's capabilities on policy keys, by accessor (admin on sys/machines)",
+        "operationId": "capabilities_accessor",
+        "parameters": [
+          {
+            "name": "accessor",
+            "in": "query",
+            "description": "Token accessor",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "paths",
+            "in": "query",
+            "description": "Comma-separated policy keys",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capabilities per key",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "No paths or too many",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator on sys/machines",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No live token with that accessor",
             "content": {
               "application/json": {
                 "schema": {}
@@ -25940,6 +26314,41 @@
         "responses": {
           "200": {
             "description": "Value",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/credential-requests": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Create a one-time link that asks someone for an agent's sign-in to one site",
+        "operationId": "credential_request_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The link",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "409": {
+            "description": "This node is not connected to Ryu Cloud",
             "content": {
               "application/json": {
                 "schema": {}
@@ -26742,6 +27151,41 @@
         "responses": {
           "200": {
             "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/folders/move": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Move or rename a folder with everything under it (admin)",
+        "operationId": "move_folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Moved",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "409": {
+            "description": "A destination value exists, or items, an external source or a pending change request block the move",
             "content": {
               "application/json": {
                 "schema": {}
@@ -27782,6 +28226,88 @@
         }
       }
     },
+    "/api/vault/namespace-locks": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "List namespace locks",
+        "operationId": "list_namespace_locks",
+        "responses": {
+          "200": {
+            "description": "Locks",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Lock a user, node, team or org subtree (admin)",
+        "operationId": "lock_namespace",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Locked",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "409": {
+            "description": "Already locked",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/namespace-locks/{id}": {
+      "delete": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Unlock a namespace (admin)",
+        "operationId": "unlock_namespace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Lock id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unlocked",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vault/password-managers/accounts": {
       "get": {
         "tags": [
@@ -28096,6 +28622,56 @@
         }
       }
     },
+    "/api/vault/personal-overrides": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Whether the caller's personal values override shared values",
+        "operationId": "get_personal_overrides",
+        "responses": {
+          "200": {
+            "description": "The caller's setting",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "No signed-in user on a registered node"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Switch whether the caller's personal values override shared values",
+        "operationId": "put_personal_overrides",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The caller's new setting",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "No signed-in user on a registered node"
+          }
+        }
+      }
+    },
     "/api/vault/pki/issuers": {
       "get": {
         "tags": [
@@ -28118,7 +28694,7 @@
         "tags": [
           "Vault"
         ],
-        "summary": "Create a root certificate authority (admin)",
+        "summary": "Create a root certificate authority (admin; keyType ec, rsa, or ed25519)",
         "operationId": "pki_create_issuer",
         "requestBody": {
           "content": {
@@ -28245,7 +28821,8 @@
         "tags": [
           "Vault"
         ],
-        "summary": "Generate an intermediate issuer key and return its CSR",
+        "summary": "Generate an intermediate issuer key and return its CSR (admin; keyType ec, rsa, or ed25519)",
+        "description": "The body takes `commonName`, and optionally `keyType` (`ec`, the default, `rsa`, or `ed25519`) and `keyBits` (`ec`: 256 or 384; `rsa`: 2048, 3072, or 4096; none for `ed25519`). The issuer stays pending until its signed certificate is installed.",
         "operationId": "pki_generate_intermediate",
         "parameters": [
           {
@@ -28268,12 +28845,15 @@
         },
         "responses": {
           "200": {
-            "description": "Result",
+            "description": "The pending issuer with its CSR",
             "content": {
               "application/json": {
                 "schema": {}
               }
             }
+          },
+          "400": {
+            "description": "An invalid name, common name, key type or size"
           }
         }
       }
@@ -28310,6 +28890,104 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/pki/issuers/{name}/ocsp": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "OCSP responder for an issuer (public; DER OCSPRequest body)",
+        "operationId": "pki_ocsp_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Issuer name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/ocsp-request": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "DER OCSPResponse, signed by the issuer",
+            "content": {
+              "application/ocsp-response": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/pki/issuers/{name}/ocsp/{request}": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "OCSP responder for an issuer (public; base64 OCSPRequest in the path)",
+        "operationId": "pki_ocsp_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Issuer name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request",
+            "in": "path",
+            "description": "URL-encoded base64 of the DER OCSPRequest",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DER OCSPResponse, signed by the issuer",
+            "content": {
+              "application/ocsp-response": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
               }
             }
           }
@@ -28564,7 +29242,7 @@
         "tags": [
           "Vault"
         ],
-        "summary": "Create or replace a vault policy (admin)",
+        "summary": "Create or replace a vault policy (admin); `createOnly` refuses an existing name with 409",
         "operationId": "put_policy",
         "parameters": [
           {
@@ -28810,6 +29488,15 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Comma-separated tags; only values carrying every one",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -29050,6 +29737,52 @@
         }
       }
     },
+    "/api/vault/secrets/{name}/move": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Move or rename one value within its scope",
+        "operationId": "move_secret",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Secret name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Moved",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "409": {
+            "description": "A value exists at the destination",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vault/secrets/{name}/subkeys": {
       "get": {
         "tags": [
@@ -29251,6 +29984,181 @@
         }
       }
     },
+    "/api/vault/share-requests": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Create a one-time link that asks someone for a value (write on the target)",
+        "operationId": "share_request_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The link",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/shares": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "List share and request links (never their keys or answers)",
+        "operationId": "share_list",
+        "responses": {
+          "200": {
+            "description": "Links",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Create a one-time share link for a vault value (read) or a wrapping token",
+        "operationId": "share_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The link, returned once (its #fragment is the key)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "409": {
+            "description": "This node is not connected to Ryu Cloud",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/shares/{id}": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "One link with its state at Ryu Cloud",
+        "operationId": "share_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Link id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Link",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Revoke an unused link",
+        "operationId": "share_revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Link id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/shares/{id}/claim": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Write a request's answer to its vault key (through the normal write path)",
+        "operationId": "share_claim",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Request link id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Written (or a change request was opened)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "409": {
+            "description": "Not answered yet, or already claimed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vault/snapshot": {
       "post": {
         "tags": [
@@ -29313,6 +30221,234 @@
         "responses": {
           "200": {
             "description": "CA public key",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/ssh/cas/{name}/certs": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "List certificates an SSH CA signed",
+        "operationId": "ssh_certs",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "CA name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certificate records",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/ssh/cas/{name}/krl": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Current key revocation list of an SSH CA (OpenSSH KRL)",
+        "operationId": "ssh_krl",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "CA name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binary KRL for sshd RevokedKeys",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/ssh/cas/{name}/revoke": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Revoke SSH certificates by serial or key ID (admin)",
+        "operationId": "ssh_revoke",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "CA name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked records",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/ssh/creds/{role}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Issue a one-time SSH password for a host (use)",
+        "operationId": "ssh_otp_creds",
+        "parameters": [
+          {
+            "name": "role",
+            "in": "path",
+            "description": "OTP role name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OTP credential (shown once)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/ssh/otp-roles": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "List SSH OTP roles",
+        "operationId": "ssh_otp_roles",
+        "responses": {
+          "200": {
+            "description": "Roles",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/ssh/otp-roles/{name}": {
+      "put": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Create or replace an SSH OTP role (admin)",
+        "operationId": "ssh_put_otp_role",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Role name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved role",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Delete an SSH OTP role and its unused OTPs (admin)",
+        "operationId": "ssh_delete_otp_role",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Role name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
             "content": {
               "application/json": {
                 "schema": {}
@@ -29436,6 +30572,41 @@
         "responses": {
           "200": {
             "description": "OpenSSH certificate",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/ssh/verify": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Verify and consume a one-time SSH password (public)",
+        "operationId": "ssh_otp_verify",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Username, host, port and role the OTP was for",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "Unknown, used, or expired OTP",
             "content": {
               "application/json": {
                 "schema": {}
@@ -29826,6 +30997,128 @@
         "responses": {
           "200": {
             "description": "Tidy report",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/sys/lockouts": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "List machine identities locked after failed logins, and the lockout settings (admin)",
+        "operationId": "sys_lockouts",
+        "responses": {
+          "200": {
+            "description": "Locked identities and settings",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/sys/lockouts/config": {
+      "put": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Set the login lockout threshold, window, and duration (admin)",
+        "operationId": "sys_lockout_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/sys/lockouts/{identity}/unlock": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Unlock a machine identity locked after failed logins (admin)",
+        "operationId": "sys_lockout_unlock",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "description": "Machine identity name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether it was locked",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/sys/metrics": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Vault size and load counts, as JSON or Prometheus text (read on sys/metrics)",
+        "operationId": "vault_metrics",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "description": "`json` (default) or `prometheus`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Counts; never names or values",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown format",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "No read on sys/metrics",
             "content": {
               "application/json": {
                 "schema": {}
@@ -30374,6 +31667,91 @@
         }
       }
     },
+    "/api/vault/tags": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "List tag entities and tags in use, with visible value counts",
+        "operationId": "list_tags",
+        "responses": {
+          "200": {
+            "description": "Tags",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/tags/{slug}": {
+      "put": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Create or update a tag entity (admin)",
+        "operationId": "put_tag",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Tag label",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Delete a tag entity; values keep the label (admin)",
+        "operationId": "delete_tag",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Tag label",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vault/token-roles": {
       "get": {
         "tags": [
@@ -30871,6 +32249,44 @@
         }
       }
     },
+    "/api/vault/transit/cmac/verify/{name}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Verify an AES-CMAC (use; batchInput accepted)",
+        "operationId": "transit_cmac_verify",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Key name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "`valid`, or `batchResults`",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vault/transit/deleted": {
       "get": {
         "tags": [
@@ -31306,7 +32722,7 @@
           {
             "name": "op",
             "in": "path",
-            "description": "encrypt, decrypt, rewrap, datakey, sign, verify, hmac, rotate",
+            "description": "encrypt, decrypt, rewrap, datakey, sign, verify, hmac, cmac, cmac-verify, rotate",
             "required": true,
             "schema": {
               "type": "string"
@@ -32488,6 +33904,523 @@
         }
       }
     },
+    "/v1/auth/approle/login": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Exchange an AppRole role id and secret id for a machine token",
+        "operationId": "vault_compat_approle_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Machine token (`auth` block, shown once)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/aws/login": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Log in with a presigned sts:GetCallerIdentity request (`role` is the identity name)",
+        "operationId": "vault_compat_aws_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Machine token (`auth` block, shown once)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/cert/login": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Log in with a TLS client certificate and proof-of-possession JWT in the body",
+        "operationId": "vault_compat_cert_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Machine token (`auth` block, shown once)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/jwt/login": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Exchange an OIDC/JWT token for a machine token (`role` is the identity name)",
+        "operationId": "vault_compat_jwt_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Machine token (`auth` block, shown once)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/kubernetes/login": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Log in with a Kubernetes service-account token (`role` is the identity name)",
+        "operationId": "vault_compat_kubernetes_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Machine token (`auth` block, shown once)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/token/create": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Create a child of the presented token (policy subset, TTL capped by the parent)",
+        "operationId": "vault_compat_token_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "New token (`auth` block, shown once)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/token/create/{role_name}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Create a child token from a token role (needs use on sys/token-roles/<name>)",
+        "operationId": "vault_compat_token_create_role",
+        "parameters": [
+          {
+            "name": "role_name",
+            "in": "path",
+            "description": "Token role name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "New token (`auth` block, shown once)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/token/lookup-self": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Look up the presented token (Vault-compatible; never echoes the token)",
+        "operationId": "vault_compat_token_lookup_self",
+        "responses": {
+          "200": {
+            "description": "Token metadata",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Look up the presented token (POST form of `lookup-self`)",
+        "operationId": "vault_compat_token_lookup_self_post",
+        "responses": {
+          "200": {
+            "description": "Token metadata",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/token/renew-self": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Renew the presented token by `increment` (default: its TTL), up to its max TTL",
+        "operationId": "vault_compat_token_renew_self",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Renewed token (`auth` block)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid increment or expired token",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied, or the token is not renewable",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/token/revoke-self": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Revoke the presented token and its children (Vault-compatible)",
+        "operationId": "vault_compat_token_revoke_self",
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat/completions": {
       "post": {
         "tags": [
@@ -32506,6 +34439,1423 @@
         "responses": {
           "200": {
             "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/secret/data/{path}": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Read a KV v2 secret (every key, all-or-nothing; current version only)",
+        "operationId": "vault_compat_kv_read",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Secret path under `secret/`, e.g. `app/db`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "Must be 0 or the current version",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No such secret",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Replace a KV v2 secret's key set (`options.cas` is check-and-set)",
+        "operationId": "vault_compat_kv_write",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Secret path under `secret/`, e.g. `app/db`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Replace a KV v2 secret's key set (POST form of the write)",
+        "operationId": "vault_compat_kv_write_post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Secret path under `secret/`, e.g. `app/db`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Soft-delete every key of a KV v2 secret (restorable)",
+        "operationId": "vault_compat_kv_delete",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Secret path under `secret/`, e.g. `app/db`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/secret/metadata": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "List the top-level KV v2 paths (`?list=true`, or the `LIST` verb)",
+        "operationId": "vault_compat_kv_list_root",
+        "parameters": [
+          {
+            "name": "list",
+            "in": "query",
+            "description": "Must be true",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "List only keys sorted after this one",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Return at most this many keys (zero or less: no limit)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No such secret",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/secret/metadata/{path}": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Read KV v2 metadata, or list children with `?list=true` (also the `LIST` verb)",
+        "operationId": "vault_compat_kv_metadata",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Secret path under `secret/`, e.g. `app/db`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "list",
+            "in": "query",
+            "description": "List the path's children instead",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "List only keys sorted after this one",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Return at most this many keys (zero or less: no limit)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No such secret",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Permanently destroy every key of a KV v2 secret and its history",
+        "operationId": "vault_compat_kv_destroy",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Secret path under `secret/`, e.g. `app/db`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sys/health": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Vault-compatible health check (unauthenticated; HEAD returns the status only)",
+        "operationId": "vault_compat_sys_health",
+        "parameters": [
+          {
+            "name": "activecode",
+            "in": "query",
+            "description": "Status when active and unsealed (default 200)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "sealedcode",
+            "in": "query",
+            "description": "Status when sealed (default 503)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "uninitcode",
+            "in": "query",
+            "description": "Status when the vault store is not installed (default 501)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "standbyok",
+            "in": "query",
+            "description": "Accepted; a Ryu node is never a standby",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "perfstandbyok",
+            "in": "query",
+            "description": "Accepted; a Ryu node is never a performance standby",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "standbycode",
+            "in": "query",
+            "description": "Validated; never used (default 429)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "drsecondarycode",
+            "in": "query",
+            "description": "Validated; never used (default 472)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "performancestandbycode",
+            "in": "query",
+            "description": "Validated; never used (default 473)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Initialized, unsealed, and active",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed status-code override",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "501": {
+            "description": "Not initialized (no vault store)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sys/internal/ui/mounts/{path}": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Report the `secret/` KV v2 mount so `vault kv` picks the v2 format",
+        "operationId": "vault_compat_ui_mount",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "description": "Mount and secret path, e.g. `secret/app/db`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mount description",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied (or not the `secret/` mount)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sys/leader": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Vault-compatible HA leader status (unauthenticated; HA is never enabled)",
+        "operationId": "vault_compat_sys_leader",
+        "responses": {
+          "200": {
+            "description": "Leader status",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sys/seal-status": {
+      "get": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Vault-compatible seal status (unauthenticated)",
+        "operationId": "vault_compat_sys_seal_status",
+        "responses": {
+          "200": {
+            "description": "Seal status",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sys/tools/hash": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "SHA-2 digest of base64 `input` (`algorithm`, `format` in the body)",
+        "operationId": "vault_compat_sys_tools_hash",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sys/tools/hash/{algorithm}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "SHA-2 digest of base64 `input` with the algorithm in the path",
+        "operationId": "vault_compat_sys_tools_hash_algorithm",
+        "parameters": [
+          {
+            "name": "algorithm",
+            "in": "path",
+            "description": "`sha2-224`, `sha2-256`, `sha2-384`, `sha2-512`, `sha2-512/224` or `sha2-512/256`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sys/tools/random": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Random bytes from the CSPRNG (`bytes`, `format`, `source` in the body)",
+        "operationId": "vault_compat_sys_tools_random",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sys/tools/random/{params}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Random bytes, with the source and/or byte count in the path",
+        "operationId": "vault_compat_sys_tools_random_params",
+        "parameters": [
+          {
+            "name": "params",
+            "in": "path",
+            "description": "`<bytes>`, `<source>`, or `<source>/<bytes>` (`platform`, `seal`, `all`)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/transit/datakey/{kind}/{name}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Generate a data key, returned wrapped and optionally in plaintext (use)",
+        "operationId": "vault_compat_transit_datakey",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "`plaintext` or `wrapped`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Transit key name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/transit/decrypt/{name}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Decrypt a transit ciphertext to base64 plaintext (use)",
+        "operationId": "vault_compat_transit_decrypt",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Transit key name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/transit/encrypt/{name}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Encrypt base64 plaintext with a transit key (use on sys/transit/<name>)",
+        "operationId": "vault_compat_transit_encrypt",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Transit key name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/transit/hmac/{name}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "HMAC-SHA256 of base64 input (use)",
+        "operationId": "vault_compat_transit_hmac",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Transit key name, optionally followed by `/<algorithm>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/transit/keys/{name}/rotate": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Add a key version (admin on sys/transit/<name>)",
+        "operationId": "vault_compat_transit_rotate",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Transit key name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/transit/rewrap/{name}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Re-encrypt a ciphertext with the key's latest version (use)",
+        "operationId": "vault_compat_transit_rewrap",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Transit key name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/transit/sign/{name}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Sign base64 input (use)",
+        "operationId": "vault_compat_transit_sign",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Transit key name, optionally followed by `/<algorithm>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/transit/verify/{name}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Verify a signature or HMAC (use)",
+        "operationId": "vault_compat_transit_verify",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Transit key name, optionally followed by `/<algorithm>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Vault response envelope",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or unsupported request",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "permission denied",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Vault is sealed",
             "content": {
               "application/json": {
                 "schema": {}
@@ -36591,7 +39941,15 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Core's English description of a failure, for logs and older clients."
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the build failed: `expired`, `empty_draft`, `context_changed`,\n`company_knowledge_disabled` or `failed`. Clients render this code in\nthe reader's language instead of `error`."
           },
           "id": {
             "type": "string"

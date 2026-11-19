@@ -98,7 +98,9 @@ export function JobDeliverable({ row }: { row: JobRow }) {
 		);
 	}
 	const author =
-		deliverable.from === "you" ? "You" : (row.freelancer?.name ?? "Freelancer");
+		deliverable.from === "you"
+			? tl("You")
+			: (row.freelancer?.name ?? tl("Freelancer"));
 	return (
 		<figure className="flex flex-col gap-1" data-testid="jobs-deliverable">
 			<blockquote

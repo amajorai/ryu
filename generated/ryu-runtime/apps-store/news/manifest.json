@@ -232,7 +232,7 @@
       },
       {
         "id": "news-stories",
-        "title": "Stories",
+        "title": "News stories",
         "icon": "news-02",
         "target": "/plugin/app__news-companion",
         "context": { "tab": "stories" },
@@ -264,7 +264,7 @@
       },
       {
         "id": "news-saved",
-        "title": "Saved",
+        "title": "Saved stories",
         "icon": "bookmark-02",
         "target": "/plugin/app__news-companion",
         "context": { "tab": "saved" },

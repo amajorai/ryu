@@ -149,6 +149,8 @@ struct ProfileJob {
     driver_active: bool,
     conversation_id: Option<String>,
     error: Option<String>,
+    /// The stable code of `error` ([`errors::ProfileBuildError`]).
+    error_code: Option<&'static str>,
     agent_suggestions: Vec<AgentSuggestion>,
 }
 
@@ -197,7 +199,12 @@ struct ProfileJobView {
     /// The user chose to leave the progress view while the build continues.
     background: bool,
     conversation_id: Option<String>,
+    /// Core's English description of a failure, for logs and older clients.
     error: Option<String>,
+    /// Why the build failed: `expired`, `empty_draft`, `context_changed`,
+    /// `company_knowledge_disabled` or `failed`. Clients render this code in
+    /// the reader's language instead of `error`.
+    error_code: Option<&'static str>,
     id: String,
     /// Legacy flag for clients that predate `background`: true once the user
     /// chose to leave the progress view or the profile is being (or was)
@@ -238,16 +245,20 @@ struct ProfileDraft {
 }
 
 mod access;
+mod copy;
 mod drafts;
 mod driver;
+mod errors;
 mod handlers;
 mod jobs;
 mod reply;
 
 use access::*;
+use copy::*;
 pub(crate) use drafts::sweep_abandoned_profile_drafts;
 use drafts::*;
 use driver::*;
+use errors::*;
 pub(crate) use handlers::*;
 use jobs::*;
 use reply::*;
@@ -257,12 +268,20 @@ use reply::*;
 mod access_tests;
 
 #[cfg(test)]
+#[path = "onboarding_profile/copy_tests.rs"]
+mod copy_tests;
+
+#[cfg(test)]
 #[path = "onboarding_profile/drafts_tests.rs"]
 mod drafts_tests;
 
 #[cfg(test)]
 #[path = "onboarding_profile/driver_tests.rs"]
 mod driver_tests;
+
+#[cfg(test)]
+#[path = "onboarding_profile/errors_tests.rs"]
+mod errors_tests;
 
 #[cfg(test)]
 #[path = "onboarding_profile/handlers_tests.rs"]

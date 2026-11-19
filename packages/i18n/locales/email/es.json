@@ -1,5 +1,4 @@
 {
-  "1 second": "1 segundo",
   "A Ryu credential was exposed publicly": "Una credencial de Ryu quedó expuesta públicamente",
   "A Ryu internal organization crossed the {level} threshold. It was not throttled or suspended automatically.": "Una organización interna de Ryu superó el umbral {level}. No se limitó ni se suspendió automáticamente.",
   "A child safety case was opened": "Se abrió un caso de protección infantil",
@@ -656,7 +655,10 @@
   "{amount} in Ryu Credits": "{amount} en Ryu Credits",
   "{amount} is now available in your Ryu balance": "{amount} ya está disponible en tu saldo de Ryu",
   "{code} is your Ryu for Students code": "{code} es tu código de Ryu for Students",
+  "{count, plural, one {# hour} other {# hours}}": "{count, plural, one {# hora} other {# horas}}",
+  "{count, plural, one {# minute} other {# minutes}}": "{count, plural, one {# minuto} other {# minutos}}",
   "{count, plural, one {# seat in {organizationName} is unassigned} other {# seats in {organizationName} are unassigned}}": "{count, plural, one {# puesto en {organizationName} está sin asignar} other {# puestos en {organizationName} están sin asignar}}",
+  "{count, plural, one {# second} other {# seconds}}": "{count, plural, one {# segundo} other {# segundos}}",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month} and cost {cost}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, one {Este agente estuvo activo} other {Estos # agentes estuvieron activos}} casi todos los días de {month}, con un costo de {cost}. Si es intencional, no tienes que hacer nada. Si alguno se quedó encendido por error, puedes pausarlo desde la vista Agentes de Ryu.",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, one {Este agente estuvo activo} other {Estos # agentes estuvieron activos}} casi todos los días de {month}. Si es intencional, no tienes que hacer nada. Si alguno se quedó encendido por error, puedes pausarlo desde la vista Agentes de Ryu.",
   "{didntAsk} Someone may have your session. Ignore this link, then change your password and sign out your other devices from Settings.": "{didntAsk} Es posible que alguien tenga acceso a tu sesión. Ignora este enlace y, después, cambia tu contraseña y cierra la sesión en tus otros dispositivos desde Configuración.",

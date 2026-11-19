@@ -305,7 +305,7 @@ export function ConnectionSetup({
 				</>
 			)}
 			<ConnectionPermissionDialog
-				connectionName={pendingToolkit?.name ?? "this integration"}
+				connectionName={pendingToolkit?.name ?? null}
 				connectionType="Composio"
 				currentLevel={
 					pendingToolkit

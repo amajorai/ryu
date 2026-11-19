@@ -17,22 +17,16 @@ import { useState } from "react";
 import { ApiError, type ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	CLOUD_TASK_BACKEND_LABELS,
-	type CloudTaskBackendFeatures,
 	fetchSubscriptionRun,
 	fetchSubscriptionRunDiff,
 	stopSubscriptionRun,
 } from "@/src/lib/api/cloud-task-backends.ts";
+import {
+	missingFeaturesList,
+	subscriptionRunStatusSentence,
+} from "./SubscriptionRunPanel-status.ts";
 
 export const SUBSCRIPTION_RUN_QUERY_KEY = "cloud-task-subscription-run";
-
-const MISSING: { feature: keyof CloudTaskBackendFeatures; label: string }[] = [
-	{ feature: "liveScreen", label: "live screen" },
-	{ feature: "runLog", label: "run log" },
-	{ feature: "diffInRyu", label: "diff review in Ryu" },
-	{ feature: "pullRequestInRyu", label: "pull requests from Ryu" },
-	{ feature: "stopFromRyu", label: "stop from Ryu" },
-	{ feature: "followUp", label: "follow-up messages" },
-];
 
 const ACTIVE = new Set(["starting", "running"]);
 
@@ -86,9 +80,7 @@ export function SubscriptionRunPanel({
 	if (!run) {
 		return null;
 	}
-	const missing = MISSING.filter(({ feature }) => !run.features[feature]).map(
-		({ label }) => label
-	);
+	const missing = missingFeaturesList(run.features, tl);
 	const site = siteFor(run.backend);
 	const active = ACTIVE.has(run.status);
 	const stop = async () => {
@@ -110,7 +102,7 @@ export function SubscriptionRunPanel({
 					{CLOUD_TASK_BACKEND_LABELS[run.backend]}
 				</Badge>
 				<span className="text-muted-foreground">
-					{tl("Status: {status}", { status: run.status })}
+					{subscriptionRunStatusSentence(run.status, tl)}
 				</span>
 				<span className="text-muted-foreground">No Ryu credits used</span>
 				{run.branch ? (
@@ -189,16 +181,16 @@ export function SubscriptionRunPanel({
 					) : null}
 				</div>
 			) : null}
-			{missing.length > 0 ? (
+			{missing ? (
 				<p className="text-muted-foreground">
 					{site
 						? tl(
 								"Not available on this backend: {missingFeatures}. Review changes and open pull requests in {site}.",
-								{ missingFeatures: missing.join(", "), site }
+								{ missingFeatures: missing, site }
 							)
 						: tl(
 								"Not available on this backend: {missingFeatures}. Push the branch from your checkout to open a pull request.",
-								{ missingFeatures: missing.join(", ") }
+								{ missingFeatures: missing }
 							)}
 				</p>
 			) : null}

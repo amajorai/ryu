@@ -186,7 +186,11 @@ function skillMaintenanceChecks(
 	return checks;
 }
 
-function parseSkillCount(value: string | null | undefined): number | null {
+/** A source-reported count ("1500", "1,500", "1.2k", "3M") as a number, or
+ *  `null` when the value is missing or not a count. */
+export function parseSkillCount(
+	value: string | null | undefined
+): number | null {
 	if (!value?.trim()) {
 		return null;
 	}

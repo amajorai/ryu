@@ -89,15 +89,16 @@ export function parseIdentityMode(
 		: null;
 }
 
-/** "Acts as you (managed)". */
+/** "Acts as you (managed)", with the title in the CLI's language. */
 export function identityModeLabel(mode: AgentIdentityMode): string {
-	return `${AGENT_IDENTITY_MODE_OPTIONS[mode].title} (${mode})`;
+	return `${tr(AGENT_IDENTITY_MODE_OPTIONS[mode].title)} (${mode})`;
 }
 
 /** The desktop card's full description: the summary plus its caveat. */
 export function identityModeDescription(mode: AgentIdentityMode): string {
 	const option = AGENT_IDENTITY_MODE_OPTIONS[mode];
-	return option.detail ? `${option.summary} ${option.detail}` : option.summary;
+	const summary = tr(option.summary);
+	return option.detail ? `${summary} ${tr(option.detail)}` : summary;
 }
 
 /** Whether the mode lets the agent use the user's own accounts. */
@@ -261,13 +262,13 @@ export function accountKeyUnusedReason(
 ): string | null {
 	const kind = accountKeyKind(key);
 	if (!kind) {
-		return "not a key Core recognises, so it allows nothing";
+		return tr("not a key Core recognises, so it allows nothing");
 	}
 	if (kind.owner === "yours" && !modeUsesYourAccounts(mode)) {
-		return "not used: it has only its own identity";
+		return tr("not used: it has only its own identity");
 	}
 	if (kind.owner === "own" && !modeHasOwnAccounts(mode)) {
-		return "not used: it acts as you";
+		return tr("not used: it acts as you");
 	}
 	return null;
 }
@@ -351,12 +352,14 @@ export function accountAccessNote(
 	mode: AgentIdentityMode
 ): string {
 	if (accountAccess === null) {
-		return UNRESTRICTED_DETAIL[mode];
+		return tr(UNRESTRICTED_DETAIL[mode]);
 	}
 	const usable = accountAccess.filter(
 		(key) => accountKeyUnusedReason(key, mode) === null
 	);
 	return usable.length === 0
-		? "It can't use any accounts, or Treg."
-		: "Only these accounts can be used. Accounts you connect later are not added automatically.";
+		? tr("It can't use any accounts, or Treg.")
+		: tr(
+				"Only these accounts can be used. Accounts you connect later are not added automatically."
+			);
 }

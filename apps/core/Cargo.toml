@@ -112,9 +112,9 @@ agent-client-protocol = { version = "=3.5.0", features = [
     # `PromptResponse.usage` per-turn token totals (the `data-acp-usage` stats frame).
     "unstable_end_turn_token_usage",
 ] }
-rmcp = { version = "2", features = ["server", "transport-io"] }
+rmcp = { version = "3.9", features = ["server", "transport-io"] }
 schemars = "1"
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 petgraph = "0.8"
 noyalib = { version = "0.0.58", default-features = false, features = ["std", "compat-serde-yaml"] }
 ghost-core = { path = "../../crates/ghost/core" }

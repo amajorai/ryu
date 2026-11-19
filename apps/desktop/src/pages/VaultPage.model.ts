@@ -34,10 +34,24 @@ export const MCP_EXAMPLE = [
 	"}",
 ].join("\n");
 
-export type VaultTab = "secrets" | "broker" | "syncs" | "audit";
+export type VaultTab =
+	| "secrets"
+	| "items"
+	| "dynamic"
+	| "machines"
+	| "tokens"
+	| "policies"
+	| "broker"
+	| "syncs"
+	| "audit";
 
 export const VAULT_TABS: readonly VaultTab[] = [
 	"secrets",
+	"items",
+	"dynamic",
+	"machines",
+	"tokens",
+	"policies",
 	"broker",
 	"syncs",
 	"audit",
@@ -108,4 +122,19 @@ export function vaultSavedForCopy(
 				organization: orgId,
 				environment,
 			});
+}
+
+/** The secret list caption: whose scopes are listed, or why only node metadata is. */
+export function vaultSecretListCaption(
+	tl: LiteralMessage,
+	callerUserId: string | null | undefined
+): string {
+	return callerUserId
+		? tl(
+				"Showing the scopes available to {userId}. Select a secret to see its details and history.",
+				{ userId: callerUserId }
+			)
+		: tl(
+				"Showing node-local metadata. Sign in to a managed node to see user, team, or organization scopes."
+			);
 }

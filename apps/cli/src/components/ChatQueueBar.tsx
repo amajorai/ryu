@@ -4,7 +4,8 @@ import { useKeyboard } from "@opentui/react";
 import { z } from "zod";
 
 import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
+import { joinQueueHints, queueActionHints } from "./chat-queue-hints.ts";
 
 /** The display fields shared by string queues and richer queued turns. */
 export interface ChatQueueItem {
@@ -158,31 +159,24 @@ const queueBarHints = ({
 	| "onClear"
 	| "onMove"
 	| "onRemove"
->): string => {
-	if (!focused) {
-		return [focusHint, onClear ? clearHint : null]
-			.filter((hint): hint is string => Boolean(hint))
-			.join(" · ");
-	}
-
-	return [
-		"↑↓ move",
-		onMove ? "⇧↑↓ reorder" : null,
-		onRemove ? "x remove" : null,
-		onClear ? "c clear" : null,
-		cancelHint,
-	]
-		.filter((hint): hint is string => Boolean(hint))
-		.join(" · ");
-};
+>): string =>
+	focused
+		? queueActionHints({
+				cancelHint: cancelHint ?? tr("Esc cancel"),
+				clearHint,
+				onClear,
+				onMove,
+				onRemove,
+			})
+		: joinQueueHints([focusHint, onClear ? clearHint : null]);
 
 export function ChatQueueBar({
-	cancelHint = "Esc cancel",
-	clearHint = "c clear",
+	cancelHint = tr("Esc cancel"),
+	clearHint = tr("c clear"),
 	focused = false,
-	focusHint = "Enter inspect",
+	focusHint = tr("Enter inspect"),
 	items,
-	label = "Queue",
+	label = tr("Queue"),
 	maxPreviewLength = DEFAULT_PREVIEW_LENGTH,
 	maxPreviewRows = DEFAULT_PREVIEW_ROWS,
 	onCancel,
@@ -279,7 +273,7 @@ export function ChatQueueBar({
 					<b>
 						{tf("{label} · {count} queued", {
 							count: String(items.length),
-							label,
+							label: tr(label),
 						})}
 					</b>
 				</text>

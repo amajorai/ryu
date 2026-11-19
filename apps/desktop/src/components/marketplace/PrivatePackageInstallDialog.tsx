@@ -58,9 +58,7 @@ export default function PrivatePackageInstallDialog({
 				</DialogContent>
 			</Dialog>
 			<ConnectionPermissionDialog
-				connectionName={
-					permissionRequirement?.displayName ?? "this integration"
-				}
+				connectionName={permissionRequirement?.displayName ?? null}
 				connectionType="Composio"
 				onConfirm={async (accessLevel) => {
 					if (!permissionRequirement) {

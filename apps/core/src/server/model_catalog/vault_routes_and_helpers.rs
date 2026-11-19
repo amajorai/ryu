@@ -44,6 +44,7 @@ pub(in crate::server) fn vault_routes() -> Router<ServerState> {
             "/api/vault/secrets/:name/:action",
             post(kv::secret_action).layer(body()),
         )
+        .merge(vault_tokens_api::sharing_routes())
         .route("/api/vault/export", post(kv::export).layer(body()))
         .route("/api/vault/import", post(kv::import).layer(bulk()))
         .route(
@@ -66,6 +67,30 @@ pub(in crate::server) fn vault_routes() -> Router<ServerState> {
                 .layer(body()),
         )
         .route(
+            "/api/vault/folders/move",
+            post(kv::move_folder).layer(body()),
+        )
+        .route(
+            "/api/vault/secrets/:name/move",
+            post(kv::move_secret).layer(body()),
+        )
+        .route("/api/vault/bulk", post(kv::bulk).layer(bulk()))
+        .route("/api/vault/tags", get(kv::list_tags))
+        .route(
+            "/api/vault/tags/:slug",
+            put(kv::put_tag).delete(kv::delete_tag).layer(body()),
+        )
+        .route(
+            "/api/vault/namespace-locks",
+            get(kv::list_namespace_locks)
+                .post(kv::lock_namespace)
+                .layer(body()),
+        )
+        .route(
+            "/api/vault/namespace-locks/:id",
+            delete(kv::unlock_namespace),
+        )
+        .route(
             "/api/vault/imports",
             get(kv::list_imports).post(kv::add_import).layer(body()),
         )
@@ -86,6 +111,7 @@ pub(in crate::server) fn vault_routes() -> Router<ServerState> {
             post(kv::decide_change_request).layer(body()),
         )
         .route("/api/vault/audit", get(kv::list_audit))
+        .route("/api/vault/sys/metrics", get(kv::vault_metrics))
         .route("/api/vault/audit/verify", get(kv::verify_audit))
         .route(
             "/api/vault/audit/devices",
@@ -124,6 +150,12 @@ pub(in crate::server) fn vault_routes() -> Router<ServerState> {
         .route(
             "/api/vault/transit/:op/:name",
             post(engines::transit_operation).layer(DefaultBodyLimit::max(
+                2 * crate::vault::transit::MAX_INPUT_BYTES,
+            )),
+        )
+        .route(
+            "/api/vault/transit/cmac/verify/:name",
+            post(engines::transit_cmac_verify).layer(DefaultBodyLimit::max(
                 2 * crate::vault::transit::MAX_INPUT_BYTES,
             )),
         )
@@ -170,6 +202,23 @@ pub(in crate::server) fn vault_routes() -> Router<ServerState> {
             "/api/vault/ssh/sign/:role",
             post(engines::ssh_sign).layer(body()),
         )
+        .route("/api/vault/ssh/otp-roles", get(engines::ssh_otp_roles))
+        .route(
+            "/api/vault/ssh/otp-roles/:name",
+            put(engines::ssh_put_otp_role)
+                .delete(engines::ssh_delete_otp_role)
+                .layer(body()),
+        )
+        .route(
+            "/api/vault/ssh/creds/:role",
+            post(engines::ssh_otp_creds).layer(body()),
+        )
+        .route("/api/vault/ssh/cas/:name/certs", get(engines::ssh_certs))
+        .route(
+            "/api/vault/ssh/cas/:name/revoke",
+            post(engines::ssh_revoke).layer(body()),
+        )
+        .route("/api/vault/ssh/cas/:name/krl", get(engines::ssh_krl))
         .route("/api/vault/dynamic/roles", get(engines::dynamic_roles))
         .route(
             "/api/vault/dynamic/roles/:name",
@@ -227,6 +276,7 @@ pub(in crate::server) fn vault_routes() -> Router<ServerState> {
         .merge(vault_agent_accounts_api::routes())
         .merge(vault_seal_dynamic_api::routes())
         .merge(vault_tokens_api::routes())
+        .merge(kv::personal_overrides::routes())
         // Client address, quotas, and `X-Ryu-Wrap-TTL` response wrapping.
         .layer(axum::middleware::from_fn(vault_tokens_api::request_layer))
 }

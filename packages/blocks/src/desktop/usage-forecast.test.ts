@@ -129,3 +129,28 @@ describe("utcMonthBounds", () => {
 function never(): never {
 	throw new Error("expected a forecast");
 }
+
+describe("formatForecastChange translation", () => {
+	const point = { lower: 0, upper: 0, value: 0 };
+	const JA: Record<string, string> = {
+		"No recent baseline": "最近の基準がありません",
+		Steady: "横ばい",
+	};
+	const ja = (source: string) => JA[source] ?? source;
+
+	test("reads the steady and no-baseline words through the translator", () => {
+		const base = { fittedSamples: 4, points: [], total: point };
+		expect(
+			formatForecastChange({ ...base, changePercent: 1, direction: "flat" }, ja)
+		).toBe("横ばい");
+		expect(
+			formatForecastChange(
+				{ ...base, changePercent: null, direction: "flat" },
+				ja
+			)
+		).toBe("最近の基準がありません");
+		expect(
+			formatForecastChange({ ...base, changePercent: null, direction: "up" })
+		).toBe("No recent baseline");
+	});
+});

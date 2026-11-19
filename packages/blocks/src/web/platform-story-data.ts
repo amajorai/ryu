@@ -25,6 +25,13 @@ import { copyMarker as t } from "./copy-marker.ts";
 import { docsHref } from "./data/resources.tsx";
 
 /**
+ * Marks a badge's English words for the catalog. The story renders on the
+ * server, in English, and the web DOM localizer swaps the badge's exact text for
+ * its catalog value. Tokens that are code (`ryu-mcp`, `manifest.json`) stay bare.
+ */
+const tl = (source: string): string => source;
+
+/**
  * The `/products/[slug]` pages the story links. Typed routes accept a dynamic
  * route only through its literal path, so `Route` alone would reject them.
  */
@@ -169,7 +176,7 @@ export const INTEGRATION_PATHS: readonly IntegrationPath[] = [
 		href: docsHref("/docs/extend/integrate/acp-integration"),
 		icon: Bot,
 		label: "ACP + A2A",
-		token: "agent protocols",
+		token: tl("agent protocols"),
 	},
 	{
 		description:
@@ -185,7 +192,7 @@ export const INTEGRATION_PATHS: readonly IntegrationPath[] = [
 		href: docsHref("/docs/surfaces"),
 		icon: MonitorSmartphone,
 		label: "Every surface",
-		token: "local → cloud",
+		token: tl("local → cloud"),
 	},
 	{
 		description:

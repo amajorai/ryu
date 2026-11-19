@@ -8,6 +8,7 @@
 // with no React, so both `@ryu/marketplace` and the desktop app import it.
 
 import type { LiteralMessage } from "@ryu/i18n";
+import { modelBytesLabel } from "./model-byte-label.ts";
 
 /** Device-fit rank — lower is a better fit. Blocked verdicts rank last so a
  *  recommendation never prefers an option that cannot be installed. */
@@ -75,11 +76,16 @@ export function isSlowFit(fit: string): boolean {
 	return fit === "cpu" || fit === "partial";
 }
 
-/** The device numbers a blocked-install explanation quotes. */
+/** The device numbers a blocked-install explanation quotes. Each byte count,
+ *  when present, is worded in the UI language; the `*Human` string is Core's
+ *  English fallback. */
 export interface FitDeviceNumbers {
+	diskFreeBytes?: number | null;
 	diskFreeHuman?: string | null;
 	ramHuman?: string | null;
+	totalRamBytes?: number | null;
 	unifiedMemory?: boolean;
+	vramBytes?: number | null;
 	vramHuman?: string | null;
 }
 
@@ -90,7 +96,8 @@ function memoryReason(
 	device: FitDeviceNumbers,
 	tl: LiteralMessage
 ): string | null {
-	const { ramHuman, vramHuman } = device;
+	const ramHuman = modelBytesLabel(device.totalRamBytes, device.ramHuman);
+	const vramHuman = modelBytesLabel(device.vramBytes, device.vramHuman);
 	if (device.unifiedMemory && ramHuman) {
 		return tl("{verdictLabel}. This device has {ramHuman} of unified memory.", {
 			verdictLabel,
@@ -135,10 +142,13 @@ export function fitBlockReason(
 	}
 	const verdictLabel = tl(FIT_LABELS[fit]);
 	let reason: string | null = null;
-	if (fit === "no_space" && device?.diskFreeHuman) {
+	const diskFreeHuman = device
+		? modelBytesLabel(device.diskFreeBytes, device.diskFreeHuman)
+		: "";
+	if (fit === "no_space" && diskFreeHuman) {
 		reason = tl(
 			"{verdictLabel}. Only {diskFreeHuman} is free on the models drive.",
-			{ verdictLabel, diskFreeHuman: device.diskFreeHuman }
+			{ verdictLabel, diskFreeHuman }
 		);
 	} else if (fit === "too_big" && device) {
 		reason = memoryReason(verdictLabel, device, tl);

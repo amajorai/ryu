@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { sileo } from "sileo";
 import { z } from "zod";
@@ -205,6 +205,7 @@ window.fetch = guardedFetch;
 const { createRoot } = await import("react-dom/client");
 const { Toaster } = await import("@ryu/ui/components/sileo.tsx");
 const { SettingsSyncTab } = await import("./SettingsSyncTab.tsx");
+const { I18nProvider } = await import("@ryu/i18n/react");
 const engine = await import("@/src/lib/settings-sync/engine.ts");
 const { BACKEND_URL, TOKEN_KEY } = await import("@/lib/auth-client.ts");
 const {
@@ -268,17 +269,19 @@ async function idle() {
 		"sync engine idle"
 	);
 }
-async function mount() {
+async function mount(wrap: (node: ReactNode) => ReactNode = (node) => node) {
 	const host = document.createElement("div");
 	document.body.append(host);
 	root = createRoot(host);
 	await act(async () => {
 		stopEngine = engine.startSettingsSync();
 		root!.render(
-			<>
-				<SettingsSyncTab />
-				<Toaster />
-			</>
+			wrap(
+				<>
+					<SettingsSyncTab />
+					<Toaster />
+				</>
+			)
 		);
 	});
 	await idle();
@@ -549,4 +552,34 @@ test("Delete My Synced Settings asks first, Cancel keeps the cloud copy, a refus
 	expect(localStorage.getItem("theme")).toBe("dark");
 	expect(localStorage.getItem("ryu:settings-sync-enabled")).toBe("true");
 	expect(pulls()).toBeGreaterThan(0);
+});
+
+test("a Japanese conflict offers both choices in Japanese", async () => {
+	seed({ "ryu:settings-sync-enabled": "true" }, {});
+	await mount((node) => (
+		<I18nProvider
+			autoLocalizeDom={false}
+			initialLocale="ja"
+			manageDocument={false}
+			overlays={{
+				ja: { "Keep this": "こちらを保持", "Use cloud": "クラウドを使用" },
+			}}
+		>
+			{node}
+		</I18nProvider>
+	));
+	cloud.set("theme", {
+		key: "theme",
+		updatedAt: Date.now() + 60_000,
+		value: "light",
+	});
+	await localEdit("theme", "dark");
+	await syncNow();
+	await settle(
+		() => text().includes("こちらを保持"),
+		"translated conflict choices"
+	);
+	expect(text()).toContain("クラウドを使用");
+	// "Keep this machine" (the bulk action) is a separate row.
+	expect(text()).not.toMatch(/Keep this(?! machine)/u);
 });

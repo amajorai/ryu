@@ -271,6 +271,7 @@ pub(in crate::server) fn memory_routes(app_store: &PluginStore) -> Router<Server
             get(get_memory_settings).put(update_memory_settings),
         )
         .route("/api/memory/graph", get(get_memory_graph))
+        .route("/api/memory/import", post(import_pasted_memories))
         .route(
             "/api/memory/:id",
             get(get_memory).put(update_memory).delete(delete_memory),

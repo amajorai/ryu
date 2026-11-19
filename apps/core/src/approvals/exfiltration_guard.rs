@@ -192,6 +192,8 @@ pub(crate) fn capability_verb_flow(verb_id: &str) -> Option<DataFlow> {
         | "browser.context"
         | "browser.annotate"
         | "browser.clear_annotations"
+        | "browser.list_webmcp_tools"
+        | "browser.execute_webmcp_tool"
         | "browser.hover"
         | "browser.click_at"
         | "browser.key"

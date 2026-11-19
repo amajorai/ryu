@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { planMonthlyAmount } from "./TeamsBillingTab.tsx";
 
 describe("Teams billing plan amounts come from the catalog", () => {
@@ -11,7 +12,7 @@ describe("Teams billing plan amounts come from the catalog", () => {
 		expect(planMonthlyAmount("teams")).toBe("$250.00/mo minimum");
 		expect(planMonthlyAmount("business")).toBe("$300.00/mo minimum");
 		expect(planMonthlyAmount("desktop-license")).toBe("Paid once");
-		expect(planMonthlyAmount(null)).toBe("$0/mo");
+		expect(planMonthlyAmount(null)).toBe("$0.00/mo");
 	});
 
 	it("scales organization plans with billed seats", () => {
@@ -45,5 +46,17 @@ describe("Teams billing plan amounts come from the catalog", () => {
 			"Contract pricing"
 		);
 		expect(planMonthlyAmount("max", { planVersion: 1 })).toBe("$99.00/mo");
+	});
+
+	it("words without a figure go through the translator", () => {
+		const tl: LiteralMessage = (source, values) =>
+			`[${source}]${values ? JSON.stringify(values) : ""}`;
+		expect(planMonthlyAmount("desktop-license", {}, tl)).toBe("[Paid once]");
+		expect(planMonthlyAmount("teams", { seats: 51 }, tl)).toBe(
+			"[Contract pricing]"
+		);
+		expect(planMonthlyAmount("teams", {}, tl)).toBe(
+			'[{amount} minimum]{"amount":"$250.00/mo"}'
+		);
 	});
 });

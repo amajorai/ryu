@@ -273,6 +273,7 @@
   "Replay, regenerate or download a take, or send its script and settings back to the Studio.": "Reproduza, gere novamente ou baixe uma gravação, ou envie o roteiro e as configurações dela de volta ao Studio.",
   "Reroll": "Gerar de novo",
   "Reset to defaults": "Redefinir para os padrões",
+  "Respell words the engine gets wrong. Entries match whole words; write {syntax} in a script for a one-off.": "Reescreva as palavras que o mecanismo pronuncia errado. As entradas correspondem a palavras inteiras; escreva {syntax} em um roteiro para um caso pontual.",
   "Retry part {part}": "Tentar novamente a parte {part}",
   "Reverb": "Reverberação",
   "Robotic": "Robótico",

@@ -41,6 +41,7 @@ export const VAULT_TOKEN_HEADER = "x-ryu-vault-token";
 
 export const VAULT_TRANSIT_KEY_TYPES = [
 	"aes256-gcm96",
+	"aes128-gcm96",
 	"chacha20-poly1305",
 	"ed25519",
 	"ecdsa-p256",
@@ -49,6 +50,8 @@ export const VAULT_TRANSIT_KEY_TYPES = [
 	"rsa-3072",
 	"rsa-4096",
 	"hmac",
+	"aes128-cmac",
+	"aes256-cmac",
 ] as const;
 
 // These codecs own complete machine reply fields only after native JSON.parse.

@@ -30,10 +30,12 @@ use super::password_policy::{CharsetRule, PasswordPolicySpec};
 use super::VaultError;
 use crate::plugin_secrets::PluginSecretStore;
 
+mod collected;
 mod enroll;
 pub mod fill_sets;
 pub mod fill_target;
 
+pub use collected::{create_collected, CollectedInput};
 pub use enroll::enroll_totp;
 #[cfg(test)]
 use enroll::normalize_enrollment_secret;
@@ -365,13 +367,6 @@ pub async fn create(
     let label = clean_text("label", input.label.as_deref())?;
     let submit_urls = fill_target::validate_submit_urls(&host, &input.submit_urls)?;
     let password = generate_password(input.password_length.unwrap_or(DEFAULT_PASSWORD_LENGTH))?;
-    let folder = agent_folder(agent_id);
-    let existing = store.item_list(Some(ENVIRONMENT), Some(&folder)).await?;
-    if existing.len() >= MAX_ACCOUNTS_PER_AGENT {
-        return Err(invalid(format!(
-            "an agent may hold at most {MAX_ACCOUNTS_PER_AGENT} accounts"
-        )));
-    }
     let mut values = std::collections::BTreeMap::new();
     values.insert(FIELD_SITE.to_owned(), site);
     values.insert(FIELD_PASSWORD.to_owned(), password);
@@ -383,6 +378,25 @@ pub async fn create(
     }
     if !submit_urls.is_empty() {
         values.insert(FIELD_SUBMIT_URLS.to_owned(), submit_urls.join(" "));
+    }
+    insert(store, agent_id, &host, (values, label), actor).await
+}
+
+/// Save a new account item with `values` (site and password at least) under
+/// a fresh id for `host`.
+async fn insert(
+    store: &PluginSecretStore,
+    agent_id: Option<&str>,
+    host: &str,
+    (values, label): (std::collections::BTreeMap<String, String>, Option<String>),
+    actor: &AuditActor,
+) -> Result<AccountView> {
+    let folder = agent_folder(agent_id);
+    let existing = store.item_list(Some(ENVIRONMENT), Some(&folder)).await?;
+    if existing.len() >= MAX_ACCOUNTS_PER_AGENT {
+        return Err(invalid(format!(
+            "an agent may hold at most {MAX_ACCOUNTS_PER_AGENT} accounts"
+        )));
     }
     let put: ItemPut = serde_json::from_value(json!({
         "environment": ENVIRONMENT,

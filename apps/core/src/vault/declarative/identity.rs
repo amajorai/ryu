@@ -4,7 +4,10 @@
 //! secret ids and tokens are still issued through the API, so the file stays
 //! free of secrets. An identity's auth method cannot be changed in place
 //! (recreating it would revoke every credential it issued), so auth drift is
-//! only ever reported.
+//! only ever reported. A declared `disabled: true` is still applied on
+//! `reconcile`: cutting an identity off never needs its auth method to match.
+//! Identities are matched by name only, so a stale file can disable a
+//! same-named identity; it can never enable one across auth drift.
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -199,8 +202,22 @@ pub(super) async fn apply(
             }
             continue;
         };
+        if declared.disabled && current.disabled {
+            retry_cut_off(store, current, spec.reconcile, actor, report).await;
+        }
         if !same_auth(&current.auth, &declared.auth) {
-            report.drifted.push(label);
+            report.drifted.push(label.clone());
+            // Only the disable is applied; enabling, or any other setting,
+            // would act on an identity the file no longer describes.
+            if spec.reconcile && declared.disabled && !current.disabled {
+                report.updated.push(label.clone());
+                if let Err(error) = store
+                    .machine_update(&current.id, None, None, Some(true), actor)
+                    .await
+                {
+                    report.fail(&label, &error);
+                }
+            }
             continue;
         }
         let plan = if declared.same_settings(current) {
@@ -215,4 +232,44 @@ pub(super) async fn apply(
         }
     }
     Ok(())
+}
+
+/// A declared-disabled identity that is disabled but still has live leases:
+/// an earlier disable failed closed on a lease its provider refused, and
+/// `disabled` was committed, so nothing else differs. On `reconcile` the
+/// revoke tree runs again (`machine:<name>:leases` in `updated`, or in
+/// `errors` naming the leases still live); without it the leases are
+/// reported as drift.
+async fn retry_cut_off(
+    store: &PluginSecretStore,
+    current: &MachineIdentity,
+    reconcile: bool,
+    actor: &AuditActor,
+    report: &mut ApplyReport,
+) {
+    let label = format!("machine:{}:leases", current.name);
+    let live = match store.machine_live_leases(&current.id).await {
+        Ok(live) => live,
+        Err(error) => return report.errors.push(format!("{label}: {error:#}")),
+    };
+    if live.is_empty() {
+        return;
+    }
+    if !reconcile {
+        report.drifted.push(label);
+        return;
+    }
+    report.updated.push(label.clone());
+    match store.machine_revoke_tokens(&current.id, actor).await {
+        Ok(revocation) if revocation.leases_left.is_empty() => {}
+        Ok(revocation) => report.fail(
+            &label,
+            &anyhow::anyhow!(
+                "disabled, but {} lease(s) are still live: {}",
+                revocation.leases_left.len(),
+                revocation.leases_left.join(", ")
+            ),
+        ),
+        Err(error) => report.fail(&label, &error),
+    }
 }

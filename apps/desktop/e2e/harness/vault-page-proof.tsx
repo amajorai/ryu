@@ -10,6 +10,7 @@ import type {
 import VaultPage from "../../src/pages/VaultPage.tsx";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import proofStyles from "./vault-page-proof.module.css";
+import { vaultAdminFixture } from "./vault-page-proof-admin.ts";
 import "../../src/index.css";
 
 const CAPS_ALL = [
@@ -195,6 +196,10 @@ window.fetch = Object.assign(
 					},
 				],
 			});
+		}
+		const admin = vaultAdminFixture(path);
+		if (admin !== undefined) {
+			return json(admin);
 		}
 		return json({ error: "not mocked" }, 404);
 	},

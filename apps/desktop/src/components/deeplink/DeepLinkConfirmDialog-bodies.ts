@@ -101,7 +101,7 @@ export function modelBody(
 			"Download {filename} ({sizeHuman}{fit}) and use it as the active model.",
 			{ filename: quant.filename, sizeHuman: quant.sizeHuman, fit }
 		),
-		confirm: "Install & use",
+		confirm: tl("Install & use"),
 		onConfirm: run,
 		...(blockedReason ? { blockedReason } : {}),
 		...(isSlowFit(quant.fit) ? { warning: SLOW_FIT_WARNING } : {}),

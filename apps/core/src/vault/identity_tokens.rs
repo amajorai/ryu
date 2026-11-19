@@ -1,15 +1,17 @@
 //! Identity tokens: vault-signed JWTs for workload identity federation.
 //!
 //! A caller (a human on the node bearer, or a machine holding a vault token)
-//! asks for a token under a named role and receives an ES256 JWT with
+//! asks for a token under a named role and receives a JWT with
 //! `iss`, `sub` (`<kind>:<id>`), `aud` (the role's audience), `iat`, `nbf`,
 //! `exp`, plus the claims rendered from the role's template. Relying parties
 //! (cloud IAM web-identity federation, third-party APIs) verify it against
 //! the public OIDC discovery document and JWKS served under
 //! `<issuer>/.well-known/`, as with Vault's identity token engine.
 //!
-//! Signing keys are ECDSA P-256 (PKCS#8 sealed with the keyring in
-//! `vault_identity_keys`). Rotation (on demand, or by the scheduler after
+//! Signing keys use the configured `signingAlgorithm` (`ES256`, the default,
+//! `RS256`, or `EdDSA`; see [`keys`]) and are PKCS#8 sealed with the keyring
+//! in `vault_identity_keys`. Changing the algorithm rotates the key at once.
+//! Rotation (on demand, or by the scheduler after
 //! `rotationPeriodSecs`) retires the active key; a retired key stays in the
 //! JWKS for [`MAX_TOKEN_TTL_SECS`] so tokens it signed keep verifying, and is
 //! then pruned.
@@ -31,6 +33,16 @@ use serde_json::{json, Map, Value};
 use super::audit::{AuditActor, AuditEntry};
 use super::{now_millis, sha256_hex, VaultError};
 use crate::plugin_secrets::PluginSecretStore;
+
+#[path = "identity_tokens_claims.rs"]
+mod claims;
+#[path = "identity_tokens_keys.rs"]
+mod keys;
+
+pub use self::claims::validate_issuer;
+use self::claims::{render_template, validate_role};
+
+pub use self::keys::IdentitySigningAlgorithm;
 
 /// Longest token lifetime; also how long a retired key stays published.
 pub const MAX_TOKEN_TTL_SECS: i64 = 24 * 3600;
@@ -73,6 +85,10 @@ pub struct IdentityConfig {
     pub issuer: Option<String>,
     #[serde(default = "default_rotation")]
     pub rotation_period_secs: i64,
+    /// Algorithm of new signing keys. Omitted on a write, the stored one is
+    /// kept; reads always carry it.
+    #[serde(default)]
+    pub signing_algorithm: Option<IdentitySigningAlgorithm>,
 }
 
 fn default_rotation() -> i64 {
@@ -84,6 +100,7 @@ impl Default for IdentityConfig {
         Self {
             issuer: None,
             rotation_period_secs: DEFAULT_ROTATION_PERIOD_SECS,
+            signing_algorithm: None,
         }
     }
 }
@@ -131,117 +148,38 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
              rotation_period_secs INTEGER NOT NULL
          );",
     )
-    .context("initializing identity token schema")
+    .context("initializing identity token schema")?;
+    keys::migrate_schema(conn).context("migrating identity token schema")
 }
 
 fn invalid(message: impl Into<String>) -> anyhow::Error {
     VaultError::Invalid(message.into()).into()
 }
 
-/// Validate an issuer URL: http(s), no query, fragment, or trailing slash.
-pub fn validate_issuer(issuer: &str) -> Result<()> {
-    let ok = (issuer.starts_with("https://") || issuer.starts_with("http://"))
-        && issuer.len() <= 512
-        && !issuer.ends_with('/')
-        && !issuer.contains(['?', '#', ' '])
-        && issuer
-            .split("://")
-            .nth(1)
-            .is_some_and(|rest| !rest.is_empty());
-    if ok {
-        Ok(())
-    } else {
-        Err(invalid(
-            "issuer must be an http(s) URL without a query, fragment, or trailing slash",
-        ))
-    }
-}
-
-/// JSON-escape `value` for use inside a JSON string literal.
-fn escape_in_string(value: &str) -> String {
-    let quoted = serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_owned());
-    quoted[1..quoted.len() - 1].to_owned()
-}
-
-/// Render a role template for `subject` into a claims object.
-fn render_template(template: &str, subject: &IdentitySubject) -> Result<Map<String, Value>> {
-    let policies = serde_json::to_string(&subject.policies)?;
-    // Single pass over the template: substituted values are never rescanned,
-    // so subject attributes containing `{{` are inserted verbatim.
-    let mut rendered = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(start) = rest.find("{{") {
-        rendered.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
-        let end = after
-            .find("}}")
-            .ok_or_else(|| invalid("template uses an unknown placeholder"))?;
-        let value = match &after[..end] {
-            "identity.policies" => policies.clone(),
-            "identity.id" => escape_in_string(&subject.id),
-            "identity.name" => escape_in_string(&subject.name),
-            "identity.kind" => escape_in_string(&subject.kind),
-            _ => return Err(invalid("template uses an unknown placeholder")),
-        };
-        rendered.push_str(&value);
-        rest = &after[end + 2..];
-    }
-    rendered.push_str(rest);
-    let value: Value = serde_json::from_str(&rendered)
-        .map_err(|_| invalid("template must render to a JSON object"))?;
-    let Value::Object(claims) = value else {
-        return Err(invalid("template must render to a JSON object"));
-    };
-    if let Some(reserved) = RESERVED_CLAIMS.iter().find(|c| claims.contains_key(**c)) {
-        return Err(invalid(format!(
-            "template may not set the reserved claim `{reserved}`"
-        )));
-    }
-    Ok(claims)
-}
-
-fn validate_role(role: &IdentityRole) -> Result<()> {
-    if !super::transit::is_valid_key_name(&role.name) {
-        return Err(invalid("role names must match ^[a-z0-9][a-z0-9_-]{0,63}$"));
-    }
-    let audience = role.audience.trim();
-    if audience.is_empty() || audience.len() > 256 {
-        return Err(invalid("audience must be 1-256 characters"));
-    }
-    if !(MIN_TOKEN_TTL_SECS..=MAX_TOKEN_TTL_SECS).contains(&role.ttl_secs) {
-        return Err(invalid(format!(
-            "ttlSecs must be between {MIN_TOKEN_TTL_SECS} and {MAX_TOKEN_TTL_SECS}"
-        )));
-    }
-    if let Some(template) = &role.template {
-        if template.len() > MAX_TEMPLATE_BYTES {
-            return Err(invalid("template is too large"));
-        }
-        let sample = IdentitySubject {
-            kind: "machine".into(),
-            id: "id".into(),
-            name: "name".into(),
-            policies: vec!["policy".into()],
-        };
-        render_template(template, &sample)?;
-    }
-    Ok(())
-}
-
 fn read_config(conn: &Connection) -> Result<IdentityConfig> {
     Ok(conn
         .query_row(
-            "SELECT issuer, rotation_period_secs FROM vault_identity_config WHERE id = 1",
+            "SELECT issuer, rotation_period_secs, algorithm FROM vault_identity_config WHERE id = 1",
             [],
             |row| {
                 Ok(IdentityConfig {
                     issuer: row.get(0)?,
                     rotation_period_secs: row.get(1)?,
+                    signing_algorithm: Some(
+                        row.get::<_, Option<String>>(2)?
+                            .and_then(|alg| IdentitySigningAlgorithm::parse(&alg))
+                            .unwrap_or_default(),
+                    ),
                 })
             },
         )
         .optional()?
         .unwrap_or_default())
+}
+
+/// The algorithm new signing keys use.
+fn configured_algorithm(conn: &Connection) -> Result<IdentitySigningAlgorithm> {
+    Ok(read_config(conn)?.signing_algorithm.unwrap_or_default())
 }
 
 /// The issuer in effect: configured, else the env var.
@@ -254,65 +192,7 @@ fn effective_issuer(config: &IdentityConfig) -> Option<String> {
     })
 }
 
-struct SigningKey {
-    kid: String,
-    pkcs8: Vec<u8>,
-}
-
 impl PluginSecretStore {
-    fn insert_identity_key(&self, conn: &Connection) -> Result<SigningKey> {
-        let key =
-            KeyPair::generate().map_err(|error| anyhow!("generating identity key: {error}"))?;
-        let raw = key.public_key_raw();
-        if raw.len() != 65 || raw[0] != 0x04 {
-            return Err(anyhow!("unexpected identity public key encoding"));
-        }
-        let x = B64URL.encode(&raw[1..33]);
-        let y = B64URL.encode(&raw[33..65]);
-        let kid = sha256_hex(raw)[..16].to_owned();
-        let pkcs8 = key.serialize_der();
-        let (key_version, nonce, ciphertext) = self.seal_row(&pkcs8)?;
-        conn.execute(
-            "INSERT INTO vault_identity_keys (kid, nonce, ciphertext, key_version, x, y, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![kid, nonce, ciphertext, key_version, x, y, now_millis()],
-        )?;
-        Ok(SigningKey { kid, pkcs8 })
-    }
-
-    /// The active signing key, created on first use.
-    fn active_identity_key(&self, conn: &Connection) -> Result<SigningKey> {
-        let row: Option<(String, Vec<u8>, Vec<u8>, u32)> = conn
-            .query_row(
-                "SELECT kid, nonce, ciphertext, key_version FROM vault_identity_keys
-                 WHERE retired_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .optional()?;
-        match row {
-            Some((kid, nonce, ciphertext, key_version)) => Ok(SigningKey {
-                kid,
-                pkcs8: self.open_row(key_version, &nonce, &ciphertext)?,
-            }),
-            None => self.insert_identity_key(conn),
-        }
-    }
-
-    /// Create the signing key now if none is active, so discovery and the JWKS
-    /// are complete before the first token is issued.
-    fn ensure_identity_key(&self, conn: &Connection) -> Result<()> {
-        let active: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM vault_identity_keys WHERE retired_at IS NULL)",
-            [],
-            |row| row.get(0),
-        )?;
-        if !active {
-            self.insert_identity_key(conn)?;
-        }
-        Ok(())
-    }
-
     /// Current issuer configuration (with the effective issuer resolved).
     pub async fn identity_config(&self) -> Result<IdentityConfig> {
         let conn = self.conn.lock().await;
@@ -341,22 +221,36 @@ impl PluginSecretStore {
             )));
         }
         let conn = self.conn.lock().await;
+        let algorithm = match config.signing_algorithm {
+            Some(algorithm) => algorithm,
+            None => configured_algorithm(&conn)?,
+        };
         conn.execute(
-            "INSERT INTO vault_identity_config (id, issuer, rotation_period_secs) VALUES (1, ?1, ?2)
+            "INSERT INTO vault_identity_config (id, issuer, rotation_period_secs, algorithm)
+             VALUES (1, ?1, ?2, ?3)
              ON CONFLICT(id) DO UPDATE SET issuer = excluded.issuer,
-                 rotation_period_secs = excluded.rotation_period_secs",
-            params![issuer, config.rotation_period_secs],
+                 rotation_period_secs = excluded.rotation_period_secs,
+                 algorithm = excluded.algorithm",
+            params![issuer, config.rotation_period_secs, algorithm.as_str()],
         )?;
         self.audit_locked(
             &conn,
             &AuditEntry::new(actor, "identity.config", "ok").details(json!({
                 "issuer": issuer, "rotationPeriodSecs": config.rotation_period_secs,
+                "signingAlgorithm": algorithm.as_str(),
             })),
         );
         let mut stored = read_config(&conn)?;
         stored.issuer = effective_issuer(&stored);
-        if stored.issuer.is_some() {
-            self.ensure_identity_key(&conn)?;
+        // A key of another algorithm is retired now; it stays published for
+        // the verification window like any rotated key.
+        let stale = self
+            .active_identity_alg(&conn)?
+            .is_some_and(|(_, alg)| alg != algorithm.as_str());
+        if stale {
+            self.rotate_identity_key_locked(&conn, algorithm, actor)?;
+        } else if stored.issuer.is_some() {
+            self.ensure_identity_key(&conn, algorithm)?;
         }
         Ok(stored)
     }
@@ -418,7 +312,8 @@ impl PluginSecretStore {
             .optional()?
             .ok_or_else(|| VaultError::NotFound(format!("identity role `{role_name}`")))?;
         let role: IdentityRole = serde_json::from_str(&definition)?;
-        let issuer = effective_issuer(&read_config(&conn)?).ok_or_else(|| {
+        let config = read_config(&conn)?;
+        let issuer = effective_issuer(&config).ok_or_else(|| {
             invalid(format!(
                 "configure the identity issuer (PUT /api/vault/identity/config or {ENV_ISSUER}) first"
             ))
@@ -438,20 +333,15 @@ impl PluginSecretStore {
         claims.insert("iat".into(), json!(now));
         claims.insert("nbf".into(), json!(now));
         claims.insert("exp".into(), json!(expires));
-        let key = self.active_identity_key(&conn)?;
-        let mut header = Header::new(Algorithm::ES256);
-        header.kid = Some(key.kid.clone());
-        let token = jsonwebtoken::encode(
-            &header,
-            &Value::Object(claims),
-            &EncodingKey::from_ec_der(&key.pkcs8),
-        )
-        .map_err(|error| anyhow!("signing identity token: {error}"))?;
+        let key = self.active_identity_key(&conn, configured_algorithm(&conn)?)?;
+        let token =
+            jsonwebtoken::encode(&key.header(), &Value::Object(claims), &key.encoding_key()?)
+                .map_err(|error| anyhow!("signing identity token: {error}"))?;
         if !self.audit_locked(
             &conn,
             &AuditEntry::new(actor, "identity.token", "ok").details(json!({
                 "role": role_name, "subject": format!("{}:{}", subject.kind, subject.id),
-                "kid": key.kid, "expiresAt": expires * 1000,
+                "kid": key.kid, "alg": key.alg.as_str(), "expiresAt": expires * 1000,
             })),
         ) {
             return Err(VaultError::AuditUnavailable.into());
@@ -467,18 +357,29 @@ impl PluginSecretStore {
     /// Retire the active signing key and create a new one. Returns the new kid.
     pub async fn identity_rotate_key(&self, actor: &AuditActor) -> Result<String> {
         let conn = self.conn.lock().await;
+        let algorithm = configured_algorithm(&conn)?;
+        self.rotate_identity_key_locked(&conn, algorithm, actor)
+    }
+
+    fn rotate_identity_key_locked(
+        &self,
+        conn: &Connection,
+        algorithm: IdentitySigningAlgorithm,
+        actor: &AuditActor,
+    ) -> Result<String> {
         let tx = conn.unchecked_transaction()?;
         tx.execute(
             "UPDATE vault_identity_keys SET retired_at = ?1 WHERE retired_at IS NULL",
             params![now_millis()],
         )?;
-        let key = self.insert_identity_key(&tx)?;
+        let key = self.insert_identity_key(&tx, algorithm)?;
         self.audit_locked(
             &tx,
-            &AuditEntry::new(actor, "identity.key.rotate", "ok").details(json!({ "kid": key.kid })),
+            &AuditEntry::new(actor, "identity.key.rotate", "ok")
+                .details(json!({ "kid": key.kid, "alg": algorithm.as_str() })),
         );
         tx.commit()?;
-        self.flush_audit(&conn);
+        self.flush_audit(conn);
         Ok(key.kid)
     }
 
@@ -490,41 +391,62 @@ impl PluginSecretStore {
         // An issuer configured only through the environment never passes
         // through `identity_set_config`; publish its key before first use.
         // Best effort: a sealed vault still serves the keys it already has.
-        if effective_issuer(&read_config(&conn)?).is_some() {
-            if let Err(error) = self.ensure_identity_key(&conn) {
+        let config = read_config(&conn)?;
+        if effective_issuer(&config).is_some() {
+            if let Err(error) = self.ensure_identity_key(&conn, configured_algorithm(&conn)?) {
                 tracing::warn!(%error, "could not create the identity signing key for the JWKS");
             }
         }
         let mut stmt = conn.prepare(
-            "SELECT kid, x, y FROM vault_identity_keys
+            "SELECT kid, x, y, alg, jwk FROM vault_identity_keys
              WHERE retired_at IS NULL OR retired_at > ?1 ORDER BY created_at DESC, rowid DESC",
         )?;
         let keys = stmt
             .query_map(params![cutoff], |row| {
-                Ok(json!({
-                    "kty": "EC", "crv": "P-256", "alg": "ES256", "use": "sig",
-                    "kid": row.get::<_, String>(0)?,
-                    "x": row.get::<_, String>(1)?,
-                    "y": row.get::<_, String>(2)?,
-                }))
+                Ok(keys::published_jwk(
+                    row.get(0)?,
+                    &row.get::<_, String>(3)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(4)?,
+                ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(json!({ "keys": keys }))
     }
 
-    /// The OIDC discovery document, or `None` without an issuer.
+    /// The OIDC discovery document, or `None` without an issuer. It lists
+    /// the configured algorithm and any still published from earlier keys.
     pub async fn identity_discovery(&self) -> Result<Option<Value>> {
-        let conn = self.conn.lock().await;
-        Ok(effective_issuer(&read_config(&conn)?).map(|issuer| {
-            json!({
-                "issuer": issuer,
-                "jwks_uri": format!("{issuer}/.well-known/keys"),
-                "response_types_supported": ["id_token"],
-                "subject_types_supported": ["public"],
-                "id_token_signing_alg_values_supported": ["ES256"],
-                "scopes_supported": ["openid"],
-            })
-        }))
+        let config = self.identity_config().await?;
+        let Some(issuer) = config.issuer else {
+            return Ok(None);
+        };
+        let mut algorithms = vec![config
+            .signing_algorithm
+            .unwrap_or_default()
+            .as_str()
+            .to_owned()];
+        for key in self.identity_jwks().await?["keys"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(alg) = key["alg"]
+                .as_str()
+                .filter(|alg| !algorithms.iter().any(|a| a == alg))
+            {
+                algorithms.push(alg.to_owned());
+            }
+        }
+        Ok(Some(json!({
+            "issuer": issuer,
+            "jwks_uri": format!("{issuer}/.well-known/keys"),
+            "response_types_supported": ["id_token"],
+            "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": algorithms,
+            "scopes_supported": ["openid"],
+        })))
     }
 
     /// Scheduler step: rotate an active key older than the rotation period
@@ -556,248 +478,5 @@ impl PluginSecretStore {
 }
 
 #[cfg(test)]
-mod tests {
-    use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
-
-    use super::*;
-
-    fn actor() -> AuditActor {
-        AuditActor::new("user", Some("u1"))
-    }
-
-    fn subject() -> IdentitySubject {
-        IdentitySubject {
-            kind: "machine".into(),
-            id: "mid_1".into(),
-            name: "ci \"runner\"".into(),
-            policies: vec!["deploy".into()],
-        }
-    }
-
-    async fn configured_store() -> PluginSecretStore {
-        let store = PluginSecretStore::in_memory().unwrap();
-        store
-            .identity_set_config(
-                &IdentityConfig {
-                    issuer: Some("https://node.example.com/api/vault/identity".into()),
-                    ..IdentityConfig::default()
-                },
-                &actor(),
-            )
-            .await
-            .unwrap();
-        store
-    }
-
-    fn verify(jwks: &Value, token: &str, audience: &str) -> Map<String, Value> {
-        let kid = decode_header(token).unwrap().kid.unwrap();
-        let jwk = jwks["keys"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|key| key["kid"] == kid)
-            .expect("kid is published");
-        let key =
-            DecodingKey::from_ec_components(jwk["x"].as_str().unwrap(), jwk["y"].as_str().unwrap())
-                .unwrap();
-        let mut validation = Validation::new(Algorithm::ES256);
-        validation.set_audience(&[audience]);
-        validation.set_issuer(&["https://node.example.com/api/vault/identity"]);
-        decode::<Map<String, Value>>(token, &key, &validation)
-            .unwrap()
-            .claims
-    }
-
-    #[tokio::test]
-    async fn tokens_verify_against_the_published_jwks() {
-        let store = configured_store().await;
-        store
-            .identity_put_role(
-                &IdentityRole {
-                    name: "aws".into(),
-                    audience: "sts.amazonaws.com".into(),
-                    ttl_secs: 900,
-                    template: Some(
-                        r#"{"machine": "{{identity.name}}", "policies": {{identity.policies}}}"#
-                            .into(),
-                    ),
-                },
-                &actor(),
-            )
-            .await
-            .unwrap();
-        let issued = store
-            .identity_token("aws", &subject(), &actor())
-            .await
-            .unwrap();
-        let claims = verify(
-            &store.identity_jwks().await.unwrap(),
-            &issued.token,
-            "sts.amazonaws.com",
-        );
-        assert_eq!(claims["sub"], "machine:mid_1");
-        assert_eq!(claims["machine"], "ci \"runner\"");
-        assert_eq!(claims["policies"], json!(["deploy"]));
-        assert_eq!(
-            claims["exp"].as_i64().unwrap() - claims["iat"].as_i64().unwrap(),
-            900
-        );
-        let discovery = store.identity_discovery().await.unwrap().unwrap();
-        assert_eq!(
-            discovery["jwks_uri"],
-            "https://node.example.com/api/vault/identity/.well-known/keys"
-        );
-    }
-
-    #[tokio::test]
-    async fn jwks_is_published_before_the_first_token() {
-        let store = configured_store().await;
-        assert_eq!(
-            store.identity_jwks().await.unwrap()["keys"]
-                .as_array()
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
-    #[test]
-    fn template_values_are_substituted_once() {
-        let tricky = IdentitySubject {
-            kind: "machine".into(),
-            id: "{{identity.kind}}".into(),
-            name: "{{unknown}}".into(),
-            policies: Vec::new(),
-        };
-        let claims = render_template(
-            r#"{"id": "{{identity.id}}", "name": "{{identity.name}}"}"#,
-            &tricky,
-        )
-        .unwrap();
-        assert_eq!(claims["id"], "{{identity.kind}}");
-        assert_eq!(claims["name"], "{{unknown}}");
-        assert!(render_template(r#"{"x": "{{identity.id"}"#, &tricky).is_err());
-    }
-
-    #[tokio::test]
-    async fn rotation_keeps_old_tokens_verifiable_and_prunes_later() {
-        let store = configured_store().await;
-        store
-            .identity_put_role(
-                &IdentityRole {
-                    name: "gcp".into(),
-                    audience: "gcp".into(),
-                    ttl_secs: 600,
-                    template: None,
-                },
-                &actor(),
-            )
-            .await
-            .unwrap();
-        let old = store
-            .identity_token("gcp", &subject(), &actor())
-            .await
-            .unwrap();
-        let new_kid = store.identity_rotate_key(&actor()).await.unwrap();
-        let jwks = store.identity_jwks().await.unwrap();
-        assert_eq!(jwks["keys"].as_array().unwrap().len(), 2);
-        verify(&jwks, &old.token, "gcp");
-        let fresh = store
-            .identity_token("gcp", &subject(), &actor())
-            .await
-            .unwrap();
-        assert_eq!(
-            decode_header(&fresh.token).unwrap().kid.as_deref(),
-            Some(new_kid.as_str())
-        );
-        // Not due yet; nothing pruned inside the window.
-        assert_eq!(store.identity_maintain().await.unwrap(), (false, 0));
-        {
-            let conn = store.conn.lock().await;
-            conn.execute(
-                "UPDATE vault_identity_keys SET retired_at = retired_at - ?1
-                 WHERE retired_at IS NOT NULL",
-                params![MAX_TOKEN_TTL_SECS * 1000 + 1],
-            )
-            .unwrap();
-        }
-        assert_eq!(store.identity_maintain().await.unwrap(), (false, 1));
-        assert_eq!(
-            store.identity_jwks().await.unwrap()["keys"]
-                .as_array()
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
-    #[tokio::test]
-    async fn roles_and_config_are_validated() {
-        let store = PluginSecretStore::in_memory().unwrap();
-        let role = |template: &str| IdentityRole {
-            name: "r".into(),
-            audience: "a".into(),
-            ttl_secs: 300,
-            template: Some(template.into()),
-        };
-        assert!(store
-            .identity_put_role(&role(r#"{"sub": "x"}"#), &actor())
-            .await
-            .is_err());
-        assert!(store
-            .identity_put_role(&role(r#"{"x": "{{identity.secret}}"}"#), &actor())
-            .await
-            .is_err());
-        assert!(store
-            .identity_put_role(&role(r#"["not", "an", "object"]"#), &actor())
-            .await
-            .is_err());
-        assert!(store
-            .identity_put_role(
-                &IdentityRole {
-                    ttl_secs: MAX_TOKEN_TTL_SECS + 1,
-                    ..role("{}")
-                },
-                &actor()
-            )
-            .await
-            .is_err());
-        store
-            .identity_put_role(&role("{}"), &actor())
-            .await
-            .unwrap();
-        // No issuer: tokens are refused and discovery is absent.
-        if std::env::var(ENV_ISSUER).is_err() {
-            assert!(store
-                .identity_token("r", &subject(), &actor())
-                .await
-                .is_err());
-            assert!(store.identity_discovery().await.unwrap().is_none());
-        }
-        for bad in [
-            "ftp://x",
-            "https://x/",
-            "https://x?y",
-            "https://",
-            "node.example.com",
-        ] {
-            assert!(
-                store
-                    .identity_set_config(
-                        &IdentityConfig {
-                            issuer: Some(bad.into()),
-                            ..IdentityConfig::default()
-                        },
-                        &actor()
-                    )
-                    .await
-                    .is_err(),
-                "{bad}"
-            );
-        }
-        assert!(store
-            .identity_token("missing", &subject(), &actor())
-            .await
-            .is_err());
-    }
-}
+#[path = "identity_tokens_tests.rs"]
+mod tests;

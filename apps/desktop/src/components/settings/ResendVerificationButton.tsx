@@ -1,3 +1,4 @@
+import { authEmailWaitLine } from "@ryu/blocks/web/email-wait-line.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useEffect, useRef, useState } from "react";
@@ -39,7 +40,11 @@ export function ResendVerificationButton({
 				callbackURL: "/",
 			});
 			if (result.error) {
-				throw new Error(result.error.message ?? "Verification email refused");
+				sileo.error({
+					title: "Failed to send verification email. Please try again.",
+					description: authEmailWaitLine(result.error) ?? undefined,
+				});
+				return;
 			}
 			sileo.success({ title: "Verification email sent. Check your inbox." });
 			setCooldown(COOLDOWN_SECONDS);

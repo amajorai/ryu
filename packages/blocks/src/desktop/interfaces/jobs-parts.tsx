@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	Avatar,
 	AvatarFallback,
@@ -124,6 +124,9 @@ export function JobStatusPill({
 	className?: string;
 	status: JobStatus;
 }) {
+	// "Open" is the status sense, which the DOM localizer cannot tell from the
+	// open verb; the other labels are plain catalog words.
+	const i18n = useOptionalI18n();
 	return (
 		<span
 			className={cn(
@@ -138,7 +141,9 @@ export function JobStatusPill({
 				aria-hidden="true"
 				className={cn("size-1.5 shrink-0 rounded-full", DOT[status])}
 			/>
-			{JOB_STATUS_LABELS[status]}
+			{status === "open"
+				? (i18n?.t("status.open", {}, "Open") ?? "Open")
+				: JOB_STATUS_LABELS[status]}
 		</span>
 	);
 }

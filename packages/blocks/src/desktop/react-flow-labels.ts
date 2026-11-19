@@ -4,7 +4,11 @@
 // the `ariaLabelConfig` prop, so every `<ReactFlow>` mount passes this hook's
 // result. `tools/check-third-party-chrome-labels.test.mjs` keeps it that way.
 
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
 import type { AriaLabelConfig } from "@xyflow/react";
 import { useRef } from "react";
 
@@ -14,8 +18,16 @@ type StaticLabels = Omit<
 	"node.a11yDescription.ariaLiveMessage"
 >;
 
+/** A keyed word sense (`en-messages-senses*.ts`) with its English fallback. */
+export type SenseMessage = (id: string, fallback: string) => string;
+
+const englishSense: SenseMessage = (_id, fallback) => fallback;
+
 /** React Flow's static labels, translated. */
-export function reactFlowStaticLabels(tl: LiteralMessage): StaticLabels {
+export function reactFlowStaticLabels(
+	tl: LiteralMessage,
+	sense: SenseMessage = englishSense
+): StaticLabels {
 	return {
 		"node.a11yDescription.default": tl(
 			"Press enter or space to select a node. Press delete to remove it and escape to cancel."
@@ -32,7 +44,9 @@ export function reactFlowStaticLabels(tl: LiteralMessage): StaticLabels {
 		"controls.fitView.ariaLabel": tl("Fit View"),
 		"controls.interactive.ariaLabel": tl("Toggle Interactivity"),
 		"minimap.ariaLabel": tl("Mini Map"),
-		"handle.ariaLabel": tl("Handle"),
+		// A node's connection point; the bare catalog "Handle" is a username
+		// (de "Benutzername").
+		"handle.ariaLabel": sense("flow.connectionHandle", "Handle"),
 	};
 }
 
@@ -87,9 +101,13 @@ interface CachedLabels {
  */
 export function useReactFlowAriaLabels(): Partial<AriaLabelConfig> {
 	const tl = useLiteralMessages();
+	const i18n = useOptionalI18n();
 	const tlRef = useRef(tl);
 	tlRef.current = tl;
-	const labels = reactFlowStaticLabels(tl);
+	const labels = reactFlowStaticLabels(
+		tl,
+		(id, fallback) => i18n?.t(id, {}, fallback) ?? fallback
+	);
 	const key = Object.values(labels).join("\u0000");
 	const cache = useRef<CachedLabels | null>(null);
 	if (cache.current?.key !== key) {

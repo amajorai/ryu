@@ -404,7 +404,9 @@ test("Subjects select the active subject and add an exam-dated subject with retr
 	page,
 }) => {
 	const companion = await mountTab(page, "subjects");
-	const selector = companion.getByRole("combobox", { name: "Subject" });
+	const selector = companion.getByRole("combobox", {
+		name: "School subject",
+	});
 	await expect(selector).toHaveValue("subject-biology");
 	await selector.selectOption("subject-chemistry");
 	await expect(selector).toHaveValue("subject-chemistry");

@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import { translate as tr } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	ClockOptions,
@@ -183,8 +184,10 @@ export const LOBBY_STATION_LAYOUT: Partial<StationLayout> = {
  * after the kit's "Likely " when the limit is only estimated.
  */
 export const lobbyLimitText: LimitText = (act, at) => {
-	const words = at ? `cooldown, back ${at}` : "cooldown";
-	return limitIsLikely(act) ? words : `C${words.slice(1)}`;
+	if (limitIsLikely(act)) {
+		return at ? tr("cooldown, back {time}", { time: at }) : tr("cooldown");
+	}
+	return at ? tr("Cooldown, back {time}", { time: at }) : tr("Cooldown");
 };
 
 /**

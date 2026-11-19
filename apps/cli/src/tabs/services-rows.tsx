@@ -6,6 +6,7 @@ import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { Spinner } from "@/components/ui/spinner.tsx";
 import { HINT, type KeyHint } from "../core/keymap.ts";
+import { tr } from "../i18n/translate.ts";
 
 // The fixed sidecar order, verbatim from apps/cli/src/app.rs SIDECAR_ORDER.
 export const SIDECAR_ORDER = [
@@ -79,13 +80,13 @@ export interface RowStatus {
 // overlay, which owns the keyboard while open). Lower priority survives narrow bars.
 export const SERVICES_HINTS: KeyHint[] = [
 	{ ...HINT.move, priority: 0 },
-	{ keys: "d", label: "install", priority: 1 },
-	{ keys: "s", label: "start", priority: 1 },
-	{ keys: "x", label: "stop", priority: 1 },
-	{ keys: "r", label: "restart", priority: 2 },
-	{ keys: "A", label: "all start", priority: 3 },
-	{ keys: "Z", label: "all stop", priority: 3 },
-	{ keys: "D", label: "uninstall", priority: 2 },
+	{ keys: "d", label: tr("install"), priority: 1 },
+	{ keys: "s", label: tr("start"), priority: 1 },
+	{ keys: "x", label: tr("stop"), priority: 1 },
+	{ keys: "r", label: tr("restart"), priority: 2 },
+	{ keys: "A", label: tr("all start"), priority: 3 },
+	{ keys: "Z", label: tr("all stop"), priority: 3 },
+	{ keys: "D", label: tr("uninstall"), priority: 2 },
 ];
 
 export function StatusCell({ status }: { status: RowStatus }) {
@@ -130,7 +131,7 @@ export function rowStatus(theme: ThemeLike, flags: RowFlags): RowStatus {
 	if (flags.installFailed) {
 		return {
 			icon: "✗",
-			text: "install failed",
+			text: tr("install failed"),
 			color: theme.colors.error,
 			downloading: false,
 		};
@@ -138,7 +139,7 @@ export function rowStatus(theme: ThemeLike, flags: RowFlags): RowStatus {
 	if (flags.downloading) {
 		return {
 			icon: "",
-			text: "downloading",
+			text: tr("downloading"),
 			color: theme.colors.primary,
 			downloading: true,
 		};
@@ -154,14 +155,14 @@ export function rowStatus(theme: ThemeLike, flags: RowFlags): RowStatus {
 	if (flags.running) {
 		return {
 			icon: "●",
-			text: "running",
+			text: tr("running"),
 			color: theme.colors.success,
 			downloading: false,
 		};
 	}
 	return {
 		icon: "○",
-		text: "stopped",
+		text: tr("stopped"),
 		color: theme.colors.warning,
 		downloading: false,
 	};

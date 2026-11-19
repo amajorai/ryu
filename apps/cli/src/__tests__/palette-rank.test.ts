@@ -3,6 +3,7 @@ import {
 	normalisePaletteQuery,
 	type RankableEntry,
 	rankPaletteEntries,
+	scorePaletteEntry,
 } from "../palette/rank.ts";
 
 const ENTRIES: RankableEntry[] = [
@@ -73,4 +74,20 @@ test("word-prefix outranks substring and subsequence", () => {
 test("recent ids are boosted within, never across, a tier", () => {
 	expect(labels("go to", ["nav:/monitors"])[0]).toBe("Go to Monitors");
 	expect(labels("new", ["action:gateway"])[0]).toBe("New chat");
+});
+
+test("word prefixes match in any script, not only ASCII", () => {
+	const russian: RankableEntry[] = [
+		{ id: "action:close-tab", label: "Закрыть вкладку" },
+		{ id: "action:reset", label: "Сбросить раскладку" },
+	];
+	expect(rankPaletteEntries(russian, "за вк").map((entry) => entry.id)).toEqual(
+		["action:close-tab"]
+	);
+	expect(scorePaletteEntry(russian[0] as RankableEntry, "за вк")).toBe(2);
+});
+
+test("full-width input matches its ASCII label", () => {
+	expect(normalisePaletteQuery("ＮＥＷ　ｃｈａｔ")).toBe("new chat");
+	expect(labels("ｎｅｗ ｃｈ")).toEqual(["New chat"]);
 });

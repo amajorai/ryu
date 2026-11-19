@@ -100,6 +100,8 @@ pub struct Broker {
     tunnels: std::sync::Mutex<HashMap<String, usize>>,
     /// Status and access tokens for OAuth services.
     oauth: Arc<dyn OAuthTokens>,
+    /// One permit per client connection being served (`max_connections`).
+    connections: Arc<tokio::sync::Semaphore>,
 }
 
 /// One open tunnel counted against its session; released on drop.
@@ -286,7 +288,9 @@ mod card_use;
 mod forward;
 mod inject;
 mod listener;
+mod mcp_filter;
 mod oauth;
+mod remote_tls;
 mod resolver;
 mod tunnel;
 mod websocket;

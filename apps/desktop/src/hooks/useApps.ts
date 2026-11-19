@@ -22,6 +22,10 @@ import {
 	describeGatewayRefusal,
 	fetchApps,
 } from "@/src/lib/api/plugins.ts";
+import {
+	describeLifecyclePermissionRefusal,
+	lifecyclePermissionRefusalOf,
+} from "@/src/lib/api/plugins-lifecycle-errors.ts";
 import { triggerGlobalRefresh } from "@/src/lib/core-refresh.ts";
 import {
 	dependencyErrorOf,
@@ -52,19 +56,33 @@ export interface UseAppsResult {
 	) => Promise<void>;
 }
 
-/** A failed toggle's banner text. Gateway refusals re-render in the viewer's
- *  language from the structured fields; other failures keep Core's message. */
+/** A node app-permission or Gateway refusal re-rendered in the viewer's
+ *  language from the structured fields, or `null` for any other failure. */
+function structuredRefusalMessage(
+	error: unknown,
+	tl: LiteralMessage
+): string | null {
+	const permissionRefusal = lifecyclePermissionRefusalOf(error);
+	if (permissionRefusal) {
+		return describeLifecyclePermissionRefusal(
+			permissionRefusal.requiredPermission,
+			tl
+		);
+	}
+	const gatewayRefusal = gatewayRefusalOf(error);
+	return gatewayRefusal ? describeGatewayRefusal(gatewayRefusal, tl) : null;
+}
+
+/** A failed toggle's banner text. Permission and Gateway refusals re-render in
+ *  the viewer's language; other failures keep Core's message. */
 function toggleFailureMessage(
 	error: unknown,
 	enable: boolean,
 	tl: LiteralMessage
 ): string {
-	const gatewayRefusal = gatewayRefusalOf(error);
-	const gatewayMessage = gatewayRefusal
-		? describeGatewayRefusal(gatewayRefusal, tl)
-		: null;
-	if (gatewayMessage) {
-		return gatewayMessage;
+	const refusalMessage = structuredRefusalMessage(error, tl);
+	if (refusalMessage) {
+		return refusalMessage;
 	}
 	if (error instanceof Error) {
 		return error.message;
@@ -247,7 +265,7 @@ export function useApps(): UseAppsResult {
 				// A dependency refusal (409) is not a generic failure — Core names the
 				// exact plugins involved. Re-render the typed error with DISPLAY NAMES
 				// (only this hook holds the id → name map) so the user reads
-				// "Meetings is needed by Whiteboard, Canvas. Disable Whiteboard, Canvas
+				// "Meetings is needed by Whiteboard and Canvas. Disable Whiteboard and Canvas
 				// first." instead of id soup or "Failed to disable extension".
 				const depError = dependencyErrorOf(e);
 				if (depError) {
@@ -303,12 +321,8 @@ export function useApps(): UseAppsResult {
 					);
 					return;
 				}
-				const gatewayRefusal = gatewayRefusalOf(e);
-				const gatewayMessage = gatewayRefusal
-					? describeGatewayRefusal(gatewayRefusal, tlRef.current)
-					: null;
 				setToggleError(
-					gatewayMessage ??
+					structuredRefusalMessage(e, tlRef.current) ??
 						(e instanceof Error
 							? e.message
 							: tlRef.current("Failed to uninstall extension"))

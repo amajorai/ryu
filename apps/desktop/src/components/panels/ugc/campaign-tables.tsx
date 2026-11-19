@@ -4,7 +4,7 @@ import {
 	RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Table,
@@ -154,6 +154,7 @@ export function SubmissionsTable({
 	platformLabel: (platform: string) => string;
 	submissions: Submission[];
 }) {
+	const i18n = useOptionalI18n();
 	if (submissions.length === 0) {
 		return (
 			<PanelNotice>
@@ -168,7 +169,9 @@ export function SubmissionsTable({
 				<TableRow>
 					<TableHead size="compact">Creator</TableHead>
 					<TableHead size="compact">Platform</TableHead>
-					<TableHead size="compact">Post</TableHead>
+					<TableHead size="compact">
+						{i18n?.t("ugc.postColumn", {}, "Post") ?? "Post"}
+					</TableHead>
 					<TableHead size="compact">Status</TableHead>
 					<TableHead className="text-end" size="compact">
 						Views

@@ -1,4 +1,6 @@
-//! The listener: binding, connection serving, session checks, and the request log.
+//! The listener: binding, connection serving (a global connection cap and a
+//! header-read deadline against slow clients), session checks, and the
+//! request log.
 //! test-exempt: moved out of proxy.rs; every proxy_tests.rs case binds and serves through it.
 
 use super::super::box_relay;
@@ -10,6 +12,8 @@ enum Admission {
     Direct(SocketAddr),
     /// A Box's relay: the one session the relay admitted.
     Relayed(String),
+    /// The remote listener: `Proxy-Authorization`, for remote sessions only.
+    Remote(SocketAddr),
 }
 
 impl Broker {
@@ -65,6 +69,7 @@ impl Broker {
             leaves: tokio::sync::Mutex::new(None),
             tunnels: std::sync::Mutex::new(HashMap::new()),
             oauth,
+            connections: Arc::new(tokio::sync::Semaphore::new(config.max_connections)),
             config,
         };
         Ok((Arc::new(broker), listener))
@@ -85,12 +90,22 @@ impl Broker {
                     continue;
                 }
             };
+            // Over the global cap the connection is closed before any byte is
+            // read, so a flood of idle sockets cannot exhaust the broker.
+            let Ok(permit) = self.connections.clone().try_acquire_owned() else {
+                tracing::debug!("broker connection cap reached; closing {peer}");
+                drop(stream);
+                continue;
+            };
             // Nagle + delayed ACK would stall each small relayed write ~40 ms.
             if let Err(error) = stream.set_nodelay(true) {
                 tracing::debug!("broker could not set TCP_NODELAY: {error}");
             }
             let broker = self.clone();
-            tokio::spawn(async move { broker.serve_connection(stream, peer).await });
+            tokio::spawn(async move {
+                broker.serve_connection(stream, peer).await;
+                drop(permit);
+            });
         }
     }
 
@@ -119,13 +134,18 @@ impl Broker {
             let admission = admission.clone();
             async move {
                 let response = match admission.as_ref() {
-                    Admission::Direct(peer) => broker.handle(request, *peer).await,
+                    Admission::Direct(peer) => broker.handle(request, *peer, false).await,
+                    Admission::Remote(peer) => broker.handle(request, *peer, true).await,
                     Admission::Relayed(id) => broker.handle_relayed(request, id).await,
                 };
                 Ok::<_, Infallible>(response)
             }
         });
+        // A client that sends its headers too slowly, or leaves a kept-alive
+        // connection idle, is cut off (slow-loris protection).
         if let Err(error) = hyper::server::conn::http1::Builder::new()
+            .timer(hyper_util::rt::TokioTimer::new())
+            .header_read_timeout(self.config.header_read_timeout)
             .serve_connection(TokioIo::new(io), service)
             .with_upgrades()
             .await
@@ -138,6 +158,7 @@ impl Broker {
         self: Arc<Self>,
         request: Request<Incoming>,
         peer: SocketAddr,
+        remote: bool,
     ) -> Response<ProxyBody> {
         let session = match self.authenticate(request.headers(), peer).await {
             Ok(session) => session,
@@ -147,7 +168,68 @@ impl Broker {
         if box_relay::is_box_session(&session) {
             return proxy_auth_required();
         }
+        // Only a session minted for remote use is admitted from the network.
+        if remote && !self.remote_session(&session.id).await {
+            return proxy_auth_required();
+        }
         self.dispatch(session, request).await
+    }
+
+    async fn remote_session(&self, id: &str) -> bool {
+        let conn = self.store.conn.lock().await;
+        match super::super::delegation::get(&conn, id) {
+            Ok(attrs) => attrs.remote,
+            Err(error) => {
+                tracing::warn!("broker session attribute lookup failed: {error:#}");
+                false
+            }
+        }
+    }
+
+    /// Accept remote connections until the listener fails, dropping peers
+    /// outside the configured networks before reading a byte.
+    pub async fn serve_remote(
+        self: Arc<Self>,
+        listener: TcpListener,
+        remote: super::super::remote::RemoteConfig,
+    ) {
+        loop {
+            let (stream, peer) = match listener.accept().await {
+                Ok(accepted) => accepted,
+                Err(error) => {
+                    tracing::warn!("remote broker accept failed: {error}");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+            };
+            if !remote.admits(peer.ip()) {
+                tracing::debug!(%peer, "remote broker connection refused: peer not allowed");
+                continue;
+            }
+            let Ok(permit) = self.connections.clone().try_acquire_owned() else {
+                tracing::debug!("broker connection cap reached; closing {peer}");
+                continue;
+            };
+            if let Err(error) = stream.set_nodelay(true) {
+                tracing::debug!("broker could not set TCP_NODELAY: {error}");
+            }
+            let broker = self.clone();
+            let remote = remote.clone();
+            tokio::spawn(async move {
+                let _permit = permit;
+                if !remote.tls {
+                    return broker.serve_io(stream, Admission::Remote(peer)).await;
+                }
+                // The TLS handshake gets the same deadline as request headers.
+                let handshake = tokio::time::timeout(
+                    broker.config.header_read_timeout,
+                    broker.accept_remote_tls(stream, &remote),
+                );
+                if let Ok(Some(tls)) = handshake.await {
+                    broker.serve_io(tls, Admission::Remote(peer)).await;
+                }
+            });
+        }
     }
 
     /// A relayed request: the bound session, if it is still a live Box session.
@@ -263,11 +345,18 @@ impl Broker {
             *cached = None;
             return Err(VaultError::Sealed.into());
         }
-        if let Some(cache) = cached.as_ref() {
+        // Read before loading, so a CA replaced mid-load is reloaded next time.
+        let generation = ca::generation();
+        if let Some(cache) = cached
+            .as_ref()
+            .filter(|cache| cache.generation == generation)
+        {
             return Ok(cache.clone());
         }
         let material = ca::ensure(self.store).await?;
-        let cache = Arc::new(LeafCache::new(&material, self.provider.clone())?);
+        let mut cache = LeafCache::new(&material, self.provider.clone())?;
+        cache.generation = generation;
+        let cache = Arc::new(cache);
         *cached = Some(cache.clone());
         Ok(cache)
     }
@@ -315,10 +404,25 @@ impl Broker {
     }
 
     pub(super) async fn record(&self, row: LogRow) {
-        let conn = self.store.conn.lock().await;
-        if let Err(error) = log::insert(&conn, &row) {
-            tracing::warn!("broker log write failed: {error:#}");
+        self.record_with(row, Vec::new()).await;
+    }
+
+    /// Log one request, append it to its session's sealed log, and send it
+    /// to the audit devices ([`super::super::request_events`]).
+    pub(super) async fn record_with(&self, row: LogRow, rpc: Vec<super::super::jsonrpc::RpcCall>) {
+        {
+            let conn = self.store.conn.lock().await;
+            if let Err(error) = log::insert(&conn, &row) {
+                tracing::warn!("broker log write failed: {error:#}");
+            }
         }
+        super::super::request_events::observe(
+            self.store,
+            &row,
+            rpc,
+            super::super::request_events::AuditMode::from_env(),
+        )
+        .await;
     }
 
     #[allow(clippy::too_many_arguments)]

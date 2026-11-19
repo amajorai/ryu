@@ -38,6 +38,13 @@
 // produce candidates never pays for the preference round-trip, and never pays for
 // the model call.
 
+// `host.t` renders a sentence in the user's language through Core's catalog; a
+// host without it (an older Core, a test stub) gets the English source back.
+if (typeof host.t !== "function") {
+	host.t = async (source, values = {}) =>
+		String(source).replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+}
+
 const MIN_TURN_CHARS = 600;
 const MAX_TURN_CHARS = 16_000;
 const MAX_CANDIDATES = 8;
@@ -126,10 +133,16 @@ try {
 
 // The counterpart of never auto-accepting: the deck only grows if the user knows
 // it has something waiting, and where to go decide on it.
-const noun = candidates.length === 1 ? "candidate" : "candidates";
+// Two whole sentences, not a spliced noun: Core's catalog renderer has no ICU
+// plural, so the singular and the plural are separate keys.
 return {
 	kind: "note",
-	text: `Study mode — ${candidates.length} review ${noun} queued. Accept or reject them in Tuition.`,
+	text:
+		candidates.length === 1
+			? await host.t("Study mode — 1 review candidate queued. Accept or reject it in Tuition.")
+			: await host.t("Study mode — {count} review candidates queued. Accept or reject them in Tuition.", {
+					count: candidates.length,
+				}),
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────

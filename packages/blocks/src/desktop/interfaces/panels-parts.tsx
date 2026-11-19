@@ -90,7 +90,7 @@ export function PanelsSidebar({
 					New chat
 				</button>
 			</div>
-			<nav aria-label="Views" className="flex flex-col gap-px px-3 pt-2">
+			<nav aria-label="Sections" className="flex flex-col gap-px px-3 pt-2">
 				{PANELS_VIEWS.map((option) => {
 					const Icon = VIEW_ICONS[option];
 					const current = option === view;
@@ -178,7 +178,7 @@ export function PanelsTopBar({
 		<header className="flex h-12 shrink-0 items-center justify-between gap-2 border-border border-b bg-background px-4 md:hidden">
 			<ToggleGroup
 				appearance="segmented"
-				aria-label="Views"
+				aria-label="Sections"
 				multiple={false}
 				onValueChange={(values: string[]) => {
 					const next = values[0];

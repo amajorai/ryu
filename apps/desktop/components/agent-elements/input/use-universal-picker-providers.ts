@@ -11,6 +11,7 @@ import {
 	type totalFreeCredit,
 } from "@/components/agent-elements/input/free-model-tag.ts";
 import { modelMenuItem } from "@/components/agent-elements/input/model-router.ts";
+import { poolUpsellCopy } from "@/components/agent-elements/input/pool-upsell-copy.ts";
 import type { ProviderEntry } from "@/components/agent-elements/input/universal-picker-body.tsx";
 import type { usePiConfig } from "@/src/hooks/usePiConfig.ts";
 import {
@@ -103,20 +104,6 @@ export function creditPoolForProvider(provider: PiProvider): CreditPool | null {
 	);
 }
 
-/**
- * Upsell copy for a pool row. Names the TIER and nothing else — the pool catalog's
- * standing rule is that a user never reads the name of the provider behind a pool,
- * so the supplier can be swapped without changing what anyone was promised.
- * There is no bring-your-own-key half: Ryu's pooled capacity is not something a
- * user can hold a key for, so offering one would be a dead end.
- */
-export function poolUpsellCopy(pool: CreditPool) {
-	return {
-		upgrade: `${pool.label} runs on Ryu's own capacity — included with a Ryu subscription, no API keys.`,
-		byoKey: null,
-	};
-}
-
 export interface BuildProviderEntriesParams {
 	activeProviderId: string | null;
 	agentId: string | null;
@@ -196,7 +183,7 @@ export function buildProviderEntries({
 						grantedPoolIds.has(pool.id)
 					)
 				: Boolean(p.managed) && !hasManagedPlan && freeCredit === null,
-			upsellCopy: pool ? poolUpsellCopy(pool) : undefined,
+			upsellCopy: pool ? poolUpsellCopy(pool, tl) : undefined,
 			// The pool's own remaining granted credit, shown on the row as "$50.00"
 			// so "how much Frontier is left?" is answerable where the choice is
 			// made. Looked up by pool id, so a grant row this build can't map back

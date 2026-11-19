@@ -1,9 +1,12 @@
 // Translate CLI copy against the bundled `cli` subset of the official literal
 // catalogs. Keys are the exact English strings `tools/i18n-extract.mjs`
 // collects, so only known UI copy changes; data (names, ids, output) never
-// matches and stays as-is.
+// matches and stays as-is. A thrown message carries its values inline
+// (`Invalid duration '5x'.`), so `trMessage` also matches it against the
+// catalog's ICU templates and fills the translation with the captured values.
 
 import { formatMessage, type LiteralCatalog } from "@ryu/i18n/core";
+import { LiteralTemplateIndex } from "@ryu/i18n/literal-templates";
 import { officialCliLiteralCatalog } from "@ryu/i18n/official-catalog/cli";
 import { cliLocales } from "./locale.ts";
 
@@ -19,6 +22,25 @@ export interface CliTranslator {
 	tr(value: string): string;
 	/** Translate string children and copy props before an element is created. */
 	translateProps<Props>(props: Props): Props;
+	/**
+	 * Translate a finished sentence such as an error message: an exact catalog
+	 * entry, else the catalog template it matches (`Invalid duration '{value}'.`)
+	 * with the captured values filled in, else the text unchanged.
+	 */
+	trMessage(value: string): string;
+}
+
+/** Keys are whitespace-collapsed, so aligned copy (`Reliable   {rate}%`)
+ * still finds its entry. */
+function lookup(catalog: LiteralCatalog, source: string): string | undefined {
+	if (!source) {
+		return;
+	}
+	if (Object.hasOwn(catalog, source)) {
+		return catalog[source];
+	}
+	const collapsed = source.replace(/\s+/gu, " ");
+	return Object.hasOwn(catalog, collapsed) ? catalog[collapsed] : undefined;
 }
 
 export function createCliTranslator(
@@ -26,16 +48,28 @@ export function createCliTranslator(
 	catalog: LiteralCatalog | null
 ): CliTranslator {
 	const resolvedLocale = locale ?? "en";
+	let templates: LiteralTemplateIndex | null = null;
 	const tr = (value: string): string => {
 		if (!catalog) {
 			return value;
 		}
 		const source = value.trim();
-		const translated = source ? catalog[source] : undefined;
+		const translated = lookup(catalog, source);
 		if (translated === undefined) {
 			return value;
 		}
 		return source === value ? translated : value.replace(source, translated);
+	};
+	const trMessage = (value: string): string => {
+		if (!catalog) {
+			return value;
+		}
+		const source = value.trim();
+		if (lookup(catalog, source) !== undefined) {
+			return tr(value);
+		}
+		templates ??= new LiteralTemplateIndex(catalog);
+		return (source && templates.match(source, resolvedLocale)) || value;
 	};
 	const translateChild = (child: unknown): unknown => {
 		if (typeof child === "string") {
@@ -49,8 +83,13 @@ export function createCliTranslator(
 	return {
 		locale: resolvedLocale,
 		tr,
+		trMessage,
 		tf: (source, values) =>
-			formatMessage(catalog?.[source] ?? source, values, resolvedLocale),
+			formatMessage(
+				(catalog && lookup(catalog, source)) ?? source,
+				values,
+				resolvedLocale
+			),
 		translateProps<Props>(props: Props): Props {
 			if (!catalog || props === null || typeof props !== "object") {
 				return props;
@@ -85,4 +124,6 @@ const translator = createCliTranslator(
 export const CLI_LOCALE = translator.locale;
 /** The locale the CLI formats dates and numbers in (`de-AT`, `en-GB`, `sv-SE`). */
 export const CLI_FORMAT_LOCALE = locales.format;
-export const { tr, tf, translateProps } = translator;
+/** The process-wide translator, for callers that take one as a parameter. */
+export const CLI_TRANSLATOR: CliTranslator = translator;
+export const { tr, tf, trMessage, translateProps } = translator;

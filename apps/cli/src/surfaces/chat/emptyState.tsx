@@ -6,6 +6,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme, useUnicode } from "@/components/ui/theme-provider.tsx";
 import { VERSION } from "../../cli/version.ts";
 import type { ConversationRow } from "../../core/conversations.ts";
+import { displayWidth } from "../../sidebar/rows.ts";
+import {
+	emptyStateHints,
+	emptyStateMode,
+	recentResumeLabel,
+} from "./emptyStateCopy.ts";
 
 // Three-row block wordmark for roomy terminals; narrow or short transcript
 // areas get a plain bold "ryu" so the centred hero never crowds the composer.
@@ -24,7 +30,6 @@ const HINT_GAP = 3;
  */
 const EMPTY_STATE_CHROME_ROWS = 6;
 const RECENT_KEY_WIDTH = "Alt+1".length;
-const RECENT_LABEL = "Resume";
 const RECENT_GAP = 2;
 /** Below this inner width the "Resume" label yields its room to the title. */
 const RECENT_LABEL_MIN_WIDTH = 40;
@@ -41,10 +46,11 @@ function wrapHints(
 	let used = 0;
 	let widest = 0;
 	for (const hint of hints) {
-		const next = used === 0 ? hint.length : used + HINT_GAP + hint.length;
+		const hintWidth = displayWidth(hint);
+		const next = used === 0 ? hintWidth : used + HINT_GAP + hintWidth;
 		if (used > 0 && next > width) {
 			rows += 1;
-			used = hint.length;
+			used = hintWidth;
 		} else {
 			used = next;
 		}
@@ -54,8 +60,8 @@ function wrapHints(
 }
 
 function recentRowWidth(title: string, showLabel: boolean): number {
-	const label = showLabel ? RECENT_LABEL.length + RECENT_GAP : 0;
-	return RECENT_KEY_WIDTH + RECENT_GAP + label + title.length;
+	const label = showLabel ? displayWidth(recentResumeLabel()) + RECENT_GAP : 0;
+	return RECENT_KEY_WIDTH + RECENT_GAP + label + displayWidth(title);
 }
 
 interface EmptyStateLayout {
@@ -89,7 +95,7 @@ function emptyStateLayout(
 	const hintLayout = wrapHints(lines.hints, available);
 	const natural = Math.max(
 		WORDMARK_WIDTH,
-		lines.mode.length,
+		displayWidth(lines.mode),
 		`v${VERSION}`.length,
 		hintLayout.widest,
 		...lines.recentTitles.map((title) => recentRowWidth(title, showRecentLabel))
@@ -147,15 +153,8 @@ export function EmptyStateHeader({
 				: { height, width }
 		);
 	}, []);
-	let mode = "Ask anything";
-	if (team) {
-		mode = `Group: ${team}`;
-	} else if (agent) {
-		mode = `Agent: ${agent}`;
-	}
-	const hints = simpleInterface
-		? ["Chat with Ryu", "/ commands"]
-		: ["Ctrl+A pick agent", "/ commands", "@ mention", "Ctrl+Q queue"];
+	const mode = emptyStateMode(team, agent);
+	const hints = emptyStateHints(simpleInterface);
 	const layout = emptyStateLayout(
 		area,
 		{ hints, mode, recentTitles: recents.map((row) => row.title) },
@@ -235,7 +234,7 @@ export function EmptyStateHeader({
 								</text>
 								{layout?.showRecentLabel ? (
 									<text fg={theme.colors.mutedForeground} flexShrink={0}>
-										{RECENT_LABEL}
+										{recentResumeLabel()}
 									</text>
 								) : null}
 								<text

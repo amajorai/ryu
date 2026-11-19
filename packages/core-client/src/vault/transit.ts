@@ -60,8 +60,9 @@ export interface VaultTransitOpOptions {
 /** Request and response bodies per transit operation. Plaintext, context, and
  *  input are base64. */
 export interface VaultTransitOperations {
+	/** Derived keys need `context`; `keyVersion` picks the wrapping version. */
 	datakey: {
-		body: Record<string, never>;
+		body: VaultTransitOpOptions;
 		result: { ciphertext: string; plaintext: string };
 	};
 	decrypt: {

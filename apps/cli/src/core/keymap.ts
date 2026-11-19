@@ -26,10 +26,8 @@ export const HINT = {
 	search: { keys: "/", label: "search" },
 } as const satisfies Record<string, KeyHint>;
 
-/** Join hints into an inline hint line: "↑↓ move · Enter open · r refresh". */
-export function hintText(hints: readonly KeyHint[]): string {
-	return hints.map((hint) => `${hint.keys} ${hint.label}`).join(" · ");
-}
+/** Join hints into "↑↓ move · Enter open", each segment translated whole. */
+export { joinHintSegments as hintText } from "./keymap-hints.ts";
 
 /** The key fields a binding matcher reads (a subset of OpenTUI's KeyEvent). */
 export interface KeyChord {

@@ -69,8 +69,8 @@ impl PluginSecretStore {
         Ok(out)
     }
 
-    /// Decrypt the current value of every live secret matching `filter`.
-    /// Not audited per value: the caller (export, scan) checks `read` and
+    /// Decrypt the current value of every live secret matching `filter`,
+    /// skipping values under a namespace lock. Not audited per value: the caller (export, scan) checks `read` and
     /// writes one summary audit row.
     pub(crate) async fn current_values(
         &self,
@@ -79,8 +79,16 @@ impl PluginSecretStore {
         let wanted = self.list_vault_secrets_filtered(filter).await?;
         let mut out = Vec::with_capacity(wanted.len());
         let conn = self.conn.lock().await;
+        // Values under a namespace lock never leave the vault in bulk.
+        let locks = crate::vault::policy::namespace_locks::load(&conn)?;
+        let org = crate::vault::policy::namespace_locks::node_org();
         for info in wanted {
             let coords = info.coords();
+            if crate::vault::policy::namespace_locks::lock_for(&locks, &coords, org.as_deref())
+                .is_some()
+            {
+                continue;
+            }
             let (binding_kind, binding_id) = coords.binding_parts();
             let row: Option<(u32, Vec<u8>, Vec<u8>)> = conn
                 .query_row(
@@ -154,6 +162,7 @@ impl PluginSecretStore {
     ) -> Result<String> {
         let coords = coords.clone().normalize()?;
         let conn = self.conn.lock().await;
+        crate::vault::policy::namespace_locks::guard_unlocked(&conn, &coords)?;
         let Some((id, info)) = find_row(&conn, &coords)? else {
             return Err(VaultError::NotFound("secret".into()).into());
         };

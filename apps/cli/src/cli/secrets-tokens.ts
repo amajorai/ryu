@@ -18,7 +18,9 @@ import {
 	type SecretsArgs,
 } from "./secrets-args.ts";
 import { agentTarget, machineTarget, printJson } from "./secrets-output.ts";
+import { TOKEN_ADMIN_ACTIONS, tokenAdmin } from "./secrets-token-admin.ts";
 import { type CliContext, UsageError } from "./types.ts";
+import { yesNo } from "./yesNo.ts";
 
 // ── Token lifecycle and response wrapping ────────────────────────────────────
 
@@ -33,7 +35,7 @@ function describeToken(ctx: CliContext, token: VaultTokenInfo): void {
 					token.policies.join(","),
 					String(token.expiresAt),
 					`${token.ttlSecs}s`,
-					token.renewable ? "yes" : "no",
+					yesNo(token.renewable),
 				],
 			]
 		)}\n`
@@ -45,6 +47,9 @@ export async function tokenCommand(
 	args: SecretsArgs
 ): Promise<number> {
 	const action = args.positional[1];
+	if (action && TOKEN_ADMIN_ACTIONS.has(action)) {
+		return await tokenAdmin(ctx, args);
+	}
 	const agent = agentTarget(ctx);
 	const accessor = args.positional[2];
 	let token: VaultTokenInfo;
@@ -78,7 +83,7 @@ export async function tokenCommand(
 		}
 	} else {
 		throw new UsageError(
-			"Usage: ryu-cli secrets token lookup [ACCESSOR] | token renew [ACCESSOR] [--increment S]"
+			"Usage: ryu-cli secrets token lookup [ACCESSOR] | renew [ACCESSOR] [--increment S] | list [--identity I] | create IDENTITY | revoke ACCESSOR [--orphan] | roles | role show|set|delete NAME"
 		);
 	}
 	if (ctx.flags.json) {

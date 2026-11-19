@@ -1,8 +1,8 @@
 // Bun module mocks survive mock.restore(). Run each suite in its own process
 // so fallback-engine and DOM fixtures cannot replace another suite's runtime.
-import { spawnSync } from "node:child_process";
 import { sep } from "node:path";
 import { Glob } from "bun";
+import { runIsolatedTestFiles } from "./isolated-test-pool.ts";
 
 const files = [
 	...new Glob("{src,scripts}/**/*.test.{ts,tsx}").scanSync("."),
@@ -11,17 +11,20 @@ if (files.length === 0) {
 	console.error("no test files found");
 	process.exit(1);
 }
-let failed = 0;
-for (const file of files) {
-	const result = spawnSync(process.execPath, ["test", file], {
-		env: { ...process.env, NODE_ENV: "test" },
-		stdio: "inherit",
-	});
-	if (result.status !== 0) {
-		failed += 1;
+// Files run concurrently, so a CPU-starved file can outlast Bun's 5 s default
+// test timeout; 15 s matches apps/web's runner.
+const failed = await runIsolatedTestFiles(
+	files.map((file) => ({
+		args: ["test", "--timeout", "15000", file],
 		// Named with `/` separators, as on POSIX, whatever the OS.
-		console.error(`FAIL ${file.split(sep).join("/")}`);
-	}
+		file: file.split(sep).join("/"),
+	})),
+	{ env: { ...process.env, NODE_ENV: "test" } }
+);
+for (const file of failed) {
+	console.error(`FAIL ${file}`);
 }
-console.log(`\n${files.length - failed}/${files.length} test files green`);
-process.exit(failed === 0 ? 0 : 1);
+console.log(
+	`\n${files.length - failed.length}/${files.length} test files green`
+);
+process.exit(failed.length === 0 ? 0 : 1);

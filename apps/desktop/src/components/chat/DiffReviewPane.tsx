@@ -114,7 +114,8 @@ export function DiffReviewPane({ target, runId, trace }: DiffReviewPaneProps) {
 		} catch (err) {
 			setApplyState({
 				status: "error",
-				message: err instanceof Error ? err.message : "apply failed",
+				message:
+					err instanceof Error ? err.message : tl("Couldn't apply the changes"),
 			});
 		}
 	};

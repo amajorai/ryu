@@ -4,6 +4,10 @@
 
 use super::*;
 
+#[path = "audit_sys/metrics.rs"]
+mod metrics;
+pub use metrics::*;
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditQuery {

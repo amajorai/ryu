@@ -123,7 +123,7 @@ export function RecentDocumentRow({
 	spaceName: string;
 }) {
 	const tl = useLiteralMessages();
-	const title = document.title || "Untitled page";
+	const title = document.title || tl("Untitled page");
 	return (
 		<button
 			aria-label={tl("Open {title}", { title })}

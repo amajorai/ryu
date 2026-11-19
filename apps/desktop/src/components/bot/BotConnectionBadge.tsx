@@ -11,10 +11,10 @@ export function BotConnectionBadge() {
 	const { coreReachable, gatewayReachable, loading } = useSystemStatusContext();
 	const connected = coreReachable && gatewayReachable;
 	const statusLabel = loading
-		? "Connecting"
+		? tl("Connecting")
 		: connected
-			? "Connected"
-			: "Reconnecting";
+			? tl("Connected")
+			: tl("Reconnecting");
 	const dotClass = loading
 		? "bg-muted-foreground/40"
 		: connected

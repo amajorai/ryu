@@ -187,7 +187,7 @@
         "description": "A job stopped before producing a file, and `error` says why — an unsupported audio codec, a file that moved while queued, or a transcription engine that could not be reached. Does NOT fire when a job merely finished with some lines untranslated; that job completed, and its `translated_count` is lower than its `cue_count`.",
         "payload_example": {
           "job_id": "sub_9f0c2a1b4d3e4f5a8b7c6d5e4f3a2b1c",
-          "error": "this file's container or audio codec is not supported: ac3"
+          "error": "This file's audio codec (Opus) is not supported."
         }
       }
     ],

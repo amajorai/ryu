@@ -102,8 +102,8 @@ function makeDetail(over: Partial<ModelDetail> = {}): ModelDetail {
 			os: "linux",
 			ramHuman: "64 GB",
 			unifiedMemory: false,
-			vramBytes: 24_000_000_000,
-			vramHuman: "24 GB",
+			vramBytes: 24 * 1024 ** 3,
+			vramHuman: "24.0 GB",
 		},
 		files: [
 			{
@@ -565,8 +565,8 @@ describe("ModelsCatalogSection — quant download picker", () => {
 		os: "linux",
 		ramHuman: "64 GB",
 		unifiedMemory: false,
-		vramBytes: 24_000_000_000,
-		vramHuman: "24 GB",
+		vramBytes: 24 * 1024 ** 3,
+		vramHuman: "24.0 GB",
 	};
 
 	test("disables a snapshot install whose repo verdict is blocked", () => {
@@ -580,7 +580,7 @@ describe("ModelsCatalogSection — quant download picker", () => {
 		});
 		expect(html).toMatch(/data-testid="install-button" disabled/);
 		expect(html).toContain(
-			"This device has 64 GB of RAM and 24 GB of GPU memory."
+			"This device has 64 GB of RAM and 24.0 GB of GPU memory."
 		);
 	});
 

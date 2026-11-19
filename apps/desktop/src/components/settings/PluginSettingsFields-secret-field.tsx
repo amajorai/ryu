@@ -17,15 +17,16 @@ import type { FieldControlProps } from "./PluginSettingsFields-save-field.ts";
 import { SettingsItem } from "./shared/settings-items.tsx";
 
 /**
- * "Set · 3 minutes ago", "Set", or "Not set" — plus the two ways a stored key can
- * be real yet never used.
+ * "Set · 3 minutes ago", "Configured", or "Not set" — plus the two ways a stored
+ * key can be real yet never used. The bare status says "Configured": the bare
+ * word "Set" is the set-a-value verb in the catalog.
  *
- * Both overrides come BEFORE the plain "Set", because in each case the honest
+ * Both overrides come BEFORE the plain status, because in each case the honest
  * answer to "is my key working?" is no. Rendering a confident "Set" for a value
  * the resolver skips is how someone spends an afternoon re-issuing a perfectly
  * good API key.
  */
-function secretStatusLabel(state: PluginSecretState | null): string {
+export function secretStatusLabel(state: PluginSecretState | null): string {
 	if (!state?.set) {
 		return "Not set";
 	}
@@ -36,7 +37,7 @@ function secretStatusLabel(state: PluginSecretState | null): string {
 		return "Overridden by an environment variable on this node";
 	}
 	if (!state.updated_at) {
-		return "Set";
+		return "Configured";
 	}
 	const writtenAt = new Date(secretUpdatedAtMillis(state.updated_at));
 	return tl("Set · {when}", { when: relativeTimeAgo(writtenAt) });

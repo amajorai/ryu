@@ -1,4 +1,5 @@
 import type { MessageReadReceiptState } from "@ryu/blocks/desktop/agent-elements/message-read-receipt.tsx";
+import { formatList } from "@ryu/i18n/lite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { createElement, useCallback, useEffect, useMemo, useRef } from "react";
@@ -434,7 +435,7 @@ export function useChatMessagePipeline({
 					toast.error({
 						title: tlRef
 							.current("Couldn't notify {names}", {
-								names: failedNames.join(", "),
+								names: formatList(failedNames),
 							})
 							.slice(0, 180),
 					});

@@ -8,6 +8,7 @@ import {
 	type HeatCell,
 	type HeatColumn,
 	weekdayShort,
+	weekOf,
 } from "./journal-model.ts";
 
 export const HEAT_LEVEL: Record<HeatCell["level"], string> = {
@@ -20,6 +21,12 @@ export const HEAT_LEVEL: Record<HeatCell["level"], string> = {
 
 const HEAT_WEEKDAY_ROWS = new Set([1, 3, 5]);
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
+
+/** A day key for heatmap row `weekday`, counted from the week's first day. */
+function heatRowDayKey(weekday: number): string {
+	const date = weekOf("2026-01-07")[weekday] ?? new Date(2026, 0, 4 + weekday);
+	return localDayKey(date);
+}
 
 function heatCellLabel(cell: HeatCell): string {
 	return tr(
@@ -93,7 +100,7 @@ export function YearHeatmap({
 							key={weekday}
 						>
 							{HEAT_WEEKDAY_ROWS.has(weekday)
-								? weekdayShort(localDayKey(new Date(2026, 0, 4 + weekday)))
+								? weekdayShort(heatRowDayKey(weekday))
 								: ""}
 						</span>
 					))}

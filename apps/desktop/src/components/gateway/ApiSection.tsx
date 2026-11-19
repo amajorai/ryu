@@ -17,7 +17,7 @@
 // key list come from `fetchGatewayConfig`; traffic from the SSE stream.
 
 import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { MorphIconSwap } from "@ryu/ui/components/morph-icon.tsx";
 import { useState } from "react";
@@ -33,6 +33,11 @@ import { COPIED_RESET_MS } from "./ApiSection-constants.ts";
 import { LiveTraffic } from "./ApiSection-live-traffic.tsx";
 
 export { GatewayClientKeys } from "./ApiSection-client-keys.tsx";
+
+/** The copy button's name: the row label is translated before it fills the sentence. */
+export function copyActionLabel(label: string, tl: LiteralMessage): string {
+	return tl("Copy {label}", { label: tl(label) });
+}
 
 /** A copy-to-clipboard row with a trailing label chip. */
 function CopyRow({
@@ -60,7 +65,7 @@ function CopyRow({
 		<SettingsItem
 			actions={
 				<Button
-					aria-label={tl("Copy {label}", { label })}
+					aria-label={copyActionLabel(label, tl)}
 					onClick={copy}
 					size="sm"
 					variant="ghost"

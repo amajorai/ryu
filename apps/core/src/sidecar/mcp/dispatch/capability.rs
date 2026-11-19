@@ -43,10 +43,12 @@ impl McpRegistry {
         // A machine verb of a conversation with a session Box runs on that
         // Box's own screen (design §7.4). `box_desktop` calls the Box
         // service directly and never re-enters this dispatch core, so the
-        // conversation gate above is evaluated once per call.
+        // conversation gate above is evaluated once per call. The dispatch's
+        // verified `agent_id` names whose credentials a Box fill may use.
         if let Some(routed) = box_desktop::route(
             self.conversations.as_ref(),
             host_conversation_id,
+            agent_id,
             tool_id,
             &arguments,
         )

@@ -36,7 +36,8 @@ export function ConnectionPermissionDialog({
 	onOpenChange,
 	open,
 }: {
-	connectionName: string;
+	/** The app being connected; null when it has no name yet. */
+	connectionName: string | null;
 	connectionType: "Composio" | "MCP";
 	currentLevel?: ConnectionAccessLevel | null;
 	onConfirm: (level: ConnectionAccessLevel) => Promise<void>;
@@ -90,9 +91,11 @@ export function ConnectionPermissionDialog({
 						<span>Connection review</span>
 					</div>
 					<DialogTitle>
-						{tl("Review access before connecting {connectionName}", {
-							connectionName,
-						})}
+						{connectionName
+							? tl("Review access before connecting {connectionName}", {
+									connectionName,
+								})
+							: tl("Review access before connecting this integration")}
 					</DialogTitle>
 					<DialogDescription>
 						{tl(

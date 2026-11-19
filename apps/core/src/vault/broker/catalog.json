@@ -86,5 +86,411 @@
     "pathPrefix": "/",
     "suggestedRef": "secret:STRIPE_SECRET_KEY",
     "auth": { "type": "bearer", "token": "secret:STRIPE_SECRET_KEY" }
+  },
+  {
+    "id": "mistral",
+    "name": "Mistral AI",
+    "host": "api.mistral.ai",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:MISTRAL_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:MISTRAL_API_KEY" }
+  },
+  {
+    "id": "groq",
+    "name": "Groq",
+    "host": "api.groq.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:GROQ_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:GROQ_API_KEY" }
+  },
+  {
+    "id": "together",
+    "name": "Together AI",
+    "host": "api.together.xyz",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:TOGETHER_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:TOGETHER_API_KEY" }
+  },
+  {
+    "id": "fireworks",
+    "name": "Fireworks AI",
+    "host": "api.fireworks.ai",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:FIREWORKS_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:FIREWORKS_API_KEY" }
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "host": "api.deepseek.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:DEEPSEEK_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:DEEPSEEK_API_KEY" }
+  },
+  {
+    "id": "xai",
+    "name": "xAI",
+    "host": "api.x.ai",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:XAI_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:XAI_API_KEY" }
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "host": "openrouter.ai",
+    "pathPrefix": "/api",
+    "suggestedRef": "secret:OPENROUTER_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:OPENROUTER_API_KEY" }
+  },
+  {
+    "id": "perplexity",
+    "name": "Perplexity",
+    "host": "api.perplexity.ai",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:PERPLEXITY_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:PERPLEXITY_API_KEY" }
+  },
+  {
+    "id": "cohere",
+    "name": "Cohere",
+    "host": "api.cohere.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:COHERE_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:COHERE_API_KEY" }
+  },
+  {
+    "id": "cerebras",
+    "name": "Cerebras",
+    "host": "api.cerebras.ai",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:CEREBRAS_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:CEREBRAS_API_KEY" }
+  },
+  {
+    "id": "voyage",
+    "name": "Voyage AI",
+    "host": "api.voyageai.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:VOYAGE_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:VOYAGE_API_KEY" }
+  },
+  {
+    "id": "replicate",
+    "name": "Replicate",
+    "host": "api.replicate.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:REPLICATE_API_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:REPLICATE_API_TOKEN" }
+  },
+  {
+    "id": "huggingface",
+    "name": "Hugging Face Hub",
+    "host": "huggingface.co",
+    "pathPrefix": "/api",
+    "suggestedRef": "secret:HF_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:HF_TOKEN" }
+  },
+  {
+    "id": "elevenlabs",
+    "name": "ElevenLabs",
+    "host": "api.elevenlabs.io",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:ELEVENLABS_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "xi-api-key",
+      "value": "secret:ELEVENLABS_API_KEY"
+    }
+  },
+  {
+    "id": "deepgram",
+    "name": "Deepgram",
+    "host": "api.deepgram.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:DEEPGRAM_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "Authorization",
+      "value": "secret:DEEPGRAM_API_KEY",
+      "prefix": "Token "
+    }
+  },
+  {
+    "id": "assemblyai",
+    "name": "AssemblyAI",
+    "host": "api.assemblyai.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:ASSEMBLYAI_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "Authorization",
+      "value": "secret:ASSEMBLYAI_API_KEY"
+    }
+  },
+  {
+    "id": "tavily",
+    "name": "Tavily",
+    "host": "api.tavily.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:TAVILY_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:TAVILY_API_KEY" }
+  },
+  {
+    "id": "exa",
+    "name": "Exa",
+    "host": "api.exa.ai",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:EXA_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "x-api-key",
+      "value": "secret:EXA_API_KEY"
+    }
+  },
+  {
+    "id": "firecrawl",
+    "name": "Firecrawl",
+    "host": "api.firecrawl.dev",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:FIRECRAWL_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:FIRECRAWL_API_KEY" }
+  },
+  {
+    "id": "brave-search",
+    "name": "Brave Search",
+    "host": "api.search.brave.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:BRAVE_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "X-Subscription-Token",
+      "value": "secret:BRAVE_API_KEY"
+    }
+  },
+  {
+    "id": "pinecone",
+    "name": "Pinecone",
+    "host": "api.pinecone.io",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:PINECONE_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "Api-Key",
+      "value": "secret:PINECONE_API_KEY"
+    }
+  },
+  {
+    "id": "bitbucket",
+    "name": "Bitbucket",
+    "host": "api.bitbucket.org",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:BITBUCKET_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:BITBUCKET_TOKEN" }
+  },
+  {
+    "id": "vercel",
+    "name": "Vercel",
+    "host": "api.vercel.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:VERCEL_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:VERCEL_TOKEN" }
+  },
+  {
+    "id": "netlify",
+    "name": "Netlify",
+    "host": "api.netlify.com",
+    "pathPrefix": "/api",
+    "suggestedRef": "secret:NETLIFY_AUTH_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:NETLIFY_AUTH_TOKEN" }
+  },
+  {
+    "id": "cloudflare",
+    "name": "Cloudflare",
+    "host": "api.cloudflare.com",
+    "pathPrefix": "/client/v4",
+    "suggestedRef": "secret:CLOUDFLARE_API_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:CLOUDFLARE_API_TOKEN" }
+  },
+  {
+    "id": "digitalocean",
+    "name": "DigitalOcean",
+    "host": "api.digitalocean.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:DIGITALOCEAN_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:DIGITALOCEAN_TOKEN" }
+  },
+  {
+    "id": "fly",
+    "name": "Fly Machines",
+    "host": "api.machines.dev",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:FLY_API_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:FLY_API_TOKEN" }
+  },
+  {
+    "id": "render",
+    "name": "Render",
+    "host": "api.render.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:RENDER_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:RENDER_API_KEY" }
+  },
+  {
+    "id": "heroku",
+    "name": "Heroku",
+    "host": "api.heroku.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:HEROKU_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:HEROKU_API_KEY" }
+  },
+  {
+    "id": "supabase",
+    "name": "Supabase Management",
+    "host": "api.supabase.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:SUPABASE_ACCESS_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:SUPABASE_ACCESS_TOKEN" }
+  },
+  {
+    "id": "sentry",
+    "name": "Sentry",
+    "host": "sentry.io",
+    "pathPrefix": "/api",
+    "suggestedRef": "secret:SENTRY_AUTH_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:SENTRY_AUTH_TOKEN" }
+  },
+  {
+    "id": "circleci",
+    "name": "CircleCI",
+    "host": "circleci.com",
+    "pathPrefix": "/api",
+    "suggestedRef": "secret:CIRCLECI_TOKEN",
+    "auth": {
+      "type": "api_key",
+      "header": "Circle-Token",
+      "value": "secret:CIRCLECI_TOKEN"
+    }
+  },
+  {
+    "id": "datadog",
+    "name": "Datadog",
+    "host": "api.datadoghq.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:DD_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "DD-API-KEY",
+      "value": "secret:DD_API_KEY"
+    }
+  },
+  {
+    "id": "pypi",
+    "name": "PyPI upload",
+    "host": "upload.pypi.org",
+    "pathPrefix": "/legacy",
+    "suggestedRef": "secret:PYPI_TOKEN",
+    "auth": {
+      "type": "basic",
+      "username": "__token__",
+      "password": "secret:PYPI_TOKEN"
+    }
+  },
+  {
+    "id": "notion",
+    "name": "Notion",
+    "host": "api.notion.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:NOTION_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:NOTION_TOKEN" }
+  },
+  {
+    "id": "airtable",
+    "name": "Airtable",
+    "host": "api.airtable.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:AIRTABLE_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:AIRTABLE_API_KEY" }
+  },
+  {
+    "id": "asana",
+    "name": "Asana",
+    "host": "app.asana.com",
+    "pathPrefix": "/api",
+    "suggestedRef": "secret:ASANA_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:ASANA_TOKEN" }
+  },
+  {
+    "id": "figma",
+    "name": "Figma",
+    "host": "api.figma.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:FIGMA_TOKEN",
+    "auth": {
+      "type": "api_key",
+      "header": "X-Figma-Token",
+      "value": "secret:FIGMA_TOKEN"
+    }
+  },
+  {
+    "id": "hubspot",
+    "name": "HubSpot",
+    "host": "api.hubapi.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:HUBSPOT_ACCESS_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:HUBSPOT_ACCESS_TOKEN" }
+  },
+  {
+    "id": "discord",
+    "name": "Discord",
+    "host": "discord.com",
+    "pathPrefix": "/api",
+    "suggestedRef": "secret:DISCORD_BOT_TOKEN",
+    "auth": {
+      "type": "api_key",
+      "header": "Authorization",
+      "value": "secret:DISCORD_BOT_TOKEN",
+      "prefix": "Bot "
+    }
+  },
+  {
+    "id": "sendgrid",
+    "name": "SendGrid",
+    "host": "api.sendgrid.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:SENDGRID_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:SENDGRID_API_KEY" }
+  },
+  {
+    "id": "resend",
+    "name": "Resend",
+    "host": "api.resend.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:RESEND_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:RESEND_API_KEY" }
+  },
+  {
+    "id": "postmark",
+    "name": "Postmark",
+    "host": "api.postmarkapp.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:POSTMARK_SERVER_TOKEN",
+    "auth": {
+      "type": "api_key",
+      "header": "X-Postmark-Server-Token",
+      "value": "secret:POSTMARK_SERVER_TOKEN"
+    }
+  },
+  {
+    "id": "twilio",
+    "name": "Twilio",
+    "host": "api.twilio.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:TWILIO_AUTH_TOKEN",
+    "auth": {
+      "type": "basic",
+      "username": "secret:TWILIO_ACCOUNT_SID",
+      "password": "secret:TWILIO_AUTH_TOKEN"
+    }
   }
 ]

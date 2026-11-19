@@ -196,7 +196,7 @@ export function deskSectionLabel(
 		case "inboxes":
 			return tl("Agent inboxes");
 		default:
-			return tl("Views");
+			return tl("Saved views");
 	}
 }
 

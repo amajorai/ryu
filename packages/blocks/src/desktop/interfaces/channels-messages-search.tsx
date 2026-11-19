@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -157,6 +157,7 @@ export function SearchEmpty({
 	snapshot: InterfaceSnapshot;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	return (
 		<PaneNote
 			description={
@@ -165,15 +166,20 @@ export function SearchEmpty({
 					: "Nothing in any channel matches. Try a name or a shorter word."
 			}
 			live
-			title={
-				<>
-					No messages in{" "}
-					<span className="whitespace-nowrap">{channelLabel}</span> match{" "}
-					<mark className={`${MARK_CLASS} whitespace-nowrap px-0.5`}>
-						{query}
-					</mark>
-				</>
-			}
+			title={tlRich(
+				"No messages in <channel>{channelLabel}</channel> match <query>{query}</query>",
+				{ channelLabel, query },
+				{
+					channel: (chunks) => (
+						<span className="whitespace-nowrap">{chunks}</span>
+					),
+					query: (chunks) => (
+						<mark className={`${MARK_CLASS} whitespace-nowrap px-0.5`}>
+							{chunks}
+						</mark>
+					),
+				}
+			)}
 		>
 			{hits.length > 0 ? (
 				<ul

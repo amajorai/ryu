@@ -303,3 +303,32 @@ test("mail rejects a missing inbox id or invalid JSON body without calling Core"
 		expect(run.calls).toEqual([]);
 	}
 });
+
+test("a refused connection names the target node instead of the socket error", async () => {
+	const cap = makeIo();
+	const refused = () =>
+		Promise.reject(
+			Object.assign(
+				new Error("Unable to connect. Is the computer able to access the url?"),
+				{
+					code: "ConnectionRefused",
+				}
+			)
+		);
+	const code = await runCli(["stack", "export"], {
+		io: cap.io,
+		api: stubApi({ call: refused }),
+		target: { token: null, url: "http://127.0.0.1:7979" },
+	});
+	expect(code).toBe(1);
+	expect(cap.err()).toBe("Error: Core isn't reachable at 127.0.0.1:7979\n");
+	const json = makeIo();
+	await runCli(["stack", "export", "--json"], {
+		io: json.io,
+		api: stubApi({ call: refused }),
+		target: { token: null, url: "http://127.0.0.1:7979" },
+	});
+	expect(JSON.parse(json.err())).toEqual({
+		error: "Unable to connect. Is the computer able to access the url?",
+	});
+});

@@ -58,7 +58,7 @@ impl From<CoordsQuery> for CoordsBody {
 }
 
 impl CoordsBody {
-    pub(super) fn query_pairs(&self, target_scope_id: &str) -> Vec<(String, String)> {
+    pub(crate) fn query_pairs(&self, target_scope_id: &str) -> Vec<(String, String)> {
         let mut pairs = vec![
             ("scope".to_owned(), self.scope.as_str().to_owned()),
             ("scopeId".to_owned(), target_scope_id.to_owned()),
@@ -80,16 +80,49 @@ impl CoordsBody {
     }
 }
 
+/// Refuse a value name that is not an environment-compatible identifier.
+fn check_name(name: &str) -> Result<(), Response> {
+    if is_valid_vault_secret_name(name) {
+        Ok(())
+    } else {
+        Err(invalid_request(
+            "name must be an environment-compatible identifier",
+        ))
+    }
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    /// Tests: [`shared_enabled`] holds in this task, as on a registered
+    /// managed node.
+    pub(crate) static TEST_SHARED: ();
+}
+
+/// Whether this node keeps team and org values in the control plane
+/// ([`crate::vault::shared::is_enabled`]).
+pub(crate) fn shared_enabled() -> bool {
+    #[cfg(test)]
+    if TEST_SHARED.try_with(|_| ()).is_ok() {
+        return true;
+    }
+    crate::vault::shared::is_enabled()
+}
+
+/// Whether value `name` of `scope` lives in the control plane
+/// ([`Ctx::shared_remote`]), so its route forwards it there. Every route
+/// that forwards one value asks this first, so a name such as `..` is
+/// refused here and never reaches a forwarded path.
+pub(crate) fn shared_value(ctx: &Ctx, name: &str, scope: SecretScope) -> Result<bool, Response> {
+    check_name(name)?;
+    Ok(ctx.shared_remote(scope))
+}
+
 pub(crate) fn coords_for(
     ctx: &Ctx,
     name: &str,
     body: CoordsBody,
 ) -> Result<SecretCoords, Response> {
-    if !is_valid_vault_secret_name(name) {
-        return Err(invalid_request(
-            "name must be an environment-compatible identifier",
-        ));
-    }
+    check_name(name)?;
     let target = resolve_target(
         body.scope,
         body.scope_id,

@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { translate as tr, translateMessage } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	InterfaceActivityKind,
@@ -248,7 +248,8 @@ export function podiumWords(act: InterfaceAgentAct): string {
 		case "delivering":
 			return tr("Answer");
 		case "limited":
-			return tr("Out");
+			// Out of the game (ja "脱落"); the bare "Out" is token output.
+			return translateMessage("quiz.contestantOut", {}, "Out");
 		case "working": {
 			const verb = act.bubble?.text?.split(/\s+/)[0] ?? "";
 			return verb && verb.length <= PODIUM_WORD_MAX ? verb : tr("Working");

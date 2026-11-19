@@ -10,6 +10,7 @@ import {
 import { z } from "zod";
 import type { useTheme } from "@/components/ui/theme-provider.tsx";
 import { nativeErrorMessage } from "../core/native-errors.ts";
+import { tr } from "../i18n/translate.ts";
 
 export const NAME_WIDTH = 20;
 export const STATE_WIDTH = 12;
@@ -85,10 +86,18 @@ export interface StateChip {
 
 export function chipFor(app: AppInfo): StateChip {
 	if (!app.installed) {
-		return { label: "available", color: (t) => t.colors.mutedForeground };
+		return { label: tr("available"), color: (t) => t.colors.mutedForeground };
 	}
 	if (app.enabled) {
-		return { label: "enabled", color: (t) => t.colors.success };
+		return { label: tr("enabled"), color: (t) => t.colors.success };
 	}
-	return { label: "disabled", color: (t) => t.colors.mutedForeground };
+	return { label: tr("disabled"), color: (t) => t.colors.mutedForeground };
+}
+
+/** The row's state column: the translated chip (or "working" while an action
+ *  runs), padded by terminal cell width so wide scripts stay aligned. */
+export function stateColumn(chip: StateChip, busy: boolean): string {
+	const label = busy ? tr("working") : chip.label;
+	const padding = Math.max(0, STATE_WIDTH - Bun.stringWidth(label));
+	return `${label}${" ".repeat(padding)}`;
 }

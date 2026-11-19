@@ -3,7 +3,11 @@ import {
 	type InterfaceSnapshot,
 	threadStatus,
 } from "@ryuhq/protocol/interfaces";
-import { relativeAge, threadStatusLabel } from "./interface-renderer.ts";
+import {
+	formatNameList,
+	relativeAge,
+	threadStatusLabel,
+} from "./interface-renderer.ts";
 import type { NoticeboardNote } from "./noticeboard-model.ts";
 
 /** Who a note is from, in words. */
@@ -33,7 +37,7 @@ export function noteAccessibleName(
 		threadStatusLabel(note.status),
 	];
 	const names = note.agents.map((agent) => agent.name);
-	parts.push(names.length > 0 ? names.join(", ") : tr("No agent"));
+	parts.push(names.length > 0 ? formatNameList(names) : tr("No agent"));
 	const age = spokenAge(note.thread.updatedAt, now);
 	if (age) {
 		parts.push(tr("updated {age}", { age }));

@@ -1,5 +1,6 @@
 "use client";
 
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import type { ChatStatus, UIMessage } from "ai";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
@@ -7,18 +8,31 @@ import { AgentChat } from "../desktop/agent-elements/agent-chat.tsx";
 import { DesktopShell } from "../desktop/shell.tsx";
 import styles from "./hero-desktop-demo.module.css";
 
-const RUNS = [
-	{
-		answer:
-			"I found the latest project notes, drafted the update, and left the final send for your approval.",
-		prompt: "Prepare a weekly update from the project folder.",
-	},
-	{
-		answer:
-			"I pulled the open items together and saved a short review list in your workspace.",
-		prompt: "What still needs my attention this week?",
-	},
-] as const;
+/**
+ * The demo's two exchanges, translated before they become chat messages: the
+ * chat renders each message through Markdown with the DOM localizer off, so
+ * an English source would stay English in every language.
+ */
+export function heroDemoRuns(
+	tl: LiteralMessage
+): readonly { answer: string; prompt: string }[] {
+	return [
+		{
+			answer: tl(
+				"I found the latest project notes, drafted the update, and left the final send for your approval."
+			),
+			prompt: tl("Prepare a weekly update from the project folder."),
+		},
+		{
+			answer: tl(
+				"I pulled the open items together and saved a short review list in your workspace."
+			),
+			prompt: tl("What still needs my attention this week?"),
+		},
+	];
+}
+
+const RUN_COUNT = heroDemoRuns((source) => source).length;
 
 const textMessage = (
 	id: string,
@@ -27,13 +41,17 @@ const textMessage = (
 ): UIMessage => ({ id, role, parts: [{ type: "text", text }] });
 
 export default function HeroDesktopDemo() {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const [runIndex, setRunIndex] = useState(0);
-	const run = RUNS[runIndex] ?? RUNS[0];
-	const messages = [
-		textMessage("hero-user", "user", run.prompt),
-		textMessage("hero-assistant", "assistant", run.answer),
-	];
+	const runs = heroDemoRuns(tl);
+	const run = runs[runIndex] ?? runs[0];
+	const messages = run
+		? [
+				textMessage("hero-user", "user", run.prompt),
+				textMessage("hero-assistant", "assistant", run.answer),
+			]
+		: [];
 
 	useEffect(() => {
 		if (reduceMotion) {
@@ -42,7 +60,7 @@ export default function HeroDesktopDemo() {
 		}
 
 		const timer = window.setInterval(() => {
-			setRunIndex((current) => (current + 1) % RUNS.length);
+			setRunIndex((current) => (current + 1) % RUN_COUNT);
 		}, 5200);
 
 		return () => window.clearInterval(timer);
@@ -70,7 +88,7 @@ export default function HeroDesktopDemo() {
 						animate={{ opacity: 1 }}
 						exit={{ opacity: 0 }}
 						initial={{ opacity: 0 }}
-						key={run.prompt}
+						key={runIndex}
 					>
 						<DesktopShell sidebarMode="trust">
 							<AgentChat

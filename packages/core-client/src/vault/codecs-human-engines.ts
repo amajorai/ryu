@@ -39,6 +39,21 @@ export const vaultHumanSshRoleResponse = vaultMachineCodec(
 	z.object({ role: vaultHumanSshRole })
 );
 
+const vaultHumanSshCertRecord = vaultMachineCodec(
+	z.object({
+		ca: vaultHumanText,
+		// A decimal string: serials can exceed JSON's safe integers.
+		serial: vaultHumanText,
+		keyId: vaultHumanText,
+		validBefore: vaultHumanTimestamp,
+		revokedAt: vaultHumanTimestamp.optional(),
+	})
+);
+
+export const vaultHumanSshCertRecords = vaultMachineCodec(
+	z.object({ certificates: z.array(vaultHumanSshCertRecord) })
+);
+
 const vaultHumanDynamicRole = vaultMachineCodec(
 	z.object({
 		name: vaultHumanText,
@@ -97,8 +112,39 @@ export const vaultHumanMachineAuth = vaultMachineCodec(
 			audiences: z.array(vaultHumanText),
 			boundClaims: vaultHumanJwtClaims,
 		}),
+		z.object({
+			kind: z.literal("cert"),
+			caPem: vaultHumanText,
+			allowedCommonNames: z.array(vaultHumanText),
+			allowedDnsSans: z.array(vaultHumanText),
+			allowedUriSans: z.array(vaultHumanText),
+		}),
+		z.object({
+			kind: z.literal("aws-iam"),
+			boundIamPrincipalArns: z.array(vaultHumanText),
+			serverIdHeaderValue: vaultHumanText.nullable(),
+			stsEndpoint: vaultHumanText.nullable(),
+		}),
+		z.object({
+			kind: z.literal("kubernetes"),
+			host: vaultHumanText,
+			caPem: vaultHumanText.nullable(),
+			reviewerJwtEnv: vaultHumanText.nullable(),
+			boundServiceAccountNames: z.array(vaultHumanText),
+			boundServiceAccountNamespaces: z.array(vaultHumanText),
+			audiences: z.array(vaultHumanText),
+		}),
 	])
 );
+
+const vaultHumanTokenConfig = z.object({
+	maxTtlSecs: vaultHumanNumber.optional(),
+	explicitMaxTtlSecs: vaultHumanNumber.optional(),
+	periodSecs: vaultHumanNumber.optional(),
+	numUses: vaultHumanNumber.optional(),
+	boundCidrs: z.array(vaultHumanText).optional(),
+	renewable: z.boolean().optional(),
+});
 
 const vaultHumanMachine = vaultMachineCodec(
 	z.object({
@@ -110,6 +156,7 @@ const vaultHumanMachine = vaultMachineCodec(
 		disabled: z.boolean(),
 		createdAt: vaultHumanTimestamp,
 		createdBy: vaultHumanText.nullable(),
+		tokenConfig: vaultHumanTokenConfig.optional(),
 	})
 );
 

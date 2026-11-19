@@ -5,7 +5,7 @@
 import { expect, test } from "bun:test";
 import { ApiError } from "@ryuhq/core-client/client";
 import type { VaultEventMessage } from "@ryuhq/core-client/vault-events";
-import { runWatching } from "../cli/secrets-watch.ts";
+import { lostStreamMessage, runWatching } from "../cli/secrets-watch.ts";
 import type { ProcessRunner } from "../cli/types.ts";
 import type { SignalGuard } from "../cli/vaultIsolation.ts";
 import { fakeNode, json, jsonExport, runSecrets } from "./secrets-fixture.ts";
@@ -119,9 +119,15 @@ test("a lost event stream stops the command and revokes its leases", async () =>
 	let opens = 0;
 	let cleanups = 0;
 	let stopped = false;
+	let errors = "";
 	const code = await runWatching(
 		{
-			io: { out: () => undefined, err: () => undefined },
+			io: {
+				out: () => undefined,
+				err: (text: string) => {
+					errors += text;
+				},
+			},
 			spawn: (_cmd, _env, options) =>
 				blockingChild(options?.signal).then((exit) => {
 					stopped = true;
@@ -153,6 +159,25 @@ test("a lost event stream stops the command and revokes its leases", async () =>
 	expect(stopped).toBe(true);
 	expect(cleanups).toBe(1);
 	expect(opens).toBe(2);
+	expect(errors).toBe(
+		"ryu: Core refused the vault event stream; stopped the command so it does not keep running on values that are no longer watched.\n"
+	);
+});
+
+test("each lost-stream reason prints one whole catalogued sentence", () => {
+	const catalog: Record<string, string> = {
+		"ryu: Core refused the vault event stream; stopped the command so it does not keep running on values that are no longer watched.":
+			"ryu: Core hat den Ereignisstrom abgelehnt.",
+		"ryu: the vault event stream ended and could not be reopened; stopped the command so it does not keep running on values that are no longer watched.":
+			"ryu: Der Ereignisstrom wurde beendet.",
+	};
+	const translate = (value: string) => catalog[value] ?? value;
+	expect(lostStreamMessage("refused", translate)).toBe(
+		"ryu: Core hat den Ereignisstrom abgelehnt."
+	);
+	expect(lostStreamMessage("ended", translate)).toBe(
+		"ryu: Der Ereignisstrom wurde beendet."
+	);
 });
 
 test("a revoked lease of the run restarts it; another lease does not", async () => {

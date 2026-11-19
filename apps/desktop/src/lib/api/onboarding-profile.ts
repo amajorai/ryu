@@ -67,12 +67,22 @@ export interface OnboardingAgentSuggestion {
 	tools: string[];
 }
 
+/** Why a profile build failed; older nodes send none. Unknown codes may appear. */
+export type ProfileJobErrorCode =
+	| "expired"
+	| "empty_draft"
+	| "context_changed"
+	| "company_knowledge_disabled"
+	| "failed";
+
 export interface ProfileJobStatus {
 	agentSuggestions: OnboardingAgentSuggestion[];
 	/** The user chose to leave the progress view; the build runs either way. */
 	background: boolean;
 	conversationId: string | null;
+	/** Core's English description, for logs; render `errorCode` instead. */
 	error: string | null;
+	errorCode: ProfileJobErrorCode | string | null;
 	id: string;
 	materialized: boolean;
 	startedAtMs: number;
@@ -84,6 +94,7 @@ interface ProfileJobWire {
 	background?: boolean;
 	conversationId?: string | null;
 	error?: string | null;
+	errorCode?: ProfileJobErrorCode | string | null;
 	id: string;
 	materialized?: boolean;
 	startedAtMs?: number;
@@ -98,6 +109,7 @@ function normalize(job: ProfileJobWire): ProfileJobStatus {
 		background: job.background ?? job.materialized ?? false,
 		conversationId: job.conversationId ?? null,
 		error: job.error ?? null,
+		errorCode: job.errorCode ?? null,
 		id: job.id,
 		materialized: job.materialized ?? false,
 		startedAtMs: job.startedAtMs ?? Date.now(),
@@ -336,6 +348,7 @@ const profileJobWireResponseSchema: z.ZodType<ProfileJobWire> =
 				background: z.boolean().optional(),
 				conversationId: z.union([z.string(), z.null()]).optional(),
 				error: z.union([z.string(), z.null()]).optional(),
+				errorCode: z.union([z.string(), z.null()]).optional(),
 				id: z.string(),
 				materialized: z.boolean().optional(),
 				startedAtMs: z.number().optional(),

@@ -175,7 +175,7 @@ describe("argument parsing", () => {
 	test("an unknown flag or a missing value is a usage error", async () => {
 		const typo = await run(["agents", "create", "A", "--mode", "individual"]);
 		expect(typo.code).toBe(2);
-		expect(typo.err).toContain("Unknown option '--mode'");
+		expect(typo.err).toContain("Unknown flag --mode. Usage: ryu-cli agents");
 		const missing = await run(["agents", "create", "A", "--identity"]);
 		expect(missing.code).toBe(2);
 		expect(calls).toEqual([]);

@@ -11,6 +11,7 @@ import {
 import { LocalizedError, localize } from "../localizedText.ts";
 import { formatTable, truncate } from "../output.ts";
 import type { CliContext, Command } from "../types.ts";
+import { yesNo } from "../yesNo.ts";
 import {
 	asRecord,
 	DESCRIPTION_WIDTH,
@@ -68,7 +69,7 @@ export const listCommand: Command = {
 			a.id,
 			a.name,
 			installedAppKind(a),
-			a.enabled ? "yes" : "no",
+			yesNo(a.enabled),
 		]);
 		ctx.io.out(`${formatTable(["ID", "NAME", "KIND", "ENABLED"], rows)}\n`);
 		return 0;

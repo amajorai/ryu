@@ -17,6 +17,7 @@ pub(super) async fn serve_acp_instance(
     unserved_first_turn: &mut UnservedFirstTurn,
     activity: Option<Arc<AcpInstanceActivity>>,
     account_confinement: crate::agent_access::AccountConfinement,
+    agent_id: &str,
 ) -> anyhow::Result<()> {
     // Held for the whole instance: dropping it on any exit path kills the
     // subprocess tree, not just the direct child the ACP crate knows about.
@@ -29,12 +30,12 @@ pub(super) async fn serve_acp_instance(
     let captured_pi_account = prep.captured_pi_account;
     let _projection = prep.projection;
 
-    // `_broker_lease` lives as long as the instance: dropping it on any exit
+    // `broker_lease` lives as long as the instance: dropping it on any exit
     // path revokes the run's broker session.
     let Some(LaunchedServer {
         server,
         sandbox_notice,
-        broker_lease: _broker_lease,
+        broker_lease,
     }) = launch_agent_server(
         &spawn_cmd,
         environment,
@@ -49,11 +50,16 @@ pub(super) async fn serve_acp_instance(
         &workspace_autonomy,
         &cwd,
         &additional_directories,
+        agent_id,
     )
     .await?
     else {
         return Ok(());
     };
+    // The run's own broker session, offered to its in-process broker tools.
+    let broker_session_token: Option<String> = broker_lease
+        .as_ref()
+        .and_then(|lease| lease.session_token().map(str::to_owned));
     let agent = AcpSpawn::new(server)
         .into_agent()?
         // Surface the ACP subprocess's own output. Without this the agent's
@@ -98,6 +104,7 @@ pub(super) async fn serve_acp_instance(
                     is_claude_code,
                     &activity,
                     &session_grant,
+                    broker_session_token.as_deref(),
                 )
                 .await?
                 else {

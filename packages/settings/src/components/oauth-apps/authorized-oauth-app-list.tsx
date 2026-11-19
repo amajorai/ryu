@@ -1,6 +1,6 @@
 import { AppWindowIcon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { activeLocale, formatRelativeTime } from "@ryu/i18n/lite";
+import { activeLocale, formatList, formatRelativeTime } from "@ryu/i18n/lite";
 import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type { OAuthApp } from "../../utils/api-client.ts";
@@ -38,11 +38,14 @@ export function AuthorizedOAuthAppList({
 		<SettingsGroup>
 			{apps.map((app) => {
 				const isConfirming = confirmRevoke === app.clientId;
-				const scopeList = app.scopes
-					.split(/[,\s]+/)
-					.filter(Boolean)
-					.map(scopeLabel)
-					.join(", ");
+				const scopeList = formatList(
+					app.scopes
+						.split(/[,\s]+/)
+						.filter(Boolean)
+						.map(scopeLabel),
+					"conjunction",
+					locale
+				);
 
 				return (
 					<SettingsItem

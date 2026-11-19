@@ -16,7 +16,7 @@ You repeat release checks across several recent sessions.
 ]}
 -->"#;
 
-    let (profile, suggestions) = parse_profile_reply(reply);
+    let (profile, suggestions) = parse_profile_reply(reply, "en");
     assert!(profile.contains("release checks"));
     assert!(!profile.contains("RYU_AGENT_SUGGESTIONS_JSON"));
     assert_eq!(suggestions.len(), 1);
@@ -31,8 +31,32 @@ You repeat release checks across several recent sessions.
 fn profile_reply_accepts_strict_json_and_defaults_empty_tools() {
     let reply = r#"{"profile":"Frequent inbox triage.","agent_suggestions":[{"name":"Inbox Triage","system_prompt":"Summarize my inbox and ask before sending anything.","tools":["shell.exec"]}]}"#;
 
-    let (profile, suggestions) = parse_profile_reply(reply);
+    let (profile, suggestions) = parse_profile_reply(reply, "en");
     assert_eq!(profile, "Frequent inbox triage.");
     assert_eq!(suggestions.len(), 1);
     assert_eq!(suggestions[0].tools, vec!["search_conversations.search"]);
+}
+
+#[test]
+fn empty_suggestion_fields_fall_back_to_core_copy_in_the_node_language() {
+    use crate::i18n::{messages, Message};
+    let reply = r#"{"profile":"Weekly reports.","agent_suggestions":[{"name":"Reporter","system_prompt":"Draft my weekly report and ask before sending it.","tools":[]}]}"#;
+    for locale in ["en", "ja", "ar"] {
+        let (_, suggestions) = parse_profile_reply(reply, locale);
+        let render = |template| Message::new(template).render(locale);
+        assert_eq!(
+            suggestions[0].title,
+            render(messages::ONBOARDING_SUGGESTION_TITLE_FALLBACK_MESSAGE)
+        );
+        assert_eq!(
+            suggestions[0].description,
+            render(messages::ONBOARDING_SUGGESTION_SUMMARY_FALLBACK_MESSAGE)
+        );
+        assert_eq!(
+            suggestions[0].reason,
+            render(messages::ONBOARDING_SUGGESTION_REASON_FALLBACK_MESSAGE)
+        );
+    }
+    let (_, english) = parse_profile_reply(reply, "en");
+    assert_eq!(english[0].title, "Suggested agent");
 }

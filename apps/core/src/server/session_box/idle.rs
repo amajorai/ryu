@@ -114,6 +114,7 @@ pub(super) async fn sweep_once(idle: Duration) -> Vec<(SessionBoxKey, ParkReason
                 if let Some(entry) = slot.lock().await.take() {
                     drop(entry);
                 }
+                super::broker_relay::revoke_relay(&lease_id).await;
                 let _ = remove_lease(&lease_id);
                 forget_empty(&key, &slot);
             }

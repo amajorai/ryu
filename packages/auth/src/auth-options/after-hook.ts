@@ -6,6 +6,7 @@ import {
 	organizationAuditDetails,
 	recordOrganizationControlAudit,
 } from "../lib/control-audit-recorder.ts";
+import { withEmailBudget } from "../lib/email-send-budget.ts";
 import { disableFamilyBotGrantsOnMemberExit } from "../lib/family-bot-grants.ts";
 import { invitationEmailNotSentError } from "../lib/invitation-email-delivery.ts";
 import {
@@ -275,13 +276,16 @@ export const afterAuthHook = createAuthMiddleware(async (ctx) => {
 		const session = ctx.context.session;
 		if (session?.user) {
 			try {
-				await sendEmail({
-					to: session.user.email,
-					subject: "Your new password is live",
-					react: PasswordChangeEmail({
-						userName: session.user.name || undefined,
-					}),
-				});
+				// The signed-in owner caused it: the account's own budget.
+				await withEmailBudget("account", () =>
+					sendEmail({
+						to: session.user.email,
+						subject: "Your new password is live",
+						react: PasswordChangeEmail({
+							userName: session.user.name || undefined,
+						}),
+					})
+				);
 			} catch (error) {
 				console.error(
 					"Failed to send password change notification email:",

@@ -16,12 +16,11 @@ import {
 	unsealVault,
 	type VaultPolicyRule,
 	vaultAgentRevokeSelf,
-	vaultAppRoleLogin,
-	vaultJwtLogin,
 	verifyVaultAudit,
 } from "@ryuhq/core-client/vault";
 import { z } from "zod";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
+import { localize } from "./localizedText.ts";
 import { formatTable, truncate } from "./output.ts";
 import {
 	arg,
@@ -32,11 +31,15 @@ import {
 } from "./secrets-args.ts";
 import {
 	agentTarget,
-	machineTarget,
 	policyKey,
 	printJson,
 	sealLine,
 } from "./secrets-output.ts";
+import {
+	changeRequestNowText,
+	noChangeRequestsText,
+	sharedValuesSourceText,
+} from "./secrets-status-copy.ts";
 import { type CliContext, UsageError } from "./types.ts";
 
 // ── Administration ───────────────────────────────────────────────────────────
@@ -55,7 +58,9 @@ export async function environments(
 		const rows = result.environments.map((env) => [
 			`${env.slug}${env.slug === result.active ? " *" : ""}`,
 			env.name,
-			env.protected ? `yes (${env.requiredApprovals})` : "no",
+			env.protected
+				? tf("yes ({count})", { count: env.requiredApprovals })
+				: tr("no"),
 		]);
 		ctx.io.out(`${formatTable(["SLUG", "NAME", "PROTECTED"], rows)}\n`);
 		return 0;
@@ -110,7 +115,8 @@ const vaultPolicyFileSchema = z.union([
 	}),
 ]);
 type VaultPolicyFile = z.infer<typeof vaultPolicyFileSchema>;
-async function readPolicyFile(file: string): Promise<VaultPolicyFile> {
+/** Read and validate a `secrets policy set` rules file. */
+export async function readPolicyFile(file: string): Promise<VaultPolicyFile> {
 	let parsed: ReturnType<typeof vaultPolicyFileSchema.safeParse>;
 	try {
 		parsed = vaultPolicyFileSchema.safeParse(
@@ -118,7 +124,7 @@ async function readPolicyFile(file: string): Promise<VaultPolicyFile> {
 		);
 	} catch (error) {
 		throw new UsageError(
-			tf("Policy file {file} must be JSON: {reason}", {
+			localize("Policy file {file} must be JSON: {reason}", {
 				file,
 				reason: error instanceof Error ? error.message : String(error),
 			})
@@ -126,7 +132,10 @@ async function readPolicyFile(file: string): Promise<VaultPolicyFile> {
 	}
 	if (!parsed.success) {
 		throw new UsageError(
-			`Policy file ${file} must be {"rules": [...]} or a valid rules array.`
+			localize(
+				"Policy file {file} must be a JSON object with a rules array, or a rules array.",
+				{ file }
+			)
 		);
 	}
 	return parsed.data;
@@ -231,9 +240,7 @@ export async function approvals(
 			return 0;
 		}
 		if (changeRequests.length === 0) {
-			ctx.io.out(
-				`${tf("No {status} change requests.", { status: String(status) })}\n`
-			);
+			ctx.io.out(`${noChangeRequestsText(status.data)}\n`);
 			return 0;
 		}
 		const rows = changeRequests.map((request) => [
@@ -268,9 +275,7 @@ export async function approvals(
 	if (ctx.flags.json) {
 		printJson(ctx, changeRequest);
 	} else {
-		ctx.io.out(
-			`${tf("Change request {id} is now {status}.", { id, status: changeRequest.status })}\n`
-		);
+		ctx.io.out(`${changeRequestNowText(id, changeRequest.status)}\n`);
 	}
 	return 0;
 }
@@ -336,7 +341,7 @@ export async function sealCommand(
 			printJson(ctx, status);
 		} else {
 			ctx.io.out(
-				`${sealLine(status.seal)}\n${tf("Active environment: {activeEnvironment}", { activeEnvironment: status.activeEnvironment })}\n${tf("Shared values: {source}", { source: status.sharedRemote ? "control plane" : "local" })}\n`
+				`${sealLine(status.seal)}\n${tf("Active environment: {activeEnvironment}", { activeEnvironment: status.activeEnvironment })}\n${sharedValuesSourceText(status.sharedRemote)}\n`
 			);
 		}
 		return 0;
@@ -353,42 +358,7 @@ export async function sealCommand(
 	return 0;
 }
 
-// ── Machine login ────────────────────────────────────────────────────────────
-
-export async function login(
-	ctx: CliContext,
-	args: SecretsArgs
-): Promise<number> {
-	const target = machineTarget(ctx);
-	let result: Awaited<ReturnType<typeof vaultAppRoleLogin>>;
-	if (args.booleans.has("--approle")) {
-		result = await vaultAppRoleLogin(target, {
-			roleId: arg(args, 1, "login --approle ROLE_ID SECRET_ID"),
-			secretId: arg(args, 2, "login --approle ROLE_ID SECRET_ID"),
-		});
-	} else if (args.booleans.has("--jwt")) {
-		result = await vaultJwtLogin(target, {
-			identity: arg(args, 1, "login --jwt IDENTITY JWT"),
-			jwt: arg(args, 2, "login --jwt IDENTITY JWT"),
-		});
-	} else {
-		throw new UsageError(
-			"Usage: ryu-cli secrets login --approle ROLE_ID SECRET_ID | --jwt IDENTITY JWT"
-		);
-	}
-	if (ctx.flags.json) {
-		printJson(ctx, result.token);
-	} else {
-		ctx.io.out(`${result.token.token}\n`);
-		ctx.io.err(
-			`${tf("Vault token for {identityId} expires {expiresAt}. Export it as RYU_VAULT_TOKEN.", { identityId: result.token.identityId, expiresAt: String(result.token.expiresAt) })}\n`
-		);
-		ctx.io.err(
-			`${tf("Vault/OpenBao CLIs work too (Ryu serves the /v1 API): export VAULT_ADDR={address} VAULT_TOKEN=<this token>", { address: ctx.target.url.replace(/\/+$/, "") })}\n`
-		);
-	}
-	return 0;
-}
+// ── Machine logout ───────────────────────────────────────────────────────────
 
 export async function logout(ctx: CliContext): Promise<number> {
 	const agent = agentTarget(ctx);
@@ -396,6 +366,6 @@ export async function logout(ctx: CliContext): Promise<number> {
 		throw new UsageError("RYU_VAULT_TOKEN is not set; nothing to revoke.");
 	}
 	await vaultAgentRevokeSelf(agent);
-	ctx.io.out("Revoked RYU_VAULT_TOKEN.\n");
+	ctx.io.out(`${tr("Revoked RYU_VAULT_TOKEN.")}\n`);
 	return 0;
 }

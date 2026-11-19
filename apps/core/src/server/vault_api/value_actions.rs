@@ -2,6 +2,9 @@
 
 use super::*;
 
+mod bulk;
+pub(crate) use bulk::*;
+
 pub(super) async fn delete_coords(ctx: &Ctx, coords: SecretCoords, actor: &AuditActor) -> Response {
     if let Err(response) = ctx.require(&coords, Capability::Delete) {
         return response;
@@ -77,27 +80,29 @@ pub async fn delete_secret(
         },
         |Json(body)| body,
     );
-    let ctx = match Ctx::load(&state, caller, &headers).await {
-        Ok(ctx) => ctx,
-        Err(response) => return response,
-    };
-    if ctx.shared_remote(body.coords.scope) {
+    let ctx = ctx!(state, caller, headers);
+    delete_secret_with(&ctx, &name, body).await
+}
+
+/// [`delete_secret`] for a loaded principal (also one item of a bulk request).
+pub(crate) async fn delete_secret_with(ctx: &Ctx, name: &str, body: DeleteSecretBody) -> Response {
+    if try_response!(shared_value(ctx, name, body.coords.scope)) {
         let target_id = ctx.shared_scope_id(&body.coords);
         return proxy(
-            &ctx,
+            ctx,
             reqwest::Method::DELETE,
-            &format!("/secrets/{}", urlencoding::encode(&name)),
+            &format!("/secrets/{}", urlencoding::encode(name)),
             &body.coords.query_pairs(&target_id),
             None,
         )
         .await;
     }
-    let coords = match coords_for(&ctx, &name, body.coords) {
+    let coords = match coords_for(ctx, name, body.coords) {
         Ok(coords) => coords,
         Err(response) => return response,
     };
     let actor = ctx.actor();
-    delete_coords(&ctx, coords, &actor).await
+    delete_coords(ctx, coords, &actor).await
 }
 
 /// GET /api/vault/secrets/{name}/versions lists version history.
@@ -121,7 +126,7 @@ pub async fn list_versions(
         Err(response) => return response,
     };
     let body: CoordsBody = query.into();
-    if ctx.shared_remote(body.scope) {
+    if try_response!(shared_value(&ctx, &name, body.scope)) {
         let target_id = ctx.shared_scope_id(&body);
         return proxy(
             &ctx,
@@ -197,7 +202,7 @@ pub(super) async fn secret_action_with(
             "vault_not_found: unknown action".to_owned(),
         );
     }
-    if ctx.shared_remote(body.coords.scope) {
+    if try_response!(shared_value(ctx, name, body.coords.scope)) {
         let forwarded = json!({
             "scope": body.coords.scope,
             "scopeId": ctx.shared_scope_id(&body.coords),

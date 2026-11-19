@@ -12,6 +12,7 @@ import { runRecipe } from "@ryuhq/core-client/recipes";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { featureListLoader, type ListRow } from "../../core/featureList.ts";
 import { ListTab } from "../../ui/ListTab.tsx";
+import { replayedNotice } from "../../ui/list-notices.ts";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
 
@@ -29,7 +30,7 @@ const replayRecipe = async (
 	target: ApiTarget
 ): Promise<string> => {
 	await runRecipe(target, row.id, {});
-	return `replayed: ${row.id}`;
+	return replayedNotice(row.id);
 };
 
 function LibrarySurface({ active, paneId }: SurfaceProps) {

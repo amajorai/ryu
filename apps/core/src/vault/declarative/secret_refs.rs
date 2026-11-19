@@ -32,11 +32,13 @@ fn secret_fields(family: Family, kind: &str) -> Option<&'static [&'static str]> 
     let fields: &'static [&'static str] = match (family, kind) {
         (_, "postgres" | "redis" | "valkey") => &["connectionUrl"],
         (_, "webhook") => &["signingSecret"],
-        (Family::Dynamic, "aws-sts") | (Family::Static, "aws-iam") => {
+        (Family::Dynamic, "aws-sts" | "aws-iam") | (Family::Static, "aws-iam") => {
             &["accessKeyId", "secretAccessKey"]
         }
+        (Family::Dynamic, "rabbitmq") => &["password"],
         (Family::Dynamic, "random") => &[],
-        (Family::Static, "openai" | "anthropic") => &["adminApiKey"],
+        (Family::Static, "openai" | "anthropic" | "stripe") => &["adminApiKey"],
+        (Family::Static, "cloudflare") => &["adminApiToken"],
         _ => return None,
     };
     Some(fields)
@@ -137,4 +139,48 @@ pub(super) fn resolve(provider: &Value, refs: &BTreeMap<String, String>) -> Resu
 pub(super) fn into_typed<T: serde::de::DeserializeOwned>(resolved: Value) -> Result<T> {
     serde_json::from_value(resolved)
         .map_err(|_| anyhow!("a resolved credential does not fit the provider configuration"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn newer_provider_kinds_take_their_credentials_by_reference() {
+        let refs = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(field, reference)| ((*field).to_owned(), (*reference).to_owned()))
+                .collect()
+        };
+        let keys = refs(&[("accessKeyId", "env:AK"), ("secretAccessKey", "env:SK")]);
+        let iam =
+            serde_json::json!({ "kind": "aws-iam", "policyArns": ["arn:aws:iam::aws:policy/X"] });
+        assert_eq!(check(Family::Dynamic, &iam, &keys).unwrap(), "aws-iam");
+        let rabbit = serde_json::json!({ "kind": "rabbitmq", "username": "admin" });
+        assert!(check(Family::Dynamic, &rabbit, &refs(&[("password", "env:RMQ")])).is_ok());
+        let stripe = serde_json::json!({ "kind": "stripe", "currentApiKeyId": "rk_1" });
+        assert!(check(
+            Family::Static,
+            &stripe,
+            &refs(&[("adminApiKey", "env:STRIPE")])
+        )
+        .is_ok());
+        let cloudflare = serde_json::json!({ "kind": "cloudflare", "tokenId": "t" });
+        assert!(check(
+            Family::Static,
+            &cloudflare,
+            &refs(&[("adminApiToken", "env:CF")])
+        )
+        .is_ok());
+        // An inline admin token is refused.
+        let inline =
+            serde_json::json!({ "kind": "cloudflare", "tokenId": "t", "adminApiToken": "x" });
+        assert!(check(
+            Family::Static,
+            &inline,
+            &refs(&[("adminApiToken", "env:CF")])
+        )
+        .is_err());
+    }
 }

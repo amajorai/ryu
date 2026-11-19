@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import type { ApiTarget } from "@ryuhq/core-client/client";
+import { localizedTextOf } from "../cli/localizedText.ts";
 import {
 	deleteConversation,
 	forkConversation,
@@ -7,6 +8,8 @@ import {
 	resumeConversation,
 	setConversationPinned,
 } from "../core/conversations.ts";
+import { createErrorText } from "../i18n/error-text.ts";
+import { createCliTranslator } from "../i18n/translate.ts";
 
 const target: ApiTarget = { url: "http://node:7980", token: "node-secret" };
 const realFetch = globalThis.fetch;
@@ -225,5 +228,21 @@ test("deletes a conversation and reports Core failures", async () => {
 	installResponse(() => Promise.resolve(new Response("", { status: 403 })));
 	await expect(deleteConversation(target, "conversation-1")).rejects.toThrow(
 		"Delete conversation failed: 403"
+	);
+});
+
+test("an empty rename title reads as a catalogued sentence in the locale", async () => {
+	const error = await renameConversation(target, "conversation-1", " ").catch(
+		(caught: unknown) => caught
+	);
+	const german = createCliTranslator("de", {
+		"Conversation title must not be empty":
+			"Der Unterhaltungstitel darf nicht leer sein",
+	});
+	expect(createErrorText(german.trMessage)(error)).toBe(
+		"Der Unterhaltungstitel darf nicht leer sein"
+	);
+	expect(localizedTextOf(error as Error)?.source).toBe(
+		"Conversation title must not be empty"
 	);
 });

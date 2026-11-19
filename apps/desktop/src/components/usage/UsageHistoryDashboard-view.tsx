@@ -162,19 +162,35 @@ export function UsageHistoryView({
 				sources.findIndex((item) => item.id === sourceId)
 			) % COLORS.length
 		];
-	const overviewNotes = summary
+	// Whole translated sentences, each its own span, so no language has to
+	// accept English word order or a hand-joined string.
+	const overviewSentences = summary
 		? [
-				"List-price estimate. Subscription charges and invoices are separate.",
+				tl(
+					"List-price estimate. Subscription charges and invoices are separate."
+				),
 				summary.unpricedRecords
-					? `${formatNumber(summary.unpricedRecords)} records have unknown prices.`
+					? tl(
+							"{count, plural, one {# record has an unknown price.} other {# records have unknown prices.}}",
+							{ count: summary.unpricedRecords }
+						)
 					: null,
 				missingCounters
-					? "Some records omit token counters. Totals include only reported values."
+					? tl(
+							"Some records omit token counters. Totals include only reported values."
+						)
 					: null,
-			]
-				.filter(Boolean)
-				.join(" ")
-		: undefined;
+			].filter((sentence): sentence is string => Boolean(sentence))
+		: [];
+	const overviewNotes =
+		overviewSentences.length > 0
+			? overviewSentences.map((sentence, index) => (
+					<span key={sentence}>
+						{index > 0 ? " " : null}
+						{sentence}
+					</span>
+				))
+			: undefined;
 	return (
 		<section
 			aria-label="Historical usage"

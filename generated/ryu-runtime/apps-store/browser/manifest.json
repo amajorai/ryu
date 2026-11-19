@@ -488,7 +488,7 @@
         },
         "fail_open": true,
         "unwrap_body": true,
-        "description": "Execute one WebMCP tool exposed in a browser tab. Use the exact tool_name, tool_id, and arguments from chromium.list_webmcp_tools; tool_id distinguishes same-name tools from different frames. This runs page JavaScript visibly in the user's signed-in tab and can cause external effects, so follow normal browser confirmation policy.",
+        "description": "Execute one WebMCP tool exposed in a browser tab. Use the exact tool_name, tool_id, and arguments from chromium.list_webmcp_tools; tool_id distinguishes same-name tools from different frames. This runs page JavaScript visibly in the user's signed-in tab and can cause external effects, so follow normal browser confirmation policy. When the tool needs a password, username or 2FA code, pass `credential_slots` instead of the value.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -507,6 +507,23 @@
             "arguments": {
               "type": "object",
               "description": "JSON object matching the tool's input_schema."
+            },
+            "credential_slots": {
+              "type": "object",
+              "description": "Optional. Up to four tool arguments the Ryu vault fills for you, as {\"<argument>\": {\"account\": \"<id or attached:n handle from chromium.list_accounts>\", \"field\": \"username\" | \"email\" | \"password\" | \"totp\"}}. Leave those arguments out of `arguments`. Only works on an https page, for a tool the top-level page registered whose input_schema declares the argument as a string, and only on the account's host. You never see the value; it is scrubbed from the result.",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "account": {
+                    "type": "string"
+                  },
+                  "field": {
+                    "type": "string",
+                    "enum": ["username", "email", "password", "totp"]
+                  }
+                },
+                "required": ["account", "field"]
+              }
             }
           },
           "required": ["id", "tool_name"]
@@ -1020,6 +1037,237 @@
           "properties": {}
         }
       }
+    },
+    {
+      "id": "tool-browser-list-downloads",
+      "name": "List Browser Downloads",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.list_downloads",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "GET",
+        "url": "core:/api/ext/@ryu/browser/downloads",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "List the files your browser session downloaded: `{downloads:[{id,filename,state,received_bytes,total_bytes,url,updated_at,available}]}`, newest first. `available` is true when a completed file can be fetched with chromium.fetch_download. You never see another agent's downloads.",
+        "input_schema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "id": "tool-browser-fetch-download",
+      "name": "Fetch Browser Download",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.fetch_download",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "GET",
+        "url": "core:/api/ext/@ryu/browser/downloads/{id}",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Fetch one completed download from your browser session as base64: `{ok,bytes,encoding,data,download}`. Files over 25 MB, files still downloading, and files saved outside your session's download folder are refused.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "A download id from chromium.list_downloads."
+            }
+          },
+          "required": ["id"]
+        }
+      }
+    },
+    {
+      "id": "tool-browser-check-login",
+      "name": "Check Browser Login",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.check_login",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "POST",
+        "url": "core:/api/ext/@ryu/browser/login-check",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Before you start a task on a website, check that your browser session is signed in to it. Pass the page the task starts on as `url` (the tab navigates there and waits for it to load) or omit it to check the current page. Returns `{state, confidence, reasons, host, url, next_step, page_loaded, tab}` where `state` is `logged_in`, `login_required` or `unknown`. On `login_required`, sign in first (chromium.list_accounts, then chromium.fill_credential) or stop and ask the user; never start the task signed out. When you know the site, pass `logged_in_selector` (a CSS selector only present when signed in, such as an account menu) or `logged_out_selector` for a firm answer.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Optional https page the task starts on. The tab navigates there first."
+            },
+            "tab_id": {
+              "type": "string",
+              "description": "Tab id; omit for the active tab."
+            },
+            "logged_in_selector": {
+              "type": "string",
+              "maxLength": 300,
+              "description": "Optional CSS selector for an element only visible when signed in."
+            },
+            "logged_out_selector": {
+              "type": "string",
+              "maxLength": 300,
+              "description": "Optional CSS selector for an element only visible when signed out."
+            },
+            "wait_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30000,
+              "description": "How long to wait for the page to finish loading. Default 10000."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "tool-browser-run-script",
+      "name": "Run Browser Script",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.run_script",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "POST",
+        "url": "core:/api/ext/@ryu/browser/run-script",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Run a Playwright-style script of up to 50 steps in one tab, in order, stopping at the first failure. Steps: `goto {url}`, `click {locator}`, `hover {locator}`, `fill {locator, value, submit?}`, `fill_credential {locator, account, field, submit?}` (vault fill, you never see the value), `press {keys}`, `scroll {direction, amount?}`, `wait_for {locator, state?: visible|hidden}`, `wait_for_url {includes}`, `expect_text {text, locator?}`, `expect_url {includes}`, `read {locator}`. A locator is like Playwright's getByRole / getByLabel / getByText: `{role, name}`, `{label}`, `{text}`, or a snapshot `{ref}`; add `exact: true` for an exact name and `nth` when several elements match (several matches without `nth` fail). Element steps wait up to `timeout_ms` (default 5000, max 30000) for the element. Returns `{ok, completed, failed_step, steps:[{index, action, ok, ms, ref, matches, output, error}], tab}`; `read` puts the element's role, name and value in `output`. There is no step that runs JavaScript.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "tab_id": {
+              "type": "string",
+              "description": "Tab id; omit for the active tab."
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 120000,
+              "description": "Time limit for the whole script. Default and maximum 120000."
+            },
+            "steps": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 50,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "goto",
+                      "click",
+                      "hover",
+                      "fill",
+                      "fill_credential",
+                      "press",
+                      "scroll",
+                      "wait_for",
+                      "wait_for_url",
+                      "expect_text",
+                      "expect_url",
+                      "read"
+                    ]
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "locator": {
+                    "type": "object",
+                    "properties": {
+                      "role": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "ref": {
+                        "type": "string"
+                      },
+                      "exact": {
+                        "type": "boolean"
+                      },
+                      "nth": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "submit": {
+                    "type": "boolean"
+                  },
+                  "account": {
+                    "type": "string",
+                    "description": "For fill_credential: an account id or attached:n handle from chromium.list_accounts."
+                  },
+                  "field": {
+                    "type": "string",
+                    "enum": ["username", "email", "password", "totp"]
+                  },
+                  "keys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": ["up", "down", "left", "right"]
+                  },
+                  "amount": {
+                    "type": "number"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": ["visible", "hidden"]
+                  },
+                  "includes": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 30000
+                  }
+                },
+                "required": ["action"]
+              }
+            }
+          },
+          "required": ["steps"]
+        }
+      }
     }
   ],
   "sidecars": [
@@ -1048,7 +1296,7 @@
       "port": 7993,
       "health_path": "/health",
       "host_api": {
-        "grants": ["vault:fill", "security-key:relay"]
+        "grants": ["vault:fill", "security-key:relay", "crypto:seal"]
       },
       "lazy": true,
       "idle_stop_secs": 300,
@@ -1167,6 +1415,16 @@
             "permission": "browser.control"
           },
           {
+            "path": "/run-script",
+            "method": "POST",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/login-check",
+            "method": "POST",
+            "permission": "browser.control"
+          },
+          {
             "path": "/lanes",
             "method": "GET",
             "permission": "browser.view"
@@ -1203,6 +1461,61 @@
           },
           {
             "path": "/sessions/current",
+            "method": "DELETE",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/downloads",
+            "method": "GET",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/downloads/:id",
+            "method": "GET",
+            "permission": "browser.view"
+          },
+          {
+            "path": "/replays",
+            "method": "GET",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/replays/:id",
+            "method": "GET",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/replays/:id",
+            "method": "DELETE",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/cdp-urls",
+            "method": "GET",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/cdp-urls",
+            "method": "POST",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/cdp-urls/:id",
+            "method": "DELETE",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/audit-log",
+            "method": "GET",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/passkeys",
+            "method": "GET",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/passkeys/:id",
             "method": "DELETE",
             "permission": "browser.control"
           }
@@ -1293,6 +1606,18 @@
         },
         "browser.list_credentials": {
           "tool": "chromium.list_accounts"
+        },
+        "browser.list_webmcp_tools": {
+          "tool": "chromium.list_webmcp_tools",
+          "args": {
+            "tab_id": "id"
+          }
+        },
+        "browser.execute_webmcp_tool": {
+          "tool": "chromium.execute_webmcp_tool",
+          "args": {
+            "tab_id": "id"
+          }
         }
       }
     }
@@ -1301,7 +1626,8 @@
     "browser:control",
     "tool:http-egress:127.0.0.1",
     "vault:fill",
-    "security-key:relay"
+    "security-key:relay",
+    "crypto:seal"
   ],
   "permission_levels": [
     {

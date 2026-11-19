@@ -307,7 +307,7 @@ export function ModelAgentPicker({
 											providerName:
 												catalog.providers.find(
 													(provider) => provider.id === providerFilter
-												)?.label ?? "provider",
+												)?.label ?? tl("provider"),
 										})
 									: "Search Ryu models, agents, providers…"
 							}

@@ -10,7 +10,8 @@
 // Core's refusal is English on the wire; the catalog holds its templates
 // (`apps/core/src/i18n/messages/agent_launch.rs`), so it is shown translated.
 
-import { useLocalizedString } from "@ryu/i18n/react";
+import { translate } from "@ryu/i18n/core";
+import { type LiteralMessage, useLocalizedString } from "@ryu/i18n/react";
 import { Alert, AlertDescription } from "@ryu/ui/components/alert.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type {
@@ -46,8 +47,11 @@ export function refusedForUnlimitedSandbox(
  * Shown when this computer has no account-access sandbox, so only Ryu's own
  * engine, on its brokered tools, can run a confined agent.
  */
-export const NO_SANDBOX_NOTE =
-	"On this computer, an agent with its own identity or limited accounts can run only on Ryu (without shell or file tools).";
+export function noSandboxNote(tl: LiteralMessage = translate): string {
+	return tl(
+		"On this computer, an agent with its own identity or limited accounts can run only on Ryu (without shell or file tools)."
+	);
+}
 
 /** Shown under the engine field while a custom "Ryu" agent runs on Ryu's built-in engine. */
 export const MANAGED_PI_NOTE =
@@ -77,7 +81,7 @@ export function agentModelsLimited(
 }
 
 /**
- * Whether to show {@link NO_SANDBOX_NOTE}: this computer has no sandbox and
+ * Whether to show {@link noSandboxNote}: this computer has no sandbox and
  * the agent's model providers are limited, so Ryu's engine still runs it.
  */
 export function showsNoSandboxNote(
@@ -159,7 +163,7 @@ export function AgentLaunchWarning({
 			) : null}
 			{noSandbox ? (
 				<p className="px-3.5 text-muted-foreground text-xs leading-snug">
-					{NO_SANDBOX_NOTE}
+					{noSandboxNote()}
 				</p>
 			) : null}
 		</div>

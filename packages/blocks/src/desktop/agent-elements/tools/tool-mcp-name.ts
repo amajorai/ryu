@@ -80,3 +80,23 @@ export function parseMcpToolType(partType: string): McpToolInfo | null {
 		category: "other",
 	};
 }
+
+/**
+ * The built-in MCP resource tools in the UI language. A server's own tool
+ * names stay as the server wrote them.
+ */
+export function mcpToolLabel(
+	info: McpToolInfo,
+	tl: (source: string) => string
+): string {
+	if (info.serverName !== "mcp") {
+		return info.displayName;
+	}
+	if (info.toolName === "list_resources") {
+		return tl("List Resources");
+	}
+	if (info.toolName === "read_resource") {
+		return tl("Read Resource");
+	}
+	return info.displayName;
+}

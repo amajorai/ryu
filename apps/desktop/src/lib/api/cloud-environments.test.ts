@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { parseEnvironmentPaste } from "./cloud-environment-input.ts";
 
 describe("cloud environment variable paste", () => {
@@ -34,5 +35,23 @@ describe("cloud environment variable paste", () => {
 				)
 			)
 		).toThrow("100");
+	});
+	test("every refusal is a catalogued sentence", () => {
+		const tl: LiteralMessage = (source, values) =>
+			`[${source}]${values ? JSON.stringify(values) : ""}`;
+		const refusal = (source: string) => {
+			try {
+				parseEnvironmentPaste(source, tl);
+			} catch (error) {
+				return error instanceof Error ? error.message : String(error);
+			}
+			return null;
+		};
+		expect(refusal("not a variable")).toBe("[Use KEY=value on each line.]");
+		expect(refusal("PATH=x")).toBe('[Reserved variable: {key}]{"key":"PATH"}');
+		expect(refusal("A=1\nA=2")).toBe('[Duplicate variable: {key}]{"key":"A"}');
+		expect(
+			refusal(Array.from({ length: 101 }, (_, i) => `K_${i}=v`).join("\n"))
+		).toBe("[Import up to 100 variables at a time.]");
 	});
 });

@@ -4,7 +4,7 @@ import {
 	RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { activeLocale, formatRelativeTime } from "@ryu/i18n/lite";
+import { activeLocale, formatList, formatRelativeTime } from "@ryu/i18n/lite";
 import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import type { OwnedOAuthApp } from "../../utils/api-client.ts";
@@ -101,12 +101,16 @@ export function OAuthAppRow({
 					</div>
 					<div className="flex gap-1">
 						<dt className="text-foreground">Redirect URIs:</dt>
-						<dd className="min-w-0 break-all">{app.redirectUris.join(", ")}</dd>
+						<dd className="min-w-0 break-all">
+							{formatList(app.redirectUris, "conjunction", locale)}
+						</dd>
 					</div>
 					<div className="flex gap-1">
 						<dt className="text-foreground">Allowed scopes:</dt>
 						<dd className="min-w-0">
-							{app.scopes.map(scopeLabel).join(", ") || "None"}
+							{app.scopes.length > 0
+								? formatList(app.scopes.map(scopeLabel), "conjunction", locale)
+								: tl("None")}
 						</dd>
 					</div>
 				</dl>

@@ -197,7 +197,8 @@ export const RIDES_PIPS = {
 
 /** "Red light till 15:10": the rides' words for a usage limit (the kit adds "Likely"). */
 export function ridesLimitText(tl: LiteralMessage): LimitText {
-	return (_act, at) => (at ? tl("Red light till {at}", { at }) : "Red light");
+	return (_act, at) =>
+		at ? tl("Red light till {at}", { at }) : tl("Red light");
 }
 
 /** On a phone the city is small: the board stands well behind the car, up the screen, clear of its neighbours. */

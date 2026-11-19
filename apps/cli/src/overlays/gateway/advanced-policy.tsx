@@ -245,7 +245,7 @@ export function GatewayAdvancedPolicy({
 				);
 				if (result.success !== true) {
 					throw new Error(
-						"Evaluator definitions saved; Gateway restart not confirmed. Retry or ask its operator to restart."
+						"Evaluator definitions saved. Gateway restart not confirmed. Retry or ask its operator to restart."
 					);
 				}
 			}

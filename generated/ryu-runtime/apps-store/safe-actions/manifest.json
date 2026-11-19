@@ -74,7 +74,7 @@
       },
       {
         "id": "safe-actions-reviews",
-        "title": "Reviews",
+        "title": "Action reviews",
         "icon": "task-done-01",
         "target": "/plugin/app__safe-actions-companion",
         "context": { "surface": "reviews" },

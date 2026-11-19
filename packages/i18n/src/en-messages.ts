@@ -2,6 +2,10 @@ import {
 	EN_NATIVE_MENU_MESSAGES,
 	type NativeMenuMessageId,
 } from "./en-messages-native-menu.ts";
+import {
+	EN_SENSE_MESSAGES,
+	type SenseMessageId,
+} from "./en-messages-senses.ts";
 import { EN_SHELL_MESSAGES } from "./en-messages-shell.ts";
 import { EN_SURFACE_MESSAGES } from "./en-messages-surfaces.ts";
 
@@ -17,10 +21,15 @@ export const EN_MESSAGES = {
 	...EN_SHELL_MESSAGES,
 	...EN_SURFACE_MESSAGES,
 	...EN_NATIVE_MENU_MESSAGES,
+	...EN_SENSE_MESSAGES,
 } as const;
 
 /**
- * A type-safe id union for the hand-written official packs. Native menu ids
- * carry their translations beside their source (`en-messages-native-menu.ts`).
+ * A type-safe id union for the hand-written official packs. Native menu and
+ * sense ids carry their translations beside their source
+ * (`en-messages-native-menu.ts`, `en-messages-senses.ts`).
  */
-export type MessageId = Exclude<keyof typeof EN_MESSAGES, NativeMenuMessageId>;
+export type MessageId = Exclude<
+	keyof typeof EN_MESSAGES,
+	NativeMenuMessageId | SenseMessageId
+>;

@@ -17,8 +17,8 @@ import { humanizeError } from "../core/native-errors.ts";
 //   - D and C are destructive, so they open an inline ConfirmPrompt first (Cancel is
 //     the default; y confirms, n/Esc cancels) and nothing is sent until confirmed.
 //
-// Typed refusals are surfaced READABLY: the core-client already folds
-// describeDependencyError() into `err.message`, so a `blocked_by_dependents` disable
+// Typed refusals are surfaced READABLY: lifecycleRefusalText rebuilds the sentence
+// from the typed fields in the CLI's language, so a `blocked_by_dependents` disable
 // prints "X is needed by Y. Disable Y first." and a built-in uninstall prints Core's
 // message; we branch only to OFFER the follow-up (C to cascade, or "disable instead").
 // Because the tui set X-Ryu-Surface=cli at entry, this list is already surface-filtered
@@ -38,7 +38,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
-import { tf } from "../i18n/translate.ts";
+import { tf, trMessage } from "../i18n/translate.ts";
 import { ConfirmPrompt } from "../ui/ConfirmPrompt.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
@@ -50,6 +50,15 @@ import {
 	type PendingCascade,
 	type PendingConfirm,
 } from "./plugins-lifecycle.ts";
+import {
+	cascadeConfirmLabel,
+	cascadeOfferText,
+	cascadeTitleText,
+	type LifecycleVerb,
+	lifecycleDoneText,
+	lifecycleFailedText,
+} from "./plugins-lifecycle-copy.ts";
+import { lifecycleRefusalText } from "./plugins-lifecycle-refusal.ts";
 import { PluginList } from "./plugins-list.tsx";
 import type { TabProps } from "./types.ts";
 
@@ -110,7 +119,7 @@ export function PluginsTab({ active }: TabProps) {
 	// Surface a typed refusal readably and, when a cascade would resolve it, remember
 	// the action so C can retry it. Returns nothing; callers already cleared busy.
 	const reportFailure = useCallback(
-		(verb: string, app: AppInfo, e: LifecycleErrorLike) => {
+		(verb: LifecycleVerb, app: AppInfo, e: LifecycleErrorLike) => {
 			pendingCascade.current = null;
 			if (
 				blockedByDependents(e) &&
@@ -124,26 +133,21 @@ export function PluginsTab({ active }: TabProps) {
 					kind: verb,
 					name: app.name,
 				};
-				notify(
-					tf("{message} — press C to {verb} dependents too.", {
-						message: e.message,
-						verb,
-					}),
-					"warning"
-				);
+				notify(cascadeOfferText(verb, lifecycleRefusalText(e)), "warning");
 				return;
 			}
 			if (e.builtIn) {
 				notify(
 					tf("{message} — it is built in; disable it instead.", {
-						message: e.message,
+						message: lifecycleRefusalText(e),
 					}),
 					"warning"
 				);
 				return;
 			}
-			const hint = e.hint ? ` (${e.hint})` : "";
-			notify(`${verb} failed: ${e.message}${hint}`, "error");
+			const reason = lifecycleRefusalText(e);
+			const error = e.hint ? `${reason} (${trMessage(e.hint)})` : reason;
+			notify(lifecycleFailedText(verb, error), "error");
 		},
 		[notify]
 	);
@@ -152,7 +156,7 @@ export function PluginsTab({ active }: TabProps) {
 	// fresh (non-cascade) action, refreshing on success, and reporting typed refusals.
 	const mutate = useCallback(
 		<T,>(
-			verb: string,
+			verb: LifecycleVerb,
 			app: AppInfo,
 			run: () => Promise<T>,
 			opts?: { keepCascade?: boolean; onOk?: (result: T) => void }
@@ -165,7 +169,7 @@ export function PluginsTab({ active }: TabProps) {
 				.then((result) => {
 					opts?.onOk?.(result);
 					if (!opts?.onOk) {
-						notify(`${verb} ${app.name}`, "success");
+						notify(lifecycleDoneText(verb, app.name), "success");
 					}
 					runLoad();
 				})
@@ -298,7 +302,10 @@ export function PluginsTab({ active }: TabProps) {
 		const app = selected;
 		setConfirm({
 			title: tf("Uninstall {name}?", { name: app.name }),
-			consequence: `${app.name} will be removed from this node; reinstall it to use it again.`,
+			consequence: tf(
+				"{name} will be removed from this node. Reinstall it to use it again.",
+				{ name: app.name }
+			),
 			confirmLabel: "Uninstall",
 			run: () => doUninstall(app),
 		});
@@ -313,7 +320,6 @@ export function PluginsTab({ active }: TabProps) {
 			notify("Nothing to cascade", "info");
 			return;
 		}
-		const verb = pending.kind === "disable" ? "Disable" : "Uninstall";
 		const disabling = pending.kind === "disable";
 		const dependents = pending.dependents.join(", ");
 		let consequence: string;
@@ -331,12 +337,9 @@ export function PluginsTab({ active }: TabProps) {
 					});
 		}
 		setConfirm({
-			title: tf("{verb} {name} and its dependents?", {
-				verb,
-				name: pending.name,
-			}),
+			title: cascadeTitleText(pending.kind, pending.name),
 			consequence,
-			confirmLabel: `${verb} all`,
+			confirmLabel: cascadeConfirmLabel(pending.kind),
 			run: doCascade,
 		});
 	};

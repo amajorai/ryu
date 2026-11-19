@@ -12,6 +12,7 @@ import { TextShimmer } from "@ryu/blocks/desktop/agent-elements/text-shimmer.tsx
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { SubagentAvatar } from "@/src/components/panels/subagent-identity.tsx";
+import { artifactDisplayTitle } from "@/src/lib/artifact-code-title.ts";
 import type { ArtifactKind } from "@/src/lib/artifacts.ts";
 import type { ArtifactView } from "@/src/lib/live-artifacts.ts";
 import type { PlanArtifact } from "@/src/lib/plan-artifacts.ts";
@@ -198,6 +199,7 @@ export function RenderedArtifactsList({
 	limit?: number;
 	onOpen?: (artifact: ArtifactView) => void;
 }) {
+	const tl = useLiteralMessages();
 	const shown = limit === undefined ? artifacts : artifacts.slice(0, limit);
 	const overflow = artifacts.length - shown.length;
 	return (
@@ -217,9 +219,9 @@ export function RenderedArtifactsList({
 						</span>
 						<span
 							className="min-w-0 flex-1 truncate text-foreground"
-							title={artifact.title}
+							title={artifactDisplayTitle(artifact, tl)}
 						>
-							{artifact.title}
+							{artifactDisplayTitle(artifact, tl)}
 						</span>
 						<span className={PANEL_ROW_BADGE}>
 							{ARTIFACT_KIND_LABEL[artifact.kind]}
@@ -268,7 +270,7 @@ export function PlansList({
 							</span>
 						</span>
 						<span className={PANEL_ROW_BADGE}>
-							{plan.error ? "Error" : plan.saved ? "Plan" : "…"}
+							{plan.error ? tl("Error") : plan.saved ? tl("Agent plan") : "…"}
 						</span>
 					</button>
 				</li>

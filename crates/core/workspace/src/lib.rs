@@ -25,6 +25,11 @@ pub mod handoff;
 pub mod source_history;
 pub mod worktree;
 
+// Clears inherited `GIT_*` repository variables and makes the temp directory a
+// git ceiling before any test runs, so fixture `git` calls never reach a
+// surrounding checkout.
+#[cfg(test)]
+mod test_process_env;
 #[cfg(test)]
 #[path = "checkpoints/rewind_pin_tests.rs"]
 mod checkpoint_rewind_pin_tests;

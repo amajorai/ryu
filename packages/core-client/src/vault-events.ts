@@ -109,7 +109,9 @@ function eventQuery(filter: VaultEventFilter): string {
 	return query ? `?${query}` : "";
 }
 
-async function* readFrames(
+/** The vault messages in an SSE response body (for callers that open the
+ *  stream with their own fetch, such as Desktop). */
+export async function* readVaultEventFrames(
 	body: ReadableStream<Uint8Array>
 ): AsyncGenerator<VaultEventMessage> {
 	const reader = body.getReader();
@@ -177,7 +179,7 @@ export async function openVaultEventStream(
 		{ ...makeHeaders(target.token, target.userJwt) },
 		signal
 	);
-	return readFrames(body);
+	return readVaultEventFrames(body);
 }
 
 /** {@link openVaultEventStream} for a machine vault token. Sends only the
@@ -196,7 +198,7 @@ export async function openVaultAgentEventStream(
 		{ [VAULT_TOKEN_HEADER]: target.vaultToken },
 		signal
 	);
-	return readFrames(body);
+	return readVaultEventFrames(body);
 }
 
 /** Stream vault changes for a person; see {@link openVaultEventStream}. */

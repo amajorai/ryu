@@ -12,7 +12,8 @@ import {
 	type VaultPasswordManagerAccount,
 } from "@ryuhq/core-client/vault";
 import { z } from "zod";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
+import { localize } from "./localizedText.ts";
 import { formatTable, truncate } from "./output.ts";
 import { arg, flag, grantFlag, type SecretsArgs } from "./secrets-args.ts";
 import { printJson } from "./secrets-output.ts";
@@ -36,7 +37,9 @@ async function readToken(ctx: CliContext): Promise<string> {
 	const token = piped?.replace(/\r?\n$/, "").trim() ?? "";
 	if (!token) {
 		throw new UsageError(
-			"Pipe the provider token on stdin (for example from your password manager's CLI); it is never accepted as an argument."
+			localize(
+				"Pipe the provider token on stdin (for example from your password manager's CLI); it is never accepted as an argument."
+			)
 		);
 	}
 	return token;
@@ -61,7 +64,7 @@ async function pmAccounts(ctx: CliContext): Promise<number> {
 		return 0;
 	}
 	if (accounts.length === 0) {
-		ctx.io.out("No password-manager accounts.\n");
+		ctx.io.out(`${tr("No password-manager accounts.")}\n`);
 		return 0;
 	}
 	const rows = accounts.map((account) => [
@@ -109,10 +112,10 @@ async function pmTest(ctx: CliContext, args: SecretsArgs): Promise<number> {
 	if (ctx.flags.json) {
 		printJson(ctx, result);
 	} else if (result.ok) {
-		ctx.io.out(`${account.name}: connected.\n`);
+		ctx.io.out(`${tf("{name}: connected.", { name: account.name })}\n`);
 	} else {
 		ctx.io.err(
-			`${account.name}: ${result.account?.state ?? "error"}: ${result.error ?? "check failed"}\n`
+			`${account.name}: ${result.account?.state ?? tr("error")}: ${result.error ?? tr("check failed")}\n`
 		);
 	}
 	return result.ok ? 0 : 1;
@@ -189,7 +192,7 @@ async function pmApprovals(
 				`${tf("Approved {id}: {subject} may use {ref} ({mode}).", { id, subject: result.grant.subject, ref: result.grant.ref, mode: result.grant.mode })}\n`
 			);
 		} else {
-			ctx.io.out(`Rejected ${id}.\n`);
+			ctx.io.out(`${tf("Rejected {id}.", { id })}\n`);
 		}
 		return 0;
 	}
@@ -253,7 +256,7 @@ async function pmGrants(ctx: CliContext, args: SecretsArgs): Promise<number> {
 		return 0;
 	}
 	if (grants.length === 0) {
-		ctx.io.out("No password-manager grants.\n");
+		ctx.io.out(`${tr("No password-manager grants.")}\n`);
 		return 0;
 	}
 	const rows = grants.map((grant) => [

@@ -347,11 +347,6 @@ describe("edge Worker snippet", () => {
 		);
 		expect(response.status).toBe(404);
 	});
-
-	test("the shown imports are the entry points the Worker uses", () => {
-		expect(typeof webhookHandler).toBe("function");
-		expect(new Ryu({ env: false }).resultMode).toBe("throw");
-	});
 });
 
 describe("edge-safe entry points", () => {

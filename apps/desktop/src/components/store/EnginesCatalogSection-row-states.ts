@@ -5,6 +5,7 @@ import {
 	EMPTY_ROW_STATE,
 	type PendingKind,
 	type RowState,
+	rowActionFailedMessage,
 } from "./EnginesCatalogSection-model.ts";
 
 export function useRowStates() {
@@ -57,7 +58,7 @@ export function useRowStates() {
 					error:
 						e instanceof Error
 							? e.message
-							: tl("Failed to {kind} {name}", { kind, name }),
+							: rowActionFailedMessage(kind, name, tl),
 				});
 			}
 		} finally {

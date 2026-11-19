@@ -65,6 +65,7 @@
   "The room is generating…": "الغرفة تُنشئ ردًا…",
   "The room is ready. Send the first prompt.": "الغرفة جاهزة. أرسل الموجّه الأول.",
   "The room is temporarily unavailable. Try again.": "الغرفة غير متاحة مؤقتًا. حاول مرة أخرى.",
+  "The room request was not accepted.": "لم يُقبل طلب الغرفة.",
   "The turn response was not a valid room.": "لم تكن استجابة الدور غرفة صالحة.",
   "This closes the room and revokes its current guest sessions.": "سيؤدي هذا إلى إغلاق الغرفة وإلغاء جلسات الضيوف الحالية فيها.",
   "This invite is invalid, expired, or revoked.": "هذه الدعوة غير صالحة أو منتهية الصلاحية أو تم إلغاؤها.",

@@ -45,7 +45,7 @@ export const SOUND_ROW_TITLES = {
 export const SOUND_GROUP_ORDER: readonly SoundGroup[] = [
 	"Activity",
 	"Agents",
-	"Calls",
+	"Voice calls",
 	"Rewards",
 ];
 

@@ -9,10 +9,12 @@ use super::*;
 ///
 /// `None` means "not a Box call": not a machine verb, no conversation, no
 /// resolvable owner, or a caller who keeps the node (see the module docs). The
-/// facade then resolves the node's provider as before.
+/// facade then resolves the node's provider as before. `agent_id` is the
+/// dispatch's calling agent, which a credential fill acts for.
 pub(crate) async fn route(
     store: Option<&ConversationStore>,
     host_conversation_id: Option<&str>,
+    agent_id: Option<&str>,
     tool_id: &str,
     arguments: &Value,
 ) -> Option<Result<Value>> {
@@ -40,8 +42,8 @@ pub(crate) async fn route(
         Err(error) => return Some(Err(error)),
     };
     let result = match planned {
-        Planned::Fill(args) => fill::run(store, conversation_id, &target, args).await,
-        Planned::ListCredentials => fill::list(store, conversation_id, &target).await,
+        Planned::Fill(args) => fill::run(store, conversation_id, agent_id, &target, args).await,
+        Planned::ListCredentials => fill::list(store, conversation_id, agent_id, &target).await,
         _ => call(&target, tool_id, arguments.clone()).await,
     };
     session_box::touch(&resolved.key).await;

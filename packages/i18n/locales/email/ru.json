@@ -1,5 +1,4 @@
 {
-  "1 second": "1 секунда",
   "A Ryu credential was exposed publicly": "Учётные данные Ryu оказались в открытом доступе",
   "A Ryu internal organization crossed the {level} threshold. It was not throttled or suspended automatically.": "Внутренняя организация Ryu превысила порог {level}. Она не была автоматически замедлена или приостановлена.",
   "A child safety case was opened": "Открыто дело о защите детей",
@@ -656,7 +655,10 @@
   "{amount} in Ryu Credits": "{amount} в Ryu Credits",
   "{amount} is now available in your Ryu balance": "На вашем балансе Ryu теперь доступно {amount}",
   "{code} is your Ryu for Students code": "{code} — ваш код Ryu for Students",
+  "{count, plural, one {# hour} other {# hours}}": "{count, plural, one {# час} few {# часа} many {# часов} other {# часа}}",
+  "{count, plural, one {# minute} other {# minutes}}": "{count, plural, one {# минута} few {# минуты} many {# минут} other {# минуты}}",
   "{count, plural, one {# seat in {organizationName} is unassigned} other {# seats in {organizationName} are unassigned}}": "{organizationName, select, other {В {organizationName} {count, plural, one {не назначено # место} few {не назначены # места} many {не назначено # мест} other {не назначено # места}}}}",
+  "{count, plural, one {# second} other {# seconds}}": "{count, plural, one {# секунда} few {# секунды} many {# секунд} other {# секунды}}",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month} and cost {cost}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, one {Этот агент был активен} few {Эти # агента были активны} many {Эти # агентов были активны} other {Эти # агента были активны}} почти каждый день за {month}, расходы составили {cost}. Если так и задумано, ничего делать не нужно. Если какой-то агент остался включённым случайно, его можно приостановить в разделе «Агенты» в Ryu.",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, one {Этот агент был активен} few {Эти # агента были активны} many {Эти # агентов были активны} other {Эти # агента были активны}} почти каждый день за {month}. Если так и задумано, ничего делать не нужно. Если какой-то агент остался включённым случайно, его можно приостановить в разделе «Агенты» в Ryu.",
   "{didntAsk} Someone may have your session. Ignore this link, then change your password and sign out your other devices from Settings.": "{didntAsk} Возможно, кто-то получил доступ к вашему сеансу. Проигнорируйте эту ссылку, затем смените пароль и выйдите из аккаунта на других устройствах в настройках.",

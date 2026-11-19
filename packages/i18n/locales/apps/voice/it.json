@@ -273,6 +273,7 @@
   "Replay, regenerate or download a take, or send its script and settings back to the Studio.": "Riascolta, rigenera o scarica una registrazione, oppure rimanda il suo copione e le sue impostazioni allo Studio.",
   "Reroll": "Rigenera",
   "Reset to defaults": "Ripristina predefiniti",
+  "Respell words the engine gets wrong. Entries match whole words; write {syntax} in a script for a one-off.": "Riscrivi le parole che il motore pronuncia male. Le voci corrispondono a parole intere; scrivi {syntax} nel copione per un caso singolo.",
   "Retry part {part}": "Riprova la parte {part}",
   "Reverb": "Riverbero",
   "Robotic": "Robotico",

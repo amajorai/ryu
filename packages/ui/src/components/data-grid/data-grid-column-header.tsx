@@ -1,6 +1,6 @@
 "use client";
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -287,15 +287,17 @@ function DataGridColumnFilterItems<TData, TValue>({
 	table: Table<TData>;
 }) {
 	const tl = useLiteralMessages();
+	const i18n = useOptionalI18n();
 	const coreRows = table.getCoreRowModel().rows;
 	const cellOpts = column.columnDef.meta?.cell;
 	const options = useMemo(
 		() =>
 			collectFilterOptions(
 				coreRows.map((row) => row.getValue(column.id)),
-				cellOpts
+				cellOpts,
+				(id, fallback) => i18n?.t(id, {}, fallback) ?? fallback
 			),
-		[coreRows, column.id, cellOpts]
+		[coreRows, column.id, cellOpts, i18n]
 	);
 	const shown = options.slice(0, FILTER_OPTION_LIMIT);
 	const filterValue = column.getFilterValue();

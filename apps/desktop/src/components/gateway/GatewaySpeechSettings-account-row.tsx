@@ -1,9 +1,17 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useEffect, useRef, useState } from "react";
 import type { CloudSpeechPolicy } from "@/src/lib/api/cloud-speech-accounts.ts";
+
+/** The name an unnamed account is shown and saved under, in the reader's language. */
+export function defaultSpeechAccountName(
+	accountId: string,
+	tl: LiteralMessage
+): string {
+	return tl("Account {id}", { id: accountId.slice(0, 8) });
+}
 
 export function CloudSpeechAccountRow({
 	accountId,
@@ -23,7 +31,7 @@ export function CloudSpeechAccountRow({
 	const tl = useLiteralMessages();
 	const incoming = {
 		...policy,
-		name: policy.name || `Account ${accountId.slice(0, 8)}`,
+		name: policy.name || defaultSpeechAccountName(accountId, tl),
 	};
 	const [draft, setDraft] = useState(incoming);
 	const [expanded, setExpanded] = useState(false);
@@ -31,7 +39,7 @@ export function CloudSpeechAccountRow({
 	useEffect(() => {
 		const next = {
 			...policy,
-			name: policy.name || `Account ${accountId.slice(0, 8)}`,
+			name: policy.name || defaultSpeechAccountName(accountId, tl),
 		};
 		const old = previous.current;
 		setDraft((current) => ({
@@ -41,7 +49,7 @@ export function CloudSpeechAccountRow({
 				current.priority === old.priority ? next.priority : current.priority,
 		}));
 		previous.current = next;
-	}, [accountId, policy]);
+	}, [accountId, policy, tl]);
 	const changed =
 		draft.name !== incoming.name ||
 		draft.enabled !== incoming.enabled ||

@@ -1,4 +1,4 @@
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 import {
 	displayBudget,
 	type MemoryPreferences,
@@ -69,4 +69,27 @@ export function memoryRowLabels(preferences: MemoryPreferences) {
 		RowId,
 		{ label: string; value: string; description: string }
 	>;
+}
+
+/**
+ * What "Couldn't save {label}" names for a row, in the reader's language.
+ * Each is a `tr` literal so the catalog extractor collects it.
+ */
+export function memorySaveLabel(field: RowId): string {
+	switch (field) {
+		case "autoRecall":
+			return tr("auto-recall");
+		case "topK":
+			return tr("the recall limit");
+		case "contextBudget":
+			return tr("the context budget");
+		case "contextReserve":
+			return tr("the reply reserve");
+		case "autoCompact":
+			return tr("auto-compact");
+		case "skills":
+			return tr("skill loading");
+		default:
+			return tr("search ranking");
+	}
 }

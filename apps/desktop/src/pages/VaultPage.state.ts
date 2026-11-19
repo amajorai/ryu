@@ -23,6 +23,7 @@ import {
 	withSharedFallback,
 } from "@/src/components/vault/vault-view.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import { useVaultChangeStream } from "@/src/hooks/useVaultChangeStream.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	deleteVaultSecret,
@@ -48,6 +49,8 @@ export function useVaultPageState() {
 		userJwt: node.userJwt ?? null,
 	};
 	const queryClient = useQueryClient();
+	// Changes made elsewhere (CLI, agents, other windows) refresh the lists.
+	useVaultChangeStream(target);
 	// A deep link (a tapped broker notification) picks the tab, on open or
 	// while the page is already showing.
 	const focus = useVaultFocus();

@@ -65,6 +65,7 @@
   "The room is generating…": "룸에서 생성하는 중…",
   "The room is ready. Send the first prompt.": "룸이 준비되었습니다. 첫 프롬프트를 보내세요.",
   "The room is temporarily unavailable. Try again.": "룸을 일시적으로 사용할 수 없습니다. 다시 시도하세요.",
+  "The room request was not accepted.": "룸 요청이 수락되지 않았습니다.",
   "The turn response was not a valid room.": "턴 응답이 유효한 룸이 아닙니다.",
   "This closes the room and revokes its current guest sessions.": "룸을 닫고 현재 게스트 세션을 취소합니다.",
   "This invite is invalid, expired, or revoked.": "이 초대는 유효하지 않거나, 만료되었거나, 취소되었습니다.",

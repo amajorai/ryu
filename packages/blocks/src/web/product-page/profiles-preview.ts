@@ -91,7 +91,7 @@ const COMPUTE_PROFILE: ProductProfile = {
 			},
 		},
 		{
-			label: "Where",
+			label: "Location",
 			value: "Agent sidebar or command palette",
 			source: {
 				path: EXCHANGE_DOC,

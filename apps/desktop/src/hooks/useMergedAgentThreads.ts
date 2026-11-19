@@ -16,7 +16,7 @@
 // (`droppedThreads` / `truncatedThreads`) so the UI can say what it left out
 // rather than implying the scroll is complete.
 
-import { translate as tl } from "@ryu/i18n/core";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { useEffect, useMemo, useState } from "react";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { conversationParticipantIds } from "@/src/lib/agent-conversation-groups.ts";
@@ -99,15 +99,18 @@ export function useAgentThreads(agentId: string | null): Conversation[] {
  *
  *  The caps ride along in the heading, because a stitched scroll that silently
  *  stops short reads as "this is everything" when it is not. */
-function threadHeading({
-	droppedThreads,
-	title,
-	truncated,
-}: {
-	droppedThreads: number;
-	title: string;
-	truncated: boolean;
-}): string {
+export function threadHeading(
+	{
+		droppedThreads,
+		title,
+		truncated,
+	}: {
+		droppedThreads: number;
+		title: string;
+		truncated: boolean;
+	},
+	tl: LiteralMessage
+): string {
 	const notes: string[] = [];
 	if (droppedThreads > 0) {
 		notes.push(
@@ -171,6 +174,7 @@ export function useMergedAgentThreads({
 	enabled: boolean;
 	liveConversationId: string | null;
 }): MergedAgentThreads {
+	const tl = useLiteralMessages();
 	const { loadMessages } = useChatHistoryContext();
 	const threads = useAgentThreads(agentId);
 	const [loaded, setLoaded] = useState<LoadedThread[]>(NO_THREADS);
@@ -246,20 +250,23 @@ export function useMergedAgentThreads({
 				continue;
 			}
 			const kept = history.slice(-MERGED_MESSAGES_PER_THREAD);
-			const heading = threadHeading({
-				// The "older threads not shown" count belongs on the topmost block —
-				// that is where the scroll actually ends.
-				droppedThreads: first ? droppedThreads : 0,
-				title: titleOf.get(id) ?? "Earlier",
-				truncated: history.length > kept.length,
-			});
+			const heading = threadHeading(
+				{
+					// The "older threads not shown" count belongs on the topmost block:
+					// that is where the scroll actually ends.
+					droppedThreads: first ? droppedThreads : 0,
+					title: titleOf.get(id) ?? tl("Earlier"),
+					truncated: history.length > kept.length,
+				},
+				tl
+			);
 			first = false;
 			out.push(
 				...kept.map((m, i) => toHistoryMessage(id, m, i === 0 ? heading : null))
 			);
 		}
 		return out;
-	}, [enabled, loaded, titleOf, droppedThreads]);
+	}, [enabled, loaded, titleOf, droppedThreads, tl]);
 
 	const truncatedThreads = loaded.filter(
 		(t) => t.history.length > MERGED_MESSAGES_PER_THREAD

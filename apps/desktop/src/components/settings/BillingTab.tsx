@@ -19,6 +19,7 @@ import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
 import { useActiveOrgId } from "@/src/lib/api/orgs.ts";
 import { formatDate } from "@/src/lib/timezone.ts";
 import { DesktopAccessSection } from "./BillingTab-desktop-access.tsx";
+import { trialBillingSentence } from "./BillingTab-plan-copy.ts";
 import { SpendControlsSection } from "./BillingTab-spend-controls.tsx";
 import {
 	SettingsGroup,
@@ -111,10 +112,7 @@ export function BillingTab() {
 	if (isTrialing) {
 		planDescription = (
 			<>
-				{tl("You're on a free trial.")}{" "}
-				{planInterval
-					? tl("Billed {planInterval}ly after trial ends.", { planInterval })
-					: ""}
+				{tl("You're on a free trial.")} {trialBillingSentence(planInterval, tl)}
 				{daysLeftInTrial > 0 ? (
 					<span className="mt-1 block text-status-destructive">
 						{tl(

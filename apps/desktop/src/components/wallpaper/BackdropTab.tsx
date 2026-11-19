@@ -8,7 +8,7 @@
 
 import { Search01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
 import { BackdropControls } from "@ryu/ui/components/backdrop/backdrop-controls.tsx";
 import {
@@ -25,23 +25,11 @@ import {
 	usePluginBackgrounds,
 } from "@/src/lib/plugin-backgrounds.ts";
 import type { WallpaperPreference } from "@/src/lib/wallpaper.ts";
+import { backdropCategoryLabel } from "./backdrop-category-label.ts";
 
 const ALL = "All";
 const ALL_MARKETPLACE_CATEGORIES = "All categories";
 const MARKETPLACE = "Marketplace";
-
-/** A category tab's label. "Light" and "Space" are stable category ids whose
- *  bare word translates in the wrong sense (brightness, a region), so their
- *  tabs say what they hold; every other id is already its label. */
-function categoryLabel(category: string, tl: LiteralMessage): string {
-	if (category === "Light") {
-		return tl("Light effects");
-	}
-	if (category === "Space") {
-		return tl("Outer space");
-	}
-	return category;
-}
 
 function BackdropTile({
 	definition,
@@ -218,7 +206,7 @@ export function BackdropTab({
 						role="tab"
 						type="button"
 					>
-						{categoryLabel(item, tl)}
+						{backdropCategoryLabel(item, tl)}
 					</button>
 				))}
 			</div>
@@ -270,7 +258,7 @@ export function BackdropTab({
 								onClick={() => setMarketplaceCategory(item)}
 								type="button"
 							>
-								{item}
+								{backdropCategoryLabel(item, tl)}
 							</button>
 						))}
 					</div>

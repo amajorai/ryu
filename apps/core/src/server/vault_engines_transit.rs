@@ -140,41 +140,82 @@ pub async fn transit_delete(
     ok_or(result.map(|()| true), "deleted")
 }
 
-/// Body for transit operations.
+/// Body for transit operations. The fields are crate-visible so the batch
+/// handler and the Vault-compatible `/v1/transit/*` surface (which builds one
+/// from Vault's snake_case fields) can read them.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransitOpBody {
     #[serde(default)]
-    plaintext: Option<String>,
+    pub(in crate::server) plaintext: Option<String>,
     #[serde(default)]
-    ciphertext: Option<String>,
+    pub(in crate::server) ciphertext: Option<String>,
     #[serde(default)]
-    context: Option<String>,
+    pub(in crate::server) context: Option<String>,
     #[serde(default)]
-    input: Option<String>,
+    pub(in crate::server) input: Option<String>,
     #[serde(default)]
-    signature: Option<String>,
+    pub(in crate::server) signature: Option<String>,
     /// For `verify` of an HMAC produced by `hmac`.
     #[serde(default)]
-    hmac: Option<String>,
+    pub(in crate::server) hmac: Option<String>,
     #[serde(default)]
-    associated_data: Option<String>,
+    pub(in crate::server) associated_data: Option<String>,
     #[serde(default)]
-    key_version: Option<u32>,
+    pub(in crate::server) key_version: Option<u32>,
     #[serde(default)]
-    signature_algorithm: Option<String>,
+    pub(in crate::server) signature_algorithm: Option<String>,
+    /// For `cmac-verify` (or `verify`) of a CMAC produced by `cmac`.
+    #[serde(default)]
+    pub(in crate::server) cmac: Option<String>,
+    /// `cmac`: tag length in bytes (1-16, default 16).
+    #[serde(default)]
+    pub(in crate::server) mac_length: Option<u32>,
+    /// Many items through one operation (see [`transit_batch_op`]).
+    #[serde(default)]
+    pub(in crate::server) batch_input: Option<Vec<TransitBatchItem>>,
 }
 
-pub(super) async fn transit_op(who: &Who, op: &str, name: &str, body: TransitOpBody) -> Response {
+/// Why [`transit_run`] produced no result. Each surface renders these in its
+/// own error format; the policy check and the store call are shared.
+pub(in crate::server) enum TransitFailure {
+    /// The caller lacks the capability; carries the native refusal.
+    Denied(Response),
+    /// A required body field is missing.
+    Missing(&'static str),
+    /// Not a transit operation.
+    UnknownOp,
+    /// The store refused or failed.
+    Store(anyhow::Error),
+}
+
+fn transit_field<T: serde::Serialize>(
+    key: &str,
+    result: anyhow::Result<T>,
+) -> Result<Value, TransitFailure> {
+    result
+        .map(|value| json!({ key: value }))
+        .map_err(TransitFailure::Store)
+}
+
+/// Authorize and run one transit operation: `use` on `sys/transit/<name>`
+/// (`admin` for `rotate`), then the store call. The result is the native
+/// response object (`{"ciphertext": …}`, `{"valid": …}`, …). Shared by the
+/// native routes and `/v1/transit/*`.
+pub(in crate::server) async fn transit_run(
+    who: &Who,
+    op: &str,
+    name: &str,
+    body: TransitOpBody,
+) -> Result<Value, TransitFailure> {
     let key = format!("sys/transit/{name}");
     let capability = if op == "rotate" {
         Capability::Admin
     } else {
         Capability::Use
     };
-    if let Err(response) = who.require(&key, capability) {
-        return response;
-    }
+    who.require(&key, capability)
+        .map_err(TransitFailure::Denied)?;
     let store = who.store();
     let actor = who.actor();
     let options = TransitOpOptions {
@@ -183,86 +224,136 @@ pub(super) async fn transit_op(who: &Who, op: &str, name: &str, body: TransitOpB
         key_version: body.key_version,
         signature_algorithm: body.signature_algorithm.clone(),
     };
-    let missing = |field: &str| invalid_request(&format!("`{field}` is required"));
+    let missing = TransitFailure::Missing;
     match op {
-        "encrypt" => match body.plaintext.as_deref() {
-            Some(plaintext) => ok_or(
+        "encrypt" => {
+            let plaintext = body.plaintext.as_deref().ok_or(missing("plaintext"))?;
+            transit_field(
+                "ciphertext",
                 store
                     .transit_encrypt_with(name, plaintext, &options, &actor)
                     .await,
-                "ciphertext",
-            ),
-            None => missing("plaintext"),
-        },
-        "decrypt" => match body.ciphertext.as_deref() {
-            Some(ciphertext) => ok_or(
+            )
+        }
+        "decrypt" => {
+            let ciphertext = body.ciphertext.as_deref().ok_or(missing("ciphertext"))?;
+            transit_field(
+                "plaintext",
                 store
                     .transit_decrypt_with(name, ciphertext, &options, &actor)
                     .await,
-                "plaintext",
-            ),
-            None => missing("ciphertext"),
-        },
-        "rewrap" => match body.ciphertext.as_deref() {
-            Some(ciphertext) => ok_or(
+            )
+        }
+        "rewrap" => {
+            let ciphertext = body.ciphertext.as_deref().ok_or(missing("ciphertext"))?;
+            transit_field(
+                "ciphertext",
                 store
                     .transit_rewrap_with(name, ciphertext, &options, &actor)
                     .await,
-                "ciphertext",
-            ),
-            None => missing("ciphertext"),
-        },
-        "datakey" => match store.transit_datakey_with(name, &options, &actor).await {
-            Ok((plaintext, ciphertext)) => {
-                respond(json!({ "plaintext": plaintext, "ciphertext": ciphertext }))
-            }
-            Err(error) => vault_error(error),
-        },
-        "sign" => match body.input.as_deref() {
-            Some(input) => ok_or(
-                store.transit_sign_with(name, input, &options, &actor).await,
+            )
+        }
+        "datakey" => {
+            let (plaintext, ciphertext) = store
+                .transit_datakey_with(name, &options, &actor)
+                .await
+                .map_err(TransitFailure::Store)?;
+            Ok(json!({ "plaintext": plaintext, "ciphertext": ciphertext }))
+        }
+        "sign" => {
+            let input = body.input.as_deref().ok_or(missing("input"))?;
+            transit_field(
                 "signature",
-            ),
-            None => missing("input"),
-        },
+                store.transit_sign_with(name, input, &options, &actor).await,
+            )
+        }
+        "cmac" => {
+            let input = body.input.as_deref().ok_or(missing("input"))?;
+            transit_field(
+                "cmac",
+                store
+                    .transit_cmac(name, input, body.key_version, body.mac_length, &actor)
+                    .await,
+            )
+        }
+        "verify" | "cmac-verify" if body.cmac.is_some() => {
+            match (body.input.as_deref(), body.cmac.as_deref()) {
+                (Some(input), Some(cmac)) if body.signature.is_none() && body.hmac.is_none() => {
+                    transit_field(
+                        "valid",
+                        store.transit_verify_cmac(name, input, cmac, &actor).await,
+                    )
+                }
+                _ => Err(missing("input and exactly one of signature, hmac, or cmac")),
+            }
+        }
+        "cmac-verify" => Err(missing("input and cmac")),
         "verify" => match (
             body.input.as_deref(),
             body.signature.as_deref(),
             body.hmac.as_deref(),
         ) {
-            (Some(input), Some(signature), None) => ok_or(
+            (Some(input), Some(signature), None) => transit_field(
+                "valid",
                 store
                     .transit_verify_with(name, input, signature, &options, &actor)
                     .await,
-                "valid",
             ),
-            (Some(input), None, Some(hmac)) => ok_or(
+            (Some(input), None, Some(hmac)) => transit_field(
+                "valid",
                 store.transit_verify_hmac(name, input, hmac, &actor).await,
-                "valid",
             ),
-            _ => missing("input and exactly one of signature or hmac"),
+            _ => Err(missing("input and exactly one of signature or hmac")),
         },
-        "hmac" => match body.input.as_deref() {
-            Some(input) => ok_or(
-                store.transit_hmac_with(name, input, &options, &actor).await,
+        "hmac" => {
+            let input = body.input.as_deref().ok_or(missing("input"))?;
+            transit_field(
                 "hmac",
-            ),
-            None => missing("input"),
-        },
-        "rotate" => ok_or(store.transit_rotate(name, &actor).await, "key"),
-        _ => json_error(
+                store.transit_hmac_with(name, input, &options, &actor).await,
+            )
+        }
+        "rotate" => transit_field("key", store.transit_rotate(name, &actor).await),
+        _ => Err(TransitFailure::UnknownOp),
+    }
+}
+
+pub(in crate::server) async fn transit_op(
+    who: &Who,
+    op: &str,
+    name: &str,
+    mut body: TransitOpBody,
+) -> Response {
+    if let Some(items) = body.batch_input.take() {
+        // One policy check covers the batch, the same check `transit_run` makes.
+        let capability = if op == "rotate" {
+            Capability::Admin
+        } else {
+            Capability::Use
+        };
+        if let Err(response) = who.require(&format!("sys/transit/{name}"), capability) {
+            return response;
+        }
+        return transit_batch_op(who, op, name, &items, &body).await;
+    }
+    match transit_run(who, op, name, body).await {
+        Ok(result) => respond(result),
+        Err(TransitFailure::Denied(response)) => response,
+        Err(TransitFailure::Missing(field)) => invalid_request(&format!("`{field}` is required")),
+        Err(TransitFailure::UnknownOp) => json_error(
             StatusCode::NOT_FOUND,
             "vault_not_found: unknown transit operation".to_owned(),
         ),
+        Err(TransitFailure::Store(error)) => vault_error(error),
     }
 }
 
 /// POST /api/vault/transit/{op}/{name}: `encrypt`, `decrypt`, `rewrap`,
-/// `datakey`, `sign`, `verify`, `hmac`, `rotate`.
+/// `datakey`, `sign`, `verify`, `hmac`, `cmac`, `cmac-verify`, `rotate`.
+/// `batchInput` runs a batchable operation once per item.
 #[utoipa::path(post, path = "/api/vault/transit/{op}/{name}", tag = "Vault",
     summary = "Run a transit operation (use; rotate needs admin)",
     params(
-        ("op" = String, Path, description = "encrypt, decrypt, rewrap, datakey, sign, verify, hmac, rotate"),
+        ("op" = String, Path, description = "encrypt, decrypt, rewrap, datakey, sign, verify, hmac, cmac, cmac-verify, rotate"),
         ("name" = String, Path, description = "Key name"),
     ),
     request_body = serde_json::Value,

@@ -39,6 +39,7 @@ import { KEYS } from "platejs";
 import { type PlateEditor, useEditorRef } from "platejs/react";
 import { type ComponentProps, type ReactNode, useState } from "react";
 
+import { useHyperlinkLabel } from "./hyperlink-label.ts";
 import { ToolbarButton, ToolbarMenuGroup } from "./toolbar.tsx";
 
 interface Group {
@@ -49,9 +50,14 @@ interface Group {
 interface Item {
 	focusEditor?: boolean;
 	icon: ReactNode;
-	label?: string;
+	label?: ReactNode;
 	onSelect: (editor: PlateEditor, value: string) => void;
 	value: string;
+}
+
+/** The Insert menu's hyperlink item, not the account-linking verb. */
+function HyperlinkLabel() {
+	return useHyperlinkLabel();
 }
 
 const groups: Group[] = [
@@ -196,7 +202,7 @@ const groups: Group[] = [
 		items: [
 			{
 				icon: <Link2Icon />,
-				label: "Link",
+				label: <HyperlinkLabel />,
 				value: KEYS.link,
 			},
 			{

@@ -46,6 +46,45 @@ impl WebhookConfig {
     }
 }
 
+/// A webhook URL as role summaries and audit rows show it: the origin only.
+/// Userinfo, path, query and fragment can carry a token.
+pub(crate) fn url_origin(url: &str) -> String {
+    url::Url::parse(url)
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_else(|_| "invalid".into())
+}
+
+/// Reduce the `url` of every stored webhook summary in `table` to its origin.
+/// Summaries written before they were reduced keep the full URL otherwise;
+/// rerunning is a no-op.
+pub(crate) fn redact_stored_summaries(conn: &rusqlite::Connection, table: &str) -> Result<()> {
+    let rows: Vec<(String, String)> = {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT name, summary FROM {table} WHERE provider = 'webhook'"
+        ))?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    for (name, summary) in rows {
+        let Ok(mut value) = serde_json::from_str::<Value>(&summary) else {
+            continue;
+        };
+        let Some(url) = value.get("url").and_then(Value::as_str) else {
+            continue;
+        };
+        let origin = url_origin(url);
+        if origin == url {
+            continue;
+        }
+        value["url"] = Value::String(origin);
+        conn.execute(
+            &format!("UPDATE {table} SET summary = ?1 WHERE name = ?2"),
+            rusqlite::params![value.to_string(), name],
+        )?;
+    }
+    Ok(())
+}
+
 /// `sha256=<hex>` over `<timestamp>.<body>`.
 pub(crate) fn signature(secret: &str, timestamp: &str, body: &str) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("any key length");

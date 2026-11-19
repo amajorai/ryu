@@ -39,6 +39,7 @@ import type { useHomeDashboardData } from "./HomePage.data.ts";
 import {
 	AI_STARTER_PROMPT,
 	dashboardSnapshot,
+	localizedPresetInput,
 	presetsFor,
 } from "./HomePage.presets.ts";
 import type { useHomeWidgetActions } from "./HomePage.widgets.ts";
@@ -273,7 +274,9 @@ export function useHomeAssistantSurface({
 								{quickAddPresets.map((preset) => (
 									<DropdownMenuItem
 										key={preset.label}
-										onClick={() => handleCreateWidget(preset)}
+										onClick={() =>
+											handleCreateWidget(localizedPresetInput(preset, tl))
+										}
 									>
 										{preset.label}
 									</DropdownMenuItem>

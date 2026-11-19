@@ -19,10 +19,12 @@ uuid = { version = "1", features = ["v4"] }
 # Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
 # backend from this crate: Core links it through its own dependency.
 ryu-crypto = { path = "../crypto", version = "0.5.1", default-features = false, features = ["sqlite"] }
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 zstd = "0.14.3"
 
 [dev-dependencies]
 tempfile = "3"
+# `test_process_env` isolates fixture `git` calls once, before any test starts.
+ctor = "0.2"
 # Test builds only: lets unit tests construct sealing stores without a host.
 ryu-crypto = { path = "../crypto", version = "0.5.1", default-features = false, features = ["test-ephemeral-host"] }

@@ -1,12 +1,16 @@
 import { expect, test } from "bun:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import HeroDesktopDemo from "./hero-desktop-demo.tsx";
+import type { LiteralMessage } from "@ryu/i18n";
+import { heroDemoRuns } from "./hero-desktop-demo.tsx";
 
-test("hero desktop demo renders the real Ryu chat surface", () => {
-	const html = renderToStaticMarkup(<HeroDesktopDemo />);
-
-	expect(html).toContain('data-testid="hero-desktop-demo"');
-	expect(html).toContain("Bot");
-	expect(html).toContain("Prepare a weekly update from the project folder.");
-	expect(html).not.toContain("rgba(139,92,246");
+test("every demo prompt and answer is translated before it becomes a message", () => {
+	const marked: LiteralMessage = (source) => `«${source}»`;
+	const runs = heroDemoRuns(marked);
+	expect(runs).toHaveLength(2);
+	for (const run of runs) {
+		expect(run.prompt).toMatch(/^«.+»$/u);
+		expect(run.answer).toMatch(/^«.+»$/u);
+	}
+	expect(runs[0]?.prompt).toBe(
+		"«Prepare a weekly update from the project folder.»"
+	);
 });

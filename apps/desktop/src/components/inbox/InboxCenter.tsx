@@ -264,7 +264,8 @@ export function InboxCenter({
 	const status = inboxTrayStatus(
 		riskyCount,
 		allPending.length + allTaskSuggestions.length,
-		totalCount
+		totalCount,
+		tl
 	);
 
 	if (layout === "unified") {

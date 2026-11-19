@@ -1,6 +1,12 @@
 import { afterAll, afterEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { formatMessage, type MessageValuesInput } from "@ryu/i18n/core";
 import type { StepUpClient } from "@ryu/step-up";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../i18n/src/active-locale.ts";
 
 // Keep the runtime's own fetch primitives: the shared client reads real
 // `Response` bodies, which happy-dom's replacements do not settle under Bun.
@@ -53,13 +59,16 @@ const STATUS = {
 const COOLDOWN_MESSAGE =
 	"Please wait 45 seconds before requesting another email.";
 
-function stepUpApi(challengeAnswers: Array<() => Response>) {
+function stepUpApi(
+	challengeAnswers: Array<() => Response>,
+	status: Record<string, unknown> = STATUS
+) {
 	const challenges: string[] = [];
 	const fetchFixture: typeof fetch = Object.assign(
 		async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
 			const url = new URL(input instanceof Request ? input.url : String(input));
 			if (url.pathname === "/api/step-up/status") {
-				return Response.json(STATUS);
+				return Response.json(status);
 			}
 			if (url.pathname === "/api/step-up/challenge") {
 				challenges.push(String(init?.body));
@@ -187,4 +196,105 @@ test("a prompt that opens inside the cooldown shows the wait straight away", asy
 	await click("Remove member");
 	await waitForText(COOLDOWN_MESSAGE);
 	expect(api.challenges).toHaveLength(1);
+});
+
+test("the prompt says the cooldown from its wait, not from the server's English", async () => {
+	// The wait arrives as a number; the sentence is the client's own catalogued
+	// ICU message, so it reads in the user's language.
+	const api = stepUpApi([
+		() =>
+			Response.json(
+				{ error: "Bitte 2 Minuten warten.", retryAfter: 120 },
+				{ headers: { "Retry-After": "120" }, status: 429 }
+			),
+	]);
+	await mount(api.client);
+
+	await click("Remove member");
+	await waitForText("Please wait 2 minutes before requesting another email.");
+	expect(document.body.textContent).not.toContain("Bitte 2 Minuten warten.");
+});
+
+test("sending the code again inside the cooldown says the wait in the reader's language", async () => {
+	const minutes =
+		"Please wait {count, plural, one {# minute} other {# minutes}} before requesting another email.";
+	const runtime = {
+		direction: "ltr" as const,
+		locale: "de",
+		translate(source: string, values?: MessageValuesInput, fallback?: string) {
+			const message =
+				fallback === minutes
+					? "Bitte warten Sie {count, plural, one {# Minute} other {# Minuten}}, bevor Sie eine weitere E-Mail anfordern."
+					: (fallback ?? source);
+			return formatMessage(message, values, "de");
+		},
+	};
+	registerActiveI18nRuntime(runtime);
+	try {
+		const api = stepUpApi([
+			() => Response.json({ sent: true }),
+			() =>
+				Response.json(
+					{
+						error: "Please wait 2 minutes before requesting another email.",
+						retryAfter: 120,
+					},
+					{ headers: { "Retry-After": "120" }, status: 429 }
+				),
+		]);
+		await mount(api.client);
+
+		await click("Remove member");
+		await waitForText("Send it again");
+		await click("Send it again");
+		await waitForText(
+			"Bitte warten Sie 2 Minuten, bevor Sie eine weitere E-Mail anfordern."
+		);
+		expect(document.body.textContent).not.toContain(
+			"Please wait 2 minutes before requesting another email."
+		);
+		expect(api.challenges).toHaveLength(2);
+	} finally {
+		unregisterActiveI18nRuntime(runtime);
+	}
+});
+
+/** Every text node under `root` whose whole value is `text`. */
+function textNodes(text: string, root: Node = document.body): Text[] {
+	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+	const found: Text[] = [];
+	for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+		if (node.nodeValue === text) {
+			found.push(node as Text);
+		}
+	}
+	return found;
+}
+
+test("the prompt line and the factor switch label each render as one standalone text node", async () => {
+	// The server's English action differs on purpose: a known scope renders
+	// its catalogued sentence, the exact key the DOM localizer looks up.
+	const api = stepUpApi([], {
+		...STATUS,
+		action: "change who may open a workspace",
+		methods: ["totp", "otp"],
+	});
+	await mount(api.client);
+
+	await click("Remove member");
+	const line =
+		"Enter the code from your authenticator app to change who can access a workspace.";
+	await waitForText(line);
+	expect(document.body.textContent).not.toContain(
+		"change who may open a workspace"
+	);
+	for (const text of [line, "Email me a code"]) {
+		const nodes = textNodes(text);
+		expect(nodes.length).toBeGreaterThan(0);
+		for (const node of nodes) {
+			// Nothing else shares the element, so the whole text is one key.
+			expect(node.parentNode?.childNodes.length).toBe(1);
+		}
+	}
+	expect(api.challenges).toEqual([]);
 });

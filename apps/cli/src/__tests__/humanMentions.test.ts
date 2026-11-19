@@ -3,9 +3,11 @@ import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import {
 	fetchActiveAccountIdentity,
 	inboxEnabled,
+	mentionNotificationText,
 	notifyMentionedUsers,
 	selectHumanNotificationTargets,
 } from "../core/humanMentions.ts";
+import { createCliTranslator } from "../i18n/translate.ts";
 
 const TARGET = { url: "http://node:7980", token: "node-token" };
 const realFetch = globalThis.fetch;
@@ -210,5 +212,20 @@ test("Inbox lifecycle state distinguishes disabled from an unreadable catalog", 
 	);
 	await expect(inboxEnabled(TARGET)).rejects.toThrow(
 		"/api/plugins failed: 503"
+	);
+});
+
+test("mention notifications are the desktop's sentences in the CLI locale", () => {
+	const german = createCliTranslator("de", {
+		"{senderName} mentioned you": "{senderName} hat Sie erwähnt",
+		"{senderName} mentioned you in chat:\n{content}":
+			"{senderName} hat Sie im Chat erwähnt:\n{content}",
+	});
+	expect(mentionNotificationText("Ada", "  hi  ", german)).toEqual({
+		body: "Ada hat Sie im Chat erwähnt:\nhi",
+		title: "Ada hat Sie erwähnt",
+	});
+	expect(mentionNotificationText("Ada", "x".repeat(4000)).body.length).toBe(
+		1800
 	);
 });

@@ -394,7 +394,9 @@ export function ResultsMatrix({
 				<div className="flex flex-col gap-2 rounded-lg border border-dashed bg-muted/10 p-3">
 					<div className="flex flex-wrap items-center gap-2">
 						<span className="font-medium text-xs">Run comparison</span>
-						<Badge variant="outline">vs {comparisonRunId}</Badge>
+						<Badge variant="outline">
+							{tl("vs {runId}", { runId: comparisonRunId })}
+						</Badge>
 					</div>
 					<div className="grid grid-cols-2 gap-3 text-xs">
 						<div className="flex flex-col gap-1">

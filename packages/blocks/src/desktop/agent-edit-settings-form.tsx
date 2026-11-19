@@ -113,9 +113,6 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	// under Identity there and the copy names that place.
 	const simpleAccountAccess =
 		simple && Boolean(identityModePanel) && Boolean(accountAccessPanel);
-	const accountAccessPath = simpleAccountAccess
-		? "Tools & knowledge → Identity"
-		: "Connections → Account access";
 	const showInlineModel = showStandaloneModelPanel && simple;
 
 	// ── Panels ───────────────────────────────────────────────────────────────────
@@ -125,7 +122,10 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	const modelPanel = <AgentModelPanel props={props} />;
 
 	const triggersPanel = (
-		<AgentTriggersPanel accountAccessPath={accountAccessPath} props={props} />
+		<AgentTriggersPanel
+			accountAccessInIdentity={simpleAccountAccess}
+			props={props}
+		/>
 	);
 
 	const toolsPanel = (

@@ -10,3 +10,5 @@ mod memory_management_api;
 pub(crate) use memory_management_api::*;
 mod memory_refresh;
 pub(in crate::server) use memory_refresh::*;
+mod memory_paste_import;
+pub(in crate::server) use memory_paste_import::import_pasted_memories;

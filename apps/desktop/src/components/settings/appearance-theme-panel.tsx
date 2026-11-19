@@ -5,7 +5,7 @@ import {
 	Share08Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import {
@@ -32,7 +32,6 @@ export interface ThemePanelProps {
 	baseTokens: CustomTokens;
 	dirty: boolean;
 	groups: GroupedVariants;
-	label: string;
 	mode: "light" | "dark";
 	onDeletePreset: (id: string) => void;
 	onDiscardClick: () => void;
@@ -48,9 +47,27 @@ export interface ThemePanelProps {
 	tokens: CustomTokens;
 }
 
+/**
+ * The panel's heading and caption, one whole sentence per mode so neither
+ * inserts the English word "Light" or "dark" into a translated sentence.
+ */
+export function themePanelHeading(
+	mode: ThemePanelProps["mode"],
+	tl: LiteralMessage
+): { description: string; title: string } {
+	return mode === "light"
+		? {
+				description: tl("Used when light mode is active."),
+				title: tl("Light theme"),
+			}
+		: {
+				description: tl("Used when dark mode is active."),
+				title: tl("Dark theme"),
+			};
+}
+
 export function ThemePanel({
 	mode,
-	label,
 	groups,
 	selectedId,
 	tokens,
@@ -67,6 +84,7 @@ export function ThemePanel({
 	onSaveCancel,
 }: ThemePanelProps) {
 	const tl = useLiteralMessages();
+	const heading = themePanelHeading(mode, tl);
 	const selected = findVariant(selectedId);
 	// Hold the id being confirmed, not a bare boolean: picking a different preset
 	// mid-confirm then re-selects the state away instead of leaving an armed
@@ -83,11 +101,9 @@ export function ThemePanel({
 	return (
 		<div className="space-y-3">
 			<div>
-				<h3 className="mb-1 font-medium text-sm">
-					{tl("{label} theme", { label })}
-				</h3>
+				<h3 className="mb-1 font-medium text-sm">{heading.title}</h3>
 				<p className="mb-2 text-muted-foreground text-xs">
-					{tl("Used when {mode} mode is active.", { mode })}
+					{heading.description}
 				</p>
 				<div className="flex items-center gap-2">
 					<Select
@@ -134,7 +150,7 @@ export function ThemePanel({
 						<>
 							<Button
 								aria-label={tl("Share {label}", {
-									label: selected?.label ?? "theme",
+									label: selected?.label ?? tl("theme"),
 								})}
 								className="h-9 w-9 shrink-0"
 								onClick={() => selected && shareTheme(selected)}
@@ -146,13 +162,13 @@ export function ThemePanel({
 							</Button>
 							<Button
 								aria-label={tl("Delete {label}", {
-									label: selected?.label ?? "theme",
+									label: selected?.label ?? tl("theme"),
 								})}
 								className="h-9 w-9 shrink-0"
 								onClick={() => setConfirmDeleteId(selectedId)}
 								size="icon"
 								title={tl("Delete {label}", {
-									label: selected?.label ?? "theme",
+									label: selected?.label ?? tl("theme"),
 								})}
 								variant="ghost"
 							>

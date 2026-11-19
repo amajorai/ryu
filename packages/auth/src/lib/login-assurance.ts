@@ -1,7 +1,27 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { deleteSessionCookie } from "better-auth/cookies";
-import { z } from "zod";
+import {
+	bodySchema,
+	clearCookie,
+	type LoginAssuranceContext,
+	mailboxKey,
+	newLoginSession,
+	normalizeEmail,
+	pendingLogin,
+	pendingMatchesSession,
+	removeNewSession,
+	requestHeader,
+	setPendingLogin,
+	setTrustedDevice,
+	stringValue,
+	trustedDevice,
+} from "./login-assurance-state.ts";
+
+export {
+	LOGIN_PENDING_COOKIE,
+	LOGIN_TRUST_COOKIE,
+	LOGIN_TRUST_MAX_AGE_SECONDS,
+} from "./login-assurance-state.ts";
 
 /** The order used after a password has been accepted. */
 export type LoginFactor = "passkey" | "two-factor" | "email" | "none";
@@ -59,279 +79,6 @@ export function decideLoginFactor(
 	return { factor: "email", fallbackFactor };
 }
 
-export const LOGIN_PENDING_COOKIE = "ryu_login_pending";
-export const LOGIN_TRUST_COOKIE = "ryu_login_trust";
-export const LOGIN_TRUST_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-
-const LOGIN_PENDING_MAX_AGE_SECONDS = 10 * 60;
-
-type FrameworkCookieContext = Parameters<typeof deleteSessionCookie>[0];
-type LoginCookie = ReturnType<
-	FrameworkCookieContext["context"]["createAuthCookie"]
->;
-type LoginCookieOptions = LoginCookie["attributes"];
-interface AdapterLookupRecord {
-	email?: string;
-	id?: string;
-	userId?: string;
-}
-interface LoginCreatedSession {
-	session?: { token?: string };
-	user?: { email?: string; id?: string; twoFactorEnabled?: boolean | null };
-}
-
-interface AdapterWhere {
-	field: string;
-	value: string;
-}
-
-interface LoginAssuranceContext {
-	body?: unknown;
-	context: {
-		adapter: {
-			findMany(input: {
-				model: string;
-				where?: AdapterWhere[];
-			}): Promise<readonly (object | undefined)[]>;
-			findOne(input: {
-				model: string;
-				where: AdapterWhere[];
-			}): Promise<AdapterLookupRecord | null>;
-		};
-		createAuthCookie: (
-			name: string,
-			overrides?: { maxAge?: number }
-		) => LoginCookie;
-		internalAdapter: {
-			deleteSession: (token: string) => Promise<void>;
-		};
-		newSession?: LoginCreatedSession | null;
-		authCookies: FrameworkCookieContext["context"]["authCookies"];
-		options: FrameworkCookieContext["context"]["options"];
-		oauthConfig: Pick<
-			FrameworkCookieContext["context"]["oauthConfig"],
-			"storeStateStrategy"
-		>;
-		secret: string;
-		setNewSession: (session: null) => void;
-	};
-	getSignedCookie: (
-		name: string,
-		secret: string
-	) => Promise<string | false | null>;
-	header?: (name: string) => string | null;
-	headers?: Headers;
-	json: (body: LoginAssuranceChallenge) => Promise<LoginAssuranceChallenge>;
-	path?: string;
-	request?: Request;
-	setCookie: (name: string, value: string, options: LoginCookieOptions) => void;
-	setSignedCookie: (
-		name: string,
-		value: string,
-		secret: string,
-		options: LoginCookieOptions
-	) => Promise<string>;
-}
-
-interface PendingLogin {
-	email: string;
-	expiresAt: number;
-	flow: "magic-link" | "password";
-	rememberDevice: boolean;
-	userId: string;
-}
-
-interface TrustedDevice {
-	expiresAt: number;
-	userId: string;
-}
-
-interface NewLoginSession {
-	token: string;
-	userEmail: string;
-	userId: string;
-}
-
-const stringValue = z.string().min(1).nullable().catch(null).parse;
-const bodySchema = z
-	.object({
-		email: z.string().optional().catch(undefined),
-		factorFallback: z.enum(["two-factor", "email"]).optional().catch(undefined),
-		rememberDevice: z.boolean().catch(false),
-		trustDevice: z.boolean().catch(false),
-		response: z
-			.object({ id: z.string().optional().catch(undefined) })
-			.optional()
-			.catch(undefined),
-	})
-	.catch(() => ({ rememberDevice: false, trustDevice: false }));
-const pendingLoginSchema = z.object({
-	email: z
-		.string()
-		.min(1)
-		.transform((email) => email.trim().toLowerCase()),
-	expiresAt: z.number().refine((expiresAt) => expiresAt > Date.now()),
-	flow: z.enum(["magic-link", "password"]).catch("password"),
-	rememberDevice: z.boolean().catch(false),
-	userId: z.string().min(1),
-});
-// The pending and trust cookies are signed with the same secret, and the
-// signature covers only the value, not the cookie name. Parse trust strictly so
-// a pending payload (which always carries email, flow and rememberDevice) can
-// never be replayed as a 30-day trusted-device cookie.
-const trustedDeviceSchema = z.strictObject({
-	expiresAt: z.number().refine((expiresAt) => expiresAt > Date.now()),
-	userId: z.string().min(1),
-});
-
-function normalizeEmail(value: string): string {
-	return value.trim().toLowerCase();
-}
-
-function parsePendingLogin(value: string | null): PendingLogin | null {
-	if (!value) {
-		return null;
-	}
-	try {
-		const parsed = pendingLoginSchema.safeParse(JSON.parse(value));
-		return parsed.success ? parsed.data : null;
-	} catch {
-		return null;
-	}
-}
-function parseTrustedDevice(value: string | null): TrustedDevice | null {
-	if (!value) {
-		return null;
-	}
-	try {
-		const parsed = trustedDeviceSchema.safeParse(JSON.parse(value));
-		return parsed.success ? parsed.data : null;
-	} catch {
-		return null;
-	}
-}
-
-async function signedCookie(
-	ctx: LoginAssuranceContext,
-	name: string
-): Promise<{ cookie: LoginCookie; value: string | null }> {
-	const cookie = ctx.context.createAuthCookie(name);
-	const value = await ctx.getSignedCookie(cookie.name, ctx.context.secret);
-	return { cookie, value: value === false ? null : value };
-}
-
-async function pendingLogin(
-	ctx: LoginAssuranceContext
-): Promise<{ cookie: LoginCookie; pending: PendingLogin | null }> {
-	const signed = await signedCookie(ctx, LOGIN_PENDING_COOKIE);
-	return { cookie: signed.cookie, pending: parsePendingLogin(signed.value) };
-}
-
-async function trustedDevice(
-	ctx: LoginAssuranceContext,
-	userId: string
-): Promise<boolean> {
-	const signed = await signedCookie(ctx, LOGIN_TRUST_COOKIE);
-	const trusted = parseTrustedDevice(signed.value);
-	if (signed.value && !trusted) {
-		clearCookie(ctx, signed.cookie);
-	}
-	return trusted?.userId === userId;
-}
-
-function clearCookie(ctx: LoginAssuranceContext, cookie: LoginCookie): void {
-	ctx.setCookie(cookie.name, "", {
-		...cookie.attributes,
-		maxAge: 0,
-	});
-}
-
-async function setPendingLogin(
-	ctx: LoginAssuranceContext,
-	input: {
-		email: string;
-		flow?: PendingLogin["flow"];
-		rememberDevice: boolean;
-		userId: string;
-	}
-): Promise<void> {
-	const cookie = ctx.context.createAuthCookie(LOGIN_PENDING_COOKIE, {
-		maxAge: LOGIN_PENDING_MAX_AGE_SECONDS,
-	});
-	await ctx.setSignedCookie(
-		cookie.name,
-		JSON.stringify({
-			email: normalizeEmail(input.email),
-			expiresAt: Date.now() + LOGIN_PENDING_MAX_AGE_SECONDS * 1000,
-			flow: input.flow ?? "password",
-			rememberDevice: input.rememberDevice,
-			userId: input.userId,
-		}),
-		ctx.context.secret,
-		cookie.attributes
-	);
-}
-
-async function setTrustedDevice(
-	ctx: LoginAssuranceContext,
-	userId: string
-): Promise<void> {
-	const cookie = ctx.context.createAuthCookie(LOGIN_TRUST_COOKIE, {
-		maxAge: LOGIN_TRUST_MAX_AGE_SECONDS,
-	});
-	const expiresAt = Date.now() + LOGIN_TRUST_MAX_AGE_SECONDS * 1000;
-	await ctx.setSignedCookie(
-		cookie.name,
-		JSON.stringify({ expiresAt, userId }),
-		ctx.context.secret,
-		cookie.attributes
-	);
-}
-
-function newLoginSession(ctx: LoginAssuranceContext): NewLoginSession | null {
-	const session = ctx.context.newSession;
-	const token = stringValue(session?.session?.token);
-	const userId = stringValue(session?.user?.id);
-	const userEmail = stringValue(session?.user?.email);
-	if (!(token && userId && userEmail)) {
-		return null;
-	}
-	return { token, userEmail: normalizeEmail(userEmail), userId };
-}
-
-async function removeNewSession(
-	ctx: LoginAssuranceContext,
-	session: NewLoginSession
-): Promise<void> {
-	// SAFETY: this framework hook supplies the SDK's cookie definitions, cookie
-	// writer, request headers and OAuth cookie policy used by deleteSessionCookie.
-	// Its broader context type also contains unrelated services unused here.
-	deleteSessionCookie(ctx as FrameworkCookieContext, true);
-	await ctx.context.internalAdapter.deleteSession(session.token);
-	ctx.context.setNewSession(null);
-}
-
-function requestHeader(
-	ctx: LoginAssuranceContext,
-	name: string
-): string | null {
-	return (
-		ctx.request?.headers.get(name) ??
-		ctx.headers?.get(name) ??
-		ctx.header?.(name) ??
-		null
-	);
-}
-
-function pendingMatchesSession(
-	pending: PendingLogin | null,
-	session: NewLoginSession
-): boolean {
-	return (
-		pending?.userId === session.userId && pending.email === session.userEmail
-	);
-}
-
 /**
  * Runs in the config-level after hook, before Better Auth's 2FA plugin hook.
  * That ordering lets passkey and email challenges replace the password session
@@ -369,7 +116,7 @@ export async function loginAssuranceAfterPassword(
 	const pending = await pendingLogin(ctx);
 	const pendingMatches =
 		pending.pending?.flow === "password" &&
-		pendingMatchesSession(pending.pending, session);
+		pendingMatchesSession(pending.pending, session, ctx.context.secret);
 	if (pendingMatches && fallback === "two-factor" && twoFactorEnabled) {
 		await setPendingLogin(ctx, {
 			email: session.userEmail,
@@ -417,6 +164,10 @@ export async function loginAssuranceAfterPassword(
  * Bind an optional 30-day device choice to a magic-link request. The signed
  * pending cookie is consumed only after Better Auth finishes the link on this
  * same browser, so opening the email on another device cannot trust it.
+ *
+ * The cookie names the requested address and no account, and it is set
+ * without looking one up: a registered, a banned and an unknown address get
+ * the same cookie after the same work, so the answer cannot tell them apart.
  */
 export async function loginAssuranceAfterMagicLinkRequest(
 	ctx: LoginAssuranceContext
@@ -430,34 +181,28 @@ export async function loginAssuranceAfterMagicLinkRequest(
 		return;
 	}
 
-	const normalizedEmail = normalizeEmail(email);
+	// The cookie names an opaque key of the mailbox the caller typed, never the
+	// address Better Auth resolved it to (lib/login-assurance-state.ts).
+	const requested = mailboxKey(ctx.context.secret, email);
+	if (!requested) {
+		return;
+	}
 	const pending = await pendingLogin(ctx);
 	const rememberDevice = requestHeader(ctx, "x-ryu-remember-device") === "true";
 	if (!rememberDevice) {
 		if (
 			pending.pending?.flow === "magic-link" &&
-			pending.pending.email === normalizedEmail
+			pending.pending.mailboxKey === requested
 		) {
 			clearCookie(ctx, pending.cookie);
 		}
 		return;
 	}
 
-	const user = await ctx.context.adapter.findOne({
-		model: "user",
-		where: [{ field: "email", value: normalizedEmail }],
-	});
-	const userId = stringValue(user?.id);
-	const userEmail = stringValue(user?.email);
-	if (!(userId && userEmail)) {
-		return;
-	}
-
 	await setPendingLogin(ctx, {
-		email: userEmail,
 		flow: "magic-link",
+		mailboxKey: requested,
 		rememberDevice: true,
-		userId,
 	});
 }
 
@@ -547,7 +292,7 @@ export async function loginAssuranceAfterFactor(
 		ctx.path === "/magic-link/verify" ? "magic-link" : "password";
 	if (
 		pending.pending?.flow === expectedFlow &&
-		pendingMatchesSession(pending.pending, session)
+		pendingMatchesSession(pending.pending, session, ctx.context.secret)
 	) {
 		const body = bodySchema.parse(ctx.body);
 		if (pending.pending?.rememberDevice || body?.trustDevice === true) {
@@ -579,7 +324,7 @@ async function cleanupPendingAfterPasswordSignIn(
 	const pending = await pendingLogin(ctx);
 	if (
 		pending.pending?.flow === "password" &&
-		pendingMatchesSession(pending.pending, session)
+		pendingMatchesSession(pending.pending, session, ctx.context.secret)
 	) {
 		clearCookie(ctx, pending.cookie);
 	}

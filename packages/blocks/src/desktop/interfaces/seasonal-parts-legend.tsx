@@ -1,3 +1,4 @@
+import { useOptionalI18n } from "@ryu/i18n/react";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { Check, Snowflake } from "lucide-react";
 import { GameLegend } from "./game-hud.tsx";
@@ -66,12 +67,16 @@ export function Legend({
 	/** Today has a door on this board, so its mark needs a key. */
 	today: boolean;
 }) {
+	const i18n = useOptionalI18n();
 	const items: { kind: LegendKind; label: string }[] = acts
 		? [
 				{ kind: "needs", label: "Needs you" },
 				{ kind: "working", label: "Working" },
 				{ kind: "stopped", label: "Failed or stopped" },
-				{ kind: "opened", label: "Read" },
+				{
+					kind: "opened",
+					label: i18n?.t("threads.readState", {}, "Read") ?? "Read",
+				},
 			]
 		: [
 				{ kind: "needs", label: "Needs you" },

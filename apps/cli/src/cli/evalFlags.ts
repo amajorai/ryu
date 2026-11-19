@@ -187,7 +187,12 @@ export function parseEvalFlags(rawArgs: readonly string[]): EvalFlags {
 		flags.positional.push(token);
 	}
 	if (flags.json && flags.junit) {
-		throw new UsageError("Use either --json or --junit, not both");
+		throw new UsageError(
+			localize("Use either {first} or {second}, not both", {
+				first: "--json",
+				second: "--junit",
+			})
+		);
 	}
 	return flags;
 }

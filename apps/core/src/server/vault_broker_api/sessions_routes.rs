@@ -98,6 +98,67 @@ pub struct SessionBody {
     pub(super) label: String,
     #[serde(default)]
     pub(super) ttl_secs: Option<i64>,
+    /// A member (user id) the session acts for (`use` on
+    /// `sys/broker/delegate/<id>`).
+    #[serde(default)]
+    pub(super) on_behalf_of: Option<String>,
+    /// Admit the session on the remote listener (`use` on `sys/broker/remote`).
+    #[serde(default)]
+    pub(super) remote: bool,
+    /// A session with no expiry (people only, admin on `sys/broker`).
+    #[serde(default)]
+    pub(super) never_expires: bool,
+}
+
+/// The TTL a person asked for: [`sessions::TTL_NEVER`] only through
+/// `neverExpires` (admin on `sys/broker`), never as a raw `ttlSecs`.
+pub(super) fn human_ttl(ctx: &Ctx, body: &SessionBody) -> Result<Option<i64>, Response> {
+    if !body.never_expires {
+        return match body.ttl_secs {
+            Some(sessions::TTL_NEVER) => Err(invalid_request(
+                "ttlSecs must be between 60 and 86400; use neverExpires",
+            )),
+            ttl => Ok(ttl),
+        };
+    }
+    if body.ttl_secs.is_some() {
+        return Err(invalid_request("neverExpires and ttlSecs are exclusive"));
+    }
+    ctx.require_sys(SYS_BROKER, Capability::Admin)?;
+    Ok(Some(sessions::TTL_NEVER))
+}
+
+/// Authorize and build a session's attributes. `may` answers whether the
+/// minter holds `use` on a policy key.
+pub(super) async fn session_attrs(
+    body: &SessionBody,
+    may: impl Fn(&str) -> bool,
+) -> Result<delegation::SessionAttrs, Response> {
+    if body.remote && !may(delegation::REMOTE_KEY) {
+        return Err(super::super::vault_api::denied(
+            Capability::Use,
+            delegation::REMOTE_KEY,
+        ));
+    }
+    let on_behalf_of = match body.on_behalf_of.as_deref() {
+        None => None,
+        Some(raw) => {
+            let member = delegation::parse_member(raw).map_err(|e| vault_error(e.into()))?;
+            let key = delegation::delegate_key(&member);
+            if !may(&key) {
+                return Err(super::super::vault_api::denied(Capability::Use, &key));
+            }
+            Some(
+                delegation::verify_member(&member)
+                    .await
+                    .map_err(|e| vault_error(e.into()))?,
+            )
+        }
+    };
+    Ok(delegation::SessionAttrs {
+        on_behalf_of,
+        remote: body.remote,
+    })
 }
 
 /// Check that every requested service exists in the environment and that the
@@ -134,22 +195,51 @@ pub(super) async fn mint_session(
     store: &PluginSecretStore,
     actor: &AuditActor,
     request: sessions::MintRequest,
+    attrs: delegation::SessionAttrs,
 ) -> Response {
     let minted = {
         let conn = store.conn.lock().await;
-        sessions::mint(&conn, request)
+        // The session and its attributes commit together, so a delegated
+        // session never exists without its member.
+        conn.unchecked_transaction()
+            .map_err(anyhow::Error::from)
+            .and_then(|tx| {
+                let minted = sessions::mint(&tx, request)?;
+                delegation::insert(&tx, &minted.1.id, &attrs)?;
+                tx.commit()?;
+                Ok(minted)
+            })
     };
     let (token, session) = match minted {
         Ok(minted) => minted,
         Err(error) => return vault_error(error),
     };
+    let member = attrs.on_behalf_of.as_ref().map(delegation::Member::subject);
     audit(
         store,
         actor,
         "broker.session.create",
-        json!({ "session": session.id, "environment": session.environment, "services": session.services }),
+        json!({
+            "session": session.id,
+            "environment": session.environment,
+            "services": session.services,
+            "mintedBy": session.minted_by,
+            "onBehalfOf": member,
+            "remote": attrs.remote,
+        }),
     )
     .await;
+    let remote = match (attrs.remote, broker::remote_listener()) {
+        (true, Some(listener)) => match ca::certificate_pem(store).await {
+            Ok(pem) => json!({
+                "url": listener.url,
+                "proxyUrl": listener.url.as_deref().map(|url| broker::remote::proxy_url(url, &token)),
+                "caPem": pem,
+            }),
+            Err(error) => return vault_error(error),
+        },
+        _ => Value::Null,
+    };
     let proxy = match broker::listening_port() {
         Some(port) => match ca::certificate_pem(store)
             .await
@@ -167,7 +257,13 @@ pub(super) async fn mint_session(
         },
         None => Value::Null,
     };
-    respond(json!({ "token": token, "session": session, "proxy": proxy }))
+    respond(json!({
+        "token": token,
+        "session": session,
+        "proxy": proxy,
+        "onBehalfOf": member,
+        "remote": remote,
+    }))
 }
 
 pub(super) fn session_environment(body: &SessionBody) -> Result<String, Response> {
@@ -201,11 +297,21 @@ pub async fn create_session(
         })
         .await
     );
+    let attrs =
+        tri!(session_attrs(&body, |key| ctx.sys_caps(key).contains(&Capability::Use)).await);
+    if attrs
+        .on_behalf_of
+        .as_ref()
+        .is_some_and(|member| ctx.caller.as_ref().map(|c| &c.user_id) == Some(&member.user_id))
+    {
+        return invalid_request("onBehalfOf names the caller; mint the session directly");
+    }
+    let ttl_secs = tri!(human_ttl(&ctx, &body));
     let request = sessions::MintRequest {
         environment,
         services: body.services,
         label: body.label,
-        ttl_secs: body.ttl_secs,
+        ttl_secs,
         minted_by: minted_by(&ctx),
         not_after: None,
         minted_token: None,
@@ -216,22 +322,30 @@ pub async fn create_session(
             manager: ctx.manager,
         }),
     };
-    mint_session(ctx.store, &ctx.actor(), request).await
+    mint_session(ctx.store, &ctx.actor(), request, attrs).await
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct LabelQuery {
+    #[serde(default)]
+    label: Option<String>,
 }
 
 /// GET /api/vault/broker/sessions.
 #[utoipa::path(get, path = "/api/vault/broker/sessions", tag = "Vault",
-    summary = "List live broker sessions (admin on sys/broker)",
-    responses((status = 200, description = "Sessions (no tokens)", body = serde_json::Value)))]
+    summary = "List live broker sessions, optionally with one label (admin on sys/broker)",
+    params(("label" = Option<String>, Query, description = "Exact session label")),
+    responses((status = 200, description = "Sessions with status and neverExpires (no tokens)", body = serde_json::Value)))]
 pub async fn list_sessions(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
     headers: HeaderMap,
+    Query(query): Query<LabelQuery>,
 ) -> Response {
     let ctx = tri!(human(&state, caller, &headers).await);
     tri!(ctx.require_sys(SYS_BROKER, Capability::Admin));
     let conn = ctx.store.conn.lock().await;
-    match sessions::list(&conn) {
+    match sessions::history::live(&conn, query.label.as_deref()) {
         Ok(items) => respond(json!({ "sessions": items })),
         Err(error) => vault_error(error),
     }

@@ -33,6 +33,7 @@ pub(super) async fn open_acp_session(
     is_claude_code: bool,
     activity: &Option<Arc<AcpInstanceActivity>>,
     session_grant: &Option<crate::server::acp_tool_broker::AcpToolSessionGrant>,
+    broker_session_token: Option<&str>,
 ) -> Result<Option<OpenedSession>, agent_client_protocol::Error> {
     // Advertise Ryu's full client capabilities (fs + terminal) so the
     // agent routes file reads/writes and command execution through the
@@ -161,6 +162,7 @@ pub(super) async fn open_acp_session(
                 permission_scope_id,
             )
             .await
+            .map(|server| server.with_broker_session(broker_session_token))
         }
     };
     let ryu_server = build_bridge().await;

@@ -5,6 +5,7 @@ import { ISSUE_REPOSITORY } from "@ryuhq/core-client/troubleshoot";
 import { updateCheckResponseSchema } from "@ryuhq/core-client/updates";
 import { isNewerCliVersion } from "../core/self-update.ts";
 import { tf } from "../i18n/translate.ts";
+import { localize } from "./localizedText.ts";
 import {
 	CORE_TIMEOUT_MS,
 	GITHUB_TIMEOUT_MS,
@@ -204,7 +205,9 @@ export async function checkUpdates(
 			}),
 			// A network problem on this machine, not a Ryu defect: no unit or
 			// search terms, so it never decides where the bug report is filed.
-			fix: "Check your internet connection or proxy (HTTPS_PROXY); downloads need it too.",
+			fix: localize(
+				"Check your internet connection or proxy (HTTPS_PROXY); downloads need it too."
+			).english,
 		});
 	}
 }

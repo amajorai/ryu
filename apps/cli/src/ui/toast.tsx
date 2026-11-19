@@ -25,7 +25,7 @@ import {
 import { Spinner } from "@/components/ui/spinner.tsx";
 import type { StatusVariant } from "@/components/ui/status-message.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 
 export interface Toast {
 	/** How many identical notifications this toast stands for. */
@@ -219,6 +219,13 @@ export function useToast(): Pick<ToastContextValue, "notify" | "dismiss"> {
  * of the root column (App renders it) so it paints above panes and overlays.
  * Its width tracks the terminal and its height stops above the status bar.
  */
+/** A toast's line: the message in the CLI's language, then any "×N" repeat
+ * count. The count is appended after translating, since the JSX runtime only
+ * translates a child that is exactly a catalogued string. */
+export function toastText(message: string, count: number): string {
+	return count > 1 ? `${tr(message)} ×${count}` : tr(message);
+}
+
 export function ToastHost() {
 	const ctx = useContext(ToastContext);
 	const theme = useTheme();
@@ -276,9 +283,7 @@ export function ToastHost() {
 						)}
 						<box paddingLeft={1} width={messageColumns}>
 							<text fg={theme.colors.foreground} wrapMode="word">
-								{toast.count > 1
-									? `${toast.message} ×${toast.count}`
-									: toast.message}
+								{toastText(toast.message, toast.count)}
 							</text>
 						</box>
 					</box>

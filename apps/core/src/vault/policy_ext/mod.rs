@@ -26,9 +26,13 @@
 //! one-time token for the value. Tokens are stored as SHA-256 digests, compared
 //! in constant time, and redeemed by a single conditional `UPDATE`, so a token
 //! can be used at most once even under concurrent redemption.
+//!
+//! **Login lockout.** [`login_lockout`] locks a machine identity after
+//! repeated failed logins.
 
 mod control_group_store;
 mod control_groups;
+pub mod login_lockout;
 mod parameters;
 mod templates;
 #[cfg(test)]

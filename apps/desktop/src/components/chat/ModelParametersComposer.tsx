@@ -5,7 +5,7 @@
 // (the same one as Gateway → LLM Providers → Model parameters) in a dialog.
 // Picking a preset saves it to the model, so it applies from the next turn.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Dialog,
 	DialogContent,
@@ -33,6 +33,14 @@ import {
 } from "@/src/lib/api/inference.ts";
 
 const EDIT_ITEM_ID = "__edit_model_parameters__";
+
+/** The menu row that opens the parameter editor, worded in the reader's language. */
+export function editParametersItem(
+	tl: LiteralMessage,
+	description: string
+): { description: string; id: string; name: string } {
+	return { description, id: EDIT_ITEM_ID, name: tl("Edit parameters…") };
+}
 
 /**
  * The model whose parameters a chat turn uses, or `null` when the turn goes to
@@ -171,11 +179,7 @@ export function useModelParametersComposer(
 					name: preset.name,
 					description: preset.description ?? null,
 				})),
-				{
-					id: EDIT_ITEM_ID,
-					name: "Edit parameters…",
-					description: editDescription,
-				},
+				editParametersItem(tl, editDescription),
 			],
 			value: undefined,
 			onChange: (id: string) => {
@@ -197,6 +201,7 @@ export function useModelParametersComposer(
 		supportQuery.data,
 		apply,
 		editDescription,
+		tl,
 	]);
 
 	const dialog = model ? (

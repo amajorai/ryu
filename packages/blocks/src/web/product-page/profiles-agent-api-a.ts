@@ -72,7 +72,7 @@ const FETCH_REQUEST =
 const PASSPORT_PROFILE: ProductProfile = {
 	facts: [
 		{
-			label: "Holds",
+			label: "Stores",
 			value: "Per-domain cookies, tokens, or session state",
 			source: {
 				path: PASSPORT,

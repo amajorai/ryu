@@ -102,20 +102,46 @@ export interface JournalPager {
 	previousShortcut?: string;
 }
 
-/** The toolbar's previous / Today / next group for the day and month pages. */
+const ARROW_GLYPH = { Left: "←", Right: "→" } as const;
+
+/**
+ * The day step for an Alt+Arrow key on the day page. The pager runs along the
+ * inline axis, so under a right-to-left layout ArrowRight goes back a day and
+ * ArrowLeft goes forward; any other key does not step.
+ */
+export function dayStepForKey(key: string, sign: 1 | -1): -1 | 0 | 1 {
+	if (key === "ArrowRight") {
+		return sign;
+	}
+	if (key === "ArrowLeft") {
+		return sign === 1 ? -1 : 1;
+	}
+	return 0;
+}
+
+/**
+ * The toolbar's previous / Today / next group for the day and month pages.
+ * `sign` is `-1` under a right-to-left layout, where the key caps and
+ * shortcuts point the other way.
+ */
 export function pagerFor(
 	view: JournalView,
-	actions: Pick<JournalPager, "atToday" | "onStep" | "onToday">
+	{
+		sign = 1,
+		...actions
+	}: Pick<JournalPager, "atToday" | "onStep" | "onToday"> & { sign?: 1 | -1 }
 ): JournalPager | null {
 	if (view === "day") {
+		const forward = sign === 1 ? "Right" : "Left";
+		const back = sign === 1 ? "Left" : "Right";
 		return {
 			...actions,
-			nextKeys: ["⌥", "→"],
+			nextKeys: ["⌥", ARROW_GLYPH[forward]],
 			nextLabel: "Next day",
-			nextShortcut: "Alt+ArrowRight",
-			previousKeys: ["⌥", "←"],
+			nextShortcut: `Alt+Arrow${forward}`,
+			previousKeys: ["⌥", ARROW_GLYPH[back]],
 			previousLabel: "Previous day",
-			previousShortcut: "Alt+ArrowLeft",
+			previousShortcut: `Alt+Arrow${back}`,
 		};
 	}
 	if (view === "calendar") {

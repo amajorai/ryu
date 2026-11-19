@@ -7,10 +7,25 @@ impl ApprovalEngine {
     /// corresponding source already uses, so an approved run is identical to the
     /// autonomous run it replaced. Returns `Some(result)` for a tool call (the
     /// tool's output, recorded onto the row for the inbox), `None` otherwise.
-    pub(super) async fn execute_action(
-        &self,
-        action: &PendingAction,
-    ) -> anyhow::Result<Option<String>> {
+    ///
+    /// Tool calls are boxed apart from the other kinds in this synchronous frame:
+    /// the other arms give `execute_other_action` a debug-build poll frame of about
+    /// 470 KiB, and a tool call runs the whole MCP dispatch beneath it, which must
+    /// fit an ordinary 2 MiB worker stack (`app_alias` tests).
+    pub(super) fn execute_action<'a>(
+        &'a self,
+        action: &'a PendingAction,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = anyhow::Result<Option<String>>> + Send + 'a>,
+    > {
+        if matches!(action, PendingAction::ToolCall { .. }) {
+            Box::pin(self.execute_tool_call(action))
+        } else {
+            Box::pin(self.execute_other_action(action))
+        }
+    }
+
+    async fn execute_other_action(&self, action: &PendingAction) -> anyhow::Result<Option<String>> {
         match action {
             PendingAction::ScheduledJob { target, job_id } => {
                 if let Some(job_id) = job_id {
@@ -170,52 +185,58 @@ impl ApprovalEngine {
                 let locale = crate::i18n::locale::node_locale().await;
                 Ok(Some(skill_approved_message(slug, replaces).render(locale)))
             }
-            PendingAction::ToolCall {
-                tool_id,
-                arguments,
-                agent_id,
-                allowlist,
-                user_id,
-                profile_ids,
-                session_id,
-                host_conversation_id,
-                composio_connection_scope,
-                conversation_scope,
-                configure_approved,
-            } => {
-                let registry = self.registry.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!("no MCP registry attached; cannot run approved tool call")
-                })?;
-                // Re-dispatch through the NO-GATE entry so the approved call runs
-                // exactly once and does not re-raise an approval (infinite loop).
-                let result = registry
-                    .call_tool_with_identity_after_approval_scoped(
-                        agent_id.as_deref(),
-                        tool_id,
-                        arguments.clone(),
-                        allowlist.as_deref(),
-                        user_id.as_deref(),
-                        profile_ids,
-                        session_id.clone(),
-                        host_conversation_id.as_deref(),
-                        composio_connection_scope.as_deref(),
-                        conversation_scope.as_deref(),
-                        *configure_approved,
-                    )
-                    .await?;
-                // The no-gate path can still return an identity `__ryu_elicitation__`
-                // envelope (a bound domain is NEEDS_AUTH). That is NOT a successful
-                // run — the tool did not execute and no plane will consume the
-                // envelope here — so surface it as an error on the row rather than a
-                // false "result", telling the user the connection needs a login.
-                if result.get("__ryu_elicitation__").is_some() {
-                    return Err(anyhow::anyhow!(
-                        "the approved tool `{tool_id}` needs an account connection that isn't logged in; connect it, then re-issue the request"
-                    ));
-                }
-                Ok(Some(serde_json::to_string(&result).unwrap_or_default()))
-            }
+            PendingAction::ToolCall { .. } => self.execute_tool_call(action).await,
         }
+    }
+
+    async fn execute_tool_call(&self, action: &PendingAction) -> anyhow::Result<Option<String>> {
+        let PendingAction::ToolCall {
+            tool_id,
+            arguments,
+            agent_id,
+            allowlist,
+            user_id,
+            profile_ids,
+            session_id,
+            host_conversation_id,
+            composio_connection_scope,
+            conversation_scope,
+            configure_approved,
+        } = action
+        else {
+            return Err(anyhow::anyhow!("approved action is not a tool call"));
+        };
+        let registry = self.registry.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("no MCP registry attached; cannot run approved tool call")
+        })?;
+        // Re-dispatch through the NO-GATE entry so the approved call runs
+        // exactly once and does not re-raise an approval (infinite loop).
+        let result = registry
+            .call_tool_with_identity_after_approval_scoped(
+                agent_id.as_deref(),
+                tool_id,
+                arguments.clone(),
+                allowlist.as_deref(),
+                user_id.as_deref(),
+                profile_ids,
+                session_id.clone(),
+                host_conversation_id.as_deref(),
+                composio_connection_scope.as_deref(),
+                conversation_scope.as_deref(),
+                *configure_approved,
+            )
+            .await?;
+        // The no-gate path can still return an identity `__ryu_elicitation__`
+        // envelope (a bound domain is NEEDS_AUTH). That is NOT a successful
+        // run — the tool did not execute and no plane will consume the
+        // envelope here — so surface it as an error on the row rather than a
+        // false "result", telling the user the connection needs a login.
+        if result.get("__ryu_elicitation__").is_some() {
+            return Err(anyhow::anyhow!(
+                "the approved tool `{tool_id}` needs an account connection that isn't logged in; connect it, then re-issue the request"
+            ));
+        }
+        Ok(Some(serde_json::to_string(&result).unwrap_or_default()))
     }
 }
 

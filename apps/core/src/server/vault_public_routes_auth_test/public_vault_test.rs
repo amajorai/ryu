@@ -33,6 +33,49 @@ async fn routes_public_by_design_need_no_credential_expose_no_key_and_create_not
     }
 }
 
+#[tokio::test]
+async fn anonymous_posts_answer_without_credentials_or_state_changes() {
+    if !in_isolated_process(
+        module_path!(),
+        "anonymous_posts_answer_without_credentials_or_state_changes",
+    ) {
+        return;
+    }
+    let fixture = Fixture::new().await;
+    for (path, body) in ANONYMOUS_POSTS {
+        let before = fingerprint(fixture.store).await;
+        let reply = fixture.call("POST", path, &[], Some(body)).await;
+        if path.ends_with("/verify") {
+            assert_eq!(
+                reply.status,
+                StatusCode::FORBIDDEN,
+                "{path}: {}",
+                reply.text
+            );
+            assert!(
+                reply.text.contains("OTP not found"),
+                "{path}: {}",
+                reply.text
+            );
+        } else {
+            // An OCSP `malformedRequest` status, never JSON.
+            assert_eq!(reply.status, StatusCode::OK, "{path}: {}", reply.text);
+            assert_eq!(reply.text.as_bytes(), [0x30, 0x03, 0x0a, 0x01, 0x01]);
+        }
+        assert!(
+            !reply.text.contains("PRIVATE KEY"),
+            "{path}: {}",
+            reply.text
+        );
+        let after = fingerprint(fixture.store).await;
+        assert_eq!(
+            changed_tables(&before, &after),
+            Vec::<String>::new(),
+            "{path}: an anonymous call changed vault state"
+        );
+    }
+}
+
 #[test]
 fn vault_public_routes_merges_exactly_the_routers_this_file_scans() {
     let mod_source = &crate::server::tests::source_text::server_source();
@@ -74,6 +117,7 @@ fn every_public_vault_route_is_classified_in_this_file() {
     classified.extend(COMPAT_LOGIN_PATHS);
     classified.extend(WRAP_PATHS);
     classified.extend(PUBLIC_BY_DESIGN);
+    classified.extend(ANONYMOUS_POSTS.iter().map(|(path, _)| *path));
 
     for router in routers {
         let start = router

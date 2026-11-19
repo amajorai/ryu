@@ -15,7 +15,7 @@
 
 import { Alert01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -41,6 +41,7 @@ import type {
 	ImportResult,
 	ObjectWithFields,
 } from "@/src/lib/api/crm.ts";
+import { importResultLabels } from "./import-result-labels.ts";
 import { importRowsLabel } from "./import-rows-label.ts";
 
 type Step = "apply" | "map" | "preview" | "upload";
@@ -60,6 +61,10 @@ export function ImportWizard({
 	subject: ObjectWithFields;
 }) {
 	const tl = useLiteralMessages();
+	const i18n = useOptionalI18n();
+	const resultLabels = importResultLabels(
+		(id, fallback) => i18n?.t(id, {}, fallback) ?? fallback
+	);
 	const [step, setStep] = useState<Step>("upload");
 	const [job, setJob] = useState<ImportJob | null>(null);
 	const [mappings, setMappings] = useState<ImportMapping[]>([]);
@@ -391,8 +396,8 @@ export function ImportWizard({
 				{step === "apply" && result && (
 					<div className="space-y-3">
 						<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-							<Stat label="Created" value={result.created} />
-							<Stat label="Updated" value={result.updated} />
+							<Stat label={resultLabels.created} value={result.created} />
+							<Stat label={resultLabels.updated} value={result.updated} />
 							<Stat label="Skipped" value={result.skipped} />
 							<Stat label="Failed" value={result.failed} />
 						</div>

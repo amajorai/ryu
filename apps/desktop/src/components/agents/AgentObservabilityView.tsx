@@ -1,3 +1,4 @@
+import { agentRegressionSuiteNames } from "@ryu/app-host/agent-regression-suite";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -325,8 +326,7 @@ export function AgentObservabilityView({
 							providers: selected?.model ? [selected.model] : [],
 							tests: [],
 						},
-						label: "Trace baseline",
-						name: "Agent regression suite",
+						...agentRegressionSuiteNames(tl),
 					})
 				).suite;
 			const result = await importPromptTrace(target, suite.id, selectedRunId);

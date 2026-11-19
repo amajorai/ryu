@@ -55,10 +55,10 @@ async fn token_guarded_routes_refuse_a_missing_or_wrong_token_and_change_nothing
             attempts += 1;
         }
     }
-    // 22 agent routes x 8 credentials, 5 broker routes x 10, 15 compat routes
+    // 22 agent routes x 8 credentials, 5 broker routes x 10, 30 compat routes
     // x 7: a route or a credential that silently stops being tried shows up
     // as a different count.
-    assert_eq!(attempts, 22 * 8 + 5 * 10 + 15 * 7);
+    assert_eq!(attempts, 22 * 8 + 5 * 10 + 30 * 7);
 }
 
 #[tokio::test]
@@ -339,6 +339,30 @@ async fn machine_logins_refuse_wrong_credentials_mint_nothing_and_burn_no_secret
             json!({}),
             None,
         ),
+        (
+            "compat certificate login for an unknown identity",
+            COMPAT_LOGIN_PATHS[2],
+            json!({ "name": "nobody-pubauth", "certificate_pem": "x", "proof": "x" }),
+            denied,
+        ),
+        (
+            "compat aws login for an unknown identity",
+            COMPAT_LOGIN_PATHS[3],
+            json!({
+                "role": "nobody-pubauth",
+                "iam_http_request_method": "POST",
+                "iam_request_url": "aHR0cHM6Ly9zdHMuYW1hem9uYXdzLmNvbS8=",
+                "iam_request_body": "",
+                "iam_request_headers": "e30=",
+            }),
+            denied,
+        ),
+        (
+            "compat kubernetes login for an approle identity",
+            COMPAT_LOGIN_PATHS[4],
+            json!({ "role": approle, "jwt": "x" }),
+            denied,
+        ),
     ];
     for (label, path, body, expected) in &attempts {
         let reply = fixture
@@ -354,6 +378,20 @@ async fn machine_logins_refuse_wrong_credentials_mint_nothing_and_burn_no_secret
             "{label}: {path} answered {}",
             reply.status
         );
+    }
+
+    // That many refusals lock the AppRole identity (login lockout,
+    // `vault/policy_ext/login_lockout.rs`); an administrator unlocks it so the
+    // corrected credentials below show the refusals burned nothing.
+    for identity in [&approle, &jwt_identity] {
+        let was_locked = fixture
+            .store
+            .lockout_unlock(identity, &fixture.admin)
+            .await
+            .unwrap();
+        if identity == &approle {
+            assert!(was_locked, "the refused AppRole logins locked {identity}");
+        }
     }
 
     // The same credentials, corrected, are accepted: the refusals above were

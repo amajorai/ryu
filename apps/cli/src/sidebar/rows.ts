@@ -4,6 +4,7 @@
 
 import type { ProductMode } from "../core/productMode.ts";
 import type { SidebarData, SidebarItem } from "./data.ts";
+import { projectsHeading, sectionHeading } from "./section-heading.ts";
 
 /** Total sidebar columns, including its one-column side padding. */
 export const SIDEBAR_WIDTH = 24;
@@ -161,7 +162,7 @@ function sectionRows(
 		{
 			header: true,
 			key: `section:${section.key}`,
-			label: section.title.toUpperCase(),
+			label: sectionHeading(section.title),
 			onSelect: () => actions.toggleSection(section.key),
 			section: section.key,
 		},
@@ -229,7 +230,7 @@ export function buildSidebarRows(
 	rows.push({
 		header: true,
 		key: "section:projects",
-		label: "PROJECTS",
+		label: projectsHeading(),
 		onSelect: () => actions.toggleSection("projects"),
 		section: "projects",
 	});

@@ -363,3 +363,26 @@ for (const code of [200, 403]) {
 		expect(container.textContent).not.toContain("We couldn't read");
 	});
 }
+
+test("a sealed store's badge reads in the UI language", async () => {
+	const { I18nProvider } = await import("@ryu/i18n/react");
+	statuses.set("A", status("A", "keychain"));
+	await act(async () =>
+		root.render(
+			<I18nProvider
+				autoLocalizeDom={false}
+				initialLocale="ja"
+				manageDocument={false}
+				overlays={{ ja: { Encrypted: "暗号化済み" } }}
+			>
+				<EncryptionSettings />
+			</I18nProvider>
+		)
+	);
+	await visible("A");
+	const badges = [...container.querySelectorAll("[data-slot='badge']")].map(
+		(badge) => badge.textContent
+	);
+	expect(badges).toContain("暗号化済み");
+	expect(badges).not.toContain("Encrypted");
+});

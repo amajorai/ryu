@@ -175,11 +175,15 @@ export function parseGatewayConfigPatch(source: string): GatewayConfigPatch {
 	}
 	const config = asRecord(parsed);
 	if (!config) {
-		throw new Error("Gateway TOML must contain a top-level table");
+		throw new LocalizedError(
+			localize("Gateway TOML must contain a top-level table.")
+		);
 	}
 	const sections = Object.keys(config);
 	if (sections.length === 0) {
-		throw new Error("Gateway TOML must include a writable section");
+		throw new LocalizedError(
+			localize("Gateway TOML must include a writable section.")
+		);
 	}
 	rejectUnknownFields(config, Array.from(WRITABLE_FIELDS.keys()), "root");
 	for (const [section, value] of Object.entries(config)) {

@@ -68,3 +68,50 @@ describe("examplePluginSrcdoc liveness", () => {
 		);
 	});
 });
+
+describe("example plugin RPC settlement", () => {
+	// The example is the pattern third-party frames copy, so it must reject a
+	// structured `{ code, message }` error as well as a legacy string error.
+	function settleBlock(): string {
+		const doc = examplePluginSrcdoc("n");
+		const start = doc.indexOf("if (msg.error !== undefined");
+		const end = doc.indexOf("p.resolve(msg.result);", start);
+		return `${doc.slice(start, end)}p.resolve(msg.result);\n}`;
+	}
+
+	function settle(msg: Record<string, unknown>) {
+		const outcome: {
+			rejected?: Error & { code?: unknown };
+			resolved?: unknown;
+		} = {};
+		new Function("msg", "p", settleBlock())(msg, {
+			reject: (error: Error) => {
+				outcome.rejected = error;
+			},
+			resolve: (value: unknown) => {
+				outcome.resolved = value;
+			},
+		});
+		return outcome;
+	}
+
+	it("rejects a structured error instead of resolving it", () => {
+		const { rejected, resolved } = settle({
+			error: { code: "denied", message: "missing grant" },
+		});
+		expect(resolved).toBeUndefined();
+		expect(rejected?.message).toBe("missing grant");
+		expect(rejected?.code).toBe("denied");
+	});
+
+	it("rejects an empty string error instead of resolving it", () => {
+		const { rejected, resolved } = settle({ error: "" });
+		expect(resolved).toBeUndefined();
+		expect(rejected?.message).toBe("error");
+	});
+
+	it("rejects a legacy string error and resolves a result", () => {
+		expect(settle({ error: "nope" }).rejected?.message).toBe("nope");
+		expect(settle({ result: 3 }).resolved).toBe(3);
+	});
+});

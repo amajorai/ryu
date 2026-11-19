@@ -1,11 +1,14 @@
 import { expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import type { LiteralMessage } from "@ryu/i18n/react";
 
 if (typeof document === "undefined") {
 	GlobalRegistrator.register();
 }
 
-const { chatParameterModel } = await import("./ModelParametersComposer.tsx");
+const { chatParameterModel, editParametersItem } = await import(
+	"./ModelParametersComposer.tsx"
+);
 
 test("an explicit provider pick is a cloud model for that provider", () => {
 	expect(
@@ -44,4 +47,13 @@ test("external agents and empty selections get no parameters", () => {
 		chatParameterModel({ engine: "acp:claude-code", modelId: "opus" })
 	).toBeNull();
 	expect(chatParameterModel({ engine: "llamacpp", modelId: null })).toBeNull();
+});
+
+test("the editor row's name is a catalogued label", () => {
+	const tl: LiteralMessage = (source) => `[${source}]`;
+	expect(editParametersItem(tl, "Tune it")).toEqual({
+		description: "Tune it",
+		id: "__edit_model_parameters__",
+		name: "[Edit parameters…]",
+	});
 });

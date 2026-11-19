@@ -89,20 +89,6 @@ export function creditPoolForProvider(provider: PiProvider): CreditPool | null {
 	);
 }
 
-/**
- * Upsell copy for a pool row. Names the TIER and nothing else — the pool catalog's
- * standing rule is that a user never reads the name of the provider behind a pool,
- * so the supplier can be swapped without changing what anyone was promised.
- * There is no bring-your-own-key half: Ryu's pooled capacity is not something a
- * user can hold a key for, so offering one would be a dead end.
- */
-export function poolUpsellCopy(pool: CreditPool) {
-	return {
-		upgrade: `${pool.label} runs on Ryu's own capacity — included with a Ryu subscription, no API keys.`,
-		byoKey: null,
-	};
-}
-
 export interface UseUniversalPickerParams {
 	/** The active agent's live approval + thinking sections. */
 	activeExtraSections: ComposerSettingsSection[];

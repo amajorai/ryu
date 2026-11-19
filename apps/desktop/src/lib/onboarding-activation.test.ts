@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { ComposioConnection, ComposioToolkit } from "./api/composio.ts";
 import {
 	activationRewardProgress,
@@ -157,4 +158,28 @@ test("a general task still requires payment for managed inference", () => {
 			managedInference: false,
 		})
 	).toBe("checkout");
+});
+
+test("a generic task's shown title is a catalogued sentence", () => {
+	const tl: LiteralMessage = (source, values) =>
+		`[${source}]${values ? JSON.stringify(values) : ""}`;
+	const draft = buildActivationTaskDraft(
+		[
+			{
+				active: false,
+				appName: "Linear",
+				appSlug: "linear-custom",
+				connectionId: null,
+				description: null,
+				logo: null,
+				prompt: "p",
+				reason: "r",
+				title: "t",
+			},
+		],
+		tl
+	);
+	expect(draft.title).toBe(
+		'[Find the next task in {app}]{"app":"linear-custom"}'
+	);
 });

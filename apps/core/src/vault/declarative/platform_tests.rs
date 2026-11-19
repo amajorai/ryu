@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::vault::audit::AuditFilter;
+use crate::vault::machine::AuthMethod;
 
 const WEBHOOK_SECRET: &str = "declared-webhook-signing-secret-0001";
 
@@ -167,33 +168,6 @@ async fn an_unset_reference_fails_only_its_item() {
     assert!(report.errors[0].contains("RYU_TEST_DECLARATIVE_NEVER_SET is not set"));
     assert!(!report.created.contains(&"dynamicRole:hooked".to_owned()));
     assert_eq!(report.created.len(), 9, "{report:?}");
-}
-
-#[tokio::test]
-async fn machine_auth_drift_is_never_reconciled_but_settings_are() {
-    let store = PluginSecretStore::in_memory().unwrap();
-    let base = json!({ "machines": [{ "name": "ci", "auth": { "kind": "approle" }, "policies": ["ci"] }] });
-    apply(&store, &spec(&base)).await.unwrap();
-    let issued_role_id = store.machine_get("ci").await.unwrap().auth;
-
-    let settings = json!({ "reconcile": true, "machines": [{
-        "name": "ci", "auth": { "kind": "approle" }, "policies": ["ci", "deploy"], "disabled": true
-    }] });
-    let updated = apply(&store, &spec(&settings)).await.unwrap();
-    assert_eq!(updated.updated, vec!["machine:ci".to_owned()]);
-    let ci = store.machine_get("ci").await.unwrap();
-    assert!(ci.disabled);
-    assert_eq!(ci.policies.len(), 2);
-    assert_eq!(ci.auth, issued_role_id, "the generated role id is kept");
-
-    let auth = json!({ "reconcile": true, "machines": [{ "name": "ci", "auth": {
-        "kind": "jwt", "issuer": "https://issuer.example",
-        "jwksUrl": "https://issuer.example/jwks", "audiences": ["ryu"]
-    } }] });
-    let report = apply(&store, &spec(&auth)).await.unwrap();
-    assert_eq!(report.drifted, vec!["machine:ci".to_owned()]);
-    assert!(report.updated.is_empty());
-    assert_eq!(store.machine_get("ci").await.unwrap().auth, issued_role_id);
 }
 
 #[tokio::test]

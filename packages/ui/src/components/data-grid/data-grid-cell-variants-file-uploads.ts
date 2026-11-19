@@ -61,7 +61,7 @@ export function useFileCellUploads<TData>({
 					return file.type === type;
 				});
 				if (!isAccepted) {
-					return "File type not accepted";
+					return tl("File type not accepted");
 				}
 			}
 			return null;

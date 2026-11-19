@@ -9,7 +9,7 @@ use super::super::postgres::{self, PostgresConfig};
 use super::super::redis;
 use super::super::target_guard::TargetEgress;
 use super::super::webhook::{self, WebhookConfig};
-use super::ai_keys;
+use super::{ai_keys, vendor_keys};
 
 const DEFAULT_PG_ROTATION: &str = "ALTER ROLE \"{{name}}\" WITH PASSWORD '{{password}}'";
 
@@ -81,6 +81,36 @@ pub enum StaticProvider {
         #[serde(default)]
         current_api_key_id: Option<String>,
     },
+    /// Stripe: each rotation rotates the key through Stripe's API keys API,
+    /// which creates a key with the same permissions and expires the old one.
+    #[serde(rename = "stripe", rename_all = "camelCase")]
+    Stripe {
+        /// A key allowed to manage API keys (`api_key_write`).
+        admin_api_key: String,
+        /// The key that rotates. Core-managed once it has rotated.
+        #[serde(default)]
+        current_api_key_id: Option<String>,
+        /// Connected account to act on (`Stripe-Context`).
+        #[serde(default)]
+        stripe_context: Option<String>,
+        #[serde(default = "default_stripe_version")]
+        stripe_version: String,
+    },
+    /// Cloudflare: each rotation rolls an API token's value in place.
+    #[serde(rename = "cloudflare", rename_all = "camelCase")]
+    Cloudflare {
+        /// A token allowed to roll the target token (API Tokens Write).
+        admin_api_token: String,
+        /// The token whose value rolls.
+        token_id: String,
+        /// The account owning the token; a user token when unset.
+        #[serde(default)]
+        account_id: Option<String>,
+    },
+}
+
+fn default_stripe_version() -> String {
+    vendor_keys::DEFAULT_STRIPE_VERSION.to_owned()
 }
 
 fn validate_pg_username(name: &str) -> Result<()> {
@@ -117,6 +147,8 @@ impl StaticProvider {
             Self::AwsIam { .. } => "aws-iam",
             Self::OpenAi { .. } => "openai",
             Self::Anthropic { .. } => "anthropic",
+            Self::Stripe { .. } => "stripe",
+            Self::Cloudflare { .. } => "cloudflare",
         }
     }
 
@@ -204,6 +236,22 @@ impl StaticProvider {
                 replacement_api_key.as_deref(),
                 current_api_key_id.as_deref(),
             ),
+            Self::Stripe {
+                admin_api_key,
+                current_api_key_id,
+                stripe_context,
+                stripe_version,
+            } => vendor_keys::validate_stripe(
+                admin_api_key,
+                current_api_key_id.as_deref(),
+                stripe_context.as_deref(),
+                stripe_version,
+            ),
+            Self::Cloudflare {
+                admin_api_token,
+                token_id,
+                account_id,
+            } => vendor_keys::validate_cloudflare(admin_api_token, token_id, account_id.as_deref()),
         }
     }
 
@@ -216,6 +264,15 @@ impl StaticProvider {
             Self::OpenAi { project_id, .. } => json!({ "kind": "openai", "projectId": project_id }),
             Self::Anthropic { workspace_id, .. } => {
                 json!({ "kind": "anthropic", "workspaceId": workspace_id })
+            }
+            Self::Stripe { stripe_context, .. } => {
+                json!({ "kind": "stripe", "stripeContext": stripe_context })
+            }
+            // Identity, not display: the full URL (the summary keeps only the
+            // origin), so another path on the same host is another account.
+            // Compared only; never stored, listed or audited.
+            Self::Webhook { url, username, .. } => {
+                json!({ "kind": "webhook", "url": url, "username": username })
             }
             other => json!({ "kind": other.kind(), "account": other.summary() }),
         }
@@ -252,7 +309,11 @@ impl StaticProvider {
     pub(super) fn mints_keys(&self) -> bool {
         matches!(
             self,
-            Self::AwsIam { .. } | Self::OpenAi { .. } | Self::Anthropic { .. }
+            Self::AwsIam { .. }
+                | Self::OpenAi { .. }
+                | Self::Anthropic { .. }
+                | Self::Stripe { .. }
+                | Self::Cloudflare { .. }
         )
     }
 
@@ -268,6 +329,10 @@ impl StaticProvider {
                 ..
             }
             | Self::Anthropic {
+                current_api_key_id: id,
+                ..
+            }
+            | Self::Stripe {
                 current_api_key_id: id,
                 ..
             } => id.clone(),
@@ -288,6 +353,10 @@ impl StaticProvider {
             | Self::Anthropic {
                 current_api_key_id: id,
                 ..
+            }
+            | Self::Stripe {
+                current_api_key_id: id,
+                ..
             } => *id = value,
             _ => {}
         }
@@ -306,6 +375,7 @@ impl StaticProvider {
                     creation_statements: Vec::new(),
                     revocation_statements: Vec::new(),
                     username_prefix: None,
+                    username_template: None,
                     egress: TargetEgress::default(),
                 }
                 .redacted_target();
@@ -315,7 +385,9 @@ impl StaticProvider {
                 connection_url,
                 username,
             } => json!({ "host": redis::redacted_target(connection_url), "username": username }),
-            Self::Webhook { url, username, .. } => json!({ "url": url, "username": username }),
+            Self::Webhook { url, username, .. } => {
+                json!({ "url": webhook::url_origin(url), "username": username })
+            }
             Self::AwsIam { user_name, .. } => json!({ "userName": user_name }),
             Self::OpenAi {
                 project_id,
@@ -330,6 +402,16 @@ impl StaticProvider {
                 "workspaceId": workspace_id,
                 "replacementStaged": replacement_api_key.is_some(),
             }),
+            Self::Stripe {
+                current_api_key_id,
+                stripe_context,
+                ..
+            } => json!({ "currentApiKeyId": current_api_key_id, "stripeContext": stripe_context }),
+            Self::Cloudflare {
+                token_id,
+                account_id,
+                ..
+            } => json!({ "tokenId": token_id, "accountId": account_id }),
         }
     }
 }
@@ -353,6 +435,7 @@ pub(super) async fn apply_password(
                 creation_statements: Vec::new(),
                 revocation_statements: Vec::new(),
                 username_prefix: None,
+                username_template: None,
                 egress,
             };
             let statements: Vec<String> = if rotation_statements.is_empty() {
@@ -398,51 +481,14 @@ pub(super) async fn apply_password(
         }
         StaticProvider::AwsIam { .. }
         | StaticProvider::OpenAi { .. }
-        | StaticProvider::Anthropic { .. } => {
+        | StaticProvider::Anthropic { .. }
+        | StaticProvider::Stripe { .. }
+        | StaticProvider::Cloudflare { .. } => {
             bail!("{} roles rotate keys, not passwords", provider.kind())
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn anthropic(replacement: Option<&str>, current: Option<&str>) -> StaticProvider {
-        StaticProvider::Anthropic {
-            admin_api_key: "sk-ant-admin01-x".into(),
-            workspace_id: None,
-            replacement_api_key: replacement.map(str::to_owned),
-            current_api_key_id: current.map(str::to_owned),
-        }
-    }
-
-    #[test]
-    fn edits_keep_the_current_key_id_and_an_unused_staged_key() {
-        let stored = anthropic(Some("sk-ant-api03-staged"), Some("apikey_1"));
-        let merged = anthropic(None, None).with_managed_fields_from(&stored);
-        assert_eq!(merged, stored);
-        // A newly staged key replaces the stored one; the id stays Core's.
-        let merged =
-            anthropic(Some("sk-ant-api03-new"), Some("apikey_9")).with_managed_fields_from(&stored);
-        assert_eq!(
-            merged,
-            anthropic(Some("sk-ant-api03-new"), Some("apikey_1"))
-        );
-        assert!(merged.mints_keys());
-        assert_eq!(stored.account(), anthropic(None, None).account());
-    }
-
-    #[tokio::test]
-    async fn key_minting_providers_never_take_a_password() {
-        let error = apply_password(
-            &anthropic(None, None),
-            "role",
-            "pw",
-            TargetEgress::default(),
-        )
-        .await
-        .unwrap_err();
-        assert!(error.to_string().contains("anthropic roles rotate keys"));
-    }
-}
+#[path = "provider_tests.rs"]
+mod tests;

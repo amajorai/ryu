@@ -342,3 +342,23 @@ test("a Core vault refusal reaches a Japanese reader translated", async () => {
 	expect(container.textContent).not.toContain("vault_denied");
 	expect(container.textContent).not.toContain("may not use your accounts");
 });
+
+test("the expiry date follows the chosen language, not the OS", async () => {
+	const ja: Record<string, string> = {
+		"Expires {time}.": "有効期限: {time}。",
+	};
+	registerLiteralCatalogLoader((locale) => (locale.startsWith("ja") ? ja : {}));
+	document.body.setAttribute("data-ryu-i18n", "off");
+	sets = [
+		{
+			...setFrom([{ key: "github" }]),
+			expires_at: new Date(2026, 10, 8, 15, 4).getTime(),
+		},
+	];
+	await render("ja");
+	await until(
+		() => container.textContent?.includes("Revoke attached items") === true
+	);
+	expect(container.textContent).toContain("有効期限: 2026/11/08 15:04。");
+	expect(container.textContent).not.toContain("11/8/2026");
+});

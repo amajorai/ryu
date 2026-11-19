@@ -1,10 +1,11 @@
+import { useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
 	THREAD_STATUS_ORDER,
 } from "@ryuhq/protocol/interfaces";
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
 import { threadStatusLabel } from "./interface-renderer.ts";
 import {
 	eventDay,
@@ -13,6 +14,11 @@ import {
 	type NewspaperGlance,
 } from "./newspaper-model.ts";
 import { BoxHead, SMALL_CAPS } from "./newspaper-parts.tsx";
+
+/** The "of 12" after the working count, quieter than the count itself. */
+function totalTag(chunks: ReactNode): ReactNode {
+	return <span className="font-normal text-muted-foreground">{chunks}</span>;
+}
 
 /** "At a glance": the paper's numbers box, one ruled row per status. */
 export function AtAGlance({
@@ -27,6 +33,7 @@ export function AtAGlance({
 	id: string;
 }) {
 	const headingId = useId();
+	const tlRich = useRichLiteralMessages();
 	const rows: { label: string; value: number }[] = [
 		...THREAD_STATUS_ORDER.map((status) => ({
 			label: threadStatusLabel(status),
@@ -56,11 +63,11 @@ export function AtAGlance({
 				<div className="flex items-baseline justify-between gap-4 py-2">
 					<dt className="text-foreground text-sm">Agents at work</dt>
 					<dd className="font-semibold font-serif text-foreground text-lg tabular-nums leading-6">
-						{agentsWorking}
-						<span className="font-normal text-muted-foreground">
-							{" "}
-							of {agentCount}
-						</span>
+						{tlRich(
+							"{working} <total>of {count}</total>",
+							{ count: agentCount, working: agentsWorking },
+							{ total: totalTag }
+						)}
 					</dd>
 				</div>
 			</dl>

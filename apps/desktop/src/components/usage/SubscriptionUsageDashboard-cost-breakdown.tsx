@@ -4,7 +4,7 @@ import {
 	projectPeriodTotal,
 	utcMonthBounds,
 } from "@ryu/blocks/desktop/usage-forecast.ts";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
@@ -20,9 +20,12 @@ import type { SubscriptionUsageAccount } from "@/src/hooks/useSubscriptionUsage.
 import type { SubscriptionCostUsageSummary } from "@/src/lib/api/subscription-costs.ts";
 import { ProviderBrandLogo } from "@/src/lib/provider-brand.tsx";
 
-function formatEstimate(costMicroUsd: number | null): string {
+export function formatEstimate(
+	costMicroUsd: number | null,
+	tl: LiteralMessage
+): string {
 	if (costMicroUsd === null) {
-		return "Unpriced";
+		return tl("Unpriced");
 	}
 	return formatCurrency(costMicroUsd / 1_000_000, "USD", {
 		maximumFractionDigits: 6,
@@ -153,7 +156,7 @@ export function SubscriptionCostBreakdown({
 									data-testid="subscription-cost-total"
 								>
 									{usage && usage.accounts.length > 0
-										? formatEstimate(overallCost)
+										? formatEstimate(overallCost, tl)
 										: "—"}
 								</div>
 								{usage && usage.accounts.length > 0 && overallMonthEnd ? (
@@ -224,7 +227,7 @@ export function SubscriptionCostBreakdown({
 														className="font-medium text-sm tabular-nums"
 														data-testid={`subscription-cost-provider-total-${providerId}`}
 													>
-														{formatEstimate(knownCost)}
+														{formatEstimate(knownCost, tl)}
 													</div>
 													{providerMonthEnd ? (
 														<div className="text-muted-foreground text-xs tabular-nums">
@@ -280,7 +283,10 @@ export function SubscriptionCostBreakdown({
 															{accountLabel}
 														</span>
 														<span className="shrink-0 tabular-nums">
-															{formatEstimate(account.estimatedCostMicroUsd)}
+															{formatEstimate(
+																account.estimatedCostMicroUsd,
+																tl
+															)}
 															{accountPartial ? " · partial" : ""}
 														</span>
 													</div>

@@ -1,9 +1,10 @@
 //! Credential-broker tools on the network transport (`POST /mcp/:agent_id`).
 //!
 //! `ryu_broker_discover`, `ryu_broker_propose` and `ryu_broker_proposal` are
-//! offered only on the hosted endpoint, and only when the MCP request carries
-//! the agent's own broker credential (`x-ryu-vault-token` or
-//! `x-ryu-broker-session`); the in-process ACP plane never lists them. The
+//! offered on the hosted endpoint only when the MCP request carries the
+//! agent's own broker credential (`x-ryu-vault-token` or
+//! `x-ryu-broker-session`). The in-process ACP bridge offers them only to a
+//! brokered run, under its lease session ([`super::session_broker`]). The
 //! credential, not the node bearer, is the authority: the calls run through the
 //! broker's agent routes and the vault request layer, from the MCP request's
 //! client address ([`crate::server::vault_broker_api::hosted_mcp`]).

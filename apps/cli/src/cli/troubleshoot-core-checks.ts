@@ -4,7 +4,8 @@ import type { ApiTarget } from "@ryuhq/core-client/client";
 import { redactDiagnosticText } from "@ryuhq/core-client/troubleshoot";
 import { z } from "zod";
 import { isLocal } from "../core/bootstrap.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
+import { localize } from "./localizedText.ts";
 import {
 	CORE_BASE_PORT,
 	PROFILE_PORT_OFFSETS,
@@ -98,7 +99,7 @@ export async function checkCore(
 	}
 
 	if (health.value) {
-		const version = health.value.version ?? "unknown";
+		const version = health.value.version ?? tr("unknown");
 		state.machine.push([
 			"Core",
 			`${version}${health.value.channel ? ` (${health.value.channel})` : ""}`,
@@ -167,7 +168,10 @@ export async function checkCore(
 				"No Core at {shownUrl}, but a {profile}-profile Core answers on port {port}.",
 				{ shownUrl, profile: other.profile, port: String(other.port) }
 			),
-			fix: `Point the CLI at it: RYU_PROFILE=${other.profile} (or RYU_CORE_URL=http://127.0.0.1:${other.port}).`,
+			fix: localize(
+				"Point the CLI at it: RYU_PROFILE={profile} (or RYU_CORE_URL=http://127.0.0.1:{port}).",
+				{ profile: other.profile, port: String(other.port) }
+			).english,
 			searchTerms: "cli cannot connect core profile port",
 			unit: "apps/cli",
 		});
@@ -191,7 +195,9 @@ export async function checkCore(
 					"Start it with `{commandName} troubleshoot --fix`, by opening `{commandName}`, or by running `ryu-core`.",
 					{ commandName: host.commandName }
 				)
-			: "Check the node is online and reachable from this machine (VPN, firewall, URL).",
+			: localize(
+					"Check the node is online and reachable from this machine (VPN, firewall, URL)."
+				).english,
 		searchTerms: local ? "core not starting" : "remote node unreachable",
 		unit: "apps/core",
 	});
@@ -240,7 +246,7 @@ export async function checkCoreDetails(
 			title: "CLI and Core versions",
 			detail: tf("CLI {VERSION}, Core {coreVersion}.", {
 				VERSION,
-				coreVersion: coreVersion || "unknown",
+				coreVersion: coreVersion || tr("unknown"),
 			}),
 		});
 	}

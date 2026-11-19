@@ -329,8 +329,8 @@ export function CreateAgentDialog() {
 									role={
 										title.trim() ||
 										(instructions.trim()
-											? "Ready to configure"
-											: "Unconfigured")
+											? tl("Ready to configure")
+											: tl("Unconfigured"))
 									}
 								/>
 							</div>

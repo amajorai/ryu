@@ -145,7 +145,7 @@ function ServiceForm({
 		onSuccess: async (service) => {
 			await queryClient.invalidateQueries({ queryKey: ["vault", "broker"] });
 			sileo.success({
-				title: editing ? "Service saved" : "Service added",
+				title: editing ? tl("Service saved") : tl("Service added"),
 				description: service.name,
 			});
 			onDone();
@@ -221,7 +221,7 @@ function ServiceForm({
 					<div className="grid gap-3 sm:grid-cols-[1fr_7rem]">
 						<TextField
 							id="broker-service-host"
-							label="Host"
+							label="Hostname"
 							onChange={(host) => set({ host })}
 							placeholder="api.example.com"
 							value={form.host}

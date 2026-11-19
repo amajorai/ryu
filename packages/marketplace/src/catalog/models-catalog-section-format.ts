@@ -1,3 +1,4 @@
+import { modelBytesLabel } from "@ryu/blocks/desktop/model-byte-label.ts";
 import {
 	activeLocale,
 	numberFormatter,
@@ -197,23 +198,26 @@ export function formatParams(
 
 /** Multi-line hardware summary for the detail overview, in the UI language. */
 export function deviceSummaryLines(device: ModelDetail["device"]): string[] {
+	// Sizes come from the byte counts in the UI language; Core's English strings
+	// are only the fallback when a count is missing.
+	const diskFree = modelBytesLabel(device.diskFreeBytes, device.diskFreeHuman);
+	const ram = modelBytesLabel(device.totalRamBytes, device.ramHuman);
+	const vram = modelBytesLabel(device.vramBytes, device.vramHuman);
 	// Free disk decides whether a download can land at all, so it closes every
 	// summary (when Core reports it).
-	const disk = device.diskFreeHuman
-		? [tl("{diskFree} free disk", { diskFree: device.diskFreeHuman })]
-		: [];
-	if (device.unifiedMemory && device.ramHuman) {
-		return [tl("{ram} unified memory", { ram: device.ramHuman }), ...disk];
+	const disk = diskFree ? [tl("{diskFree} free disk", { diskFree })] : [];
+	if (device.unifiedMemory && ram) {
+		return [tl("{ram} unified memory", { ram }), ...disk];
 	}
 	const lines: string[] = [];
 	if (device.gpuName) {
 		lines.push(device.gpuName);
 	}
-	if (device.vramHuman) {
-		lines.push(tl("{vram} GPU RAM", { vram: device.vramHuman }));
+	if (vram) {
+		lines.push(tl("{vram} GPU RAM", { vram }));
 	}
-	if (device.ramHuman) {
-		lines.push(tl("{ram} system RAM", { ram: device.ramHuman }));
+	if (ram) {
+		lines.push(tl("{ram} system RAM", { ram }));
 	}
 	if (lines.length === 0) {
 		return [device.os || tl("unknown hardware"), ...disk];

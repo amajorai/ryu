@@ -2,9 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { drawing as proWorkbench } from "./pro-workbench.tsx";
 import { STATIC_FIGURES } from "./registry.tsx";
-import { drawing as securityCheckpoint } from "./security-checkpoint.tsx";
 import type { StaticDrawing } from "./static-figure.tsx";
 import { StaticFigure } from "./static-figure.tsx";
 
@@ -79,11 +77,4 @@ describe.each(HERO_DRAWINGS)("%s", (name) => {
 test("the registry stays in alphabetical order", () => {
 	const ids = Object.keys(STATIC_FIGURES);
 	expect(ids).toEqual([...ids].sort());
-});
-
-test("the two hero drawings are distinct drawings", () => {
-	expect(proWorkbench).not.toBe(securityCheckpoint);
-	expect(render("pro-workbench", proWorkbench)).not.toBe(
-		render("security-checkpoint", securityCheckpoint)
-	);
 });

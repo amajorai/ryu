@@ -420,21 +420,22 @@ export function TunnelLayer({
 					active: backend === MESH_BACKEND_HEADSCALE,
 					// Honest about the one thing that stops it working. The row stays
 					// SELECTABLE — picking it is how a user gets the prompt for the URL.
-					detail: loginServer === "" ? "needs control server" : "self-hosted",
+					detail:
+						loginServer === "" ? "needs control server" : tl("self-hosted"),
 					select: () => pickBackend(MESH_BACKEND_HEADSCALE),
 				},
 				{
 					name: MESH_BACKEND_TAILSCALE,
 					label: TUNNEL_LABEL[MESH_BACKEND_TAILSCALE],
 					active: backend === MESH_BACKEND_TAILSCALE,
-					detail: "hosted",
+					detail: tl("hosted service"),
 					select: () => pickBackend(MESH_BACKEND_TAILSCALE),
 				},
 				{
 					name: MESH_BACKEND_TAILCAT,
 					label: TUNNEL_LABEL[MESH_BACKEND_TAILCAT],
 					active: backend === MESH_BACKEND_TAILCAT,
-					detail: "point-to-point",
+					detail: tl("point-to-point"),
 					select: () => pickBackend(MESH_BACKEND_TAILCAT),
 				},
 				...pluginRows,

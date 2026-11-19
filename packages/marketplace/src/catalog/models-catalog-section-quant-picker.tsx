@@ -1,5 +1,6 @@
 import { Download01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { modelBytesLabel } from "@ryu/blocks/desktop/model-byte-label.ts";
 import { isBlockedFit, pickBestFit } from "@ryu/blocks/desktop/model-fit.ts";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
@@ -117,6 +118,10 @@ export function QuantizationPicker({
 		if (!selectedFile) {
 			return "Pick a compression level";
 		}
+		const selectedSize = modelBytesLabel(
+			selectedFile.sizeBytes,
+			selectedFile.sizeHuman
+		);
 		return (
 			<span className="flex min-w-0 items-center gap-2">
 				<span className="truncate">
@@ -129,9 +134,9 @@ export function QuantizationPicker({
 						{selectedFile.quant}
 					</span>
 				)}
-				{selectedFile.sizeHuman && (
+				{selectedSize && (
 					<span className="shrink-0 text-muted-foreground text-xs">
-						{selectedFile.sizeHuman}
+						{selectedSize}
 					</span>
 				)}
 			</span>
@@ -164,10 +169,11 @@ export function QuantizationPicker({
 								friendly && fComp.quality !== null
 									? fComp.label
 									: (f.quant ?? "GGUF");
+							const fSize = modelBytesLabel(f.sizeBytes, f.sizeHuman);
 							return (
 								<SelectItem
 									key={f.filename}
-									textValue={`${f.quant ?? ""} ${f.sizeHuman ?? ""} ${f.fitLabel}`}
+									textValue={`${f.quant ?? ""} ${fSize} ${f.fitLabel}`}
 									value={f.filename}
 								>
 									<span className="flex w-full items-center gap-2">
@@ -190,10 +196,8 @@ export function QuantizationPicker({
 										)}
 										<span className="ms-auto shrink-0 text-muted-foreground text-xs">
 											{isBlockedFit(f.fit)
-												? tl("{sizeHuman} · won't fit", {
-														sizeHuman: f.sizeHuman,
-													})
-												: f.sizeHuman}
+												? tl("{sizeHuman} · won't fit", { sizeHuman: fSize })
+												: fSize}
 										</span>
 									</span>
 								</SelectItem>

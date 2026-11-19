@@ -154,10 +154,10 @@ export function CommunityAgentDetail({
 			hero={
 				<ListingHero
 					badges={[
-						"Agent Template",
+						tl("Agent Template"),
 						card.category,
 						verification,
-						card.firstParty ? "First party" : null,
+						card.firstParty ? tl("First party") : null,
 					].filter((badge): badge is string => Boolean(badge))}
 					icon={
 						<HugeiconsIcon className="size-9 opacity-90" icon={Target01Icon} />

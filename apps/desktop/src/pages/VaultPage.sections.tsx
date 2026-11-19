@@ -15,6 +15,7 @@ import {
 	SettingsCard,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
+import { VaultNewFolder } from "@/src/components/vault/VaultNewFolder.tsx";
 import { VaultValueTypeSelect } from "@/src/components/vault/VaultValueTypeSelect.tsx";
 import { vaultErrorMessage } from "@/src/components/vault/vault-errors.ts";
 import { secretKey } from "@/src/components/vault/vault-view.ts";
@@ -22,6 +23,7 @@ import {
 	SCOPE_COPY,
 	scopeLabel,
 	vaultSavedForCopy,
+	vaultSecretListCaption,
 } from "./VaultPage.model.ts";
 import styles from "./VaultPage.module.css";
 import { SecretRow } from "./VaultPage.secret-row.tsx";
@@ -233,6 +235,7 @@ export function renderVaultSecretForm({
 
 type VaultSecretListInput = Pick<
 	ReturnType<typeof useVaultPageState>,
+	| "activeEnvironment"
 	| "deleteMutation"
 	| "folder"
 	| "folderTree"
@@ -243,12 +246,14 @@ type VaultSecretListInput = Pick<
 	| "setShowDeleted"
 	| "showDeleted"
 	| "state"
+	| "target"
 	| "vaultQuery"
 	| "visibleSecrets"
 > & { tl: LiteralMessage };
 
 /** The scoped secret list with folders and deleted-secret recovery. A plain render call, so the React tree is unchanged. */
 export function renderVaultSecretList({
+	activeEnvironment,
 	deleteMutation,
 	folder,
 	folderTree,
@@ -259,19 +264,14 @@ export function renderVaultSecretList({
 	setShowDeleted,
 	showDeleted,
 	state,
+	target,
 	tl,
 	vaultQuery,
 	visibleSecrets,
 }: VaultSecretListInput) {
 	return (
 		<SettingsSection
-			caption={
-				state?.caller
-					? "Showing the scopes available to " +
-						state.caller.userId +
-						". Select a secret to see its details and history."
-					: "Showing node-local metadata. Sign in to a managed node to see user, team, or organization scopes."
-			}
+			caption={vaultSecretListCaption(tl, state?.caller?.userId)}
 			headerAction={
 				<div className="flex items-center gap-2">
 					<Label
@@ -322,6 +322,12 @@ export function renderVaultSecretList({
 								);
 							})}
 						</ul>
+						<VaultNewFolder
+							environment={activeEnvironment}
+							onCreated={setFolder}
+							parent={folder}
+							target={target}
+						/>
 					</SettingsCard>
 				</nav>
 				<SettingsCard className="divide-y divide-border">

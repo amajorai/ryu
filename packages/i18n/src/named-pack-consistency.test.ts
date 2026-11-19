@@ -76,7 +76,7 @@ describe("official named packs agree with the literal catalogs", () => {
 		expect(german.translate(messageIdForLiteral("Marketplace"))).toBe(
 			"Marktplatz"
 		);
-		expect(german.translate(messageIdForLiteral("Skills"))).toBe("Fähigkeiten");
+		expect(german.translate(messageIdForLiteral("Skills"))).toBe("Skills");
 		expect(
 			german.translate(messageIdForLiteral("Academy"), {}, "Academy")
 		).toBe("Akademie");
@@ -89,9 +89,65 @@ describe("official named packs agree with the literal catalogs", () => {
 		const portuguese = new I18nRuntime([], {
 			initialPackId: "official/pt-br",
 		});
-		expect(portuguese.translate(messageIdForLiteral("Skills"))).toBe(
-			"Habilidades"
-		);
+		expect(portuguese.translate(messageIdForLiteral("Skills"))).toBe("Skills");
+	});
+
+	test("German and Brazilian Portuguese keep the Skills glossary term", () => {
+		for (const [packId, locale] of [
+			["official/de", "de"],
+			["official/pt-br", "pt-BR"],
+		] as const) {
+			const runtime = new I18nRuntime([], { initialPackId: packId });
+			const catalog = readJson(`${locale}.json`);
+			for (const id of [
+				"sidebar.section.skills",
+				"marketplace.section.skills",
+				"marketplace.skills",
+			]) {
+				expect(`${locale} ${id}: ${runtime.translate(id)}`).toBe(
+					`${locale} ${id}: Skills`
+				);
+			}
+			expect(catalog.Skills).toBe("Skills");
+			expect(catalog.Skill).toBe("Skill");
+		}
+	});
+
+	test("French and Spanish Skills sentences name the translated page", () => {
+		const sentences = [
+			"Open Skills",
+			"Open the Skills page from the command palette or the sidebar.",
+		];
+		for (const [locale, term] of [
+			["fr", "Compétences"],
+			["es", "Habilidades"],
+		] as const) {
+			const catalog = readJson(`${locale}.json`);
+			expect(catalog.Skills).toBe(term);
+			for (const source of sentences) {
+				const value = String(catalog[source]);
+				expect(`${locale} ${source}: ${value.includes(term)}`).toBe(
+					`${locale} ${source}: true`
+				);
+			}
+		}
+	});
+
+	test("Ryu Credits stays the brand name in every catalog sentence", () => {
+		const outliers: string[] = [];
+		for (const pack of officialPacks) {
+			const catalog = readJson(`${pack.locale}.json`);
+			for (const [source, value] of Object.entries(catalog)) {
+				if (
+					source.includes("Ryu Credits") &&
+					typeof value === "string" &&
+					!value.includes("Ryu Credits")
+				) {
+					outliers.push(`${pack.locale} ${source}: ${value}`);
+				}
+			}
+		}
+		expect(outliers).toEqual([]);
 	});
 
 	test("English stays English and alignment only overrides existing pack ids", () => {

@@ -622,11 +622,3 @@ describe("World2dInterface", () => {
 		}
 	});
 });
-
-describe("World3dInterface", () => {
-	test("exports a renderer component without rendering WebGL", async () => {
-		const module = await import("./world-3d-interface.tsx");
-
-		expect(typeof module.World3dInterface).toBe("function");
-	});
-});

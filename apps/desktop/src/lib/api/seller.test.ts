@@ -6,11 +6,17 @@ import {
 	expect,
 	it,
 } from "bun:test";
+import { formatMessage, type MessageValuesInput } from "@ryu/i18n";
 import {
 	type AppJsonValue,
 	appJsonValueSchema,
 } from "@ryuhq/core-client/app-request-json.ts";
 import { TOKEN_KEY, vaultHydrated } from "@/lib/auth-client.ts";
+// The provider registers its runtime here; a test registers a stand-in.
+import {
+	registerActiveI18nRuntime,
+	unregisterActiveI18nRuntime,
+} from "../../../../../packages/i18n/src/active-locale.ts";
 import {
 	fetchSellerStatus,
 	hasSellerAuth,
@@ -216,4 +222,26 @@ it("retains classified errors and honestly normalizes unexpected transport failu
 	expect(network.kind).toBe("unknown");
 	expect(network.message).toBe("Network unavailable");
 	expect(toSellerError(null).kind).toBe("unknown");
+});
+it("an unclassified failure without a server message reads in the host language", async () => {
+	const runtime = {
+		direction: "ltr" as const,
+		locale: "de",
+		translate(_id: string, values?: MessageValuesInput, fallback = "") {
+			const rows: Record<string, string> = {
+				"Request failed: {status}": "Anfrage fehlgeschlagen: {status}",
+			};
+			return formatMessage(rows[fallback] ?? fallback, values, "de");
+		},
+	};
+	registerActiveI18nRuntime(runtime);
+	try {
+		responseStatus = 418;
+		response = {};
+		await expect(fetchSellerStatus()).rejects.toThrow(
+			"Anfrage fehlgeschlagen: 418"
+		);
+	} finally {
+		unregisterActiveI18nRuntime(runtime);
+	}
 });

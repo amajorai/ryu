@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import { translate as tr } from "@ryu/i18n/lite";
 import type { InterfaceAgentAct } from "@ryuhq/protocol/interfaces";
 import {
 	ActStation,
@@ -26,8 +27,12 @@ import { QUIZ_3D } from "./quiz-palette.ts";
  * case after the kit's "Likely " when the limit is only estimated).
  */
 export const quizLimitText: LimitText = (act, at) => {
-	const words = at ? `sitting out, back ${at}` : "sitting out";
-	return limitIsLikely(act) ? words : `S${words.slice(1)}`;
+	if (limitIsLikely(act)) {
+		return at
+			? tr("sitting out, back {time}", { time: at })
+			: tr("sitting out");
+	}
+	return at ? tr("Sitting out, back {time}", { time: at }) : tr("Sitting out");
 };
 
 /** The podium lights: progress pips in the show's lamp colours. */

@@ -304,7 +304,7 @@ function CardTable({
 			// Failed cards come back to the pile, not the hand: the person already
 			// chose them, and Send again is the one-click retry.
 			setPile(result.failed.map((failure) => failure.id));
-			const first = result.failed[0]?.message ?? "The send failed.";
+			const first = result.failed[0]?.message ?? tl("The send failed.");
 			setStatus({
 				message:
 					result.failed.length === ids.length

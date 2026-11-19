@@ -171,8 +171,10 @@ async function sessionTarget(ctx: CliContext): Promise<ApiTarget> {
 	const broker = localCore(ctx);
 	const status = await localSession(broker);
 	if (!status.authenticated) {
-		throw new Error(
-			"Sign in on this machine first (`ryu login`): the confirmation is proved on the account the local Core is signed in to."
+		throw new LocalizedError(
+			localize(
+				"Sign in on this machine first (`ryu-cli login`): the confirmation is proved on the account the local Core is signed in to."
+			)
 		);
 	}
 	if (!status.token) {
@@ -200,7 +202,8 @@ const NUMERIC_CODE_ORDER: readonly CliMethod[] = ["totp", "otp", "backup"];
 const NUMERIC_CODE = /^\d+$/;
 const OTHER_CODE_ORDER: readonly CliMethod[] = ["backup", "totp", "otp"];
 
-function chooseMethod(
+/** The factor to confirm with: `--method` when given, else a best guess. */
+export function chooseMethod(
 	offered: string[],
 	requested: string | undefined,
 	givenCode: string | undefined
@@ -212,7 +215,7 @@ function chooseMethod(
 		const parsed = cliMethodSchema.safeParse(requested);
 		if (!parsed.success) {
 			throw new UsageError(
-				localize("--method must be one of {methods}.", {
+				localize("The --method value must be one of {methods}.", {
 					methods: CLI_METHODS.join(", "),
 				})
 			);
@@ -293,7 +296,9 @@ export async function confirmIdentity(
 	);
 	if (given !== undefined && !ONE_TIME_METHODS.has(method)) {
 		throw new UsageError(
-			"Pipe the password on stdin; it is never accepted as an argument."
+			localize(
+				"Pipe the password on stdin; it is never accepted as an argument."
+			)
 		);
 	}
 	let code: string | undefined = given?.trim();

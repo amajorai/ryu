@@ -5,7 +5,8 @@
 // when the command ends; `--watch` restarts it when those values change (see
 // `secrets-watch.ts`). With `--broker` it receives only the credential-broker
 // proxy environment and never a credential (an AI agent session's broker run
-// also gets the `config` values, `secrets-agent-redaction.ts`); with
+// also gets the `config` values, `secrets-agent-redaction.ts`) plus dummy
+// `__ryu_broker__` API keys so SDKs start (`secrets-broker-placeholders.ts`); with
 // `--isolation=container` it runs in a Docker container whose only egress is
 // the broker (`vaultIsolation.ts`).
 
@@ -16,7 +17,7 @@ import {
 	type VaultBrokerSessionInput,
 	vaultAgentBrokerSession,
 } from "@ryuhq/core-client/vault";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { isAgentBrokerRun } from "./secrets-agent-guard.ts";
 import { agentConfigEnvironment } from "./secrets-agent-redaction.ts";
 import { flag, parseDuration, type SecretsArgs } from "./secrets-args.ts";
@@ -30,7 +31,13 @@ import {
 	localBrokerCa,
 	spawnUntilStopped,
 } from "./secrets-broker.ts";
+import {
+	brokerPlaceholderEnv,
+	explicitPlaceholders,
+} from "./secrets-broker-placeholders.ts";
+import { refuseValueLayersWithBroker } from "./secrets-local-env.ts";
 import { agentTarget } from "./secrets-output.ts";
+import { refusePlainEnvDump } from "./secrets-run-dump-guard.ts";
 import { prepareTaggedRun } from "./secrets-run-env.ts";
 import { runEventSource, runWatching } from "./secrets-watch.ts";
 import { type CliContext, UsageError } from "./types.ts";
@@ -60,7 +67,20 @@ export async function runWithSecrets(
 	) {
 		throw new UsageError("--image and --mount need --isolation=container.");
 	}
+	const placeholders = explicitPlaceholders(args);
+	if (
+		!args.values.has("--broker") &&
+		(placeholders.length > 0 || args.booleans.has("--no-placeholders"))
+	) {
+		throw new UsageError("--placeholder and --no-placeholders need --broker.");
+	}
+	if (container && placeholders.length > 0) {
+		ctx.io.err(
+			`${tr("ryu: --placeholder is not applied inside a container; the command gets only the proxy environment.")}\n`
+		);
+	}
 	if (args.values.has("--broker")) {
+		refuseValueLayersWithBroker(args);
 		if (brokerServices(args).length === 0) {
 			throw new UsageError("--broker needs at least one service name.");
 		}
@@ -70,9 +90,10 @@ export async function runWithSecrets(
 			);
 		}
 		if (args.booleans.has("--watch")) {
-			ctx.io.err(
-				"The broker reads current values on every request, so --watch is not needed with --broker.\n"
+			const notice = tr(
+				"The broker reads current values on every request, so --watch is not needed with --broker."
 			);
+			ctx.io.err(`${notice}\n`);
 		}
 		// Container mode hands this environment to the host `docker` CLI (which
 		// needs DOCKER_* configuration), never to the isolated command. A host
@@ -100,6 +121,10 @@ async function runWithValues(
 	args: SecretsArgs,
 	command: string[]
 ): Promise<number> {
+	const refused = refusePlainEnvDump(ctx, args, command);
+	if (refused !== null) {
+		return refused;
+	}
 	const guard = guardSignals(ctx.containerHost ?? defaultContainerHost());
 	try {
 		if (args.booleans.has("--watch")) {
@@ -142,7 +167,7 @@ async function withBrokerSession(
 ): Promise<number> {
 	const input: VaultBrokerSessionInput = {
 		services: brokerServices(args),
-		label: `ryu secrets run ${command[0] ?? ""}`.trim(),
+		label: `ryu-cli secrets run ${command[0] ?? ""}`.trim(),
 	};
 	const environment = flag(args, "--env");
 	const ttl = flag(args, "--ttl");
@@ -159,16 +184,20 @@ async function withBrokerSession(
 	try {
 		const { proxy } = grant;
 		if (!proxy) {
-			ctx.io.err(
-				"The credential broker is not listening on this node, so no proxy environment is available.\n"
+			const notice = tr(
+				"The credential broker is not listening on this node, so no proxy environment is available."
 			);
+			ctx.io.err(`${notice}\n`);
 			return 1;
 		}
 		if (!brokerProxyReachable(ctx, proxy)) {
-			ctx.io.err(
-				"The broker proxy listens only on the node's loopback interface, so it is not reachable from this host.\n" +
-					"Run this command on the node, or tunnel the proxy port (for example `ssh -L`) and target the node through that tunnel.\n"
+			const unreachable = tr(
+				"The broker proxy listens only on the node's loopback interface, so it is not reachable from this host."
 			);
+			const remedy = tr(
+				"Run this command on the node, or tunnel the proxy port (for example `ssh -L`) and target the node through that tunnel."
+			);
+			ctx.io.err(`${unreachable}\n${remedy}\n`);
 			return 1;
 		}
 		return await body(grant, proxy);
@@ -209,25 +238,24 @@ async function runWithBroker(
 		: {};
 	const guard = guardSignals(ctx.containerHost ?? defaultContainerHost());
 	try {
-		return await withBrokerSession(
-			ctx,
-			args,
-			command,
-			async (_grant, proxy) => {
-				guard.throwIfCancelled();
-				const ca = await localBrokerCa(ctx, proxy);
-				const env = { ...baseEnv, ...config };
-				for (const [key, value] of Object.entries(proxy.env)) {
-					env[key] = ca.replacements.get(value) ?? value;
-				}
-				try {
-					guard.throwIfCancelled();
-					return await spawnUntilStopped(ctx, guard, command, env);
-				} finally {
-					await ca.cleanup();
-				}
+		return await withBrokerSession(ctx, args, command, async (grant, proxy) => {
+			guard.throwIfCancelled();
+			const ca = await localBrokerCa(ctx, proxy);
+			const env = { ...baseEnv, ...config };
+			for (const [key, value] of Object.entries(proxy.env)) {
+				env[key] = ca.replacements.get(value) ?? value;
 			}
-		);
+			Object.assign(
+				env,
+				await brokerPlaceholderEnv(ctx, args, grant.session.services, env)
+			);
+			try {
+				guard.throwIfCancelled();
+				return await spawnUntilStopped(ctx, guard, command, env);
+			} finally {
+				await ca.cleanup();
+			}
+		});
 	} catch (error) {
 		if (error instanceof IsolationCancelledError) {
 			ctx.io.err(

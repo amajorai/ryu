@@ -17,7 +17,7 @@ import {
 	useSetInputFocused,
 	useShellKeyboardCaptured,
 } from "../../core/InputFocusContext.tsx";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 import { useOverlay } from "../../overlays/OverlayHost.tsx";
 import {
 	fieldsForEngine,
@@ -348,7 +348,7 @@ export function AgentEditView({
 					: AGENT_IDENTITY_MODE_OPTIONS[identityMode].title;
 			case "accountAccess":
 				return remotePeer
-					? "not used on this node"
+					? tr("not used on this node")
 					: accountAccessHeadline(accountAccess);
 		}
 	};

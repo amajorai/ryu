@@ -240,29 +240,33 @@
       {
         "id": "@ryu/monitors#alert.raised",
         "title": "Monitor alert raised",
-        "description": "A scheduled (or run-now) check tripped its alert condition and the alert was stored. Fires once per transition, not once per check. `kind` identifies transitions including `uptime_down` / `uptime_up` / `keyword` / `content_change` / `price` / `stock` / `usage_reset`.",
+        "description": "A scheduled (or run-now) check tripped its alert condition and the alert was stored. Fires once per transition, not once per check. `kind` identifies transitions including `uptime_down` / `uptime_up` / `keyword` / `content_change` / `price` / `stock` / `usage_reset`. An `uptime_down` raised by a failed fetch also carries the `reason_code` and the typed cause fields described for `check.failed`, and its `message` is the cause's own sentence.",
         "payload_example": {
           "alert_id": 42,
           "monitor_id": "mon_9f2c1b7a4e5d4f0a8c3b6d1e7f905a2c",
-          "monitor_name": "Concert tickets",
-          "url": "https://example.com/tickets",
-          "kind": "stock",
-          "title": "Now in stock",
-          "message": "On HTTP 200",
-          "value": "in_stock",
-          "created_at": "2026-08-01T10:15:00Z"
+          "monitor_name": "Shop uptime",
+          "url": "https://example.com/",
+          "kind": "uptime_down",
+          "title": "Site down",
+          "message": "The site's domain could not be found.",
+          "value": "down",
+          "created_at": "2026-08-01T10:15:00Z",
+          "reason_code": "dns_failed",
+          "elapsed_ms": 38
         }
       },
       {
         "id": "@ryu/monitors#check.failed",
         "title": "Monitor check failed",
-        "description": "A check could not complete — the fetch failed, the crawler was unavailable, or the price/region regex matched nothing — so the site was never actually evaluated. The watch is broken, not the watched page. Unlike an alert this is NOT transition-gated: a monitor that keeps failing emits this on EVERY run until it is fixed. Uptime checks never emit it, because for them a failed fetch is the signal (`uptime_down`) rather than an error.",
+        "description": "A check could not complete (the fetch failed, the crawler was unavailable, or the price/region regex matched nothing), so the site was never actually evaluated. The watch is broken, not the watched page. Unlike an alert this is NOT transition-gated: a monitor that keeps failing emits this on EVERY run until it is fixed. Uptime checks never emit it, because for them a failed fetch is the signal (`uptime_down`) rather than an error. `reason` is the sentence shown in the check history. `reason_code` is a stable machine code for the cause, one of: `egress_blocked_host`, `punycode`, `dns_failed`, `unreachable`, `unreadable`, `bad_redirect`, `too_many_redirects`, `invalid_url`, `fetch_failed`, `spider_failed`, `spider_unavailable`, `backend_unavailable`, `price_no_match`, `price_unreadable`, `usage_no_targets`, `usage_read_failed`, `usage_invalid_response`, `usage_account_not_found`, `usage_unsupported`, `usage_not_logged_in`, `usage_token_expired`, `usage_missing_scope`, `usage_no_plan`, `usage_rate_limited`, `usage_unavailable`, `usage_other_account`, `usage_target_gone`, `check_failed`. The payload never carries upstream error text. Besides `reason_code`, it describes the cause only with typed fields: `http_status` when the page answered, `elapsed_ms` when a request was attempted, and `target_id` for the usage window or credit meter that is no longer reported.",
         "payload_example": {
           "monitor_id": "mon_9f2c1b7a4e5d4f0a8c3b6d1e7f905a2c",
           "monitor_name": "Laptop price",
           "url": "https://example.com/laptop",
-          "reason": "price regex '\\$([0-9.,]+)' did not match",
-          "checked_at": "2026-08-01T10:15:00Z"
+          "reason": "The site's domain could not be found.",
+          "checked_at": "2026-08-01T10:15:00Z",
+          "reason_code": "dns_failed",
+          "elapsed_ms": 41
         }
       }
     ],

@@ -1,4 +1,4 @@
-import { translate } from "@ryu/i18n/core";
+import { translateMessage as tm, translate } from "@ryu/i18n/core";
 import {
 	isNativeNumber,
 	isNativeText,
@@ -222,7 +222,7 @@ export const toolRegistry: ToolMetadataRegistry = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? tl("Reading") : tl("Read");
+			return isPending ? tl("Reading") : tm("tools.readDone", {}, "Read");
 		},
 		subtitle: (part) => {
 			const filePath =

@@ -273,6 +273,7 @@
   "Replay, regenerate or download a take, or send its script and settings back to the Studio.": "أعد تشغيل تسجيل أو أعد إنشاءه أو نزّله، أو أرسل نصه وإعداداته إلى الاستوديو.",
   "Reroll": "إعادة التوليد",
   "Reset to defaults": "إعادة التعيين إلى الافتراضي",
+  "Respell words the engine gets wrong. Entries match whole words; write {syntax} in a script for a one-off.": "أعد تهجئة الكلمات التي يخطئ المحرك في نطقها. تطابق الإدخالات الكلمات الكاملة؛ اكتب {syntax} في النص لاستخدامه مرة واحدة.",
   "Retry part {part}": "إعادة محاولة الجزء {part}",
   "Reverb": "تردّد الصدى",
   "Robotic": "آلي",

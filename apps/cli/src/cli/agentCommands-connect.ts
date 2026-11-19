@@ -1,6 +1,6 @@
 // `ryu connect <agent>`: add Ryu's MCP entry to a coding agent's config.
 
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import {
 	BIN,
 	connectionTarget,
@@ -139,10 +139,10 @@ export const connectCommand: Command = {
 			}
 			const verb =
 				action === "create"
-					? "add"
+					? tr("add")
 					: action === "update"
-						? "replace"
-						: "leave unchanged";
+						? tr("replace")
+						: tr("leave unchanged");
 			ctx.io.out(
 				tf(
 					"Dry run — would {verb} the '{MCP_SERVER_NAME}' MCP server in {configPath}:\n{snippet}",
@@ -189,7 +189,7 @@ export const connectCommand: Command = {
 					MCP_SERVER_NAME,
 					mcpUrl: target.mcpUrl,
 					configPath,
-					reloadHint: agent.reloadHint,
+					reloadHint: tr(agent.reloadHint),
 				}
 			)}\n`
 		);
@@ -203,7 +203,7 @@ export const connectCommand: Command = {
 						configPath,
 						mode: modeLabel(priorMode),
 						groupWarning: groupReadable
-							? " That file is readable by other users; consider chmod 600."
+							? ` ${tr("That file is readable by other users; consider chmod 600.")}`
 							: "",
 						TOKEN_ENV_VAR,
 					}

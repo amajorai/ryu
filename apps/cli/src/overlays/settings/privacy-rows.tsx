@@ -2,7 +2,7 @@
 
 import { TextInput } from "@/components/ui/text-input.tsx";
 import type { useTheme } from "@/components/ui/theme-provider.tsx";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 import { type PrivacyPreferences, ROWS } from "./privacy-preferences.ts";
 
 /** One row per privacy preference, with the selected row's description. */
@@ -55,22 +55,22 @@ export function PrivacyRows({
 					description = "Separate consent tier; enabled by default.";
 				} else if (row === "diagnosticsExport") {
 					label = "Diagnostics export";
-					value = preferences.diagnosticsExport ? "ON" : "OFF · opt-in";
+					value = preferences.diagnosticsExport ? "ON" : tr("OFF · opt-in");
 					description =
 						"Core and Gateway export local traces to your endpoint.";
 				} else if (row === "diagnosticsEndpoint") {
 					label = "OTLP endpoint";
 					value = editingEndpoint
-						? "editing"
-						: preferences.diagnosticsEndpoint || "not set";
+						? tr("editing")
+						: preferences.diagnosticsEndpoint || tr("not set");
 					description =
 						"No destination means diagnostics remain local-only. Press t to send a test span.";
 				} else if (row === "diagnosticsContentMode") {
 					label = "Content mode";
 					value =
 						preferences.diagnosticsContentMode === "content"
-							? "Full content"
-							: "Metadata only";
+							? tr("Full content")
+							: tr("Metadata only");
 					description =
 						preferences.diagnosticsContentMode === "content"
 							? "Prompts, responses, and tool data leave this device for your collector."

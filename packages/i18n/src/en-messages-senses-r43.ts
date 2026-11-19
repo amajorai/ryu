@@ -1,0 +1,255 @@
+/**
+ * Round 43 word senses, merged by `en-messages-senses.ts` into
+ * `EN_SENSE_MESSAGES` and `OFFICIAL_SENSE_MESSAGES` like
+ * `en-messages-senses-more.ts`. Same contract: the English stays exactly as
+ * written, ids stay stable, and no translation repeats the English word.
+ *
+ * - `clips.startRecording` / `clips.stopRecording`: the Clips screen
+ *   recorder (video, ja 録画); the bare words are audio recording (ja 録音).
+ * - `workflows.startRecording`: Workflows records the steps of a desktop task
+ *   (ja 記録を開始), neither audio nor a video clip.
+ * - `devices.foreground`: a paired phone with the Ryu app open right now; the
+ *   bare "Open now" is open for entries (ja 受付中, fr "Ouverts").
+ * - `forms.addQuestion` / `forms.removeQuestion` / `forms.questionBlocks`: a
+ *   form's survey questions; the bare words are exam items (ja 問題) and an
+ *   FAQ heading (ja よくある質問, zh-CN 常见问题).
+ * - `missionControl.touchNew` / `touchEdit` / `touchRead`: what a turn did to
+ *   a file (created, edited, read), not the create, edit and read verbs.
+ * - `news.storiesTab` / `news.savedTab`: News headings for clustered news
+ *   stories and saved articles; the bare "Stories" is a tale (de
+ *   "Geschichten") and "Saved" the save status (ja 保存しました).
+ * - `projects.dueDate`: a project deadline; the bare "Due date" is an
+ *   invoice's payment date (ja 支払期日, ru "Срок оплаты").
+ * - `showcase.thisWeek`: a dashboard mockup's neutral period; the bare "this
+ *   week" is a pitch's deadline fragment (ja 今週中に).
+ * - `time.notYet`: a timestamp or step not reached yet; the bare "Not yet" is
+ *   a dismiss button (ja 後で, fr "Pas maintenant").
+ * - `tracking.inTransit`: a parcel on its way; the bare "On the way" is a
+ *   processing status (ja 処理中, de "In Bearbeitung").
+ */
+export const EN_SENSE_MESSAGES_R43 = {
+	"clips.startRecording": "Start recording",
+	"clips.stopRecording": "Stop recording",
+	"devices.foreground": "Open now",
+	"forms.addQuestion": "Add a question",
+	"forms.questionBlocks": "Questions",
+	"forms.removeQuestion": "Remove question",
+	"missionControl.touchEdit": "edit",
+	"missionControl.touchNew": "new",
+	"missionControl.touchRead": "read",
+	"news.savedTab": "Saved",
+	"news.storiesTab": "Stories",
+	"projects.dueDate": "Due date",
+	"showcase.thisWeek": "this week",
+	"time.notYet": "Not yet",
+	"tracking.inTransit": "On the way",
+	"workflows.startRecording": "Start recording",
+} as const;
+
+type R43SenseMessages = Readonly<
+	Record<keyof typeof EN_SENSE_MESSAGES_R43, string>
+>;
+
+/** Each sense above in each official pack locale. */
+export const OFFICIAL_SENSE_MESSAGES_R43: Readonly<
+	Record<string, R43SenseMessages>
+> = {
+	ar: {
+		"clips.startRecording": "بدء تسجيل الشاشة",
+		"clips.stopRecording": "إيقاف تسجيل الشاشة",
+		"devices.foreground": "التطبيق مفتوح",
+		"forms.addQuestion": "إضافة سؤال",
+		"forms.questionBlocks": "الأسئلة",
+		"forms.removeQuestion": "إزالة السؤال",
+		"missionControl.touchEdit": "معدّل",
+		"missionControl.touchNew": "جديد",
+		"missionControl.touchRead": "مقروء",
+		"news.savedTab": "المحفوظات",
+		"news.storiesTab": "القصص الإخبارية",
+		"projects.dueDate": "الموعد النهائي",
+		"showcase.thisWeek": "هذا الأسبوع",
+		"time.notYet": "ليس بعد",
+		"tracking.inTransit": "في الطريق",
+		"workflows.startRecording": "بدء تسجيل الخطوات",
+	},
+	de: {
+		"clips.startRecording": "Aufnahme starten",
+		"clips.stopRecording": "Aufnahme beenden",
+		"devices.foreground": "App geöffnet",
+		"forms.addQuestion": "Frage hinzufügen",
+		"forms.questionBlocks": "Fragen",
+		"forms.removeQuestion": "Frage entfernen",
+		"missionControl.touchEdit": "geändert",
+		"missionControl.touchNew": "neu",
+		"missionControl.touchRead": "gelesen",
+		"news.savedTab": "Merkliste",
+		"news.storiesTab": "Meldungen",
+		"projects.dueDate": "Fälligkeitsdatum",
+		"showcase.thisWeek": "diese Woche",
+		"time.notYet": "Noch nicht",
+		"tracking.inTransit": "Unterwegs",
+		"workflows.startRecording": "Aufzeichnung starten",
+	},
+	es: {
+		"clips.startRecording": "Iniciar grabación",
+		"clips.stopRecording": "Detener grabación",
+		"devices.foreground": "App abierta",
+		"forms.addQuestion": "Agregar una pregunta",
+		"forms.questionBlocks": "Preguntas",
+		"forms.removeQuestion": "Quitar pregunta",
+		"missionControl.touchEdit": "editado",
+		"missionControl.touchNew": "nuevo",
+		"missionControl.touchRead": "leído",
+		"news.savedTab": "Guardados",
+		"news.storiesTab": "Noticias",
+		"projects.dueDate": "Fecha límite",
+		"showcase.thisWeek": "esta semana",
+		"time.notYet": "Todavía no",
+		"tracking.inTransit": "En camino",
+		"workflows.startRecording": "Iniciar grabación",
+	},
+	fr: {
+		"clips.startRecording": "Démarrer l’enregistrement",
+		"clips.stopRecording": "Arrêter l’enregistrement",
+		"devices.foreground": "App ouverte",
+		"forms.addQuestion": "Ajouter une question",
+		"forms.questionBlocks": "Types de questions",
+		"forms.removeQuestion": "Supprimer la question",
+		"missionControl.touchEdit": "modifié",
+		"missionControl.touchNew": "nouveau",
+		"missionControl.touchRead": "lu",
+		"news.savedTab": "Enregistrés",
+		"news.storiesTab": "Articles",
+		"projects.dueDate": "Échéance",
+		"showcase.thisWeek": "cette semaine",
+		"time.notYet": "Pas encore",
+		"tracking.inTransit": "En route",
+		"workflows.startRecording": "Démarrer l’enregistrement",
+	},
+	hi: {
+		"clips.startRecording": "रिकॉर्डिंग शुरू करें",
+		"clips.stopRecording": "रिकॉर्डिंग बंद करें",
+		"devices.foreground": "ऐप खुला है",
+		"forms.addQuestion": "प्रश्न जोड़ें",
+		"forms.questionBlocks": "प्रश्न",
+		"forms.removeQuestion": "प्रश्न हटाएँ",
+		"missionControl.touchEdit": "संपादित",
+		"missionControl.touchNew": "नया",
+		"missionControl.touchRead": "पढ़ा",
+		"news.savedTab": "सहेजे गए",
+		"news.storiesTab": "ख़बरें",
+		"projects.dueDate": "नियत तारीख",
+		"showcase.thisWeek": "इस हफ़्ते",
+		"time.notYet": "अभी तक नहीं",
+		"tracking.inTransit": "रास्ते में",
+		"workflows.startRecording": "रिकॉर्डिंग शुरू करें",
+	},
+	it: {
+		"clips.startRecording": "Avvia registrazione",
+		"clips.stopRecording": "Interrompi registrazione",
+		"devices.foreground": "App aperta",
+		"forms.addQuestion": "Aggiungi una domanda",
+		"forms.questionBlocks": "Domande",
+		"forms.removeQuestion": "Rimuovi domanda",
+		"missionControl.touchEdit": "modificato",
+		"missionControl.touchNew": "nuovo",
+		"missionControl.touchRead": "letto",
+		"news.savedTab": "Salvati",
+		"news.storiesTab": "Notizie",
+		"projects.dueDate": "Scadenza",
+		"showcase.thisWeek": "questa settimana",
+		"time.notYet": "Non ancora",
+		"tracking.inTransit": "In viaggio",
+		"workflows.startRecording": "Avvia registrazione",
+	},
+	ja: {
+		"clips.startRecording": "録画を開始",
+		"clips.stopRecording": "録画を停止",
+		"devices.foreground": "アプリを使用中",
+		"forms.addQuestion": "質問を追加",
+		"forms.questionBlocks": "質問",
+		"forms.removeQuestion": "質問を削除",
+		"missionControl.touchEdit": "編集",
+		"missionControl.touchNew": "新規",
+		"missionControl.touchRead": "読取",
+		"news.savedTab": "保存済み",
+		"news.storiesTab": "ニュース",
+		"projects.dueDate": "期限",
+		"showcase.thisWeek": "今週",
+		"time.notYet": "まだ",
+		"tracking.inTransit": "配送中",
+		"workflows.startRecording": "記録を開始",
+	},
+	ko: {
+		"clips.startRecording": "녹화 시작",
+		"clips.stopRecording": "녹화 중지",
+		"devices.foreground": "앱 사용 중",
+		"forms.addQuestion": "질문 추가",
+		"forms.questionBlocks": "질문",
+		"forms.removeQuestion": "질문 삭제",
+		"missionControl.touchEdit": "수정",
+		"missionControl.touchNew": "신규",
+		"missionControl.touchRead": "읽음",
+		"news.savedTab": "저장한 항목",
+		"news.storiesTab": "뉴스",
+		"projects.dueDate": "마감일",
+		"showcase.thisWeek": "이번 주",
+		"time.notYet": "아직",
+		"tracking.inTransit": "배송 중",
+		"workflows.startRecording": "기록 시작",
+	},
+	"pt-BR": {
+		"clips.startRecording": "Iniciar gravação",
+		"clips.stopRecording": "Parar gravação",
+		"devices.foreground": "App aberto",
+		"forms.addQuestion": "Adicionar uma pergunta",
+		"forms.questionBlocks": "Perguntas",
+		"forms.removeQuestion": "Remover pergunta",
+		"missionControl.touchEdit": "editado",
+		"missionControl.touchNew": "novo",
+		"missionControl.touchRead": "lido",
+		"news.savedTab": "Salvos",
+		"news.storiesTab": "Matérias",
+		"projects.dueDate": "Prazo",
+		"showcase.thisWeek": "esta semana",
+		"time.notYet": "Ainda não",
+		"tracking.inTransit": "A caminho",
+		"workflows.startRecording": "Iniciar gravação",
+	},
+	ru: {
+		"clips.startRecording": "Начать запись",
+		"clips.stopRecording": "Остановить запись",
+		"devices.foreground": "Приложение открыто",
+		"forms.addQuestion": "Добавить вопрос",
+		"forms.questionBlocks": "Вопросы",
+		"forms.removeQuestion": "Удалить вопрос",
+		"missionControl.touchEdit": "изменён",
+		"missionControl.touchNew": "новый",
+		"missionControl.touchRead": "прочитан",
+		"news.savedTab": "Сохранённые",
+		"news.storiesTab": "Сюжеты",
+		"projects.dueDate": "Срок",
+		"showcase.thisWeek": "на этой неделе",
+		"time.notYet": "Ещё нет",
+		"tracking.inTransit": "В пути",
+		"workflows.startRecording": "Начать запись",
+	},
+	"zh-CN": {
+		"clips.startRecording": "开始录制",
+		"clips.stopRecording": "停止录制",
+		"devices.foreground": "应用已打开",
+		"forms.addQuestion": "添加题目",
+		"forms.questionBlocks": "问题",
+		"forms.removeQuestion": "移除题目",
+		"missionControl.touchEdit": "已改",
+		"missionControl.touchNew": "新建",
+		"missionControl.touchRead": "已读",
+		"news.savedTab": "已收藏",
+		"news.storiesTab": "报道",
+		"projects.dueDate": "截止日期",
+		"showcase.thisWeek": "本周",
+		"time.notYet": "尚未",
+		"tracking.inTransit": "运输中",
+		"workflows.startRecording": "开始录制",
+	},
+};

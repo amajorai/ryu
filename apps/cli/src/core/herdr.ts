@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CLI_TRANSLATOR, type CliTranslator } from "../i18n/translate.ts";
 import type { ChatStreamOptions } from "./chatStream.ts";
 
 function invalidResumeArgument(value: string): boolean {
@@ -55,9 +56,14 @@ export function herdrText(value: string, limit = HERDR_TEXT_LIMIT): string {
 }
 
 /** The blocked-on-error attention message for a failed chat turn. */
-export function herdrErrorMessage(message: string): string {
-	const detail = herdrText(message, HERDR_TEXT_LIMIT - "Error: ".length);
-	return detail ? `Error: ${detail}` : "Error";
+export function herdrErrorMessage(
+	message: string,
+	translator: Pick<CliTranslator, "tf" | "tr"> = CLI_TRANSLATOR
+): string {
+	const { tf, tr } = translator;
+	const prefix = tf("Error: {message}", { message: "" });
+	const detail = herdrText(message, HERDR_TEXT_LIMIT - [...prefix].length);
+	return detail ? tf("Error: {message}", { message: detail }) : tr("Error");
 }
 
 /** Display-only pane metadata: the conversation title and its model. */

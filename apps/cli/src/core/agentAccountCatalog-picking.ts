@@ -1,6 +1,7 @@
 // Pure picking helpers for the agent account catalog (see ./agentAccountCatalog.ts).
 
-import { tf } from "../i18n/translate.ts";
+import { formatCliList } from "../i18n/format.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import type {
 	AvailableAccount,
 	AvailableAccounts,
@@ -87,7 +88,7 @@ export function accountLimitStartBlocked(
 	if (failed.length === 0) {
 		return null;
 	}
-	const names = failed.map((entry) => entry.title).join(", ");
+	const names = formatCliList(failed.map((entry) => tr(entry.title)));
 	return tf(
 		"Couldn't load {names}, so a limit started now would also take those accounts away. Nothing was changed; try again once they load.",
 		{ names }

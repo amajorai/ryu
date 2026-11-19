@@ -13,6 +13,9 @@ pub(super) struct AcpLaunch {
     pub(super) additional_directories: Vec<PathBuf>,
     pub(super) environment: Vec<(String, String)>,
     pub(super) account_confinement: crate::agent_access::AccountConfinement,
+    /// The resolved agent id the instance serves (the pool's agent key);
+    /// selects the run's agent identity for the credential broker.
+    pub(super) agent_id: String,
 }
 
 /// The credentials a new instance's grants are issued from.
@@ -37,6 +40,7 @@ pub(super) fn spawn_unpooled(
         additional_directories,
         environment,
         account_confinement,
+        agent_id,
     } = launch;
     let mut released_slot = false;
     // A fresh context turn must not leave the old pooled sender eligible for
@@ -85,6 +89,7 @@ pub(super) fn spawn_unpooled(
             turns_rx,
             None,
             account_confinement,
+            agent_id,
         )
         .await
         {
@@ -229,6 +234,7 @@ pub(super) fn spawn_pooled(
         additional_directories,
         environment,
         account_confinement,
+        agent_id,
     } = launch;
     let spawn_cmd_task = spawn_cmd.clone();
     let cwd_task = cwd.clone();
@@ -276,6 +282,7 @@ pub(super) fn spawn_pooled(
             turns_rx,
             Some(activity_task),
             account_confinement,
+            agent_id,
         )
         .await
         {

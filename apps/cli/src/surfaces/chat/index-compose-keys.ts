@@ -16,8 +16,8 @@ import {
 	shouldCollapsePaste,
 } from "../../core/composerPaste.ts";
 import { deleteConversation } from "../../core/conversations.ts";
-import { nativeErrorMessage as errText } from "../../core/native-errors.ts";
 import { nextPrompt, previousPrompt } from "../../core/promptHistory.ts";
+import { failureText as errText } from "../../i18n/failure-text.ts";
 import { tf } from "../../i18n/translate.ts";
 import type { ChatSurfaceContext } from "./index-context.ts";
 import { transcriptScrollForKey } from "./transcriptScroll.tsx";

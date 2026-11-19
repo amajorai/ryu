@@ -184,6 +184,7 @@ describe("onboarding profile job recipes", () => {
 			});
 			expect(job.agentSuggestions).toEqual([]);
 			expect(job.background).toBe(false);
+			expect(job.errorCode).toBeNull();
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
@@ -215,6 +216,34 @@ describe("onboarding profile job recipes", () => {
 			expect(current.background).toBe(false);
 			const older = await startProfileJob(target, input);
 			expect(older.background).toBe(true);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	test("keeps the stable error code of a failed build", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = fixtureFetch(
+			async () =>
+				Response.json({
+					error: "profile job expired; start onboarding again",
+					errorCode: "expired",
+					id: "job-5",
+					state: "failed",
+				}),
+			originalFetch
+		);
+
+		try {
+			const job = await startProfileJob(target, {
+				cloudSelection: EMPTY_AGENT_SELECTION,
+				importedConversationIds: [],
+				recentDays: 90,
+				shareUserOrg: false,
+				sourceIds: [],
+			});
+			expect(job.errorCode).toBe("expired");
+			expect(job.error).toBe("profile job expired; start onboarding again");
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

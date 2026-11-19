@@ -8,9 +8,11 @@
 // helpers are pure and exported.
 
 import { describe, expect, test } from "bun:test";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	isMergedHistoryId,
 	mergedHistorySource,
+	threadHeading,
 } from "./useMergedAgentThreads.ts";
 
 describe("merged history ids", () => {
@@ -34,5 +36,20 @@ describe("merged history ids", () => {
 		expect(mergedHistorySource("merged:conv-abc:acp:session:9")).toBe(
 			"conv-abc"
 		);
+	});
+});
+
+describe("thread headings", () => {
+	test("the caps are worded by the translator the hook passes in", () => {
+		const tl: LiteralMessage = (source, values) =>
+			`[${source}]${values ? JSON.stringify(values) : ""}`;
+		expect(
+			threadHeading({ droppedThreads: 2, title: "Plan", truncated: true }, tl)
+		).toBe(
+			'**Plan** · _[{count, plural, one {# older thread not shown} other {# older threads not shown}}]{"count":2} · [earlier messages in this thread not shown]_'
+		);
+		expect(
+			threadHeading({ droppedThreads: 0, title: "Plan", truncated: false }, tl)
+		).toBe("**Plan**");
 	});
 });

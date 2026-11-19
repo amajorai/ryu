@@ -277,6 +277,9 @@ test("docs, related and compare links resolve to their real destinations", () =>
 	expect(related).toContain('href="/guides/fixture"');
 	expect(related).toContain(`href="${docsHref("/docs/core")}"`);
 	expect(related).toContain(">Guide<");
+	// The guide chip is the article noun (keyed `kb.guideKind`), kept away
+	// from the DOM localizer's bare "Guide" verb.
+	expect(related).toContain('<span data-ryu-i18n="off">Guide</span>');
 
 	expect(compareHref("cursor")).toBe("/compare/cursor");
 	const compare = renderToStaticMarkup(

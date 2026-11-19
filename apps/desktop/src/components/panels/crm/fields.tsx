@@ -50,6 +50,7 @@ import {
 } from "@/src/lib/timezone.ts";
 import { CrmSelectOption } from "./crm-label.tsx";
 import { currencyInputValue, parseCurrencyCents } from "./currency-input.ts";
+import { localizedRecordTitle } from "./record-title-label.ts";
 
 /** Shown wherever a value is absent. One constant so an empty cell, an empty
  *  detail row and an empty card line are visibly the same kind of nothing. */
@@ -485,7 +486,7 @@ export function recordTitle(
 	titleField: Field | undefined
 ): string {
 	if (title && title.trim() !== "") {
-		return title;
+		return localizedRecordTitle(title, values);
 	}
 	if (titleField && values) {
 		const raw = values[titleField.slug];

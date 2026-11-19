@@ -1,5 +1,7 @@
 /* eslint-disable react/no-unknown-property */
+
 import { Html } from "@react-three/drei";
+import { translate as tr } from "@ryu/i18n/lite";
 import type { InterfaceAgentAct } from "@ryuhq/protocol/interfaces";
 import {
 	type LimitText,
@@ -150,10 +152,14 @@ export function deniedOf(act: InterfaceAgentAct): boolean {
 
 /** The limit in the passport's words: "Border closed till 15:10". */
 export const borderClosed: LimitText = (act, clearsAt) => {
-	const words = clearsAt ? `border closed till ${clearsAt}` : "border closed";
-	return limitIsLikely(act)
-		? words
-		: `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+	if (limitIsLikely(act)) {
+		return clearsAt
+			? tr("border closed till {time}", { time: clearsAt })
+			: tr("border closed");
+	}
+	return clearsAt
+		? tr("Border closed till {time}", { time: clearsAt })
+		: tr("Border closed");
 };
 
 /**
@@ -161,10 +167,10 @@ export const borderClosed: LimitText = (act, clearsAt) => {
  * words: "Opens 15:10" (or "Closed" with no reset time).
  */
 export const borderOpens: LimitText = (act, clearsAt) => {
-	const words = clearsAt ? `opens ${clearsAt}` : "closed";
-	return limitIsLikely(act)
-		? words
-		: `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+	if (limitIsLikely(act)) {
+		return clearsAt ? tr("opens {time}", { time: clearsAt }) : tr("closed");
+	}
+	return clearsAt ? tr("Opens {time}", { time: clearsAt }) : tr("Closed");
 };
 
 /**

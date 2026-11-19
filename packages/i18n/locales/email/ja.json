@@ -1,5 +1,4 @@
 {
-  "1 second": "1 秒",
   "A Ryu credential was exposed publicly": "Ryu の認証情報が公開されました",
   "A Ryu internal organization crossed the {level} threshold. It was not throttled or suspended automatically.": "Ryu 内部組織が {level} のしきい値を超えました。自動的なスロットリングや停止は行われていません。",
   "A child safety case was opened": "児童保護ケースが開始されました",
@@ -656,7 +655,10 @@
   "{amount} in Ryu Credits": "{amount} 分の Ryu Credits",
   "{amount} is now available in your Ryu balance": "Ryu の残高で {amount} が利用可能になりました",
   "{code} is your Ryu for Students code": "{code} は Ryu for Students のコードです",
+  "{count, plural, one {# hour} other {# hours}}": "{count, plural, other {# 時間}}",
+  "{count, plural, one {# minute} other {# minutes}}": "{count, plural, other {# 分}}",
   "{count, plural, one {# seat in {organizationName} is unassigned} other {# seats in {organizationName} are unassigned}}": "{count, plural, =1 {{organizationName} に未割り当てのシートが # 件あります} other {{organizationName} に未割り当てのシートが # 件あります}}",
+  "{count, plural, one {# second} other {# seconds}}": "{count, plural, other {#秒}}",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month} and cost {cost}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, other {# 個のエージェントが}} {month} のほぼ毎日稼働し、{cost} のコストがかかりました。意図したものであれば、対応は不要です。誤って稼働したままになっている場合は、Ryu の「エージェント」ビューから一時停止できます。",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, other {# 個のエージェントが}} {month} のほぼ毎日稼働しました。意図したものであれば、対応は不要です。誤って稼働したままになっている場合は、Ryu の「エージェント」ビューから一時停止できます。",
   "{didntAsk} Someone may have your session. Ignore this link, then change your password and sign out your other devices from Settings.": "{didntAsk} 誰かがあなたのセッションを使用している可能性があります。このリンクを無視し、パスワードを変更して、設定から他のデバイスをサインアウトしてください。",

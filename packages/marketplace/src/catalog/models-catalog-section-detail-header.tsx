@@ -6,7 +6,7 @@ import {
 	SquareLock01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	Tooltip,
@@ -53,6 +53,7 @@ export function ModelDetailHeader({
 	onSelectOrg: (org: string) => void;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const size = parseModelSize(card.name, tl);
 	const tokens = displayTokens(extractTokens(card.name, card.tags), friendly);
 	return (
@@ -63,27 +64,34 @@ export function ModelDetailHeader({
 						{friendly ? friendlyModelName(card.name, card.tags) : card.name}
 					</h2>
 					<p className="text-muted-foreground text-sm">
-						by{" "}
-						{card.author ? (
-							<Tooltip>
-								<TooltipTrigger
-									render={
-										<button
-											className="underline decoration-dotted underline-offset-2 hover:text-foreground"
-											onClick={() => onSelectOrg(card.author)}
-											type="button"
-										>
-											{card.author}
-										</button>
+						{card.author
+							? tlRich(
+									"by <author>{author}</author>",
+									{ author: card.author },
+									{
+										author: (children) => (
+											<Tooltip>
+												<TooltipTrigger
+													render={
+														<button
+															className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+															onClick={() => onSelectOrg(card.author)}
+															type="button"
+														>
+															{children}
+														</button>
+													}
+												/>
+												<TooltipContent>
+													{tl("Browse all models by {author}", {
+														author: card.author,
+													})}
+												</TooltipContent>
+											</Tooltip>
+										),
 									}
-								/>
-								<TooltipContent>
-									{tl("Browse all models by {author}", { author: card.author })}
-								</TooltipContent>
-							</Tooltip>
-						) : (
-							"unknown"
-						)}
+								)
+							: tl("by an unknown author")}
 					</p>
 				</div>
 				<div className="flex shrink-0 items-center gap-1.5">

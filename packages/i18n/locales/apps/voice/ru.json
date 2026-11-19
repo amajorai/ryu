@@ -273,6 +273,7 @@
   "Replay, regenerate or download a take, or send its script and settings back to the Studio.": "Воспроизведите, сгенерируйте заново или скачайте дубль либо отправьте его сценарий и настройки обратно в Студию.",
   "Reroll": "Сгенерировать заново",
   "Reset to defaults": "Сбросить по умолчанию",
+  "Respell words the engine gets wrong. Entries match whole words; write {syntax} in a script for a one-off.": "Задайте написание слов, которые движок произносит неправильно. Записи совпадают только с целыми словами; для разового случая напишите в сценарии {syntax}.",
   "Retry part {part}": "Повторить часть {part}",
   "Reverb": "Реверберация",
   "Robotic": "Робот",

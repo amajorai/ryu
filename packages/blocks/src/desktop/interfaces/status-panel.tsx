@@ -7,6 +7,7 @@ import { X } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode, Ref } from "react";
 import { useInlineSign } from "./inline-direction.ts";
+import { formatNameList } from "./interface-renderer.ts";
 import { useReducedMotion } from "./reduced-motion.ts";
 import { SEVERITY_TEXT } from "./status-incidents.tsx";
 import type { StatusIncident } from "./status-model.ts";
@@ -38,7 +39,9 @@ export function StatusThreadPanel({
 		? thread.title.trim() || tl("Untitled thread")
 		: tl("New thread");
 	const who =
-		agentNames.length > 0 ? agentNames.join(", ") : "No agent assigned";
+		agentNames.length > 0
+			? formatNameList(agentNames)
+			: tl("No agent assigned");
 	return (
 		<motion.aside
 			animate={{ opacity: 1, x: 0 }}

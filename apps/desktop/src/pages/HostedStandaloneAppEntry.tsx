@@ -38,6 +38,10 @@ import { useStandaloneApps } from "@/src/hooks/useStandaloneApps.ts";
 import { isNavigablePluginCompanion } from "@/src/lib/plugin-companion-navigation.ts";
 import PluginCompanionPage from "@/src/pages/PluginCompanionPage.tsx";
 import {
+	type StandaloneUnavailableReason,
+	standaloneUnavailableDescription,
+} from "./HostedStandaloneAppEntry-copy.ts";
+import {
 	standaloneWindowTitle,
 	useStandaloneWindowTitle,
 } from "./hosted-standalone-window-title.ts";
@@ -67,10 +71,10 @@ function StartupState({
 
 function UnavailableStandaloneApp({
 	appId,
-	description,
+	reason,
 }: {
 	appId: string;
-	description: string;
+	reason: StandaloneUnavailableReason;
 }) {
 	const tl = useLiteralMessages();
 	return (
@@ -81,9 +85,7 @@ function UnavailableStandaloneApp({
 				</EmptyMedia>
 				<EmptyTitle>Standalone app unavailable</EmptyTitle>
 				<EmptyDescription>
-					{tl("{description} The app and its data remain safe in Ryu.", {
-						description,
-					})}
+					{standaloneUnavailableDescription(reason, tl)}
 				</EmptyDescription>
 			</EmptyHeader>
 			<EmptyContent>
@@ -239,11 +241,7 @@ export default function HostedStandaloneAppEntry({ appId }: { appId: string }) {
 		return (
 			<UnavailableStandaloneApp
 				appId={appId}
-				description={
-					error
-						? "Ryu could not load this app from the active node."
-						: "This app is disabled or no longer installed on the active node."
-				}
+				reason={error ? "load-failed" : "missing"}
 			/>
 		);
 	}

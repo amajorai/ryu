@@ -11,6 +11,7 @@ import type {
 	ProfileJobStatus,
 } from "@/src/lib/api/onboarding-profile.ts";
 import { ContinueRow } from "./OnboardingSetupStep.parts.tsx";
+import { profileErrorMessage } from "./OnboardingSetupStep.profile-errors.ts";
 
 /** The progress lines, translated before render: TextMorph animates each
  *  character, so the DOM localizer cannot translate them afterwards. */
@@ -111,7 +112,7 @@ export function ProfileSetup({
 					The profile build needs another try
 				</p>
 				<p className="text-detail text-muted-foreground">
-					{job.error ?? "The agent could not finish the first draft."}
+					{profileErrorMessage(job.errorCode, tl)}
 				</p>
 				<ContinueRow
 					continueLabel="Try again"

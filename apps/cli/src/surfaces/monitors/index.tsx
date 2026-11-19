@@ -20,6 +20,7 @@ import { useSurfaceView } from "../../core/ContributionsContext.tsx";
 import { featureListLoader, type ListRow } from "../../core/featureList.ts";
 import { ContributedViewPanel } from "../../ui/ContributedView.tsx";
 import { ListTab } from "../../ui/ListTab.tsx";
+import { checkedNotice } from "../../ui/list-notices.ts";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
 
@@ -42,7 +43,7 @@ const checkMonitor = async (
 	target: ApiTarget
 ): Promise<string> => {
 	await runMonitor(target, row.id);
-	return `checked: ${row.id}`;
+	return checkedNotice(row.id);
 };
 
 function MonitorsSurface({ active, paneId }: SurfaceProps) {

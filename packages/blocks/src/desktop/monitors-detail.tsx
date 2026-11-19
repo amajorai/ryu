@@ -30,6 +30,10 @@ import {
 	type UsageAccountsByProvider,
 	watchedAccountLabel,
 } from "./monitors-usage-accounts.ts";
+import {
+	monitorStatusLabel,
+	monitorValueLabel,
+} from "./monitors-value-label.ts";
 
 export function MonitorDetail({
 	monitor,
@@ -123,7 +127,7 @@ export function MonitorDetail({
 							className={`inline-block size-2 rounded-full ${statusColor(monitor.last_status)}`}
 						/>
 						{formatMonitorValue(monitor, monitor.last_value, tl) ??
-							monitor.last_status}
+							monitorStatusLabel(monitor.last_status, tl)}
 					</span>
 				) : null}
 			</div>
@@ -229,8 +233,11 @@ function formatMonitorValue(
 	raw: string | null | undefined,
 	tl: LiteralMessage
 ) {
-	if (!raw || monitor.check.type !== "provider_usage_reset") {
+	if (!raw) {
 		return raw;
+	}
+	if (monitor.check.type !== "provider_usage_reset") {
+		return monitorValueLabel(monitor.check.type, raw, tl);
 	}
 	try {
 		// SAFETY: This is only a lazy property-read view of the entire validated

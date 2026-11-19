@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { I18nRuntime } from "@ryu/i18n/core";
 import { formatMessage } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import { maplibreLocale } from "./maplibre-labels.ts";
@@ -22,6 +23,16 @@ describe("React Flow labels", () => {
 		);
 	});
 
+	test("name the connection handle by its sense, not the bare username word", () => {
+		// The bare "Handle" is a username (de "Benutzername", fr "Identifiant").
+		const german = new I18nRuntime([], { initialPackId: "official/de" });
+		const labels = reactFlowStaticLabels(english, (id, fallback) =>
+			german.translate(id, {}, fallback)
+		);
+		expect(labels["handle.ariaLabel"]).toBe("Verbindungspunkt");
+		expect(reactFlowStaticLabels(english)["handle.ariaLabel"]).toBe("Handle");
+	});
+
 	test("announce keyboard moves as one sentence per direction", () => {
 		const announce = reactFlowAriaLiveMessage(english);
 		expect(announce({ direction: "left", x: 12, y: -4 })).toBe(
@@ -34,8 +45,14 @@ describe("React Flow labels", () => {
 
 	test("route every label through the translator", () => {
 		const marked: LiteralMessage = (source) => `«${source}»`;
-		for (const value of Object.values(reactFlowStaticLabels(marked))) {
-			expect(value.startsWith("«")).toBe(true);
+		const sense = (id: string) => `‹${id}›`;
+		for (const [key, value] of Object.entries(
+			reactFlowStaticLabels(marked, sense)
+		)) {
+			expect([key, value[0]]).toEqual([
+				key,
+				key === "handle.ariaLabel" ? "‹" : "«",
+			]);
 		}
 		for (const value of Object.values(maplibreLocale(marked))) {
 			expect(value.startsWith("«")).toBe(true);

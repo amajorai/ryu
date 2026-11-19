@@ -29,6 +29,9 @@ pub struct LeaseInfo {
     pub max_expires_at: i64,
     pub renewable: bool,
     pub revoked_at: Option<i64>,
+    /// A credential that was never handed out and is only waiting for its
+    /// revoke (a retry lease); see `lease_record_for_revoke`.
+    pub pending_revoke: bool,
 }
 
 impl LeaseInfo {
@@ -68,6 +71,12 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
     for (column, definition) in [
         ("revoke_attempts", "INTEGER NOT NULL DEFAULT 0"),
         ("next_revoke_at", "INTEGER"),
+        // 1 for a retry lease (`lease_record_for_revoke`): a credential that
+        // was never handed out and is only waiting for its revoke.
+        ("pending_revoke", "INTEGER NOT NULL DEFAULT 0"),
+        // For a retry lease: the version of its role when the credential was
+        // issued (`dynamic::role_version_locked`).
+        ("issued_role_version", "TEXT"),
     ] {
         let exists = conn
             .prepare("SELECT 1 FROM pragma_table_info('vault_leases') WHERE name = ?1")?
@@ -88,7 +97,8 @@ const REVOKE_RETRY_BASE_MS: i64 = 60_000;
 const REVOKE_RETRY_MAX_MS: i64 = 3_600_000;
 
 pub(super) const COLUMNS: &str =
-    "id, role, provider, issued_to, created_at, expires_at, max_expires_at, renewable, revoked_at";
+    "id, role, provider, issued_to, created_at, expires_at, max_expires_at, renewable, revoked_at,
+     pending_revoke";
 
 pub(super) fn lease_from_row(row: &Row<'_>) -> rusqlite::Result<LeaseInfo> {
     Ok(LeaseInfo {
@@ -101,6 +111,7 @@ pub(super) fn lease_from_row(row: &Row<'_>) -> rusqlite::Result<LeaseInfo> {
         max_expires_at: row.get(6)?,
         renewable: row.get::<_, i64>(7)? != 0,
         revoked_at: row.get(8)?,
+        pending_revoke: row.get::<_, i64>(9)? != 0,
     })
 }
 
@@ -119,6 +130,20 @@ pub struct NewLease<'a> {
 impl PluginSecretStore {
     /// Record a lease. Returns the lease metadata.
     pub async fn lease_create(&self, lease: NewLease<'_>, actor: &AuditActor) -> Result<LeaseInfo> {
+        self.lease_create_for_role_version(lease, actor, None).await
+    }
+
+    /// [`Self::lease_create`] for a credential issued with the role at
+    /// `role_version`: if the role was rewritten since (for example retargeted
+    /// to another provider), the lease is refused, so its revoke data is never
+    /// governed by a config other than the one that issued it. The caller then
+    /// revokes the credential with the issuance-time config.
+    pub(crate) async fn lease_create_for_role_version(
+        &self,
+        lease: NewLease<'_>,
+        actor: &AuditActor,
+        role_version: Option<&str>,
+    ) -> Result<LeaseInfo> {
         let now = now_millis();
         let id = random_token("lease_");
         let max_expires_at = now + lease.max_ttl_secs.max(lease.ttl_secs) * 1000;
@@ -126,11 +151,24 @@ impl PluginSecretStore {
         let sealed = serde_json::to_vec(lease.revoke_data)?;
         let (key_version, nonce, ciphertext) = self.seal_row(&sealed)?;
         let conn = self.conn.lock().await;
+        // Tie the lease to the requesting token so revoking it revokes this;
+        // a token cut off since the request was admitted gets no lease.
+        let holder = super::tokens::request_lease_holder_locked(&conn)?;
+        if let Some(expected) = role_version {
+            let current = super::dynamic::role_version_locked(&conn, lease.role)?;
+            if current.as_deref() != Some(expected) {
+                return Err(VaultError::Conflict(format!(
+                    "role `{}` changed while its credential was being issued",
+                    lease.role
+                ))
+                .into());
+            }
+        }
         conn.execute(
             "INSERT INTO vault_leases
                  (id, role, provider, issued_to, created_at, expires_at, max_expires_at,
-                  renewable, nonce, ciphertext, key_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                  renewable, nonce, ciphertext, key_version, token_accessor)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 id,
                 lease.role,
@@ -142,11 +180,10 @@ impl PluginSecretStore {
                 lease.renewable as i64,
                 nonce,
                 ciphertext,
-                key_version
+                key_version,
+                holder
             ],
         )?;
-        // Tie the lease to the requesting token so revoking it revokes this.
-        super::tokens::attach_request_token_locked(&conn, &id)?;
         if !self.audit_locked(
             &conn,
             &AuditEntry::new(actor, "lease.create", "ok").details(serde_json::json!({
@@ -155,15 +192,71 @@ impl PluginSecretStore {
             })),
         ) {
             // Fail-closed: no audit device recorded the issuance, so the lease
-            // is ended at once and the caller (dynamic issue) revokes the
-            // upstream credential instead of handing it out.
-            conn.execute(
-                "UPDATE vault_leases SET revoked_at = ?1 WHERE id = ?2",
-                params![now_millis(), id],
-            )?;
+            // is dropped and the caller (dynamic issue) revokes the upstream
+            // credential instead of handing it out, keeping a retry lease if
+            // the provider refuses. A row marked revoked here would claim a
+            // revoke that may never have happened.
+            conn.execute("DELETE FROM vault_leases WHERE id = ?1", params![id])?;
             return Err(VaultError::AuditUnavailable.into());
         }
         lease_locked(&conn, &id)
+    }
+
+    /// Record a provider credential that was issued but never handed out and
+    /// whose immediate revoke failed, so it is not forgotten: a lease that
+    /// has already expired and is held by no token. The reaper retries its
+    /// revoke with backoff and audits every failure (`lease.revoke` error)
+    /// until the provider accepts. It is a cleanup record, not an issuance,
+    /// so it is never refused by the token check or the fail-closed audit
+    /// gate of [`Self::lease_create`].
+    pub(crate) async fn lease_record_for_revoke(
+        &self,
+        lease: NewLease<'_>,
+        issued_role_version: Option<&str>,
+    ) -> Result<String> {
+        let now = now_millis();
+        let id = random_token("lease_");
+        let sealed = serde_json::to_vec(lease.revoke_data)?;
+        let (key_version, nonce, ciphertext) = self.seal_row(&sealed)?;
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO vault_leases
+                 (id, role, provider, issued_to, created_at, expires_at, max_expires_at,
+                  renewable, nonce, ciphertext, key_version, pending_revoke, issued_role_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?5, 0, ?6, ?7, ?8, 1, ?9)",
+            params![
+                id,
+                lease.role,
+                lease.provider,
+                lease.issued_to,
+                now,
+                nonce,
+                ciphertext,
+                key_version,
+                issued_role_version
+            ],
+        )?;
+        Ok(id)
+    }
+
+    /// The role version a retry lease's credential was issued under, if any.
+    pub(crate) async fn lease_issued_role_version(&self, id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        Ok(conn.query_row(
+            "SELECT issued_role_version FROM vault_leases WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Whether `id` is a retry lease (see [`Self::lease_record_for_revoke`]).
+    pub(crate) async fn lease_is_pending_revoke(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        Ok(conn.query_row(
+            "SELECT pending_revoke FROM vault_leases WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, i64>(0),
+        )? != 0)
     }
 
     /// One lease.

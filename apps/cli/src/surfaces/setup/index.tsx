@@ -29,12 +29,15 @@ import {
 import { installSidecar } from "@ryuhq/core-client/plugins";
 import { type ReactNode, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { LocalizedError, localize } from "../../cli/localizedText.ts";
 import type { ListRow } from "../../core/featureList.ts";
 import { useInputFocused } from "../../core/InputFocusContext.tsx";
 import { tf, tr } from "../../i18n/translate.ts";
 import { type ListLoader, ListTab } from "../../ui/ListTab.tsx";
+import { installingNotice } from "../../ui/list-notices.ts";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
+import { catalogBadge, stepLabel } from "./setup-labels.ts";
 
 // Host prerequisites Core cannot install; shown read-only like apps/cli's
 // dependency screen so the user knows what to have on PATH.
@@ -61,25 +64,23 @@ function catalogLoader(category: string): ListLoader {
 			signal,
 		});
 		if (!resp.ok) {
-			throw new Error(`/api/catalog failed: ${resp.status}`);
+			throw new LocalizedError(
+				localize("{path} failed: {status}", {
+					path: "/api/catalog",
+					status: resp.status,
+				})
+			);
 		}
 		const json = sidecarCatalogSchema.parse(await resp.json());
 		return (json.sidecars ?? [])
 			.filter((item) => item.category === category)
 			.map((item): ListRow => {
 				const rec = item.recommended ? "★ " : "";
-				const state = item.install_state;
-				const badge =
-					state && state !== "not_installed"
-						? state
-						: rec
-							? "recommended"
-							: undefined;
 				return {
 					id: item.name ?? "",
 					title: item.name ?? "—",
 					subtitle: `${rec}${item.description ?? ""}`.trim() || undefined,
-					badge,
+					badge: catalogBadge(item.install_state, item.recommended === true),
 				};
 			});
 	};
@@ -88,7 +89,7 @@ function catalogLoader(category: string): ListLoader {
 // Enter on a catalog row: install it via the same endpoint apps/cli posts to.
 const installRow = async (row: ListRow, target: ApiTarget): Promise<string> => {
 	await installSidecar(target, row.id);
-	return `installing ${row.id}… (r to refresh)`;
+	return installingNotice(row.id);
 };
 
 interface Step {
@@ -203,7 +204,7 @@ function SetupSurface({ active, paneId }: SurfaceProps) {
 							}
 							key={s.title}
 						>
-							{i === step ? `[${i + 1} ${s.title}]` : `${i + 1} ${s.title}`}
+							{stepLabel(i, s.title, i === step)}
 						</text>
 					))}
 				</box>

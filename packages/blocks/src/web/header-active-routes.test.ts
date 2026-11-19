@@ -49,3 +49,10 @@ test("Products and Resources never claim the same route", () => {
 		expect(isWithinPrefixes(prefix, PRODUCT_ACTIVE_PREFIXES)).toBe(false);
 	}
 });
+
+test("the stories wall link keeps the testimonial key", () => {
+	// The bare "Stories" is News and Voice story lists (fr "Histoires"); the
+	// wall reuses the footer's "User stories" (fr "Témoignages").
+	const stories = resources.find((link) => link.href === "/stories");
+	expect(stories?.label).toBe("User stories");
+});

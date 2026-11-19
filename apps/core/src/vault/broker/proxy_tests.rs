@@ -281,9 +281,17 @@ async fn open_raw_tunnel(port: u16, echo_port: u16, token: &str) -> (TcpStream, 
 
 #[path = "proxy/cards_tests.rs"]
 mod cards;
+#[path = "proxy/delegation_tests.rs"]
+mod delegation;
 #[path = "proxy/forwarding_tests.rs"]
 mod forwarding;
+#[path = "proxy/limits_tests.rs"]
+mod limits;
+#[path = "proxy/mcp_policy_tests.rs"]
+mod mcp_policy;
 #[path = "proxy/password_manager_tests.rs"]
 mod password_managers;
+#[path = "proxy/remote_tls_tests.rs"]
+mod remote_tls;
 #[path = "proxy/tunnel_tests.rs"]
 mod tunnels;

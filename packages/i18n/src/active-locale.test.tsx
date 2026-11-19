@@ -13,6 +13,7 @@ const {
 	registerActiveI18nRuntime,
 	subscribeLocale,
 	translate,
+	translateMessage,
 	unregisterActiveI18nRuntime,
 } = await import("./active-locale.ts");
 const { registerLiteralCatalogLoader } = await import("./literal-catalog.ts");
@@ -38,6 +39,9 @@ function LocaleSwitch() {
 
 afterEach(() => {
 	document.body.innerHTML = "";
+	// setLocale stores the chosen pack; later test files build fresh English
+	// runtimes that would otherwise start in that stored language.
+	localStorage.clear();
 });
 
 function setNavigatorLanguages(languages: readonly string[]): void {
@@ -254,3 +258,28 @@ function Nested() {
 		</I18nProvider>
 	);
 }
+
+describe("translateMessage outside React", () => {
+	test("formats the English fallback until a runtime is active", async () => {
+		expect(translateMessage("tools.readDone", {}, "Read")).toBe("Read");
+		expect(translateMessage("x.count", { count: 2 }, "{count} left")).toBe(
+			"2 left"
+		);
+		const asked: unknown[] = [];
+		const runtime = {
+			direction: "ltr" as const,
+			locale: "ja",
+			translate: (id: string, values?: unknown, fallback?: string) => {
+				asked.push([id, values, fallback]);
+				return id === "tools.readDone" ? "読み込み完了" : (fallback ?? id);
+			},
+		};
+		registerActiveI18nRuntime(runtime);
+		// The id resolves through the runtime, not the bare word's literal entry.
+		expect(translateMessage("tools.readDone", {}, "Read")).toBe("読み込み完了");
+		expect(asked).toEqual([["tools.readDone", {}, "Read"]]);
+		unregisterActiveI18nRuntime(runtime);
+		await settle();
+		expect(translateMessage("tools.readDone", {}, "Read")).toBe("Read");
+	});
+});

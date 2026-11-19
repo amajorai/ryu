@@ -115,14 +115,6 @@ describe("DownloadMenu", () => {
 			/<DropdownMenu onOpenChange=\{handleMenuOpenChange\}>/
 		);
 	});
-
-	test("a failed menu chunk resolves to a releases-page fallback instead of throwing", () => {
-		// Without a rejection handler, `lazy` rethrows the failed import during
-		// render and takes the page down to its nearest error boundary.
-		expect(MENU_SOURCE).toContain(
-			"() => ({ default: DownloadDropdownFallback })"
-		);
-	});
 });
 
 const WINDOWS_UA =

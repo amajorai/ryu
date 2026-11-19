@@ -28,8 +28,26 @@ type FleetResponseInput = Parameters<typeof fleetStatusEnvelopeSchema.parse>[0];
 export const FLEET_NODE_NAME_MAX_LENGTH = 128;
 export const FLEET_REQUEST_TIMEOUT_MS = 20_000;
 
+/** A Fleet call bounded by {@link FLEET_REQUEST_TIMEOUT_MS}. */
+export type FleetOperation = "create-code" | "enroll" | "read-status";
+
+/** The timeout error for one Fleet call, one whole sentence per call. */
+export function fleetTimeoutMessage(
+	operation: FleetOperation,
+	tl: LiteralMessage = translate
+): string {
+	switch (operation) {
+		case "create-code":
+			return tl("Creating the enrollment code timed out after 20 seconds.");
+		case "enroll":
+			return tl("Enrolling this node timed out after 20 seconds.");
+		default:
+			return tl("Reading Fleet status timed out after 20 seconds.");
+	}
+}
+
 async function withFleetRequestTimeout<T>(
-	label: string,
+	label: FleetOperation,
 	operation: (signal: AbortSignal) => Promise<T>
 ): Promise<T> {
 	const controller = new AbortController();
@@ -37,7 +55,7 @@ async function withFleetRequestTimeout<T>(
 	const timeout = new Promise<never>((_resolve, reject) => {
 		timeoutId = setTimeout(() => {
 			controller.abort();
-			reject(new Error(`${label} timed out after 20 seconds.`));
+			reject(new Error(fleetTimeoutMessage(label)));
 		}, FLEET_REQUEST_TIMEOUT_MS);
 	});
 	try {
@@ -157,45 +175,40 @@ async function issueEnrollmentCode(input: {
 	name: string;
 	organizationId: string;
 }): Promise<string> {
-	return withFleetRequestTimeout(
-		"Creating the enrollment code",
-		async (signal) => {
-			const token = sessionToken();
-			if (!token) {
-				throw new Error("Sign in before binding this node to an organization.");
-			}
-			const response = await fetch(
-				`${CONTROL_PLANE_BASE}/orgs/${encodeURIComponent(input.organizationId)}/nodes/enrollment-tokens`,
-				{
-					body: JSON.stringify({ kind: "byod", name: input.name }),
-					headers: {
-						Authorization: `Bearer ${token}`,
-						"Content-Type": "application/json",
-					},
-					method: "POST",
-					signal,
-				}
-			);
-			if (!response.ok) {
-				throw new Error(await cloudError(response));
-			}
-			const value: FleetResponseInput = await response.json();
-			const parsed = enrollmentCodeSchema.safeParse(value);
-			if (!parsed.success) {
-				throw new Error(
-					"The control plane returned an invalid enrollment code."
-				);
-			}
-
-			return parsed.data.token;
+	return withFleetRequestTimeout("create-code", async (signal) => {
+		const token = sessionToken();
+		if (!token) {
+			throw new Error("Sign in before binding this node to an organization.");
 		}
-	);
+		const response = await fetch(
+			`${CONTROL_PLANE_BASE}/orgs/${encodeURIComponent(input.organizationId)}/nodes/enrollment-tokens`,
+			{
+				body: JSON.stringify({ kind: "byod", name: input.name }),
+				headers: {
+					Authorization: `Bearer ${token}`,
+					"Content-Type": "application/json",
+				},
+				method: "POST",
+				signal,
+			}
+		);
+		if (!response.ok) {
+			throw new Error(await cloudError(response));
+		}
+		const value: FleetResponseInput = await response.json();
+		const parsed = enrollmentCodeSchema.safeParse(value);
+		if (!parsed.success) {
+			throw new Error("The control plane returned an invalid enrollment code.");
+		}
+
+		return parsed.data.token;
+	});
 }
 
 export async function getFleetBindingStatus(
 	target: ApiTarget
 ): Promise<FleetBindingStatus> {
-	return withFleetRequestTimeout("Reading Fleet status", async (signal) =>
+	return withFleetRequestTimeout("read-status", async (signal) =>
 		parseFleetBindingStatus(
 			await request(
 				target,
@@ -235,7 +248,7 @@ export async function bindSelfHostedNodeToOrganization(input: {
 		name,
 		organizationId: input.organizationId,
 	});
-	await withFleetRequestTimeout("Enrolling this node", (signal) =>
+	await withFleetRequestTimeout("enroll", (signal) =>
 		request(
 			input.target,
 			"/api/fleet/enroll",

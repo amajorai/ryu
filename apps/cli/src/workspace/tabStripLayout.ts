@@ -1,6 +1,7 @@
 // Pure layout helpers for the TabStrip: chip labels and the overflow window.
 // Kept free of OpenTUI so the truncation and windowing rules are unit-testable.
 
+import { CLI_TRANSLATOR, type CliTranslator } from "../i18n/translate.ts";
 import { displayWidth, truncateLabel } from "../sidebar/rows.ts";
 
 /** Marks a pinned tab, between its index and title ("1:*Agents"). */
@@ -23,6 +24,20 @@ export function formatTabLabel(
 	const prefix = `${index}:${pinned ? PIN_GLYPH : ""}`;
 	const room = Math.max(1, max - displayWidth(prefix));
 	return `${prefix}${truncateLabel(title, room)}`;
+}
+
+/**
+ * A tab title as shown on its chip and in the terminal title. Tabs store the
+ * English surface title ("New chat", "Agents") so restored workbenches stay
+ * stable across locales; it is translated here, before the "n:" prefix is
+ * joined on, because the joined chip label never matches a catalog entry.
+ * Names and conversation titles have no catalog entry and stay as typed.
+ */
+export function tabTitleText(
+	title: string,
+	translator: Pick<CliTranslator, "tr"> = CLI_TRANSLATOR
+): string {
+	return translator.tr(title);
 }
 
 /** The leading overflow marker for `count` hidden tabs ("‹ +3"). */

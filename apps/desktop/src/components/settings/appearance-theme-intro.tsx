@@ -92,7 +92,6 @@ export function AppearanceThemeIntro({ state }: { state: AppearanceTabState }) {
 						baseTokens={lightBaseTokens}
 						dirty={lightDirty}
 						groups={lightGroups}
-						label="Light"
 						mode="light"
 						onDeletePreset={handleLightDelete}
 						onDiscardClick={handleLightDiscard}
@@ -114,7 +113,6 @@ export function AppearanceThemeIntro({ state }: { state: AppearanceTabState }) {
 						baseTokens={darkBaseTokens}
 						dirty={darkDirty}
 						groups={darkGroups}
-						label="Dark"
 						mode="dark"
 						onDeletePreset={handleDarkDelete}
 						onDiscardClick={handleDarkDiscard}

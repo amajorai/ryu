@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { translate as tr, translateMessage } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceGroup,
@@ -62,7 +62,8 @@ export function jobStatusLabel(status: JobStatus): string {
 		case "on-hold":
 			return tr("On hold");
 		case "open":
-			return tr("Open");
+			// The status, not the open verb the bare word translates as.
+			return translateMessage("status.open", {}, "Open");
 		default:
 			return tr("Review");
 	}

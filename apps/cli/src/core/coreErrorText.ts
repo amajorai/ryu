@@ -18,7 +18,10 @@
 import type { CliTranslator } from "../i18n/translate.ts";
 
 /** The parts of the CLI translator this module uses. */
-export type CoreErrorTranslator = Pick<CliTranslator, "locale" | "tf" | "tr">;
+export type CoreErrorTranslator = Pick<
+	CliTranslator,
+	"locale" | "tf" | "tr" | "trMessage"
+>;
 
 export interface LocalizableCoreError {
 	i18n?: unknown;
@@ -106,8 +109,9 @@ function literal(
 
 /**
  * The error's title and message in the CLI's locale, each falling back to
- * the stored English (looked up as a catalog literal) when its messages are
- * missing or malformed.
+ * the stored English when its messages are missing or malformed: the title is
+ * looked up as a catalog literal, the message also as a catalogued template
+ * (a Core reason with its values inline) filled with the captured values.
  */
 export function localizeCoreError(
 	part: LocalizableCoreError,
@@ -117,7 +121,7 @@ export function localizeCoreError(
 	return {
 		message:
 			(wire && renderBody(wire.body, wire.join, translator)) ??
-			translator.tr(part.message),
+			translator.trMessage(part.message),
 		title:
 			(wire && renderPhrase(wire.title, translator)) ??
 			literal(part.title, translator),

@@ -1,5 +1,11 @@
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
+
+/** Parse a pasted `.env` block. Each refusal is a whole catalogued sentence,
+ *  shown as written by the vault dialog. */
 export function parseEnvironmentPaste(
-	source: string
+	source: string,
+	tl: LiteralMessage = translate
 ): { key: string; value: string }[] {
 	const entries: { key: string; value: string }[] = [];
 	for (const line of source.split(/\r?\n/)) {
@@ -11,7 +17,7 @@ export function parseEnvironmentPaste(
 			trimmed
 		);
 		if (!match) {
-			throw new Error("Use KEY=value on each line");
+			throw new Error(tl("Use KEY=value on each line."));
 		}
 		const key = match[1];
 		if (
@@ -31,10 +37,10 @@ export function parseEnvironmentPaste(
 				"PYTHONHOME",
 			].includes(key.toUpperCase())
 		) {
-			throw new Error(`Reserved variable: ${key}`);
+			throw new Error(tl("Reserved variable: {key}", { key }));
 		}
 		if (entries.some((entry) => entry.key === key)) {
-			throw new Error(`Duplicate variable: ${key}`);
+			throw new Error(tl("Duplicate variable: {key}", { key }));
 		}
 		let value = match[2];
 		if (
@@ -45,7 +51,7 @@ export function parseEnvironmentPaste(
 		}
 		entries.push({ key, value });
 		if (entries.length > 100) {
-			throw new Error("Import up to 100 variables at a time");
+			throw new Error(tl("Import up to 100 variables at a time."));
 		}
 	}
 	return entries;

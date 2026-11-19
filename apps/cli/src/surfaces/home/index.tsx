@@ -16,7 +16,7 @@ import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import { useCoreHealth } from "../../core/CoreHealthContext.tsx";
 import { useShellKeyboardCaptured } from "../../core/InputFocusContext.tsx";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 import { useOverlay } from "../../overlays/OverlayHost.tsx";
 import { CoreConnectionCard } from "../../ui/ConnectionCard.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
@@ -101,8 +101,8 @@ function HomeSurface({ active, paneId }: SurfaceProps) {
 					})
 				);
 				setStatus([
-					{ key: "engine", label: "Engine", ok: snap.engineRunning },
-					{ key: "gateway", label: "Gateway", ok: snap.gatewayReachable },
+					{ key: "engine", label: tr("Engine"), ok: snap.engineRunning },
+					{ key: "gateway", label: tr("Gateway"), ok: snap.gatewayReachable },
 					...sidecars,
 				]);
 				setEngine(snap.activeEngine);

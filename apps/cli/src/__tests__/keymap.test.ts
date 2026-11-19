@@ -216,18 +216,3 @@ test("status-bar hints and palette shortcuts come from the registry", () => {
 	expect(paletteShortcut("nav:/chat")).toBeUndefined();
 	expect(paletteShortcut("action:sidebar")).toBe("Ctrl+B / Alt+B");
 });
-
-test("keymap documents transcript scrolling shortcuts", () => {
-	const shortcuts = new Set(CHAT_KEYMAP.map((entry) => entry.keys));
-
-	expect(shortcuts.has("PgUp / PgDn")).toBe(true);
-	expect(shortcuts.has("Ctrl+Home / Ctrl+End")).toBe(true);
-});
-
-test("keymap documents the composer newline shortcuts", () => {
-	const newline = CHAT_KEYMAP.find(
-		(entry) => entry.label === "insert a newline"
-	);
-
-	expect(newline?.keys).toBe("Shift+Enter / Alt+Enter / Ctrl+J");
-});

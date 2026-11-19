@@ -79,3 +79,5 @@ pub(crate) use transfer::*;
 pub(crate) use value_actions::*;
 pub(crate) use values::*;
 pub(crate) use wire::*;
+#[cfg(test)]
+use super::vault_kv_shared::record_forward;

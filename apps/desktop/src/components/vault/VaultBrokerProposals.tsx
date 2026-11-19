@@ -114,11 +114,11 @@ export function BrokerProposals({ target }: { target: ApiTarget }) {
 				clearVaultFocus();
 			}
 			await queryClient.invalidateQueries({ queryKey: ["vault", "broker"] });
-			sileo.success({ title: DECISION_TOAST[decision] });
+			sileo.success({ title: tl(DECISION_TOAST[decision]) });
 		},
 		onError: (error) => {
 			sileo.error({
-				title: "Could not update the proposal",
+				title: tl("Could not update the proposal"),
 				description: vaultErrorMessage(error, "Try again.", tl),
 			});
 		},

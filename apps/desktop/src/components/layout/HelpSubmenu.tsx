@@ -29,7 +29,7 @@ import { useRecentUpdates } from "@/src/hooks/useRecentUpdates.ts";
 import type { RecentUpdateItem } from "@/src/lib/api/updates.ts";
 import { getAppVersion } from "@/src/lib/app-version.ts";
 import { compactAgo } from "@/src/lib/time.ts";
-import { formatDate } from "@/src/lib/timezone.ts";
+import { itemMeta } from "./HelpSubmenu-item-meta.ts";
 import { OverflowTooltip } from "./overflow-tooltip.tsx";
 
 const TRAILING_SLASH_RE = /\/$/;
@@ -42,36 +42,6 @@ const WHATS_NEW_LIMIT = 3;
 const APP_VERSION_KEY = ["app", "version"] as const;
 
 const SUPPORT_EMAIL = "support@ryuhq.com";
-
-// The feed's `date` is the site's calendar day (`2026-10-01`) or, rarely, a
-// timestamp. Hand `formatDate` the original string, not a parsed `Date`: it
-// prints a bare day as written and keeps an instant in the display zone, but a
-// `Date` of UTC midnight shows the previous day west of UTC.
-function formatItemDate(date: string): string {
-	if (Number.isNaN(new Date(date).getTime())) {
-		return "";
-	}
-	return formatDate(date, {
-		month: "short",
-		day: "numeric",
-		year: "numeric",
-	});
-}
-
-function itemMeta(item: RecentUpdateItem): string {
-	const date = formatItemDate(item.date);
-	if (item.kind === "blog") {
-		return [item.tag ?? "Blog", date].filter(Boolean).join(" · ");
-	}
-	const parts = ["Changelog"];
-	if (item.version) {
-		parts.push(`v${item.version}`);
-	}
-	if (date) {
-		parts.push(date);
-	}
-	return parts.join(" · ");
-}
 
 function itemUrl(item: RecentUpdateItem, frontendBase: string): string {
 	if (item.kind === "blog") {
@@ -179,7 +149,7 @@ export function HelpSubmenu() {
 										<OverflowTooltip
 											className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-muted-foreground text-xs"
 											fade
-											text={itemMeta(item)}
+											text={itemMeta(item, tl)}
 										/>
 									</span>
 									<HugeiconsIcon

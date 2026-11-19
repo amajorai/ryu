@@ -26,7 +26,7 @@ import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useContributions } from "../core/ContributionsContext.tsx";
 import { pluginViewPath, surfaceClaimToken } from "../core/contributions.ts";
 import type { ProductMode } from "../core/productMode.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { useOverlay } from "../overlays/OverlayHost.tsx";
 import { Modal, modalSize } from "../ui/Modal.tsx";
 import { listSurfaces } from "../workspace/router.ts";
@@ -45,6 +45,7 @@ import {
 	rememberRecent,
 	SHORTCUTS,
 } from "./CommandPalette-registry.ts";
+import { localizePaletteAction } from "./localize.ts";
 import { rankPaletteEntries } from "./rank.ts";
 import { paletteWindow } from "./window.ts";
 
@@ -116,15 +117,20 @@ export function CommandPalette({
 			mode === "bot"
 				? NAV_DESTINATIONS.filter((destination) => destination.path === "/chat")
 				: buildNavDestinations();
-		const nav: PaletteAction[] = destinations.map((dest) => ({
-			id: `nav:${dest.path}`,
-			group: "Navigation",
-			label: tf("Go to {label}", { label: dest.label }),
-			run: () => {
-				openTab(dest.path);
-				close();
-			},
-		}));
+		const nav: PaletteAction[] = destinations.map((dest) =>
+			localizePaletteAction(
+				{
+					id: `nav:${dest.path}`,
+					group: "Navigation",
+					label: tf("Go to {label}", { label: tr(dest.label) }),
+					run: () => {
+						openTab(dest.path);
+						close();
+					},
+				},
+				`Go to ${dest.label}`
+			)
+		);
 		// A view that CLAIMS a built-in surface is already reachable under that
 		// surface's own entry, so only the extra ones get their own destination.
 		// The comparison is against the CLAIM TOKEN, not the bare surface id: a
@@ -290,7 +296,11 @@ export function CommandPalette({
 				},
 			})),
 		];
-		return [...nav, ...contributedNav, ...actions];
+		return [
+			...nav,
+			...contributedNav,
+			...actions.map((action) => localizePaletteAction(action)),
+		];
 	}, [
 		views,
 		mode,

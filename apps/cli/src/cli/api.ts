@@ -117,7 +117,9 @@ const runScaffold: ScaffoldRunner = async (
 		// different fix from a missing Bun, and a message naming the wrong one sends
 		// them off installing something they already have.
 		const fix = process.env.RYU_CREATE_APP_BIN
-			? localize("Check RYU_CREATE_APP_BIN.")
+			? localize(
+					"Check that RYU_CREATE_APP_BIN points to a working scaffolder."
+				)
 			: localize(
 					"Install Bun (https://bun.sh), or set RYU_CREATE_APP_BIN to a local scaffolder."
 				);

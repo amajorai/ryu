@@ -185,8 +185,8 @@ test("counts diff lines for edits excluding file headers", () => {
 test("labels in-flight tools with gerunds", () => {
 	expect(toolPendingLabel("Read")).toBe("Reading");
 	expect(toolPendingLabel("bash")).toBe("Running");
-	expect(toolPendingLabel("Edit")).toBe("Editing");
-	expect(toolPendingLabel("Write")).toBe("Writing");
+	expect(toolPendingLabel("Edit")).toBe("Editing file");
+	expect(toolPendingLabel("Write")).toBe("Writing file");
 	expect(toolPendingLabel("Grep")).toBe("Searching");
 	expect(toolPendingLabel("Glob")).toBe("Searching");
 	expect(toolPendingLabel("WebFetch")).toBe("Fetching");

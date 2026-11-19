@@ -23,13 +23,12 @@
 
 import {
 	addAccountKeys,
-	identityModeDescription,
 	identityModeLabel,
 	isRemotePeerEngine,
 	parseIdentityMode,
 	removeAccountKeys,
 } from "../core/agentIdentity.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { NO_AGENT_CAPABILITIES } from "../surfaces/agents/capabilities.ts";
 import {
 	type AgentsArgs,
@@ -49,6 +48,7 @@ import {
 import {
 	describeAccess,
 	describeAgent,
+	describeIdentityMode,
 	describePendingIdentity,
 	describeRemotePeer,
 	output,
@@ -78,7 +78,7 @@ async function listAgents(ctx: CliContext): Promise<number> {
 		return 0;
 	}
 	if (agents.length === 0) {
-		ctx.io.out("No agents.\n");
+		ctx.io.out(`${tr("No agents.")}\n`);
 		return 0;
 	}
 	const rows = agents.map((agent) => [
@@ -88,7 +88,7 @@ async function listAgents(ctx: CliContext): Promise<number> {
 	]);
 	ctx.io.out(`${formatTable(["ID", "NAME", "ENGINE"], rows)}\n`);
 	ctx.io.out(
-		"\nRun 'ryu-cli agents show <id>' for how an agent works and its account access.\n"
+		`\n${tr("Run 'ryu-cli agents show <id>' for how an agent works and its account access.")}\n`
 	);
 	return 0;
 }
@@ -156,11 +156,15 @@ async function createAgentCommand(
 	const parsed = agentEnvelopeSchema.safeParse(json);
 	if (!parsed.success) {
 		throw new Error(
-			"Core created the agent but returned an unreadable record."
+			tr("Core created the agent but returned an unreadable record.")
 		);
 	}
 	const view = toView(parsed.data.agent);
-	output(ctx, viewJson(view), `Created agent.\n${describeAgent(view)}`);
+	output(
+		ctx,
+		viewJson(view),
+		`${tr("Created agent.")}\n${describeAgent(view)}`
+	);
 	return 0;
 }
 
@@ -185,11 +189,13 @@ async function identityCommand(
 			ctx,
 			viewJson(view),
 			[
-				`How it works:   ${identityModeLabel(view.identityMode)}`,
-				`                ${identityModeDescription(view.identityMode)}`,
+				...describeIdentityMode(view),
 				...describePendingIdentity(view),
 				"",
-				`Change it with: ryu-cli agents identity ${view.id} <managed|individual|mixed>`,
+				tf(
+					"Change it with: ryu-cli agents identity {id} <managed|individual|mixed>",
+					{ id: view.id }
+				),
 			].join("\n")
 		);
 		return 0;
@@ -197,7 +203,9 @@ async function identityCommand(
 	if (requested.trim().toLowerCase() === "dismiss") {
 		if (!view.pendingIdentityMode) {
 			throw new Error(
-				`'${view.name}' has no identity request from its app to dismiss.`
+				tf("'{name}' has no identity request from its app to dismiss.", {
+					name: view.name,
+				})
 			);
 		}
 		return saveAgentPatch(
@@ -221,7 +229,10 @@ async function identityCommand(
 		ctx,
 		view,
 		{ identityMode: mode, engine: engineFlag(args) },
-		`'${view.name}' now works as: ${identityModeLabel(mode)}.`
+		tf("'{name}' now works as: {mode}.", {
+			mode: identityModeLabel(mode),
+			name: view.name,
+		})
 	);
 }
 
@@ -270,7 +281,10 @@ async function accessCommand(
 			[
 				...describeAccess(view),
 				"",
-				`Change it with: ryu-cli agents access ${view.id} <add|remove> <key>…, clear (no limit) or none (no accounts)`,
+				tf(
+					"Change it with: ryu-cli agents access {id} <add|remove> <key>…, clear (no limit) or none (no accounts)",
+					{ id: view.id }
+				),
 			].join("\n")
 		);
 		return 0;
@@ -281,7 +295,7 @@ async function accessCommand(
 			ctx,
 			view,
 			{ accountAccess: null, engine: engineFlag(args) },
-			`'${view.name}' has no account limit now.`
+			tf("'{name}' has no account limit now.", { name: view.name })
 		);
 	}
 	if (action === "none") {
@@ -289,7 +303,7 @@ async function accessCommand(
 			ctx,
 			view,
 			{ accountAccess: [], engine: engineFlag(args) },
-			`'${view.name}' can't use any accounts now.`
+			tf("'{name}' can't use any accounts now.", { name: view.name })
 		);
 	}
 	if (action === "add") {
@@ -320,7 +334,10 @@ async function accessCommand(
 	const keys = requireKeys(rest, `ryu-cli agents access ${id} remove <key>…`);
 	if (view.accountAccess === null) {
 		throw new Error(
-			`'${view.name}' has no account limit, so there is nothing to remove. Use 'ryu-cli agents access ${view.id} add <key>…' to limit it to chosen accounts, or 'none' for no accounts.`
+			tf(
+				"'{name}' has no account limit, so there is nothing to remove. Use 'ryu-cli agents access {id} add <key>…' to limit it to chosen accounts, or 'none' for no accounts.",
+				{ id: view.id, name: view.name }
+			)
 		);
 	}
 	const missing = keys.filter((key) => !view.accountAccess?.includes(key));

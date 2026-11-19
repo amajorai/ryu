@@ -28,6 +28,7 @@ import {
 import { installSidecar } from "@ryuhq/core-client/plugins";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { LocalizedError, localize } from "../cli/localizedText.ts";
 import { useCore } from "../core/CoreContext.tsx";
 import { errorText } from "../i18n/error-text.ts";
 import { tf } from "../i18n/translate.ts";
@@ -37,6 +38,11 @@ import { Loading } from "../ui/Loading.tsx";
 import { ListPosition, SelectableRow } from "../ui/SelectableRow.tsx";
 import { useToast } from "../ui/toast.tsx";
 import { useListWindow } from "../ui/useListWindow.ts";
+import {
+	alreadyInstalledText,
+	appStatusFor,
+	appStatusText,
+} from "./apps-status.ts";
 import type { TabProps } from "./types.ts";
 
 const NAME_WIDTH = 16;
@@ -84,7 +90,12 @@ async function fetchCatalog(
 		signal,
 	});
 	if (!resp.ok) {
-		throw new Error(`/api/catalog failed: ${resp.status}`);
+		throw new LocalizedError(
+			localize("{path} failed: {status}", {
+				path: "/api/catalog",
+				status: resp.status,
+			})
+		);
 	}
 	const json = sidecarCatalogSchema.parse(await resp.json());
 	return (json.sidecars ?? []).map(toItem);
@@ -105,7 +116,12 @@ async function uninstallSidecar(
 		}
 	);
 	if (!resp.ok) {
-		throw new Error(`/api/setup/${name}/uninstall failed: ${resp.status}`);
+		throw new LocalizedError(
+			localize("{path} failed: {status}", {
+				path: `/api/setup/${name}/uninstall`,
+				status: resp.status,
+			})
+		);
 	}
 }
 
@@ -214,13 +230,7 @@ export function AppsTab({ active }: TabProps) {
 				item.installState === "installed" ||
 				item.installState === "installing"
 			) {
-				notify(
-					tf("{name} is already {installState}", {
-						name: item.name,
-						installState: item.installState,
-					}),
-					"info"
-				);
+				notify(alreadyInstalledText(item.name, item.installState), "info");
 				return;
 			}
 			setBusy(item.name);
@@ -349,7 +359,10 @@ export function AppsTab({ active }: TabProps) {
 					<ConfirmPrompt
 						active={active}
 						confirmLabel="Uninstall"
-						consequence={`${confirmItem.name} will be removed from this node; reinstall it to use it again.`}
+						consequence={tf(
+							"{name} will be removed from this node. Reinstall it to use it again.",
+							{ name: confirmItem.name }
+						)}
 						onCancel={() => setConfirmItem(null)}
 						onConfirm={() => {
 							setConfirmItem(null);
@@ -371,21 +384,6 @@ export function AppsTab({ active }: TabProps) {
 
 type ThemeValue = ReturnType<typeof useTheme>;
 
-// Maps an install_state to its display icon, label and color (parity with the
-// status column in apps/cli's render_apps_content).
-function statusFor(state: string, theme: ThemeValue) {
-	if (state === "failed") {
-		return { icon: "✗", label: "failed", color: theme.colors.error };
-	}
-	if (state === "installing") {
-		return { icon: "◌", label: "installing", color: theme.colors.info };
-	}
-	if (state === "installed") {
-		return { icon: "●", label: "installed", color: theme.colors.success };
-	}
-	return { icon: " ", label: "-", color: theme.colors.mutedForeground };
-}
-
 function CatalogRow({
 	item,
 	selected,
@@ -398,10 +396,10 @@ function CatalogRow({
 	theme: ThemeValue;
 }) {
 	const installed = item.installState === "installed";
-	const status = statusFor(item.installState, theme);
+	const status = appStatusFor(item.installState, theme.colors);
 	const version = item.installedVersion ?? item.latestVersion ?? "";
 	const name = item.name.padEnd(NAME_WIDTH);
-	const statusText = `${busy ? "◌" : status.icon} ${busy ? "working" : status.label}`;
+	const statusText = appStatusText(status, busy);
 	const muted = selected
 		? theme.colors.selectionForeground
 		: theme.colors.mutedForeground;

@@ -180,8 +180,16 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
       var p = pending[msg.id];
       if (!p) return;
       delete pending[msg.id];
-      if (typeof msg.error === "string") p.reject(new Error(msg.error));
-      else p.resolve(msg.result);
+      // An error is a string (legacy, possibly empty) OR a structured
+      // { code, message } object; reject on either, never resolve.
+      if (msg.error !== undefined && msg.error !== null) {
+        var em = (typeof msg.error === "string" ? msg.error : msg.error.message) || "error";
+        var error = new Error(em);
+        if (typeof msg.error === "object" && msg.error.code) error.code = msg.error.code;
+        p.reject(error);
+      } else {
+        p.resolve(msg.result);
+      }
     }
 
     // The host posts the channel port to the parent window after verifying our

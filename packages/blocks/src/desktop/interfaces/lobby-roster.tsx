@@ -89,11 +89,11 @@ function RosterCard({
 	const { agent, level } = member;
 	// With acts the figure stands ready: its act is in the label instead.
 	const state = actLabel === undefined ? member.state : "ready";
-	let role = "Bench";
+	let role = tr("Bench");
 	if (leading) {
-		role = "Selected";
+		role = tr("Selected");
 	} else if (inSquad) {
-		role = "In squad";
+		role = tr("In squad");
 	}
 	const label = rosterCardLabel({
 		actLabel,

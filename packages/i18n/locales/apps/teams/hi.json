@@ -28,6 +28,7 @@
   "Group created": "समूह बनाया गया",
   "Group deleted": "समूह हटाया गया",
   "Group updated": "समूह अपडेट किया गया",
+  "Groups cannot reach its sidecar. Check the {permission} permission and try again.": "Groups अपने साइडकार तक नहीं पहुँच पा रहा है। {permission} अनुमति जाँचें और फिर से कोशिश करें।",
   "Groups couldn't load": "समूह लोड नहीं हो सके",
   "Groups loaded, but agents could not: {error}": "समूह लोड हो गए, लेकिन एजेंट लोड नहीं हो सके: {error}",
   "Groups returned an invalid group record.": "समूहों ने अमान्य समूह रिकॉर्ड लौटाया।",

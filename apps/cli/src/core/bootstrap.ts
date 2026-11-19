@@ -19,7 +19,13 @@ import {
 import { delimiter, join } from "node:path";
 import type { ApiTarget } from "@ryuhq/core-client/client";
 import { binDir, logPath } from "@ryuhq/core-client/data-dir";
-import { tf, tr } from "../i18n/translate.ts";
+import {
+	LocalizedError,
+	localize,
+	localizedTextOf,
+	renderLocalized,
+} from "../cli/localizedText.ts";
+import { tf, tr, trMessage } from "../i18n/translate.ts";
 import { cliDataDir } from "./cliStatePath.ts";
 import { CORE_IDENTITY_CONFLICT_HINT } from "./coreIdentity.ts";
 import { probeCore } from "./nodes.ts";
@@ -247,8 +253,11 @@ export async function downloadBinary(
 	const limits = { deadlineMs: timeoutMs, stallMs: stallTimeoutMs };
 	const asset = assetName(bin, platform, arch);
 	if (!asset) {
-		throw new Error(
-			`no prebuilt ${binName(bin)} for ${platform}-${arch} — build from source or install manually`
+		throw new LocalizedError(
+			localize(
+				"No prebuilt {binary} for {target}: build it from source or install it manually.",
+				{ binary: binName(bin), target: `${platform}-${arch}` }
+			)
 		);
 	}
 	const dir = options.binDir ?? ryuBinDir();
@@ -256,32 +265,57 @@ export async function downloadBinary(
 	const dest = join(dir, binName(bin));
 	const url = `${RELEASE_BASE}/${asset}`;
 
-	report(`downloading ${binName(bin)} (${asset})…`);
+	report(
+		tf("downloading {binary} ({asset})…", { asset, binary: binName(bin) })
+	);
 	// Checksum first: a missing .sha256 refuses the install before the binary is fetched.
 	const sum = await fetchReleaseBytes(fetcher, `${url}.sha256`, limits);
 	if (!sum.bytes) {
-		throw new Error(
-			`download ${url}.sha256: HTTP ${sum.status} — refusing to install an unverified binary`
+		throw new LocalizedError(
+			localize(
+				"Could not download {url} (HTTP {status}), so ryu-cli is refusing to install an unverified binary.",
+				{ status: sum.status, url: `${url}.sha256` }
+			)
 		);
 	}
 	const expected = checksumFromText(sum.bytes.toString("utf8"), asset);
 	if (!expected) {
-		throw new Error(`malformed checksum at ${url}.sha256`);
+		throw new LocalizedError(
+			localize("Could not verify {url}: malformed checksum.", {
+				url: `${url}.sha256`,
+			})
+		);
 	}
 	const { bytes, status } = await fetchReleaseBytes(fetcher, url, limits);
 	if (!bytes) {
-		throw new Error(`download ${url}: HTTP ${status}`);
+		throw new LocalizedError(
+			localize("Could not download {url} (HTTP {status}).", { status, url })
+		);
 	}
 	if (bytes.byteLength === 0) {
-		throw new Error(`download ${url}: empty body`);
+		throw new LocalizedError(
+			localize("Could not download {url}: the response was empty.", { url })
+		);
 	}
 	const actual = createHash("sha256").update(bytes).digest("hex");
 	if (actual !== expected) {
-		throw new Error(
-			`checksum mismatch for ${asset} (want ${expected}, got ${actual})`
+		throw new LocalizedError(
+			localize(
+				"Download rejected: checksum mismatch for {asset} (expected {expected}, got {actual}).",
+				{ actual, asset, expected }
+			)
 		);
 	}
 	return installVerifiedBinary(bytes, dest);
+}
+
+/** A failure in the CLI locale: its localized sentence, or its message. */
+function failureText(err: unknown): string {
+	if (!(err instanceof Error)) {
+		return String(err);
+	}
+	const localized = localizedTextOf(err);
+	return localized ? renderLocalized(localized) : trMessage(err.message);
 }
 
 /** Auto-detect, then download only if missing. Returns the resolved path. */
@@ -382,7 +416,9 @@ export async function ensureCoreRunning(
 	try {
 		bin = await ensureBinary("core", report);
 	} catch (err) {
-		report(`could not install ryu-core: ${String(err)}`);
+		report(
+			tf("could not install ryu-core: {error}", { error: failureText(err) })
+		);
 		return;
 	}
 
@@ -392,16 +428,21 @@ export async function ensureCoreRunning(
 		await ensureBinary("gateway", report);
 	} catch (err) {
 		report(
-			`could not install ryu-gateway (${String(err)}); Core will run without the Gateway`
+			tf(
+				"could not install ryu-gateway ({error}); Core will run without the Gateway",
+				{ error: failureText(err) }
+			)
 		);
 	}
 
 	const bind = hostPort(target.url);
-	report(`starting ryu-core on ${bind}…`);
+	report(tf("starting ryu-core on {bind}…", { bind }));
 	try {
 		spawnCore(bin, bind);
 	} catch (err) {
-		report(`could not start ryu-core: ${String(err)}`);
+		report(
+			tf("could not start ryu-core: {error}", { error: failureText(err) })
+		);
 		return;
 	}
 
@@ -410,7 +451,9 @@ export async function ensureCoreRunning(
 		report(conflictMessage(target.url));
 	} else if (started === "timeout") {
 		report(
-			`ryu-core did not become healthy within 30s (see ${logPath(cliDataDir(), "ryu-core.log")})`
+			tf("ryu-core did not become healthy within 30s (see {path})", {
+				path: logPath(cliDataDir(), "ryu-core.log"),
+			})
 		);
 	}
 }

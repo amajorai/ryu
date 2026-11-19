@@ -97,6 +97,7 @@ describe("step-up response boundaries", () => {
 		expect(cooldown).toMatchObject({
 			message: "Please wait 40 seconds before requesting another email.",
 			name: "StepUpRequestError",
+			retryAfter: 40,
 			status: 429,
 		});
 
@@ -114,6 +115,75 @@ describe("step-up response boundaries", () => {
 			name: "StepUpRequestError",
 			status: 500,
 		});
+		expect((failure as { retryAfter?: number }).retryAfter).toBeUndefined();
+	});
+
+	it("reads a cooldown's wait from Retry-After when the body has none, and leaves a wait without a number unset", async () => {
+		const refusedWith = (response: Response) =>
+			clientForResponse(response)
+				.challenge("org.members")
+				.then(
+					() => null,
+					(error: unknown) => error as { retryAfter?: number; status: number }
+				);
+		const headerOnly = await refusedWith(
+			Response.json(
+				{ error: "Please wait before requesting another email." },
+				{ headers: { "Retry-After": "12.5" }, status: 429 }
+			)
+		);
+		expect(headerOnly?.retryAfter).toBe(13);
+		const noWait = await refusedWith(
+			Response.json(
+				{ error: "Please wait a moment before requesting another email." },
+				{ status: 429 }
+			)
+		);
+		expect(noWait?.status).toBe(429);
+		expect(noWait?.retryAfter).toBeUndefined();
+	});
+
+	it("names no wait on a refusal that is not a cooldown, even with Retry-After", async () => {
+		const unavailable = await clientForResponse(
+			Response.json(
+				{ error: "Service Unavailable", retryAfter: 30 },
+				{ headers: { "Retry-After": "30" }, status: 503 }
+			)
+		)
+			.challenge("org.members")
+			.then(
+				() => null,
+				(error: unknown) => error as { retryAfter?: number; status: number }
+			);
+		expect(unavailable?.status).toBe(503);
+		expect(unavailable?.retryAfter).toBeUndefined();
+	});
+
+	it("takes a wait only from a positive number or decimal digits, never a boolean, array or date", async () => {
+		const waitOf = async (bodyWait: unknown, header?: string) => {
+			const refused = await clientForResponse(
+				Response.json(
+					{ error: "Please wait.", retryAfter: bodyWait },
+					{
+						headers: header === undefined ? {} : { "Retry-After": header },
+						status: 429,
+					}
+				)
+			)
+				.challenge("org.members")
+				.then(
+					() => null,
+					(error: unknown) => error as { retryAfter?: number }
+				);
+			return refused?.retryAfter;
+		};
+		expect(await waitOf(true)).toBeUndefined();
+		expect(await waitOf([30])).toBeUndefined();
+		expect(await waitOf("30")).toBe(30);
+		expect(await waitOf(-5)).toBeUndefined();
+		expect(await waitOf(0)).toBeUndefined();
+		expect(await waitOf(null, "Wed, 21 Oct 2026 07:28:00 GMT")).toBeUndefined();
+		expect(await waitOf(true, "45")).toBe(45);
 	});
 
 	it("sends the supplied credentials and JSON challenge with normalized headers", async () => {

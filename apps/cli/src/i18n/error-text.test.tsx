@@ -15,6 +15,7 @@ mock.module("./translate.ts", () => ({
 	createCliTranslator,
 	tf: japanese.tf,
 	tr: japanese.tr,
+	trMessage: japanese.trMessage,
 	translateProps: japanese.translateProps,
 }));
 const { caughtMessage, createErrorText, errorText } = await import(
@@ -59,7 +60,9 @@ describe("errorText", () => {
 		"de",
 	])("translates the overlays' thrown reasons under %s", (locale) => {
 		const catalog = officialCliLiteralCatalog(locale);
-		const localized = createErrorText(createCliTranslator(locale, catalog).tr);
+		const localized = createErrorText(
+			createCliTranslator(locale, catalog).trMessage
+		);
 		// One literal throw from each wrapping screen.
 		for (const reason of [
 			"Identity verification was not confirmed.",
@@ -76,8 +79,33 @@ describe("errorText", () => {
 		expect(localized(new Error(SERVER_REASON))).toBe(SERVER_REASON);
 	});
 
+	test("translates a templated thrown reason and keeps its value", () => {
+		// memory.tsx throws `Core did not confirm ${write.key}.`, which the
+		// catalog holds as the template "Core did not confirm {key}.".
+		const template =
+			officialCliLiteralCatalog("ja")?.["Core did not confirm {key}."];
+		expect(template).toBeString();
+		const expected = (template ?? "").replace("{key}", "memory-enabled");
+		expect(errorText(new Error("Core did not confirm memory-enabled."))).toBe(
+			expected
+		);
+		// A stub catalog stands in for the gateway policy refusal until the
+		// catalog build carries it.
+		const stub = createErrorText(
+			createCliTranslator("ja", {
+				"Keep served field {key}. Edit its value explicitly.":
+					"配信中のフィールド {key} を残してください。値は明示的に編集してください。",
+			}).trMessage
+		);
+		expect(
+			stub(new Error("Keep served field rules. Edit its value explicitly."))
+		).toBe(
+			"配信中のフィールド rules を残してください。値は明示的に編集してください。"
+		);
+	});
+
 	test("stays English without a catalog", () => {
-		const english = createErrorText(createCliTranslator(null, null).tr);
+		const english = createErrorText(createCliTranslator(null, null).trMessage);
 		expect(english(new Error(UNAVAILABLE))).toBe(UNAVAILABLE);
 		expect(caughtMessage(new TypeError("bad"))).toBe("bad");
 	});
@@ -160,16 +188,21 @@ describe("account security errors under Japanese", () => {
 		expect(frame).not.toContain(UNAVAILABLE);
 	});
 
-	test("an uncatalogued server reason passes through unchanged", async () => {
+	test("a refused read keeps its path inside the translated template", async () => {
 		installAccountService("server");
 		const rendered = await renderSecurity();
 		await rendered.mockInput.pressKeys(["w"]);
+		const reason = japanese.trMessage(REFUSED_READ);
+		// The request client's "{path} failed: {status}" template is catalogued,
+		// so the reason reads in Japanese while the path stays verbatim.
+		expect(reason).not.toBe(REFUSED_READ);
+		expect(reason).toContain("/api/step-up/status?scope=account.security");
 		const frame = await rendered.waitForFrame((text) =>
-			text.includes(REFUSED_READ)
+			compact(text).includes(compact(reason))
 		);
 		const prefix = japanese.tf("Could not complete action: {error}", {
 			error: "",
 		});
-		expect(compact(frame)).toContain(compact(`${prefix}${REFUSED_READ}`));
+		expect(compact(frame)).toContain(compact(`${prefix}${reason}`));
 	});
 });

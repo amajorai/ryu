@@ -62,6 +62,7 @@ fn rules_cannot_manage_passwords_or_state() {
         connection_url: "rediss://admin:pw@cache.example.com:6380".into(),
         acl_rules: vec!["~app:*".into(), "+@read".into()],
         username_prefix: None,
+        username_template: None,
         egress: TargetEgress::Trusted,
     };
     assert!(config.validate().is_ok());
@@ -104,9 +105,10 @@ async fn issue_revoke_and_rotate_speak_acl() {
         connection_url: url.clone(),
         acl_rules: vec!["~app:*".into(), "+get".into()],
         username_prefix: Some("svc".into()),
+        username_template: None,
         egress: TargetEgress::Trusted,
     };
-    let issued = issue(&config, "cache-ro").await.unwrap();
+    let issued = issue(&config, "cache-ro", "token").await.unwrap();
     let name = issued.data["username"].clone();
     assert!(name.starts_with("svc_cachero_"));
     revoke(&config, &issued.revoke_data).await.unwrap();

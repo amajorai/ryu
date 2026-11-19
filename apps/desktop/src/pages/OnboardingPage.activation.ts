@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback } from "react";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import {
@@ -96,6 +97,7 @@ export function useOnboardingActivation({
 	submitting,
 	toolkits,
 }: OnboardingActivationInput) {
+	const tl = useLiteralMessages();
 	const enterActivationApps = useCallback(() => {
 		setActivationError(null);
 		setActivationRecommendations(
@@ -314,8 +316,10 @@ export function useOnboardingActivation({
 			const stored = localStorage.getItem("ryu_onboarding_activation_task");
 			if (!stored) {
 				const quest = await createQuest(target, {
-					completion_condition:
-						"The agent returns the requested task brief and the user confirms the result is useful.",
+					// Stored on the quest and shown on it, so worded in the user's language.
+					completion_condition: tl(
+						"The agent returns the requested task brief and the user confirms the result is useful."
+					),
 					detail: activationTask.prompt,
 					title: activationTask.title,
 				});
@@ -348,6 +352,7 @@ export function useOnboardingActivation({
 		activationTaskPending,
 		finish,
 		getActiveNode,
+		tl,
 	]);
 	const continueWithOwnModel = useCallback(() => {
 		finishOnboarding(

@@ -2,6 +2,7 @@
 import type { Agent } from "@ryuhq/core-client/agents";
 import { StatusMessage } from "@/components/ui/status-message.tsx";
 import { REMOTE_PEER_IDENTITY_NOTE } from "../../core/agentIdentity.ts";
+import { tr } from "../../i18n/translate.ts";
 import { EditField, PickerField, ToggleField } from "./index-fields.tsx";
 import {
 	type FieldDef,
@@ -61,7 +62,7 @@ export function AgentEditForm({
 						/>
 					) : field.kind === "sampling" ? (
 						<PickerField
-							action="Enter to edit"
+							action={tr("Enter to edit")}
 							focused={focused && fieldIndex === i}
 							key={field.key}
 							label="sampling"
@@ -72,10 +73,10 @@ export function AgentEditForm({
 						<PickerField
 							action={
 								remotePeer
-									? "Remote peer"
+									? tr("Remote peer")
 									: field.kind === "identity"
-										? "Enter to change"
-										: "Enter to edit"
+										? tr("Enter to change")
+										: tr("Enter to edit")
 							}
 							focused={focused && fieldIndex === i}
 							key={field.key}

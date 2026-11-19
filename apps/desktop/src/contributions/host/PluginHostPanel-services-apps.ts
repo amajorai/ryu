@@ -1,3 +1,4 @@
+import { agentRegressionSuiteNames } from "@ryu/app-host/agent-regression-suite";
 import {
 	type ActivityScoreInput,
 	activityAuditResponseSchema,
@@ -251,8 +252,7 @@ export function buildPluginHostAppServices({
 							await createPromptSuite(target, {
 								agentId: agent_id ?? "",
 								config: { prompts: [], providers: [], tests: [] },
-								label: "Trace baseline",
-								name: "Agent regression suite",
+								...agentRegressionSuiteNames(),
 							})
 						).suite;
 			return activityTraceImportRecordSchema.parse(

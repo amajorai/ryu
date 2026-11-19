@@ -43,6 +43,14 @@ const splitReferralUrl = (url: string) => {
 	}
 };
 
+/** Headline once a handle is claimed: one whole sentence the catalog can translate. */
+export function reservedHandleTitle(
+	handle: string,
+	tl: LiteralMessage
+): string {
+	return tl("@{handle} is reserved", { handle });
+}
+
 export function WaitlistHandleStep({
 	handle,
 	handleError,
@@ -60,6 +68,7 @@ export function WaitlistHandleStep({
 	reserved?: string | null;
 	reserving: boolean;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<div className="flex flex-col gap-4">
 			<PageHeader
@@ -68,7 +77,9 @@ export function WaitlistHandleStep({
 						? "It's yours the moment you're in. We'll let you know."
 						: "Pick the handle you want. It's held for you from the moment you claim it."
 				}
-				title={reserved ? `@${reserved} is reserved` : "Reserve your handle"}
+				title={
+					reserved ? reservedHandleTitle(reserved, tl) : "Reserve your handle"
+				}
 			/>
 			<WaitlistUsernameField
 				error={handleError}

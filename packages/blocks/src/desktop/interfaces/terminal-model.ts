@@ -272,7 +272,7 @@ export function resolveOpenTarget(
 		};
 	}
 	return {
-		hint: "usage: open <n|id> · ls for numbers",
+		hint: tl("usage: open <n|id> · ls for numbers"),
 		kind: "missing",
 		message: tl("open: no thread {target}", { target: cleaned }),
 	};

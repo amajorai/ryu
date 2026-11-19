@@ -265,7 +265,7 @@ export function NodeRoutingBusinessSections({
 						keyName="preferred_min_throughput"
 						label="Preferred minimum throughput"
 						onChange={changePercentile}
-						unit="tokens per second"
+						unit={tl("tokens per second")}
 						values={percentileValues(
 							providerOptions,
 							"preferred_min_throughput"
@@ -276,7 +276,7 @@ export function NodeRoutingBusinessSections({
 						keyName="preferred_max_latency"
 						label="Preferred maximum latency"
 						onChange={changePercentile}
-						unit="seconds"
+						unit={tl("seconds")}
 						values={percentileValues(providerOptions, "preferred_max_latency")}
 					/>
 				</SettingsGroup>

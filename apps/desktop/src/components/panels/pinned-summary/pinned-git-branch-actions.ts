@@ -270,7 +270,11 @@ export function pinnedGitBranchActions(
 			setRemote({
 				status: "error",
 				message:
-					error instanceof Error ? error.message : `git ${action} failed`,
+					error instanceof Error
+						? error.message
+						: action === "pull"
+							? tl("Couldn't pull the latest changes")
+							: tl("Couldn't sync with the remote"),
 			});
 		} finally {
 			if (activeGitOperationRef.current === controller) {

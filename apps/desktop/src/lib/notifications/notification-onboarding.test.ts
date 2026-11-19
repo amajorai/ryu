@@ -27,6 +27,25 @@ describe("detectDeviceOs", () => {
 });
 
 describe("notificationOnboardingCopy", () => {
+	test("each OS's settings hint is one whole catalogued sentence", () => {
+		const marked: LiteralMessage = (source, values) =>
+			`[${source}]${values ? JSON.stringify(values) : ""}`;
+		const help = (os: "linux" | "macos" | "windows") =>
+			notificationOnboardingCopy(
+				{ os, permission: "denied", platform: "desktop", surface: "desktop" },
+				marked
+			).blockedHelp;
+		expect(help("macos")).toBe(
+			"[If no banner appears, allow Ryu in System Settings → Notifications → Ryu.]"
+		);
+		expect(help("windows")).toBe(
+			"[If no banner appears, allow Ryu in Settings → System → Notifications → Ryu.]"
+		);
+		expect(help("linux")).toBe(
+			"[If no banner appears, allow Ryu in your desktop's notification settings.]"
+		);
+	});
+
 	test("desktop points at the OS notification settings", () => {
 		const mac = notificationOnboardingCopy(
 			{

@@ -4,10 +4,14 @@
 // that day, including agent runs it started on a schedule; the built-in
 // health check bot does not count.
 
+/** Marks catalog copy; the DOM localizer translates it once rendered. */
+const tl = (source: string): string => source;
+
 /** Full explanation, for tooltips and screen-reader descriptions. */
 export const USAGE_STREAK_HINT =
 	"Days in a row you used Ryu (UTC). Agent runs count too, so a scheduled agent can keep your streak going.";
 
 /** Compact variant for tight layouts (cards, share images). */
-export const USAGE_STREAK_HINT_SHORT =
-	"UTC days in a row; agent runs keep it going";
+export const USAGE_STREAK_HINT_SHORT = tl(
+	"UTC days in a row; agent runs keep it going"
+);

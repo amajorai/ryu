@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { translate as tr, translateMessage } from "@ryu/i18n/lite";
 import {
 	type InterfaceAgent,
 	type InterfaceEvent,
@@ -70,8 +70,10 @@ export type TrackingTab = "all" | "delivered" | "exceptions" | "on-the-way";
 export const TRACKING_TABS: readonly { id: TrackingTab; label: string }[] = [
 	{
 		id: "on-the-way",
+		// A parcel in transit (ja 配送中); the bare "On the way" is a
+		// processing status (ja 処理中).
 		get label() {
-			return tr("On the way");
+			return translateMessage("tracking.inTransit", {}, "On the way");
 		},
 	},
 	{

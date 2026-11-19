@@ -1,11 +1,12 @@
-import {
-	DESKTOP_TRIAL_INCLUDES,
-	DESKTOP_TRIAL_LABEL,
-} from "@ryu/auth/lib/plans";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
+import {
+	desktopTrialEndedTitle,
+	desktopTrialIncludes,
+	desktopTrialLabel,
+} from "./desktop-trial-copy.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -33,17 +34,17 @@ export function DesktopAccessSection() {
 		subscription: "Active subscription",
 		license: "Licensed",
 		beta: "Free during beta",
-		// Not a "Pro trial": the trial grants Band 2 only — see
-		// `DESKTOP_TRIAL_LABEL` in `@ryu/auth/lib/plans`.
+		// Not a "Pro trial": the trial grants Band 2 only (see
+		// `desktop-trial-copy.ts`).
 		trial: tl(
 			"{trialLabel} — {daysLeftInTrial, plural, one {# day} other {# days}} left",
 			{
-				trialLabel: DESKTOP_TRIAL_LABEL,
+				trialLabel: desktopTrialLabel(tl),
 				daysLeftInTrial: verdict.daysLeftInTrial,
 			}
 		),
 		"offline-grace": "Active (offline)",
-		"trial-expired": `${DESKTOP_TRIAL_LABEL} ended`,
+		"trial-expired": desktopTrialEndedTitle(tl),
 		locked: "Free (local only)",
 	} satisfies Record<typeof verdict.reason, string>;
 
@@ -62,7 +63,7 @@ export function DesktopAccessSection() {
 						verdict.paywalled
 							? "Basic local chat stays free. Unlock Pro features and cloud models that run for you."
 							: verdict.reason === "trial"
-								? DESKTOP_TRIAL_INCLUDES
+								? desktopTrialIncludes(tl)
 								: verdict.reason === "beta"
 									? "Free and unlimited during the beta. Managed inference and cloud nodes bill separately."
 									: "Pro features are unlocked."

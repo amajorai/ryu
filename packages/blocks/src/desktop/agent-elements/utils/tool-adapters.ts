@@ -131,6 +131,15 @@ function extractToolDetail(
 	}
 }
 
+/**
+ * Display names for tools whose wire name is not a label. The plan tool says
+ * "Agent plan", not "Plan", which every catalog reads as a billing plan.
+ */
+const TOOL_DISPLAY_LABELS: Readonly<Record<string, string>> = {
+	PlanWrite: "Agent plan",
+	TodoWrite: "Todo",
+};
+
 export function mapToolInvocationToStep(
 	toolCallId: string,
 	toolInvocation: {
@@ -141,12 +150,9 @@ export function mapToolInvocationToStep(
 	}
 ): Extract<TimelineStep, { type: "tool-call" }> {
 	const { toolName, args = {}, result } = toolInvocation;
-	const displayToolName =
-		toolName === "PlanWrite"
-			? "Plan"
-			: toolName === "TodoWrite"
-				? "Todo"
-				: toolName;
+	const displayToolName = Object.hasOwn(TOOL_DISPLAY_LABELS, toolName)
+		? (TOOL_DISPLAY_LABELS[toolName] ?? toolName)
+		: toolName;
 	const detail = extractToolDetail(toolName, args);
 
 	const step: Extract<TimelineStep, { type: "tool-call" }> = {

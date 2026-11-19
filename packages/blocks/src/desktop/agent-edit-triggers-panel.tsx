@@ -88,10 +88,11 @@ export function triggerAccountLabel(
 /** Triggers tab: the schedule (or injected routines) plus Composio event
  *  triggers. */
 export function AgentTriggersPanel({
-	accountAccessPath,
+	accountAccessInIdentity = false,
 	props,
 }: {
-	accountAccessPath: string;
+	/** The simple editor moves Account access under Identity. */
+	accountAccessInIdentity?: boolean;
 	props: AgentSettingsFormProps;
 }) {
 	const {
@@ -126,6 +127,13 @@ export function AgentTriggersPanel({
 	} = props;
 	const tl = useLiteralMessages();
 	const locale = useOptionalI18n()?.locale;
+	// Where Account access lives, named with the tab labels the user sees.
+	const accountAccessPath = accountAccessInIdentity
+		? tl("{from} → {to}", { from: tl("Tools & knowledge"), to: tl("Identity") })
+		: tl("{from} → {to}", {
+				from: tl("Connections"),
+				to: tl("Account access"),
+			});
 	const showTimeField =
 		schedulePhrase === "daily" ||
 		schedulePhrase === "weekdays" ||

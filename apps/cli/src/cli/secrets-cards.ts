@@ -1,6 +1,7 @@
 import {
 	decideVaultCardApproval,
 	listVaultCardApprovals,
+	type VaultCardApproval,
 	type VaultCardApprovalStatus,
 	type VaultCardApproveInput,
 } from "@ryuhq/core-client/vault";
@@ -64,6 +65,52 @@ function cardApproveInput(args: SecretsArgs): VaultCardApproveInput {
 		input.note = note;
 	}
 	return input;
+}
+
+type CardDecision = "approve" | "reject" | "revoke";
+
+/** The confirmation for a card decision, one whole sentence per outcome. */
+export function cardDecisionLine(
+	action: CardDecision,
+	id: string,
+	approval: VaultCardApproval
+): string {
+	if (action === "reject") {
+		return tf("Rejected card approval {id}.", { id });
+	}
+	if (action === "revoke") {
+		return tf("Revoked card approval {id}.", { id });
+	}
+	if (approval.mode !== "grant") {
+		return tf("Approved card approval {id}.", { id });
+	}
+	const merchant = approval.merchantHost;
+	const uses = approval.maxUses;
+	const subject = approval.grantSubject;
+	if (subject) {
+		return uses
+			? tf(
+					"Approved card approval {id} (grant for {subject} at {merchant}, {uses, plural, one {# use} other {# uses}}).",
+					{ id, merchant, subject, uses }
+				)
+			: tf("Approved card approval {id} (grant for {subject} at {merchant}).", {
+					id,
+					merchant,
+					subject,
+				});
+	}
+	return uses
+		? tf(
+				"Approved card approval {id} (grant for the requester at {merchant}, {uses, plural, one {# use} other {# uses}}).",
+				{ id, merchant, uses }
+			)
+		: tf(
+				"Approved card approval {id} (grant for the requester at {merchant}).",
+				{
+					id,
+					merchant,
+				}
+			);
 }
 
 async function cardApprovalsList(
@@ -142,17 +189,6 @@ export async function cards(
 		printJson(ctx, approval);
 		return 0;
 	}
-	const verb = {
-		approve: "Approved",
-		reject: "Rejected",
-		revoke: "Revoked",
-	}[action];
-	const scope =
-		action === "approve" && approval.mode === "grant"
-			? ` (grant for ${approval.grantSubject ?? "the requester"} at ${approval.merchantHost}${approval.maxUses ? `, ${approval.maxUses} uses` : ""})`
-			: "";
-	ctx.io.out(
-		`${tf("{verb} card approval {id}{scope}.", { verb, id, scope })}\n`
-	);
+	ctx.io.out(`${cardDecisionLine(action, id, approval)}\n`);
 	return 0;
 }

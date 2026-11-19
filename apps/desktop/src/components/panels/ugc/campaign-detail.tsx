@@ -302,7 +302,7 @@ export function CampaignDetail({
 					})}
 				</span>
 				<span className="text-muted-foreground text-xs">
-					· {formatPayoutRule(campaign.payout)}
+					· {formatPayoutRule(campaign.payout, tl)}
 				</span>
 				<span className="flex-1" />
 				<Button

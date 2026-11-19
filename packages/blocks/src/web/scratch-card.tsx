@@ -111,7 +111,7 @@ export default function ScratchCard({
 	overlayColor,
 	overlayLabel,
 	overlayLabelColor,
-	revealAnnouncement = "Your offer is revealed.",
+	revealAnnouncement,
 	revealThreshold = REVEAL_THRESHOLD,
 }: ScratchCardProps) {
 	const tl = useLiteralMessages();
@@ -369,7 +369,9 @@ export default function ScratchCard({
 					</canvas>
 				</div>
 				<span aria-live="polite" className="sr-only">
-					{revealed ? revealAnnouncement : ""}
+					{revealed
+						? (revealAnnouncement ?? tl("Your offer is revealed."))
+						: ""}
 				</span>
 				<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
 					{revealed ? (

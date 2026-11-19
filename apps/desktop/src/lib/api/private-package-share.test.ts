@@ -7,7 +7,7 @@ import {
 	peekRedeemedPrivatePackageShareSession,
 	previewPrivatePackageShareCode,
 	redeemPrivatePackageShareCode,
-} from "./marketplace.ts";
+} from "./marketplace-private-share.ts";
 
 test("normalizes private package codes entered with spaces or hyphens", () => {
 	expect(normalizePrivatePackageShareCode("7k4m-x2qp-9f6d")).toBe(

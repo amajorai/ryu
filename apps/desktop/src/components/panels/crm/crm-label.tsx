@@ -1,61 +1,23 @@
 import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { NativeSelectOption } from "@ryu/ui/components/native-select.tsx";
+import {
+	CRM_SEED_LABEL_MESSAGES,
+	LOCALIZABLE_SEED_LABELS,
+} from "./crm-seed-labels.ts";
 
 /**
  * CRM object names and option labels are schema data, so the DOM localizer
  * must not treat them as UI copy: "Deal" would come out as the verb (配る,
- * Austeilen) and "Lead" as leadership. The two seed labels with a wrong-sense
- * catalog match translate through their own unambiguous messages instead.
- */
-const DISAMBIGUATED_SEED_LABELS: Readonly<
-	Record<string, (tl: LiteralMessage) => [source: string, translated: string]>
-> = {
-	Deal: (tl) => ["Deal (CRM record)", tl("Deal (CRM record)")],
-	Lead: (tl) => ["Lead stage", tl("Lead stage")],
-};
-
-/**
- * Seed labels whose catalog entry already has the right sense. They stay open
- * to the DOM localizer so a fresh workspace keeps reading in the user's
- * language; everything else a user typed renders exactly as written.
- */
-const LOCALIZABLE_SEED_LABELS: ReadonlySet<string> = new Set([
-	"Cancelled",
-	"Companies",
-	"Company",
-	"Customer",
-	"Description",
-	"Done",
-	"Education",
-	"Event",
-	"Healthcare",
-	"High",
-	"In progress",
-	"Location",
-	"Low",
-	"Media",
-	"Medium",
-	"Note",
-	"Notes",
-	"Other",
-	"Partner",
-	"People",
-	"Person",
-	"Pipeline",
-	"Proposal",
-	"Task",
-	"Tasks",
-	"To do",
-	"Urgent",
-]);
-
-/**
- * The text to show for a CRM schema label. A wrong-sense seed label resolves to
- * its disambiguated translation; English (or a locale without that message)
- * keeps the label as typed.
+ * Austeilen) and "Lead" as leadership. Seed labels translate through
+ * `CRM_SEED_LABEL_MESSAGES` (crm-seed-labels.ts) or, when the catalog entry
+ * already has the right sense, through the DOM localizer.
+ *
+ * The text to show for a CRM schema label: a seed label without a right-sense
+ * catalog entry resolves to its own translation; English (or a locale without
+ * that message) keeps the label as typed.
  */
 export function crmLabel(text: string, tl: LiteralMessage): string {
-	const disambiguate = DISAMBIGUATED_SEED_LABELS[text];
+	const disambiguate = CRM_SEED_LABEL_MESSAGES[text];
 	if (!disambiguate) {
 		return text;
 	}

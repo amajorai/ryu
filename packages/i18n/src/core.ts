@@ -16,6 +16,7 @@ export {
 	activeLocale,
 	subscribeLocale,
 	translate,
+	translateMessage,
 } from "./active-locale.ts";
 export {
 	languagePackArchive,

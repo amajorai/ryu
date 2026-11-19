@@ -18,8 +18,9 @@
 //! 10. audit the outcome after the TTL; 11. a fill-set revoke cancels live
 //!     fills ([`revoke_set`]).
 //!
-//! `route` cannot receive the dispatch's `agent_id` without editing
-//! `mcp/mod.rs`, so the agent comes from the conversation, and any doubt
+//! The agent is the dispatch's verified `agent_id` when the call carries one
+//! ([`caller_for`]), whatever the conversation's participants or sub-agent
+//! scope. Without it the agent comes from the conversation, and any doubt
 //! refuses: no global state, a sub-agent scope, more than one agent
 //! participant, or an active agent that does not match the participant.
 
@@ -93,7 +94,25 @@ impl Caller {
     }
 }
 
-/// Step 1: the agent a fill in `conversation_id` is for, or a refusal.
+/// Step 1: the dispatch's calling agent when it names one (the dispatch core
+/// has already checked it is installed and may run the verb), else the
+/// conversation's agent ([`caller_agent`]).
+pub(super) async fn caller_for(
+    dispatch_agent: Option<&str>,
+    store: Option<&ConversationStore>,
+    conversation_id: &str,
+) -> Result<Caller> {
+    match dispatch_agent
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty())
+    {
+        Some(agent) => Ok(Caller::Agent(agent.to_owned())),
+        None => caller_agent(store, conversation_id).await,
+    }
+}
+
+/// The agent a fill in `conversation_id` is for, from the conversation alone,
+/// or a refusal.
 pub(super) async fn caller_agent(
     store: Option<&ConversationStore>,
     conversation_id: &str,
@@ -168,6 +187,7 @@ async fn client() -> Result<BoxSessionClient> {
 pub(super) async fn run(
     store: Option<&ConversationStore>,
     conversation_id: &str,
+    dispatch_agent: Option<&str>,
     target: &BoxTarget,
     args: FillArgs,
 ) -> Result<Value> {
@@ -175,6 +195,7 @@ pub(super) async fn run(
         crate::learning::global_state(),
         store,
         conversation_id,
+        dispatch_agent,
         target,
         args,
     )
@@ -186,13 +207,14 @@ pub(super) async fn run_in(
     state: Option<ServerState>,
     store: Option<&ConversationStore>,
     conversation_id: &str,
+    dispatch_agent: Option<&str>,
     target: &BoxTarget,
     args: FillArgs,
 ) -> Result<Value> {
     if state.is_none() {
         bail!("{NO_STATE_REFUSAL}");
     }
-    let caller = caller_agent(store, conversation_id).await?;
+    let caller = caller_for(dispatch_agent, store, conversation_id).await?;
     let client = client().await?;
     let env = environment(state, &caller, &client).await?;
     execute(&env, &target.box_id, &caller, &args).await
@@ -202,10 +224,11 @@ pub(super) async fn run_in(
 pub(super) async fn list(
     store: Option<&ConversationStore>,
     conversation_id: &str,
+    dispatch_agent: Option<&str>,
     _target: &BoxTarget,
 ) -> Result<Value> {
     let state = crate::learning::global_state().ok_or_else(|| anyhow!(NO_STATE_REFUSAL))?;
-    let caller = caller_agent(store, conversation_id).await?;
+    let caller = caller_for(dispatch_agent, store, conversation_id).await?;
     let policy = box_fill::policy_for(&state.agent_store, caller.agent_id())
         .await
         .map_err(|_| anyhow!("The agent's account policy could not be read; try again"))?;
@@ -464,3 +487,7 @@ pub(super) async fn revoke_with(client: &BoxSessionClient, set_id: &str) -> Revo
 #[cfg(test)]
 #[path = "fill_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "fill_caller_tests.rs"]
+mod caller_tests;

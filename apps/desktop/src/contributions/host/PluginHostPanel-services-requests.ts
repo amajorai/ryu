@@ -12,6 +12,7 @@ import {
 import { asGlyphValue } from "@ryu/ui/components/glyph.ts";
 import { RealtimeConnection } from "@ryuhq/core-client/realtime.ts";
 import { z } from "zod";
+import { withRelayedFailure } from "@/src/contributions/host/app-request-failure.ts";
 import { waitForApplicationRealtime } from "@/src/contributions/host/application-realtime-lifetime.ts";
 import { ApplicationRealtimeQueue } from "@/src/contributions/host/application-realtime-queue.ts";
 import { ownAppRequest } from "@/src/lib/api/app-request.ts";
@@ -217,11 +218,16 @@ export function buildPluginHostRequestServices({
 		appRequest: appRequestService({
 			approvedGrants: approvedGrantList,
 			callerId: companion.pluginId,
+			// A backend's 4xx reason reaches only its own companion (see
+			// app-request-failure.ts); another app's failure crosses as a status.
 			forward: (pluginId, input, signal) =>
-				ownAppRequest(toTarget(node), pluginId, {
-					...input,
-					signal,
-				}).then(rpcJsonResponseSchema.parse),
+				withRelayedFailure(
+					ownAppRequest(toTarget(node), pluginId, {
+						...input,
+						signal,
+					}).then(rpcJsonResponseSchema.parse),
+					{ sameApp: pluginId === companion.pluginId }
+				),
 		}),
 		// Generic application-room realtime. The node target, node bearer and
 		// user JWT remain in this trusted host; only the opaque join result crosses

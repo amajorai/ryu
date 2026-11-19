@@ -86,7 +86,7 @@ export function ridesActTrips(
 						(blocking ? nameOf(blocking.agentId) : undefined) ??
 						actOn.get(thread.id) ??
 						nameOf(thread.agentIds[0]) ??
-						"Your driver",
+						tl("Your driver"),
 					redacted,
 					limited: limited.has(thread.id),
 					replied: own.some((ask) => ask.kind === "reply"),
@@ -166,7 +166,7 @@ function actTrip(
 			done: false,
 			stage: "completed",
 			tone: "plain",
-			word: "Red light",
+			word: tl("Red light"),
 		};
 	}
 	if (counted?.kind === "interrupted") {

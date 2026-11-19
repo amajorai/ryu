@@ -100,7 +100,7 @@
     "lucide-react": "catalog:",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vite": "^6.4.5",
+    "vite": "^6.4.6",
     "vite-plugin-singlefile": "^2.3.0"
   },
   "name": "desktop",

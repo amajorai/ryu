@@ -12,12 +12,8 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { StoreSearchRealm } from "@/src/hooks/useStoreSearch.ts";
 import type { IntegrationOption } from "@/src/lib/api/integrations.ts";
-import { providerOptionPrice } from "@/src/lib/integration-price.ts";
-import {
-	installChatPrompt,
-	providerOptionKind,
-	SOURCE_LABELS,
-} from "./IntegrationsCatalogSection-options.ts";
+import { providerOptionMetaParts } from "./IntegrationsCatalogSection-option-meta.ts";
+import { installChatPrompt } from "./IntegrationsCatalogSection-options.ts";
 
 export function ProviderOptionRow({
 	brandName,
@@ -119,17 +115,7 @@ export function ProviderOptionRow({
 				Lowest listed price
 			</Badge>
 		) : null;
-	const meta = [
-		SOURCE_LABELS.get(option.source) ?? option.source,
-		providerOptionKind(option),
-		option.providerRole === "alternative" ? tl("Alternative") : null,
-		option.provider,
-		option.capability,
-		providerOptionPrice(option.price),
-		option.availabilityNote,
-	]
-		.filter(Boolean)
-		.join(" · ");
+	const meta = providerOptionMetaParts(option, tl);
 
 	return (
 		<div className="flex min-h-12 items-center justify-between gap-3 border-border border-b py-2 last:border-b-0">
@@ -145,7 +131,14 @@ export function ProviderOptionRow({
 						{option.description}
 					</div>
 				) : null}
-				<div className="truncate text-muted-foreground text-xs">{meta}</div>
+				<div className="truncate text-muted-foreground text-xs">
+					{meta.map((part, index) => (
+						<span key={`${index}-${part}`}>
+							{index > 0 ? <span aria-hidden="true"> · </span> : null}
+							<span>{part}</span>
+						</span>
+					))}
+				</div>
 			</div>
 			<span className="shrink-0">{action}</span>
 		</div>

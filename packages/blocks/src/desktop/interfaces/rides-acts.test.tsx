@@ -518,3 +518,20 @@ describe("rides queue rows (test 15)", () => {
 		);
 	});
 });
+
+test("a trip with no named driver says so in the UI language", () => {
+	const cy = fixture.threads.find((thread) => thread.id === "t-cy");
+	if (!cy) {
+		throw new Error("the fixture has t-cy");
+	}
+	const german: LiteralMessage = (source, values) =>
+		formatMessage(source === "Your driver" ? "Ihr Fahrer" : source, values);
+	const trips = ridesActTrips(
+		{ agents: [], asks: [], threads: [{ ...cy, agentIds: [] }] },
+		new Map(),
+		german
+	);
+	const detail = trips.get("t-cy")?.detail ?? "";
+	expect(detail).toContain("Ihr Fahrer");
+	expect(detail).not.toContain("Your driver");
+});

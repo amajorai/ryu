@@ -77,7 +77,7 @@ export function GroupArticle({
 	const tl = useLiteralMessages();
 	const article = wikiGroupArticle(snapshot, groupId);
 	if (!article) {
-		return <Missing noun="team or project" />;
+		return <Missing article="group" />;
 	}
 	const { group, members, threads, counts, related } = article;
 	const noun = group.kind === "team" ? "Team" : "Project";
@@ -196,7 +196,7 @@ export function GroupArticle({
 												group.memberAgentIds.includes(id)
 											).length
 										),
-										kind: other.kind === "team" ? "team" : "project",
+										kind: other.kind === "team" ? tl("team") : tl("project"),
 									})}
 								</span>
 							</li>
@@ -209,7 +209,7 @@ export function GroupArticle({
 								}}
 							>
 								{tl("Category:{name}", {
-									name: group.kind === "team" ? "Teams" : "Projects",
+									name: group.kind === "team" ? tl("Teams") : tl("Projects"),
 								})}
 							</WikiLink>
 						</li>

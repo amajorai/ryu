@@ -1,5 +1,4 @@
 {
-  "1 second": "1초",
   "A Ryu credential was exposed publicly": "Ryu 자격 증명이 공개적으로 노출되었습니다",
   "A Ryu internal organization crossed the {level} threshold. It was not throttled or suspended automatically.": "Ryu 내부 조직이 {level} 기준값을 초과했습니다. 자동으로 조절되거나 정지되지는 않았습니다.",
   "A child safety case was opened": "아동 안전 관련 사건이 접수되었습니다",
@@ -656,7 +655,10 @@
   "{amount} in Ryu Credits": "{amount} 상당의 Ryu Credits",
   "{amount} is now available in your Ryu balance": "이제 Ryu 잔액에서 {amount}을(를) 사용할 수 있습니다",
   "{code} is your Ryu for Students code": "{code}은(는) Ryu for Students 코드입니다",
+  "{count, plural, one {# hour} other {# hours}}": "{count, plural, other {#시간}}",
+  "{count, plural, one {# minute} other {# minutes}}": "{count, plural, other {#분}}",
   "{count, plural, one {# seat in {organizationName} is unassigned} other {# seats in {organizationName} are unassigned}}": "{count, plural, =1 {{organizationName}에 할당되지 않은 좌석이 #개 있습니다} other {{organizationName}에 할당되지 않은 좌석이 #개 있습니다}}",
+  "{count, plural, one {# second} other {# seconds}}": "{count, plural, other {#초}}",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month} and cost {cost}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, other {에이전트 #개가}} {month} 거의 매일 활성 상태였으며 {cost}의 비용이 발생했습니다. 의도한 것이라면 아무 조치도 필요하지 않습니다. 실수로 켜 둔 에이전트가 있다면 Ryu의 에이전트 보기에서 일시 중지할 수 있습니다.",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, other {에이전트 #개가}} {month} 거의 매일 활성 상태였습니다. 의도한 것이라면 아무 조치도 필요하지 않습니다. 실수로 켜 둔 에이전트가 있다면 Ryu의 에이전트 보기에서 일시 중지할 수 있습니다.",
   "{didntAsk} Someone may have your session. Ignore this link, then change your password and sign out your other devices from Settings.": "{didntAsk} 다른 사람이 세션을 사용하고 있을 수 있습니다. 이 링크를 무시하고 비밀번호를 변경한 다음 설정에서 다른 기기를 로그아웃하세요.",

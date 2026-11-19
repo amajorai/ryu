@@ -1,6 +1,6 @@
 import type { AgentBannerPreferenceStore } from "@ryu/blocks/desktop/agent-banner-dialog.tsx";
 import type { SlotOption } from "@ryu/blocks/desktop/agent-edit.tsx";
-import { translate as tl } from "@ryu/i18n/core";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { getMarketplaceBackdrops } from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -27,6 +27,7 @@ export function useAgentEditBase({
 	agentIdProp?: string;
 	onClose?: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const { agentId: routeAgentId } = useParams<{ agentId: string }>();
 	const agentId = agentIdProp ?? routeAgentId;
 	const navigate = useNavigate();
@@ -129,7 +130,7 @@ export function useAgentEditBase({
 			});
 		}
 		return options;
-	}, [agents, activeEngine]);
+	}, [agents, activeEngine, tl]);
 	const installedAgentEngineIds = useMemo(
 		() => new Set(installedAgentEngineOptions.map((option) => option.id)),
 		[installedAgentEngineOptions]

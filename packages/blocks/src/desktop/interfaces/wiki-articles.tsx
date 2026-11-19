@@ -55,7 +55,7 @@ export function ThreadArticle({
 	const tlRich = useRichLiteralMessages();
 	const article = wikiThreadArticle(snapshot, threadId);
 	if (!article) {
-		return <Missing noun="thread" />;
+		return <Missing article="thread" />;
 	}
 	const { agents, project, team, thread, related } = article;
 	return (

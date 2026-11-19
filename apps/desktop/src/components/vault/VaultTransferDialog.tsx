@@ -142,7 +142,7 @@ function ImportBody({
 			setContent("");
 			await queryClient.invalidateQueries({ queryKey: ["vault"] });
 			sileo.success({
-				title: "Import finished",
+				title: tl("Import finished"),
 				description: tl(
 					"{created} added, {updated} updated, {skipped} skipped",
 					{

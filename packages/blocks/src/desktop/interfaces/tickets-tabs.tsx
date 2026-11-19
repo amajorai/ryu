@@ -96,7 +96,7 @@ export function TicketsTabs({
 							type="button"
 						>
 							<LayoutList aria-hidden="true" className="size-4 shrink-0" />
-							<span className={cn(compact && "sr-only")}>Views</span>
+							<span className={cn(compact && "sr-only")}>Saved views</span>
 						</button>
 					</TabShell>
 					{shown.map((tab) => {

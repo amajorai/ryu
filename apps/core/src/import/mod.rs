@@ -30,6 +30,7 @@ use crate::sidecar::mcp::McpServerConfig;
 
 pub mod chat_exports;
 pub mod frameworks;
+pub mod pasted_memory;
 
 mod helpers;
 mod instructions;

@@ -16,6 +16,7 @@ import {
 	permissionToolTitle,
 } from "../../core/chatPermission.ts";
 import { tf } from "../../i18n/translate.ts";
+import { permissionHintLine } from "./permission-hints.ts";
 
 const PERMISSION_BAR: BorderCharacters = {
 	topLeft: " ",
@@ -159,15 +160,11 @@ export function PermissionPrompt({
 		permissionBodyMaxHeight(terminal.height)
 	);
 	const count = permission.options.length;
-	const dot = unicode ? "·" : "-";
-	const arrows = unicode ? "←/→" : "left/right";
-	const hint = [
-		count > 1 ? `1-${count} select` : "1 select",
-		`${arrows} move`,
-		"Enter confirm",
-		"Esc reject",
-		...(bodyRows > bodyHeight ? ["PgUp/PgDn scroll"] : []),
-	].join(` ${dot} `);
+	const hint = permissionHintLine({
+		count,
+		scrollable: bodyRows > bodyHeight,
+		unicode,
+	});
 	return (
 		<box
 			border={["left"]}

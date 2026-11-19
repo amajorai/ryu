@@ -5,17 +5,26 @@
 // and the one it replaced or archived is active again).
 
 import { ArrowTurnBackwardIcon } from "@hugeicons/core-free-icons";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import type { MemoryProposal } from "@/src/lib/api/memory-dream.ts";
 
-/** What accepting the proposal did, as a short label. */
-function appliedLabel(proposal: MemoryProposal): string {
+/**
+ * What accepting the proposal did, as a short label. Whole phrases, not a
+ * bare "Saved" or "Updated", so each locale translates the memory sense.
+ */
+function appliedLabel(
+	proposal: Pick<MemoryProposal, "operation">,
+	tl: LiteralMessage
+): string {
 	if (proposal.operation === "archive") {
-		return "Archived";
+		return tl("Memory archived");
 	}
-	return proposal.operation === "revise" ? "Updated" : "Saved";
+	return proposal.operation === "revise"
+		? tl("Memory updated")
+		: tl("Memory saved");
 }
 
 /** The memory the change is about: the archived one, or the one written. */
@@ -35,6 +44,7 @@ export function MemoryDreamRecent({
 	onUndo: (proposal: MemoryProposal) => void;
 	recent: MemoryProposal[];
 }) {
+	const tl = useLiteralMessages();
 	if (recent.length === 0) {
 		return null;
 	}
@@ -59,7 +69,7 @@ export function MemoryDreamRecent({
 								{appliedContent(proposal)}
 							</p>
 							<Badge className="mt-1" variant="outline">
-								{appliedLabel(proposal)}
+								{appliedLabel(proposal, tl)}
 							</Badge>
 						</div>
 						<Button

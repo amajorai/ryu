@@ -2,6 +2,12 @@
 
 use super::*;
 
+mod tags;
+#[cfg(test)]
+#[path = "values/value_rules_tests.rs"]
+mod value_rules_tests;
+pub(crate) use tags::*;
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListQuery {
@@ -22,6 +28,9 @@ pub struct ListQuery {
     /// Include each value's version summaries (KV v2 detailed metadata).
     #[serde(default)]
     pub(crate) detailed: Option<bool>,
+    /// Comma-separated tags; a value is listed only when it carries all.
+    #[serde(default)]
+    pub(crate) tag: Option<String>,
 }
 
 /// GET /api/vault/secrets lists the caller's visible vault metadata.
@@ -38,6 +47,7 @@ pub struct ListQuery {
         ("after" = Option<String>, Query, description = "Page cursor: `nextAfter` from the previous page"),
         ("limit" = Option<usize>, Query, description = "Page size (default 200, max 1000); enables paging"),
         ("detailed" = Option<bool>, Query, description = "Include per-version summaries (requires paging)"),
+        ("tag" = Option<String>, Query, description = "Comma-separated tags; only values carrying every one"),
     ),
     responses((status = 200, description = "Metadata only", body = serde_json::Value))
 )]
@@ -64,7 +74,11 @@ pub async fn list_secrets(
     if detailed && !paged {
         return invalid_request("detailed=true requires paging: pass limit (or after)");
     }
-    let can_list = |info: &VaultSecretInfo| ctx.caps(&info.coords()).contains(&Capability::List);
+    let tags = tags::tag_filter(query.tag.as_deref());
+    let can_list = |info: &VaultSecretInfo| {
+        tags::has_tags(&info.metadata.tags, &tags)
+            && ctx.caps(&info.coords()).contains(&Capability::List)
+    };
     let mut next_after = None;
     let mut page_ids = Vec::new();
     let local = if paged {
@@ -142,7 +156,11 @@ pub async fn list_secrets(
             {
                 Ok(value) => {
                     if let Some(remote) = value.get("secrets").and_then(Value::as_array) {
-                        for mut secret in remote.iter().cloned() {
+                        for mut secret in remote
+                            .iter()
+                            .filter(|secret| tags::wire_has_tags(secret, &tags))
+                            .cloned()
+                        {
                             if let Some(object) = secret.as_object_mut() {
                                 object.insert("source".into(), json!("control-plane"));
                             }
@@ -250,8 +268,14 @@ pub async fn put_secret(
     Extension(caller): Extension<Option<VerifiedCaller>>,
     headers: HeaderMap,
     Path(name): Path<String>,
-    Json(mut body): Json<Value>,
+    Json(body): Json<Value>,
 ) -> Response {
+    let ctx = ctx!(state, caller, headers);
+    put_secret_with(&ctx, &name, body).await
+}
+
+/// [`put_secret`] for a loaded principal (also one item of a bulk request).
+pub(crate) async fn put_secret_with(ctx: &Ctx, name: &str, mut body: Value) -> Response {
     // `customMetadata` keys are user-defined; keep them out of the RFC 3339
     // `…At` conversion.
     let custom_metadata = crate::server::vault_kv_api::take_custom_metadata(&mut body);
@@ -267,11 +291,7 @@ pub async fn put_secret(
     {
         return invalid_request("value exceeds the maximum allowed size");
     }
-    let ctx = match Ctx::load(&state, caller, &headers).await {
-        Ok(ctx) => ctx,
-        Err(response) => return response,
-    };
-    if ctx.shared_remote(body.coords.scope) {
+    if try_response!(shared_value(ctx, name, body.coords.scope)) {
         let mut forwarded = json!({
             "scope": body.coords.scope,
             "scopeId": ctx.shared_scope_id(&body.coords),
@@ -289,22 +309,22 @@ pub async fn put_secret(
         // The control-plane contract uses RFC 3339, like this API's own wire.
         let forwarded = rfc3339_fields(forwarded);
         return proxy(
-            &ctx,
+            ctx,
             reqwest::Method::PUT,
-            &format!("/secrets/{}", urlencoding::encode(&name)),
+            &format!("/secrets/{}", urlencoding::encode(name)),
             &[],
             Some(forwarded),
         )
         .await;
     }
-    let coords = match coords_for(&ctx, &name, body.coords) {
+    let coords = match coords_for(ctx, name, body.coords) {
         Ok(coords) => coords,
         Err(response) => return response,
     };
     let actor = ctx.actor();
     // Legacy clear: an empty value deletes.
     if body.value.as_deref() == Some("") {
-        return delete_coords(&ctx, coords, &actor).await;
+        return delete_coords(ctx, coords, &actor).await;
     }
     if let Err(response) = ctx.require(&coords, Capability::Write) {
         return response;
@@ -317,7 +337,7 @@ pub async fn put_secret(
         Ok(patch) => patch,
         Err(error) => return invalid_request(&format!("metadata: {error}")),
     };
-    match protected_environment(&ctx, &coords.environment).await {
+    match protected_environment(ctx, &coords.environment).await {
         Ok(Some(required)) if !ctx.caps(&coords).contains(&Capability::Admin) => {
             let authority = ctx.requester_authority(&coords);
             return match ctx
@@ -371,7 +391,7 @@ pub async fn put_secret(
         )
         .await
     {
-        Ok(info) => respond(json!({ "ok": true, "secret": to_wire(&ctx, info) })),
+        Ok(info) => respond(json!({ "ok": true, "secret": to_wire(ctx, info) })),
         Err(error) => vault_error(error),
     }
 }

@@ -10,16 +10,14 @@
  * same wording.
  */
 
-export const PROMPT_CACHE_CONFIRM_TITLE =
-	"Apply now? This resets the prompt cache";
-
 /** Profile › About you reaches every owner thread's system prompt. */
 export function aboutYouCacheWarning(): {
 	description: string;
 	title: string;
 } {
 	return {
-		title: PROMPT_CACHE_CONFIRM_TITLE,
+		// A literal, not a constant: the extractor skips `PROMPT` constants.
+		title: "Apply now? This resets the prompt cache",
 		description:
 			"About you is part of the system prompt for every thread on this node. Each thread's next message re-sends its whole conversation at the full input price, once; replies after that are cached again. Switching models costs the same.",
 	};

@@ -143,7 +143,7 @@ export function FilesTableSection({
 										document,
 										tl
 									);
-									const title = document.title || "Untitled";
+									const title = document.title || tl("Untitled");
 									const badge = indexBadgeLabel(document.indexState, tl);
 									return (
 										<TableRow className="group" key={document.id}>

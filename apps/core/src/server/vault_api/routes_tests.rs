@@ -414,7 +414,7 @@ fn an_export_never_hands_back_a_shared_value_a_local_sealed_one_shadows() {
         ),
     )]);
     let withheld = std::collections::BTreeSet::from(["SIGNING_KEY".to_owned()]);
-    let values = overlay_local_values(shared, local, &withheld);
+    let values = overlay_local_values(shared, local, &withheld, true);
     assert_eq!(
         values,
         BTreeMap::from([

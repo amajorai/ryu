@@ -90,7 +90,7 @@ export function ActivationTaskStep({
 				</div>
 			</OnboardingActions>
 			<ConnectionPermissionDialog
-				connectionName={draft.appName ?? "this integration"}
+				connectionName={draft.appName ?? null}
 				connectionType="Composio"
 				onConfirm={async (accessLevel) => {
 					await onConnect(accessLevel);

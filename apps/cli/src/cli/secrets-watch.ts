@@ -19,7 +19,7 @@ import {
 	type VaultEventFilter,
 	type VaultEventMessage,
 } from "@ryuhq/core-client/vault-events";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { flag, type SecretsArgs } from "./secrets-args.ts";
 import { agentTarget } from "./secrets-output.ts";
 import type { PreparedRun } from "./secrets-run-env.ts";
@@ -34,7 +34,7 @@ export const VALUE_EVENT_TYPES = [
 	"kv-import",
 	"change-applied",
 ];
-const LEASE_EVENT_TYPES = ["lease-revoke", "lease-expire"];
+export const LEASE_EVENT_TYPES = ["lease-revoke", "lease-expire"];
 
 /** Opens one subscription; resolves once Core accepted it. */
 export type EventSource = (
@@ -92,10 +92,29 @@ export function runEventSource(
 	return async (signal) => onlyEnvironment(await open(signal), environment);
 }
 
+/** Why the event stream was given up: it ended past its reconnects, or Core
+ *  refused to reopen it. */
+export type LostReason = "ended" | "refused";
+
 /** Why a running command must stop. */
-type Stop =
+export type Stop =
 	| { kind: "change"; names: string[] }
-	| { kind: "lost"; reason: string };
+	| { kind: "lost"; reason: LostReason };
+
+/** The whole line `run --watch` prints when it stops a command because the
+ *  event stream was lost, as one catalogued sentence per reason. */
+export function lostStreamMessage(
+	reason: LostReason,
+	translate: (value: string) => string = tr
+): string {
+	return reason === "refused"
+		? translate(
+				"ryu: Core refused the vault event stream; stopped the command so it does not keep running on values that are no longer watched."
+			)
+		: translate(
+				"ryu: the vault event stream ended and could not be reopened; stopped the command so it does not keep running on values that are no longer watched."
+			);
+}
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
 	return new Promise((resolve) => {
@@ -122,10 +141,10 @@ function refused(error: unknown): boolean {
 }
 
 /** Buffers events from the stream (reconnecting as allowed) and hands the
- *  watch loop the next reason to restart. */
-class ChangeFeed {
+ *  watch loop the next reason to restart. `ryu secrets agent` reuses it. */
+export class ChangeFeed {
 	private readonly pending: VaultEventMessage[] = [];
-	private lost: string | null = null;
+	private lost: LostReason | null = null;
 	private wake: (() => void) | null = null;
 
 	constructor(
@@ -166,7 +185,7 @@ class ChangeFeed {
 			}
 			const wait = this.timing.reconnectMs[attempt];
 			if (wait === undefined) {
-				this.lost = "the vault event stream ended and could not be reopened";
+				this.lost = "ended";
 				this.push();
 				return;
 			}
@@ -181,7 +200,7 @@ class ChangeFeed {
 				this.push();
 			} catch (error) {
 				if (refused(error)) {
-					this.lost = "Core refused the vault event stream";
+					this.lost = "refused";
 					this.push();
 					return;
 				}
@@ -220,7 +239,7 @@ class ChangeFeed {
 									message.event.leaseId ??
 									message.event.type,
 							]
-						: ["(missed events)"]
+						: [tr("(missed events)")]
 				);
 				this.clear();
 				return { kind: "change", names: [...new Set(names)] };
@@ -280,9 +299,7 @@ export async function runWatching(
 				child.abort("restart");
 				const code = await exit;
 				if (outcome.kind === "lost") {
-					ctx.io.err(
-						`${tf("ryu: {reason}; stopped the command so it does not keep running on values that are no longer watched.", { reason: outcome.reason })}\n`
-					);
+					ctx.io.err(`${lostStreamMessage(outcome.reason)}\n`);
 					return code === 0 ? 1 : code;
 				}
 				ctx.io.err(

@@ -1,4 +1,5 @@
-import { translate as tl } from "@ryu/i18n/core";
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { GatewayEgressConfig } from "@/src/lib/api/gateway.ts";
 
 type Pool = GatewayEgressConfig["pools"][string];
@@ -75,23 +76,26 @@ export function savedCredentialEnvNames(
 export function validatePool(
 	name: string,
 	pool: Pool,
-	savedEnvNames: ReadonlySet<string> = new Set()
+	savedEnvNames: ReadonlySet<string> = new Set(),
+	tl: LiteralMessage = translate
 ): string | null {
 	if (pool.direct_fallback_only && !pool.include_direct) {
-		return "Include a direct connection before enabling direct fallback.";
+		return tl("Include a direct connection before enabling direct fallback.");
 	}
 	if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) {
-		return "Use 1–64 letters, numbers, hyphens, or underscores for the pool name.";
+		return tl(
+			"Use 1–64 letters, numbers, hyphens, or underscores for the pool name."
+		);
 	}
 	if (
 		!(
 			pool.include_direct || pool.endpoints.some((endpoint) => endpoint.enabled)
 		)
 	) {
-		return "Enable a proxy endpoint or include a direct connection.";
+		return tl("Enable a proxy endpoint or include a direct connection.");
 	}
 	if (pool.endpoints.length + Number(pool.include_direct) > 32) {
-		return "A pool supports at most 32 connections.";
+		return tl("A pool supports at most 32 connections.");
 	}
 	const ids = new Set<string>();
 	for (const endpoint of pool.endpoints) {
@@ -100,10 +104,12 @@ export function validatePool(
 			(endpoint.priority ?? 0) < 0 ||
 			(endpoint.priority ?? 0) > 65_535
 		) {
-			return "Priority must be an integer from 0 to 65535.";
+			return tl("Priority must be an integer from 0 to 65535.");
 		}
 		if (!/^[A-Za-z0-9_-]{1,64}$/.test(endpoint.id) || ids.has(endpoint.id)) {
-			return "Proxy endpoint IDs must be unique and use letters, numbers, hyphens, or underscores.";
+			return tl(
+				"Proxy endpoint IDs must be unique and use letters, numbers, hyphens, or underscores."
+			);
 		}
 		ids.add(endpoint.id);
 		if (endpoint.enabled) {

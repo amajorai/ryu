@@ -180,6 +180,7 @@ pub async fn build_ryu_mcp_server(
         caps,
         permission_tx,
         permission_scope_id,
+        broker_credentials: None,
     };
     Some(server)
 }
@@ -211,9 +212,17 @@ pub struct RyuMcpServer {
     permission_tx: Option<tokio::sync::mpsc::UnboundedSender<AcpEvent>>,
     /// Stable chat-session key for one-time interactive approvals.
     permission_scope_id: Option<String>,
+    /// The run's own broker-session credential (`session_broker`), if brokered.
+    broker_credentials: Option<axum::http::HeaderMap>,
 }
 
 impl RyuMcpServer {
+    /// Offer the broker tools under this run's broker session token.
+    pub fn with_broker_session(mut self, token: Option<&str>) -> Self {
+        self.broker_credentials = token.and_then(session_broker::session_credentials);
+        self
+    }
+
     /// The MCP server name advertised in `session/new.mcpServers`.
     pub fn name(&self) -> String {
         "ryu-registry".to_owned()
@@ -241,6 +250,13 @@ impl RyuMcpServer {
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + 'static,
     {
         let (read, write) = tokio::io::split(stream);
+        // A brokered run's bridge also serves its broker tools (`session_broker`).
+        if let Some(credentials) = self.broker_credentials.clone() {
+            let handler = session_broker::BrokeredHandler::new(self.new_handler(), credentials);
+            let running = handler.serve((read, write)).await?;
+            running.waiting().await?;
+            return Ok(());
+        }
         let running = self.new_handler().serve((read, write)).await?;
         running.waiting().await?;
         Ok(())
@@ -278,6 +294,7 @@ mod hosted_broker_catalog;
 mod jsonrpc;
 mod permissions;
 mod result_bound;
+mod session_broker;
 mod tool_defs;
 mod turn_sender;
 mod widget;

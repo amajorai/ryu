@@ -12,6 +12,7 @@ import {
 	makeHeaders,
 } from "@ryuhq/core-client/client";
 import { z } from "zod";
+import { LocalizedError, localize } from "../cli/localizedText.ts";
 
 /** One row in a list tab. Mirrors apps/cli's `ListRow`. */
 export interface ListRow {
@@ -93,7 +94,12 @@ export async function fetchFeatureList(
 		signal,
 	});
 	if (!resp.ok) {
-		throw new Error(`${config.path} failed: ${resp.status}`);
+		throw new LocalizedError(
+			localize("{path} failed: {status}", {
+				path: config.path,
+				status: resp.status,
+			})
+		);
 	}
 	const json = featurePayloadSchema.parse(await resp.json());
 	const arr = findArray(json, config.containerKeys ?? []);

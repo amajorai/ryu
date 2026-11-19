@@ -32,6 +32,7 @@ import type {
 	RelatedGroup,
 } from "@/src/lib/api/crm.ts";
 import { CrmUserText } from "./crm-label.tsx";
+import { crmValidationText } from "./crm-validation-text.ts";
 import { renderActivityComposer } from "./record-activity-composer.tsx";
 import { TimelineEntry } from "./record-detail-parts.tsx";
 import { renderRelatedGroups } from "./record-related-groups.tsx";
@@ -161,7 +162,7 @@ export function RecordDetail({
 			});
 			setFailedFieldDraft({ fieldId: field.id, value: next });
 			setEditingField(field.id);
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(crmValidationText(cause, subject.fields, tl));
 		}
 	};
 
@@ -330,7 +331,7 @@ export function RecordDetail({
 							.map((field) => (
 								<div key={field.id}>
 									<dt className="text-muted-foreground text-xs">
-										{field.name}
+										<CrmUserText text={field.name} />
 									</dt>
 									<dd className="mt-0.5 text-sm">
 										{editingField === field.id ? (

@@ -303,7 +303,7 @@ test("Account refresh, switch, remove, add, sign in, and sign out follow their v
 			frame.includes("Beta Two")
 	);
 	expect(first).toContain("alpha@example.test");
-	expect(first).toMatch(/Password\s+Set/);
+	expect(first).toMatch(/Password\s+Configured/);
 	expect(first).toMatch(/2FA\s+Disabled/);
 	expect(first).toMatch(/Sessions\s+0 active/);
 	expect(accountBackendReads).toEqual(

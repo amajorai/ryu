@@ -72,6 +72,9 @@ export function NestedOverflowToolbar({
 	const tl = useLiteralMessages();
 	const controlsId = useId();
 	const [isOpen, setIsOpen] = useState(defaultOpen);
+	const toggleLabel = isOpen
+		? tl("Close editor tools")
+		: tl("Open editor tools");
 	const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 	const activeCategory =
 		expandedLayout === "nested"
@@ -121,7 +124,9 @@ export function NestedOverflowToolbar({
 					<motion.div
 						animate={{ opacity: 1, y: 0 }}
 						aria-hidden={!isOpen}
-						aria-label={tl("{ariaLabel} expanded", { ariaLabel })}
+						aria-label={tl("{ariaLabel} expanded", {
+							ariaLabel: tl(ariaLabel),
+						})}
 						className="pointer-events-auto absolute bottom-full mb-2 grid max-h-[min(60vh,30rem)] w-[min(72rem,calc(100vw-2rem))] grid-cols-2 gap-2 overflow-y-auto rounded-2xl border border-border bg-card/95 p-2 text-card-foreground shadow-2xl shadow-black/10 backdrop-blur-xl sm:grid-cols-3 lg:grid-cols-4 dark:shadow-black/30"
 						exit={reduce ? { opacity: 0 } : { opacity: 0, y: 4 }}
 						id={visibleLayerId}
@@ -132,7 +137,7 @@ export function NestedOverflowToolbar({
 					>
 						{categories.map((category) => (
 							<div
-								aria-label={tl("{label} tools", { label: category.label })}
+								aria-label={tl("{label} tools", { label: tl(category.label) })}
 								className="min-w-0 rounded-xl border border-border/60 bg-background/70 p-2"
 								key={category.id}
 								role="group"
@@ -151,7 +156,7 @@ export function NestedOverflowToolbar({
 			</AnimatePresence>
 
 			<motion.div
-				aria-label={ariaLabel}
+				aria-label={tl(ariaLabel)}
 				className="pointer-events-auto inline-flex max-w-full items-center overflow-hidden rounded-full border border-border bg-card/95 p-1 shadow-2xl shadow-black/10 backdrop-blur-xl supports-[backdrop-filter]:bg-card/80 dark:shadow-black/30"
 				data-slot="nested-overflow-toolbar"
 				layout
@@ -171,7 +176,7 @@ export function NestedOverflowToolbar({
 							variants={variants}
 						>
 							<RailButton
-								ariaLabel="Back to editor tools"
+								ariaLabel={tl("Back to editor tools")}
 								onClick={() => setActiveCategoryId(null)}
 							>
 								<ArrowLeftIcon className="rtl:-scale-x-100" />
@@ -205,7 +210,7 @@ export function NestedOverflowToolbar({
 									{categories.map((category) => (
 										<RailButton
 											ariaLabel={tl("Open {label} tools", {
-												label: category.label,
+												label: tl(category.label),
 											})}
 											key={category.id}
 											onClick={() => {
@@ -227,7 +232,7 @@ export function NestedOverflowToolbar({
 				<motion.button
 					aria-controls={isOpen ? visibleLayerId : undefined}
 					aria-expanded={isOpen}
-					aria-label={isOpen ? "Close editor tools" : "Open editor tools"}
+					aria-label={toggleLabel}
 					className={cn(
 						"relative inline-grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-transform",
 						"focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
@@ -240,7 +245,7 @@ export function NestedOverflowToolbar({
 						}
 						setIsOpen(true);
 					}}
-					title={isOpen ? "Close editor tools" : "Open editor tools"}
+					title={toggleLabel}
 					type="button"
 				>
 					{isOpen ? (

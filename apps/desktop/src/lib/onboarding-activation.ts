@@ -1,3 +1,5 @@
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { ComposioConnection, ComposioToolkit } from "./api/composio.ts";
 import type { GatewayOnboardingAccess } from "./api/onboarding-profile.ts";
 
@@ -139,17 +141,22 @@ function hasActiveEmailConnection(
 	);
 }
 
-function templateFor(slug: string): ToolkitTaskTemplate {
+function templateFor(slug: string, tl: LiteralMessage): ToolkitTaskTemplate {
 	return (
 		TASK_TEMPLATES.get(slug) ?? {
 			prompt: `Review my recent ${slug} work and suggest the next task I can delegate. Keep it concise, cite the relevant source, and ask before changing anything.`,
-			title: `Find the next task in ${slug}`,
+			// The title is shown; the prompt above goes to the model as written.
+			title: tl("Find the next task in {app}", { app: slug }),
 		}
 	);
 }
 
-function taskDraftFor(slug: string, name: string | null): ActivationTaskDraft {
-	const template = templateFor(slug);
+function taskDraftFor(
+	slug: string,
+	name: string | null,
+	tl: LiteralMessage = translate
+): ActivationTaskDraft {
+	const template = templateFor(slug, tl);
 	return {
 		appName: name,
 		appSlug: slug,
@@ -211,7 +218,8 @@ export function buildActivationRecommendations(input: {
 }
 
 export function buildActivationTaskDraft(
-	recommendations: readonly ActivationRecommendation[]
+	recommendations: readonly ActivationRecommendation[],
+	tl: LiteralMessage = translate
 ): ActivationTaskDraft {
 	const active = recommendations.find(
 		(recommendation) => recommendation.active
@@ -226,7 +234,7 @@ export function buildActivationTaskDraft(
 	}
 	const first = recommendations[0];
 	if (first) {
-		return taskDraftFor(first.appSlug ?? "work", first.appName);
+		return taskDraftFor(first.appSlug ?? "work", first.appName, tl);
 	}
 	return {
 		appName: null,

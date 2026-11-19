@@ -217,13 +217,18 @@ export function ClipsQuickAttachSettings() {
 		);
 	}
 
-	const shortcut = isMacOS() ? "Command twice" : "Alt twice";
+	const mac = isMacOS();
 	return (
 		<SettingsSection
-			caption={tl(
-				"Press {shortcut} to attach recent activity. Ryu never sends it automatically.",
-				{ shortcut }
-			)}
+			caption={
+				mac
+					? tl(
+							"Press Command twice to attach recent activity. Ryu never sends it automatically."
+						)
+					: tl(
+							"Press Alt twice to attach recent activity. Ryu never sends it automatically."
+						)
+			}
 			title="Clips quick attach"
 		>
 			<SettingsGroup>
@@ -236,10 +241,15 @@ export function ClipsQuickAttachSettings() {
 							onCheckedChange={toggle}
 						/>
 					}
-					description={tl(
-						"{shortcut} captures the last three minutes as staged image attachments and a visible summary.",
-						{ shortcut }
-					)}
+					description={
+						mac
+							? tl(
+									"Command twice captures the last three minutes as staged image attachments and a visible summary."
+								)
+							: tl(
+									"Alt twice captures the last three minutes as staged image attachments and a visible summary."
+								)
+					}
 					title="Attach recent activity to a chat"
 				/>
 				<SettingsItem

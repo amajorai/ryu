@@ -44,14 +44,27 @@ export interface LoginPrompt {
 // cross the wire - Core returns only these safe fields (parity with the shared
 // multi-account contract used by every bearer surface).
 
+// A trial's label, one whole phrase per billing interval.
+function trialPlanLabel(interval: string): string {
+	if (interval === "month") {
+		return tr("Trial (monthly after trial)");
+	}
+	if (interval === "year") {
+		return tr("Trial (annually after trial)");
+	}
+	// A whole phrase: the bare catalog "Trial" is an agent lifecycle stage (de
+	// "Test"), and the CLI catalog carries no keyed word senses.
+	return tr("Trial period");
+}
+
 // Mirror apps/cli main.rs::format_plan: collapse the subscription payload into a
 // short human label.
-function formatPlan(sub: SubscriptionStatus): string {
+export function formatPlan(sub: SubscriptionStatus): string {
 	const lifetime = sub.lifetime;
 	if (lifetime) {
 		const lt = lifetime;
 		if (lt.expired === true) {
-			return "Lifetime (updates expired)";
+			return tr("Lifetime (updates expired)");
 		}
 		const until = lt.updatesExpiresAt?.split("T")[0] ?? "—";
 		return tf("Lifetime (updates until {until})", { until });
@@ -63,7 +76,7 @@ function formatPlan(sub: SubscriptionStatus): string {
 		const status = s.status;
 		const interval = s.interval;
 		if (status === "trialing") {
-			return tf("Trial ({interval}ly after trial)", { interval });
+			return trialPlanLabel(interval);
 		}
 		if (interval === "month") {
 			return tr("Pro (monthly)");
@@ -74,7 +87,8 @@ function formatPlan(sub: SubscriptionStatus): string {
 		return tf("Pro ({label})", { label: interval });
 	}
 
-	return "Free";
+	// A whole phrase: the bare catalog "Free" is the price sense.
+	return tr("Free plan");
 }
 
 export type LoadResult =

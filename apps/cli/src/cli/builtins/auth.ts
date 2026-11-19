@@ -5,6 +5,7 @@ import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { accountBackendTarget } from "../../core/authBackend.ts";
 import { tf, tr } from "../../i18n/translate.ts";
+import { LocalizedError, localize } from "../localizedText.ts";
 import { type CliContext, type Command, UsageError } from "../types.ts";
 import {
 	asRecord,
@@ -240,8 +241,10 @@ export const sessionsCommand: Command = {
 			}
 			if (!currentSession) {
 				if (sessions.length > 0) {
-					throw new Error(
-						"The account service did not identify this device's session; reload before revoking others."
+					throw new LocalizedError(
+						localize(
+							"The account service did not identify this device's session; reload before revoking others."
+						)
 					);
 				}
 				outputCommandResult(

@@ -30,6 +30,7 @@ import {
 	type UnloadedSecuritySession,
 } from "./account-security-types.ts";
 import { AccountSecurityView } from "./account-security-view.tsx";
+import { usePanelNotice } from "./panel-notice.tsx";
 import { passwordProblem } from "./password-issue.ts";
 
 export function AccountSecurity({
@@ -48,7 +49,7 @@ export function AccountSecurity({
 	const [session, setSession] = useState<
 		SecuritySessionResponse | UnloadedSecuritySession
 	>({});
-	const [message, setMessage] = useState("");
+	const { notice, setFailure, setMessage } = usePanelNotice();
 	const [busy, setBusy] = useState(false);
 	const [value, setValue] = useState("");
 	const [methods, setMethods] = useState<string[]>([]);
@@ -77,7 +78,7 @@ export function AccountSecurity({
 			await task(controller.signal);
 		} catch (error) {
 			if (!controller.signal.aborted) {
-				setMessage(
+				setFailure(
 					tf("Could not complete action: {error}", { error: errorText(error) })
 				);
 			}
@@ -98,9 +99,7 @@ export function AccountSecurity({
 			request(
 				authTarget,
 				"/api/user/email-change-status",
-				{
-					signal,
-				},
+				{ signal },
 				securityEmailChangeStatusResponseSchema
 			),
 		]);
@@ -123,7 +122,7 @@ export function AccountSecurity({
 		controllerRef.current = controller;
 		void read(controller.signal).catch((error) => {
 			if (!controller.signal.aborted) {
-				setMessage(
+				setFailure(
 					tf("Could not load security: {error}", { error: errorText(error) })
 				);
 			}
@@ -487,7 +486,7 @@ export function AccountSecurity({
 			busy={busy}
 			codes={codes}
 			emailChange={emailChange}
-			message={message}
+			message={notice}
 			methodIndex={methodIndex}
 			methods={methods}
 			operation={operation}

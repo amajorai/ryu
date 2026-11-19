@@ -31,9 +31,13 @@ const MAX_PATH_PREFIX_LEN: usize = 512;
 const MAX_DESCRIPTION_LEN: usize = 512;
 
 mod auth;
+pub mod tool_policy;
 pub use auth::ServiceAuth;
+pub use tool_policy::McpToolPolicy;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
+#[cfg(test)]
+pub(crate) use tests::test_service;
 
 /// A placeholder the broker replaces with a credential.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +80,9 @@ pub struct ServiceInput {
     /// Markdown instructions shown to agents through discovery.
     #[serde(default)]
     pub notes: String,
+    /// MCP tools agents may call through this service ([`tool_policy`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_tools: Option<McpToolPolicy>,
 }
 
 fn default_environment() -> String {
@@ -221,6 +228,9 @@ impl ServiceInput {
         }
         if self.notes.len() > MAX_NOTES_BYTES {
             return Err(invalid("notes exceed 64 KiB".into()));
+        }
+        if let Some(policy) = self.mcp_tools.take() {
+            self.mcp_tools = Some(policy.normalize().map_err(|e| invalid(format!("{e:#}")))?);
         }
         Ok(self)
     }
@@ -467,29 +477,4 @@ pub fn host_is_brokered(services: &[BrokerService], host: &str, port: u16) -> bo
     services
         .iter()
         .any(|service| rank(service, &host, port, None).is_some())
-}
-
-#[cfg(test)]
-pub(crate) fn test_service(
-    name: &str,
-    host: &str,
-    port: Option<u16>,
-    prefix: &str,
-) -> ServiceInput {
-    ServiceInput {
-        name: name.to_owned(),
-        environment: "default".to_owned(),
-        host: host.to_owned(),
-        port,
-        path_prefix: prefix.to_owned(),
-        auth: ServiceAuth::Bearer {
-            token: "secret:API_TOKEN".to_owned(),
-        },
-        substitutions: Vec::new(),
-        enabled: true,
-        allow_insecure_http: false,
-        box_relay: false,
-        description: String::new(),
-        notes: String::new(),
-    }
 }

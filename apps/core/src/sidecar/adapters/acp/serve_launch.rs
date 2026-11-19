@@ -24,6 +24,7 @@ pub(super) async fn launch_agent_server(
     workspace_autonomy: &WorkspaceAutonomy,
     cwd: &PathBuf,
     additional_directories: &Vec<PathBuf>,
+    agent_id: &str,
 ) -> anyhow::Result<Option<LaunchedServer>> {
     // Told to the user once, on the first turn, when the agent runs under the
     // untrusted-workspace profile (or could not be confined).
@@ -100,6 +101,7 @@ pub(super) async fn launch_agent_server(
                 is_claude_code,
                 workspace_autonomy.trusted,
                 account_confinement,
+                agent_id,
                 |name| std::env::var(name).ok(),
             ))
             .await;

@@ -83,7 +83,7 @@ function ExpiryTimeline({ expiresAt }: { expiresAt: string[] }) {
 	);
 }
 
-/** One window's line inside a shared tooltip: "Weekly: 61% used · resets in ~3d". */
+/** One window's line inside a shared tooltip: "Weekly: 61% used · Resets in 3 days". */
 export function WindowTooltipRow({
 	window: usageWindow,
 	mode,
@@ -94,7 +94,7 @@ export function WindowTooltipRow({
 	const used = Math.max(0, Math.min(100, usageWindow.usedPercent));
 	const shown = mode === "remaining" ? 100 - used : used;
 	const tl = useLiteralMessages();
-	const reset = formatReset(usageWindow.resetsAt);
+	const reset = formatReset(usageWindow.resetsAt, tl);
 	const pace = paceStatus(usageWindow, tl);
 	return (
 		<span className="font-medium">
@@ -150,7 +150,7 @@ export function MeterChip({
 		return null;
 	}
 	const soonest = meter.expiresAt.at(0) ?? null;
-	const reset = formatReset(meter.resetsAt);
+	const reset = formatReset(meter.resetsAt, tl);
 	return (
 		<Tooltip>
 			<TooltipTrigger
@@ -380,7 +380,7 @@ export function UsageWindowMeter({
 	const fillStyle: UsageFillStyle = { "--usage-fill": `${shown}%` };
 	// Color always reflects danger (high usage → red), regardless of which
 	// number is displayed; the bar fill matches the displayed number.
-	const reset = formatReset(usageWindow.resetsAt);
+	const reset = formatReset(usageWindow.resetsAt, tl);
 	const pace = paceStatus(usageWindow, tl);
 	const paceClass = paceDotClass(usageWindow);
 	const linearBar = (

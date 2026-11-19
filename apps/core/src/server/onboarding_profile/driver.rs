@@ -141,6 +141,7 @@ pub(super) async fn drive_job_phases<
             (Some(job), Some(Err(err))) => {
                 job.state = JobState::Failed;
                 job.error = Some(err.to_string());
+                job.error_code = Some(profile_error_code(&err));
                 None
             }
         }
@@ -162,6 +163,7 @@ pub(super) async fn drive_job_phases<
             Err(err) => {
                 job.state = JobState::Failed;
                 job.error = Some(err.to_string());
+                job.error_code = Some(profile_error_code(&err));
             }
         }
     }

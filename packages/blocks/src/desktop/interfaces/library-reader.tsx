@@ -1,4 +1,8 @@
-import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import {
+	type LiteralMessage,
+	useLiteralMessages,
+	useOptionalI18n,
+} from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import {
@@ -38,7 +42,7 @@ export function ownsKeys(target: EventTarget | null): boolean {
 }
 
 /** The book's contents in a popover, for jumping between chapters. */
-function ContentsMenu({
+export function ContentsMenu({
 	book,
 	currentId,
 	onOpenChapter,
@@ -48,10 +52,14 @@ function ContentsMenu({
 	onOpenChapter: (threadId: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
+	// A table-of-contents heading (ja 目次); the bare catalog "Contents" is what
+	// something holds (ja 内容).
+	const contents =
+		useOptionalI18n()?.t("nav.tableOfContents", {}, "Contents") ?? "Contents";
 	return (
 		<Popover onOpenChange={setOpen} open={open}>
 			<PopoverTrigger
-				aria-label="Contents"
+				aria-label={contents}
 				className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted aria-expanded:text-foreground motion-reduce:transition-none"
 				type="button"
 			>

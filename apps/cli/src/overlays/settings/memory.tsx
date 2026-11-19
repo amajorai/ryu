@@ -34,7 +34,7 @@ import {
 	TOP_K_MIN,
 	wireValue,
 } from "./memory-preferences.ts";
-import { memoryRowLabels } from "./memory-row-labels.ts";
+import { memoryRowLabels, memorySaveLabel } from "./memory-row-labels.ts";
 
 /** Core-backed memory and conversation-context preferences with readback. */
 export function MemoryPanel({
@@ -162,7 +162,7 @@ export function MemoryPanel({
 	);
 
 	const saveField = useCallback(
-		<K extends RowId>(field: K, next: MemoryPreferences[K], label: string) => {
+		<K extends RowId>(field: K, next: MemoryPreferences[K]) => {
 			const previousValue = preferences[field];
 			const nextPreferences: MemoryPreferences = {
 				...preferences,
@@ -170,7 +170,7 @@ export function MemoryPanel({
 			};
 			setPreferences(nextPreferences);
 			void saveIntent({
-				label,
+				label: memorySaveLabel(field),
 				next: { [field]: next },
 				previous: { [field]: previousValue },
 				writes: [
@@ -238,7 +238,7 @@ export function MemoryPanel({
 				editingRef.current = false;
 				setEditing(null);
 				onEditingChange(false);
-				saveField("contextBudget", nextBudget, "the context budget");
+				saveField("contextBudget", nextBudget);
 				return;
 			}
 			const parsed = parseWholeNumber(value);
@@ -250,16 +250,11 @@ export function MemoryPanel({
 			setEditing(null);
 			onEditingChange(false);
 			if (editing === "topK") {
-				saveField(
-					"topK",
-					Math.min(TOP_K_MAX, Math.max(TOP_K_MIN, parsed)),
-					"the recall limit"
-				);
+				saveField("topK", Math.min(TOP_K_MAX, Math.max(TOP_K_MIN, parsed)));
 			} else {
 				saveField(
 					"contextReserve",
-					Math.min(RESERVE_MAX, Math.max(RESERVE_MIN, parsed)),
-					"the reply reserve"
+					Math.min(RESERVE_MAX, Math.max(RESERVE_MIN, parsed))
 				);
 			}
 		},
@@ -283,7 +278,7 @@ export function MemoryPanel({
 
 	const toggleSelected = useCallback(() => {
 		if (selected === "autoRecall") {
-			saveField("autoRecall", !preferences.autoRecall, "auto-recall");
+			saveField("autoRecall", !preferences.autoRecall);
 		} else if (selected === "autoCompact") {
 			if (preferences.contextBudget === "off") {
 				setNotice(
@@ -291,9 +286,9 @@ export function MemoryPanel({
 				);
 				return;
 			}
-			saveField("autoCompact", !preferences.autoCompact, "auto-compact");
+			saveField("autoCompact", !preferences.autoCompact);
 		} else if (selected === "skills") {
-			saveField("skills", !preferences.skills, "skill loading");
+			saveField("skills", !preferences.skills);
 		}
 	}, [preferences, saveField, selected]);
 
@@ -303,7 +298,7 @@ export function MemoryPanel({
 			const next =
 				RANKERS[(current + direction + RANKERS.length) % RANKERS.length] ??
 				"needle2";
-			saveField("ranker", next, "search ranking");
+			saveField("ranker", next);
 		},
 		[preferences.ranker, saveField]
 	);
@@ -331,7 +326,7 @@ export function MemoryPanel({
 			const next =
 				choices[(current + direction + choices.length) % choices.length] ??
 				"off";
-			saveField("contextBudget", next, "the context budget");
+			saveField("contextBudget", next);
 		},
 		[preferences.contextBudget, saveField]
 	);

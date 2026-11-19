@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { translate as tr, translateMessage } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
@@ -12,6 +12,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { inlineSign, useInlineSign } from "./inline-direction.ts";
 import { isInterfaceCovered } from "./interface-keys.ts";
 import {
 	agentById,
@@ -21,6 +22,7 @@ import { JournalDayPage } from "./journal-day.tsx";
 import { JournalEntryPage } from "./journal-entry.tsx";
 import {
 	cssString,
+	dayStepForKey,
 	EASE,
 	isEditable,
 	isShown,
@@ -124,8 +126,7 @@ export function JournalInterface({
 		}
 	}, [activeDay]);
 
-	// Keep the timeline on the selected day, or on the open entry's row, so
-	// strip, page, and list agree.
+	// Keep the timeline on the selected day or the open entry's row (in sync).
 	const followSelector = entryOpen
 		? activeThreadId
 			? `[data-thread-id="${cssString(activeThreadId)}"]`
@@ -225,13 +226,10 @@ export function JournalInterface({
 			stepEntry(event.key === "ArrowUp" ? -1 : 1);
 			return;
 		}
-		if (
-			!entryOpen &&
-			view === "day" &&
-			(event.key === "ArrowLeft" || event.key === "ArrowRight")
-		) {
+		const dayStep = dayStepForKey(event.key, inlineSign(rootRef.current));
+		if (!entryOpen && view === "day" && dayStep !== 0) {
 			event.preventDefault();
-			stepDay(event.key === "ArrowLeft" ? -1 : 1);
+			stepDay(dayStep);
 		}
 	};
 
@@ -428,6 +426,7 @@ export function JournalInterface({
 				selectDay(todayKey);
 			}
 		},
+		sign: useInlineSign(),
 	});
 
 	const toolbar = (
@@ -452,7 +451,9 @@ export function JournalInterface({
 	const main = (
 		<main
 			aria-label={
-				entryOpen ? "Entry" : VIEWS.find((item) => item.id === view)?.label
+				entryOpen
+					? translateMessage("journal.entry", {}, "Entry")
+					: VIEWS.find((item) => item.id === view)?.label
 			}
 			className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
 		>

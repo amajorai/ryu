@@ -84,7 +84,7 @@ export function ForecastSummary({
 				<div className="flex min-w-0 flex-col gap-0.5 text-end">
 					<span className="text-muted-foreground text-xs">Trend</span>
 					<span className={`text-sm tabular-nums ${forecastTone(forecast)}`}>
-						{formatForecastChange(forecast)}
+						{formatForecastChange(forecast, tl)}
 					</span>
 				</div>
 			</div>
@@ -150,7 +150,9 @@ export function ForecastSummary({
 							<td
 								className={`py-2 text-end tabular-nums ${series.forecast ? forecastTone(series.forecast) : "text-muted-foreground"}`}
 							>
-								{series.forecast ? formatForecastChange(series.forecast) : "—"}
+								{series.forecast
+									? formatForecastChange(series.forecast, tl)
+									: "—"}
 							</td>
 						</tr>
 					))}

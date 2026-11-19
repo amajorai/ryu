@@ -61,6 +61,7 @@
       "!apps/core/src/plugin_manifest/fixtures",
       "!packages/blocks/src/web/backgrounds/vendor",
       "!tools/embedded-app-ui.lock.json",
+      "!tools/check-i18n-sense-call-sites.baseline.json",
       "!apps/web/public/openapi.json",
       "!crates/sdk/core/specs/core-openapi.json",
       "!crates/sdk/napi/index.js",

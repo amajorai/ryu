@@ -47,6 +47,7 @@ import { Loading } from "../../ui/Loading.tsx";
 import { useToast } from "../../ui/toast.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
+import { documentCountLabel, messageCountLabel } from "./space-counts.ts";
 
 const SCROLL_STEP = 10;
 const HISTORY_WINDOW = 14;
@@ -240,7 +241,7 @@ function SpacesPane({ spaces, index }: { spaces: Space[]; index: number }) {
 					const selected = i === index;
 					const count =
 						space.documentCount !== undefined && space.documentCount !== null
-							? ` (${space.documentCount} docs)`
+							? ` (${documentCountLabel(space.documentCount)})`
 							: "";
 					return (
 						<box flexDirection="row" gap={1} key={space.id}>
@@ -337,7 +338,9 @@ function HistoryPane({
 		<Card title="history">
 			{visible.map((conv) => {
 				const meta = [
-					conv.messageCount === null ? "" : `${conv.messageCount}msg`,
+					conv.messageCount === null
+						? ""
+						: messageCountLabel(conv.messageCount),
 					conv.date ?? "",
 				]
 					.filter((part) => part.length > 0)

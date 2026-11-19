@@ -25,7 +25,8 @@ export const env = createEnv({
 if (
 	!process.env.SKIP_ENV_VALIDATION &&
 	env.NODE_ENV === "production" &&
-	!env.RYU_DB_MASTER_KEY
+	!env.RYU_DB_MASTER_KEY &&
+	!env.RYU_DB_MASTER_KEYS
 ) {
 	throw new Error(
 		"RYU_DB_MASTER_KEY is required in production so sensitive control-plane fields are encrypted at rest."

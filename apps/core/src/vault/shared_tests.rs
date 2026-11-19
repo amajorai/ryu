@@ -61,12 +61,13 @@ fn every_proxied_request_carries_the_node_key_and_only_a_vouch_asks_for_one() {
 #[test]
 fn the_proxied_subpaths_are_exactly_the_control_plane_allowlist() {
     // Paired with `CORE_FORWARDED_JWT_ROUTES` in
-    // packages/api/src/lib/forwarded-user-jwt.ts (its guard test reads this
+    // packages/api/src/lib/forwarded-user-jwt-routes.ts (its guard test reads this
     // list): the control plane takes a forwarded JWT on these and no other.
     let get = reqwest::Method::GET;
     let post = reqwest::Method::POST;
     let put = reqwest::Method::PUT;
     let delete = reqwest::Method::DELETE;
+    let patch = reqwest::Method::PATCH;
     for (method, subpath) in [
         (&get, "/secrets"),
         (&put, "/secrets/API_KEY"),
@@ -76,6 +77,11 @@ fn the_proxied_subpaths_are_exactly_the_control_plane_allowlist() {
         (&post, "/secrets/API_KEY/rollback"),
         (&post, "/secrets/API_KEY/restore"),
         (&post, "/secrets/API_KEY/destroy"),
+        (&patch, "/secrets/API_KEY/metadata"),
+        (&patch, "/secrets/API%20KEY/data"),
+        (&get, "/secrets/API_KEY/subkeys"),
+        (&post, "/secrets/API_KEY/versions/delete"),
+        (&post, "/secrets/API_KEY/versions/undelete"),
         (&post, "/export"),
         (&post, "/import"),
         (&get, "/change-requests"),
@@ -92,10 +98,19 @@ fn the_proxied_subpaths_are_exactly_the_control_plane_allowlist() {
         (&post, "/secrets//reveal"),
         (&post, "/secrets/API_KEY/share"),
         (&post, "/export/"),
+        // KV v2: only the forwarded methods, and no detailed metadata read.
+        (&get, "/secrets/API_KEY/metadata"),
+        (&patch, "/secrets/API_KEY"),
+        (&put, "/secrets/API_KEY/data"),
+        (&post, "/secrets/API_KEY/subkeys"),
+        (&post, "/secrets/API_KEY/versions/destroy"),
+        (&get, "/secrets/API_KEY/subkeys/"),
+        (&patch, "/secrets//metadata"),
+        (&post, "/secrets/API_KEY/versions"),
     ] {
         assert!(!is_proxied_subpath(method, subpath), "{method} {subpath}");
     }
-    assert_eq!(PROXIED_SUBPATHS.len(), 12);
+    assert_eq!(PROXIED_SUBPATHS.len(), 17);
 }
 
 #[test]

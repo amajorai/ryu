@@ -25,7 +25,7 @@ const USER_VOICE_KEYS = new Set([
  * the start of a sentence ("Versuche es erneut"; not "ich stelle die …").
  */
 const INFORMAL =
-	/\b(?:du|dich|dir|dein(?!stall)\w*)\b|(?:^|[.!?:]\s+)(?:Versuche|Stelle|Prüfe|Wähle|Öffne|Füge|Melde|Starte|Speichere|Aktiviere|Bitte den)\s+(?:es|sicher|sie|ihn|den|die|das|dich)\b/iu;
+	/\b(?:du|dich|dir|dein(?!stall)\w*)\b|(?:^|[.!?:]\s+)(?:Versuche|Stelle|Prüfe|Wähle|Öffne|Füge|Melde|Starte|Speichere|Aktiviere|Bitte den|Gib|Nutze|Verbinde|Verwende|Setze|Drücke|Mach|Behalte|Beanspruche)\s+(?:es|sicher|sie|ihn|den|die|das|dich|einen|eine|ein)\b/iu;
 
 /** Placeholder and path tokens ({dir}, <data dir>) are code, not German. */
 const informalText = (value: string) =>
@@ -46,6 +46,8 @@ test("the guard recognizes informal forms and ignores 'deinstallieren'", () => {
 	expect(INFORMAL.test("App deinstallieren")).toBe(false);
 	expect(INFORMAL.test("Versuchen Sie es erneut.")).toBe(false);
 	expect(INFORMAL.test("Ich stelle die Widgets zusammen.")).toBe(false);
+	expect(INFORMAL.test("Gib den Ordner an.")).toBe(true);
+	expect(INFORMAL.test("Geben Sie den Ordner an.")).toBe(false);
 	expect(informalText("{dir} ist kein Ordner.")).toBe(false);
 	expect(informalText("in <data dir>/bin gefunden")).toBe(false);
 });

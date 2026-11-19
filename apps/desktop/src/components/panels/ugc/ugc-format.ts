@@ -76,15 +76,20 @@ export function parseCount(input: string): number | null {
 }
 
 /** The campaign's pricing rule in words. A campaign the sidecar priced at zero
- *  says so out loud — that is the state a mis-sent rule leaves behind, and it is
+ *  says so out loud: that is the state a mis-sent rule leaves behind, and it is
  *  invisible if the panel only ever shows the resulting $0.00 accruals. */
-export function formatPayoutRule(rule: PayoutRule | undefined): string {
+export function formatPayoutRule(
+	rule: PayoutRule | undefined,
+	tl: LiteralMessage
+): string {
 	if (!rule) {
-		return "No payout rule";
+		return tl("No payout rule");
 	}
 	return rule.type === "cpm"
-		? `${formatCents(rule.cpm_cents)} per 1,000 views`
-		: `${formatCents(rule.flat_cents)} per approved post`;
+		? tl("{amount} per 1,000 views", { amount: formatCents(rule.cpm_cents) })
+		: tl("{amount} per approved post", {
+				amount: formatCents(rule.flat_cents),
+			});
 }
 
 /** Spend as a whole percentage of budget, in integer cents. A 0 budget means

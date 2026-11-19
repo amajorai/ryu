@@ -4,6 +4,7 @@ use crate::vault::broker::services::test_service;
 fn launch() -> RuntimeLaunch {
     RuntimeLaunch {
         kind: "pi",
+        agent: None,
         trusted_workspace: true,
         account_confined: false,
         model_via_loopback: true,
@@ -370,7 +371,10 @@ async fn disabling_a_runtime_identity_ends_its_runs_and_brokers_no_new_ones() {
         kind: "acp",
         ..launch()
     };
-    let lease_live = lease(store, 8123, &dir, running).await.unwrap().unwrap();
+    let lease_live = lease(store, 8123, &dir, running.clone())
+        .await
+        .unwrap()
+        .unwrap();
     store
         .machine_update(
             "ryu-agent-acp",
@@ -444,5 +448,50 @@ async fn a_bound_runtime_is_capped_per_identity_and_leaks_no_token_past_the_cap(
     assert_eq!(live_tokens, sessions::MAX_ACTIVE_PER_SUBJECT);
     drop(conn);
     drop(leases);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn a_run_authenticates_as_its_agents_own_identity_once_bound() {
+    use crate::vault::agent_identity::agent_identity_name;
+    let store = leaked_store();
+    add_service(store, "github", "api.github.com", true).await;
+    // Policies bound to the kind; the agent's identity has none yet.
+    bind_runtime(store, "acp", &["github"], false).await;
+    let dir = ca_dir();
+    let reviewer = RuntimeLaunch {
+        kind: "acp",
+        agent: Some("reviewer".into()),
+        ..launch()
+    };
+    let kind = store.machine_get("ryu-agent-acp").await.unwrap();
+    let fallback = lease(store, 8123, &dir, reviewer.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    let minted_by = |lease: &RuntimeBrokerLease| {
+        let conn = store.conn.try_lock().unwrap();
+        sessions::live(&conn, lease.session_id())
+            .unwrap()
+            .unwrap()
+            .minted_by
+    };
+    assert_eq!(minted_by(&fallback), format!("machine:{}", kind.id));
+    // Bind the agent's own identity: its next run authenticates as it.
+    let name = agent_identity_name("acp", "reviewer").unwrap();
+    let agent = store.machine_get(&name).await.unwrap();
+    store
+        .machine_update(
+            &agent.id,
+            Some(vec!["agent-services".into()]),
+            None,
+            None,
+            &AuditActor::system(),
+        )
+        .await
+        .unwrap();
+    let own = lease(store, 8123, &dir, reviewer).await.unwrap().unwrap();
+    assert_eq!(minted_by(&own), format!("machine:{}", agent.id));
+    drop((fallback, own));
     let _ = std::fs::remove_dir_all(&dir);
 }

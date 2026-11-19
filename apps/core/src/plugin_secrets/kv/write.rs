@@ -47,6 +47,7 @@ impl PluginSecretStore {
         if request.source != VersionSource::External {
             crate::vault::external::guard_local_write(tx, &coords)?;
         }
+        crate::vault::policy::namespace_locks::guard_unlocked(tx, &coords)?;
         let existing = find_row(tx, &coords)?;
         if let (Some(expected), Some((_, info))) = (request.expected_version, existing.as_ref()) {
             if info.version != expected {
@@ -264,6 +265,7 @@ impl PluginSecretStore {
         coords: &SecretCoords,
         actor: &AuditActor,
     ) -> Result<bool> {
+        crate::vault::policy::namespace_locks::guard_unlocked(conn, coords)?;
         let Some((id, info)) = find_row(conn, coords)? else {
             return Ok(false);
         };
@@ -291,6 +293,7 @@ impl PluginSecretStore {
         let coords = coords.normalize()?;
         let conn = self.conn.lock().await;
         crate::vault::external::guard_local_write(&conn, &coords)?;
+        crate::vault::policy::namespace_locks::guard_unlocked(&conn, &coords)?;
         let Some((id, _)) = find_row(&conn, &coords)? else {
             return Err(VaultError::NotFound("secret".into()).into());
         };
@@ -320,6 +323,7 @@ impl PluginSecretStore {
         let coords = coords.normalize()?;
         let conn = self.conn.lock().await;
         crate::vault::external::guard_local_write(&conn, &coords)?;
+        crate::vault::policy::namespace_locks::guard_unlocked(&conn, &coords)?;
         let Some((id, info)) = find_row(&conn, &coords)? else {
             return Ok(0);
         };

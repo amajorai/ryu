@@ -1,8 +1,17 @@
 //! Policies, bindings, and change requests.
 //!
-//! test-exempt: policy, binding, and change-request routes moved unchanged out of the former single-file `vault_api`; covered end to end by the vault route and policy tests.
+//! The policy routes are tested through their `*_with` bodies in
+//! `policies/routes_tests.rs`; bindings and change requests are covered by the
+//! vault route and policy tests.
 
 use super::*;
+
+mod namespace_locks;
+pub(crate) use namespace_locks::*;
+
+#[cfg(test)]
+#[path = "policies/routes_tests.rs"]
+mod routes_tests;
 
 /// GET /api/vault/policies lists policies and bindings.
 #[utoipa::path(get, path = "/api/vault/policies", tag = "Vault",
@@ -17,6 +26,10 @@ pub async fn list_policies(
         Ok(ctx) => ctx,
         Err(response) => return response,
     };
+    list_policies_with(&ctx).await
+}
+
+pub(crate) async fn list_policies_with(ctx: &Ctx) -> Response {
     if let Err(response) = ctx.require_sys("sys/policies", Capability::Admin) {
         return response;
     }
@@ -38,11 +51,15 @@ pub struct PolicyBody {
     #[serde(default)]
     pub(crate) description: String,
     pub(crate) rules: Vec<PolicyRule>,
+    /// Refuse with `409` when a policy of this name exists, instead of
+    /// replacing it (a client creating a new policy sends this).
+    #[serde(default)]
+    pub(crate) create_only: bool,
 }
 
 /// PUT /api/vault/policies/{name}.
 #[utoipa::path(put, path = "/api/vault/policies/{name}", tag = "Vault",
-    summary = "Create or replace a vault policy (admin)",
+    summary = "Create or replace a vault policy (admin); `createOnly` refuses an existing name with 409",
     params(("name" = String, Path, description = "Policy name")),
     request_body = serde_json::Value,
     responses((status = 200, description = "Saved", body = serde_json::Value)))]
@@ -57,9 +74,14 @@ pub async fn put_policy(
         Ok(ctx) => ctx,
         Err(response) => return response,
     };
+    put_policy_with(&ctx, name, body).await
+}
+
+pub(crate) async fn put_policy_with(ctx: &Ctx, name: String, body: PolicyBody) -> Response {
     if let Err(response) = ctx.require_sys("sys/policies", Capability::Admin) {
         return response;
     }
+    let create_only = body.create_only;
     let policy = Policy {
         name,
         description: body.description,
@@ -69,6 +91,20 @@ pub async fn put_policy(
         return invalid_request(&error.to_string());
     }
     let conn = ctx.store.conn.lock().await;
+    // Checked under the same lock as the write, so two creators cannot both
+    // pass and the second silently replace the first.
+    if create_only {
+        match policy_exists(&conn, &policy.name) {
+            Ok(false) => {}
+            Ok(true) => {
+                return json_error(
+                    StatusCode::CONFLICT,
+                    format!("vault_conflict: policy `{}` already exists", policy.name),
+                )
+            }
+            Err(error) => return vault_error(error),
+        }
+    }
     if let Err(error) = crate::vault::policy::put_policy(&conn, &policy) {
         return vault_error(error);
     }
@@ -78,6 +114,18 @@ pub async fn put_policy(
             .details(json!({ "policy": policy.name })),
     );
     respond(json!({ "ok": true, "policy": policy }))
+}
+
+fn policy_exists(conn: &rusqlite::Connection, name: &str) -> anyhow::Result<bool> {
+    use rusqlite::OptionalExtension as _;
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM vault_policies WHERE name = ?1",
+            [name],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }
 
 /// DELETE /api/vault/policies/{name}.
@@ -95,11 +143,15 @@ pub async fn delete_policy(
         Ok(ctx) => ctx,
         Err(response) => return response,
     };
+    delete_policy_with(&ctx, &name).await
+}
+
+pub(crate) async fn delete_policy_with(ctx: &Ctx, name: &str) -> Response {
     if let Err(response) = ctx.require_sys("sys/policies", Capability::Admin) {
         return response;
     }
     let conn = ctx.store.conn.lock().await;
-    match crate::vault::policy::delete_policy(&conn, &name) {
+    match crate::vault::policy::delete_policy(&conn, name) {
         Ok(deleted) => {
             ctx.store.audit_locked(
                 &conn,

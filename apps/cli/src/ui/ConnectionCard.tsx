@@ -17,7 +17,7 @@ import { useCore } from "../core/CoreContext.tsx";
 import { useCoreHealth } from "../core/CoreHealthContext.tsx";
 import { displayHostPort } from "../core/native-errors.ts";
 import { useCliProductMode } from "../core/ProductModeContext.tsx";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 
 /** Headline for an unreachable node: local nodes "aren't running", remote ones
  * "aren't reachable". */
@@ -31,7 +31,9 @@ export function connectionHeadline(url: string): string {
 /** "retrying in Ns…" for a scheduled retry, or "retrying…" when it is due. */
 export function retryCountdown(nextRetryAt: number, now: number): string {
 	const seconds = Math.ceil((nextRetryAt - now) / 1000);
-	return seconds > 0 ? `retrying in ${seconds}s…` : "retrying…";
+	return seconds > 0
+		? tf("retrying in {seconds}s…", { seconds })
+		: tr("retrying…");
 }
 
 interface ConnectionAction {
@@ -81,10 +83,10 @@ export function ConnectionCard({
 		actions.push({ key: "^N", label: "switch node" });
 	}
 	if (keysActive) {
-		actions.push({ key: "r", label: "retry" });
+		actions.push({ key: "r", label: tr("retry") });
 	}
 
-	let status = "checking…";
+	let status = tr("checking…");
 	if (starting && progress) {
 		status = progress;
 	} else if (nextRetryAt !== null) {

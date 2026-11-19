@@ -15,14 +15,11 @@ impl McpRegistry {
             tool_id,
             arguments,
             allowlist,
-            user_id,
             profile_ids,
             session_id,
             host_conversation_id,
-            composio_connection_scope,
-            conversation_scope,
-            configure_approved,
             account_policy,
+            alias_reentry,
             ..
         } = call;
         // Only dispatch ids an enabled app actually registered — never an
@@ -297,28 +294,20 @@ impl McpRegistry {
                 "app tool '{tool_id}' has an invalid target '{tool}'"
             ));
         }
-        // Re-enter for the target. The recursive future is boxed because an
-        // async fn cannot name its own type. No allowlist: the app-layer check
-        // above is the gate; the target is manifest-fixed. Use the NO-GATE
-        // entry: the approval gate (if any) applies to the granted `app.` id,
-        // not to the manifest-fixed target — otherwise an app tool would raise
-        // a second approval for its inner target.
-        Box::pin(self.call_tool_with_identity_no_gate_scoped(
-            // Same calling agent — the alias re-enter is one logical call, so
-            // per-agent scoping must not be dropped on the way in.
-            agent_id,
-            tool,
+        // Re-enter for the target through the NO-GATE entry, after this frame
+        // unwinds (see `app_alias`). The wrapper keeps the same calling agent,
+        // user, conversation and Composio scope, and passes no allowlist: the
+        // app-layer check above is the gate, the target is manifest-fixed, and
+        // the approval gate (if any) applied to the granted `app.` id, so the
+        // target never raises a second approval. `profile_ids` is carried as
+        // narrowed by this agent's account policy in the dispatch core.
+        alias_reentry.hand_off(app_alias::AppAliasReentry {
+            tool: tool.to_owned(),
             arguments,
-            None,
-            user_id,
-            profile_ids,
+            profile_ids: profile_ids.to_vec(),
             session_id,
-            host_conversation_id,
-            composio_connection_scope,
-            conversation_scope,
-            configure_approved,
-        ))
-        .await
+        });
+        Ok(Value::Null)
     }
 }
 

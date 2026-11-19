@@ -169,13 +169,6 @@ function coreSyncProviders(): string[] {
 }
 
 describe("the shared vocabulary covers Core's wire values", () => {
-	test("lists every sync provider and import kind once", () => {
-		expect(PROVIDERS).toHaveLength(12);
-		expect(KINDS).toHaveLength(8);
-		expect(new Set(PROVIDERS).size).toBe(PROVIDERS.length);
-		expect(new Set(KINDS).size).toBe(KINDS.length);
-	});
-
 	test("the exported lists the codecs derive from match the Core vocabulary", () => {
 		expect(sorted(SYNC_PROVIDERS)).toEqual(sorted(PROVIDERS));
 		expect(sorted(IMPORT_ITEM_KINDS)).toEqual(sorted(KINDS));

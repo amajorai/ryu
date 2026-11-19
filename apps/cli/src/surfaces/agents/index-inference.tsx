@@ -3,7 +3,7 @@ import { useKeyboard } from "@opentui/react";
 import { useCallback, useState } from "react";
 import { StatusMessage } from "@/components/ui/status-message.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { tf } from "../../i18n/translate.ts";
+import { tf, tr } from "../../i18n/translate.ts";
 import {
 	editorText,
 	type JsonObject,
@@ -136,7 +136,7 @@ export function AgentInferenceEditor({
 					{ backHint: EDIT_BACK_HINT }
 				)}
 				subtitle={tf("Per-agent defaults · {engine}", {
-					engine: engineName || "engine default",
+					engine: engineName || tr("engine default"),
 				})}
 				title="Advanced inference"
 			/>

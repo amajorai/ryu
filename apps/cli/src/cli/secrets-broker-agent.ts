@@ -31,10 +31,12 @@ import {
 	rawFetchForTarget,
 	requiresCoreIdentity,
 } from "../core/coreIdentity.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
+import { localize } from "./localizedText.ts";
 import { formatTable, truncate } from "./output.ts";
 import { arg, flag, type SecretsArgs } from "./secrets-args.ts";
 import { agentTarget, machineTarget, printJson } from "./secrets-output.ts";
+import { proposalStatusText } from "./secrets-status-copy.ts";
 import { type CliContext, UsageError } from "./types.ts";
 
 const HTTPS_URL = /^https:/i;
@@ -95,9 +97,10 @@ async function discoverCommand(
 		return parsed.success ? [parsed.data] : [];
 	});
 	if (services.length === 0) {
-		ctx.io.out(
-			"No services. Ask for one with 'ryu-cli secrets broker propose'.\n"
+		const empty = tr(
+			"No services. Ask for one with 'ryu-cli secrets broker propose'."
 		);
+		ctx.io.out(`${empty}\n`);
 		return 0;
 	}
 	const rows = services.map((service) => [
@@ -142,11 +145,17 @@ function serviceAuth(
 	if (kind === "api_key") {
 		const header = flag(args, "--header");
 		if (!header) {
-			throw new UsageError("--auth api_key needs --header NAME.");
+			throw new UsageError(
+				localize("--auth {kind} needs --header NAME.", { kind: "api_key" })
+			);
 		}
 		return { type: "api_key", header, value: credential };
 	}
-	throw new UsageError("--auth must be bearer, api_key, or passthrough.");
+	throw new UsageError(
+		localize("--auth must be bearer, {apiKey}, or passthrough.", {
+			apiKey: "api_key",
+		})
+	);
 }
 
 /** The proposal body for `propose`. Exported for tests. */
@@ -165,7 +174,15 @@ export function proposalInput(args: SecretsArgs): {
 	for (const reference of references) {
 		if (!REFERENCE_PREFIXES.some((prefix) => reference.startsWith(prefix))) {
 			throw new UsageError(
-				`--credential takes a reference such as secret:NAME or op://vault/item/field, not '${truncate(reference, 12)}'. Never pass a value.`
+				localize(
+					"{flag} takes a reference such as {secretReference} or {managerReference}, not '{reference}'. Never pass a value.",
+					{
+						flag: "--credential",
+						managerReference: "op://vault/item/field",
+						reference: truncate(reference, 12),
+						secretReference: "secret:NAME",
+					}
+				)
 			);
 		}
 	}
@@ -192,13 +209,7 @@ export function proposalInput(args: SecretsArgs): {
 }
 
 function printProposal(ctx: CliContext, proposal: VaultBrokerProposal): void {
-	ctx.io.out(
-		`${tf("Proposal {id} is {status} (environment {environment}).", {
-			environment: proposal.environment,
-			id: proposal.id,
-			status: proposal.status,
-		})}\n`
-	);
+	ctx.io.out(`${proposalStatusText(proposal)}\n`);
 	if (proposal.status === "pending") {
 		ctx.io.out(
 			`${tf(

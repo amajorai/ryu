@@ -1,11 +1,12 @@
 //! Connect-time egress screening for roles written by a delegate.
 //!
-//! A dynamic or static role names a target (a Postgres or Redis server, a
-//! webhook, an STS endpoint) that Core connects to with its own network
-//! position. Configuration managers (and the unbound local operator) may point
-//! a role anywhere, including this host's loopback and LAN. A principal that
-//! holds only `admin` on `sys/dynamic/<name>` or `sys/static/<name>` (a
-//! delegate) must not borrow that position, so each role row records its
+//! A dynamic or static role names a target (a database or Redis server, a
+//! Kubernetes API server, a webhook, an STS endpoint) that Core connects to
+//! with its own network position. Configuration managers (and the unbound
+//! local operator) may point a role anywhere, including this host's loopback
+//! and LAN. A principal that holds only `admin` on `sys/dynamic/<name>` or
+//! `sys/static/<name>` (a delegate) must not borrow that position, so each
+//! role row records its
 //! writer (`writer`: `manager` or `delegate`) and every connection a
 //! delegate-written role makes (issue, renew, revoke, rotate, webhook call) is
 //! screened when it is made:
@@ -175,13 +176,44 @@ fn precheck_url(raw: &str, https_only: bool) -> Result<()> {
 pub(crate) fn precheck_provider(config: &ProviderConfig) -> Result<()> {
     match config {
         ProviderConfig::Postgres(config) => precheck_url(&config.connection_url, false),
+        ProviderConfig::Mysql(config) => precheck_url(&config.connection_url, false),
+        ProviderConfig::Mongodb(config) => precheck_url(&config.connection_url, false),
         ProviderConfig::Redis(config) => precheck_url(&config.connection_url, false),
+        ProviderConfig::Mssql(config) => {
+            if config.ca_pem.is_some() {
+                return Err(invalid("caPem is not allowed".into()));
+            }
+            precheck_url(&config.connection_url, false)
+        }
+        ProviderConfig::Kubernetes(config) => {
+            if config.ca_pem.is_some() {
+                return Err(invalid("caPem is not allowed".into()));
+            }
+            precheck_url(&config.host, true)
+        }
+        ProviderConfig::KubernetesRules(config) => {
+            if config.ca_pem.is_some() {
+                return Err(invalid("caPem is not allowed".into()));
+            }
+            precheck_url(&config.host, true)
+        }
+        ProviderConfig::RabbitMq(config) => {
+            if config.ca_pem.is_some() {
+                return Err(invalid("caPem is not allowed".into()));
+            }
+            precheck_url(&config.connection_uri, true)
+        }
         ProviderConfig::Webhook(config) => precheck_url(&config.url, true),
+        ProviderConfig::AwsIam(config) => match &config.endpoint {
+            Some(endpoint) => precheck_url(endpoint, true),
+            None => Ok(()),
+        },
         ProviderConfig::AwsSts(config) => match &config.endpoint {
             Some(endpoint) => precheck_url(endpoint, true),
             None => Ok(()),
         },
-        ProviderConfig::Random { .. } => Ok(()),
+        // GCP and Azure calls go to fixed provider endpoints.
+        ProviderConfig::Gcp(_) | ProviderConfig::Azure(_) | ProviderConfig::Random { .. } => Ok(()),
     }
 }
 
@@ -191,10 +223,13 @@ pub(crate) fn precheck_static(provider: &StaticProvider) -> Result<()> {
         StaticProvider::Postgres { connection_url, .. }
         | StaticProvider::Redis { connection_url, .. } => precheck_url(connection_url, false),
         StaticProvider::Webhook { url, .. } => precheck_url(url, true),
-        // IAM, OpenAI and Anthropic calls go to fixed provider endpoints.
+        // IAM, OpenAI, Anthropic, Stripe and Cloudflare calls go to fixed
+        // provider endpoints.
         StaticProvider::AwsIam { .. }
         | StaticProvider::OpenAi { .. }
-        | StaticProvider::Anthropic { .. } => Ok(()),
+        | StaticProvider::Anthropic { .. }
+        | StaticProvider::Stripe { .. }
+        | StaticProvider::Cloudflare { .. } => Ok(()),
     }
 }
 
@@ -203,7 +238,16 @@ impl ProviderConfig {
     pub(crate) fn set_egress(&mut self, egress: TargetEgress) {
         match self {
             Self::Postgres(config) => config.egress = egress,
+            Self::Mysql(config) => config.egress = egress,
+            Self::Mssql(config) => config.egress = egress,
+            Self::Mongodb(config) => config.egress = egress,
             Self::AwsSts(config) => config.egress = egress,
+            Self::Gcp(config) => config.egress = egress,
+            Self::Azure(config) => config.egress = egress,
+            Self::Kubernetes(config) => config.egress = egress,
+            Self::KubernetesRules(config) => config.egress = egress,
+            Self::RabbitMq(config) => config.egress = egress,
+            Self::AwsIam(config) => config.egress = egress,
             Self::Webhook(config) => config.egress = egress,
             Self::Redis(config) => config.egress = egress,
             Self::Random { .. } => {}
@@ -299,7 +343,9 @@ pub(crate) async fn post(
     for (name, value) in headers {
         request = request.header(name, value);
     }
-    let response = request.send().await?;
+    // reqwest's error text ends with the URL, whose path and query can hold a
+    // token; this error reaches audit rows and logs.
+    let response = request.send().await.map_err(reqwest::Error::without_url)?;
     let status = response.status().as_u16();
     let bytes = response.bytes().await.unwrap_or_default().to_vec();
     Ok((status, bytes))

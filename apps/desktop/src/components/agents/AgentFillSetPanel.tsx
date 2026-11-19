@@ -27,6 +27,7 @@ import {
 	withBoxFillChoices,
 } from "@/src/lib/api/agent-fill-sets.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
+import { formatLocalDateTime } from "@/src/lib/locale-format.ts";
 
 const ITEMS_FIELD_ID = "agent-fill-set-items";
 const ENVIRONMENT_FIELD_ID = "agent-fill-set-environment";
@@ -75,7 +76,7 @@ function ActiveSet({
 			</ul>
 			<p className="text-muted-foreground text-xs">
 				{tl("Expires {time}.", {
-					time: new Date(set.expires_at).toLocaleString(),
+					time: formatLocalDateTime(set.expires_at),
 				})}{" "}
 				{set.claimed
 					? "In use by the agent's current browser session."

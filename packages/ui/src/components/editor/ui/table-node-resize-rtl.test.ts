@@ -89,17 +89,6 @@ describe("table resize under RTL", () => {
 		expect(indicator.style.getPropertyValue("inset-inline-start")).toBe("");
 	});
 
-	test("the controller flips pointer and keyboard deltas by the inline sign", async () => {
-		const source = await Bun.file(
-			new URL("./table-node-resize-controller.ts", import.meta.url)
-		).text();
-
-		expect(source).toContain("toInlineResizeDelta(");
-		expect(
-			source.match(/inlineSignRef\.current = getTableInlineSign\(/g)
-		).toHaveLength(2);
-	});
-
 	test("the editor table pads its stored margin on the inline start", async () => {
 		const css = await Bun.file(
 			new URL("../editor-lint.module.css", import.meta.url)

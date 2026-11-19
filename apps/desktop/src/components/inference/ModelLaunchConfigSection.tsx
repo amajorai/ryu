@@ -88,8 +88,9 @@ export function ModelLaunchConfigSection({
 	const configQueryKey = isEngineScope
 		? ["engines", "launch-config", configOwnerId]
 		: ["models", "launch-config", configOwnerId];
-	const ownerLabel = isEngineScope ? "engine" : "model";
 	const tl = useLiteralMessages();
+	const ownerLabel = isEngineScope ? "engine" : "model";
+	const ownerText = isEngineScope ? tl("engine") : tl("model");
 	const activeNode = useActiveNode();
 	const target: ApiTarget = {
 		url: activeNode.url,
@@ -359,7 +360,7 @@ export function ModelLaunchConfigSection({
 												"Could not load {ownerLabel} launch config: {error}",
 												{
 													error: launchSaveError(configQuery.error),
-													ownerLabel,
+													ownerLabel: ownerText,
 												}
 											)}
 										</p>
@@ -370,7 +371,9 @@ export function ModelLaunchConfigSection({
 											size="sm"
 											variant="outline"
 										>
-											{tl("Retry {ownerLabel} config", { ownerLabel })}
+											{tl("Retry {ownerLabel} config", {
+												ownerLabel: ownerText,
+											})}
 										</Button>
 									</div>
 								) : (

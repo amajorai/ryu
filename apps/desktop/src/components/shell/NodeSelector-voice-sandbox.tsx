@@ -41,6 +41,7 @@ import { PanelSection } from "./NodePanelNav.tsx";
 import { installEngine, useNodeEngines } from "./NodeSelector-engines.tsx";
 import { speechModelDetail } from "./NodeSelector-speech-model-size.ts";
 import {
+	ryuAudioEngineLabel,
 	SpeechProcessingOptionMenus,
 	useVoiceAndSandboxQuery,
 } from "./NodeSelector-voice-sandbox-parts.tsx";
@@ -117,10 +118,9 @@ export function VoiceAndSandboxSection({
 		await refresh();
 	};
 
-	/** The install/start action a voice layer needs before it can actually run —
-	 *  null once its sidecar is installed AND up. Mirrors the Voice settings tab's
-	 *  "Install / Start Ryu Audio engine" prompt, so the dropdown isn't a dead end
-	 *  for an engine the node hasn't downloaded yet. */
+	/** The install/start action a voice layer needs before it can run (null once
+	 *  its sidecar is installed AND up), mirroring the Voice settings tab's prompt
+	 *  so the dropdown isn't a dead end for an engine the node hasn't downloaded. */
 	const sidecarReadyAction = (
 		name: string,
 		label: string
@@ -171,7 +171,7 @@ export function VoiceAndSandboxSection({
 	};
 
 	// The multi-engine Audio sidecar that serves every non-built-in voice.
-	const ttsReadyAction = sidecarReadyAction("ryutts", "Ryu Audio engine");
+	const ttsReadyAction = sidecarReadyAction("ryutts", ryuAudioEngineLabel(tl));
 
 	// ---- Speech-to-text -----------------------------------------------------
 	const selectedStt =
@@ -333,7 +333,7 @@ export function VoiceAndSandboxSection({
 					caption={
 						selectedTts
 							? tl("Speaks as {voice}", {
-									voice: activeVoice || "default voice",
+									voice: activeVoice || tl("default voice"),
 								})
 							: "Engine not available on this computer"
 					}

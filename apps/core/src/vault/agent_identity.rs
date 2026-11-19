@@ -15,6 +15,14 @@
 //!   disabling it ends every run's brokering;
 //! * the identity disabled ([`AgentBinding::Disabled`]): runs are not
 //!   brokered at all.
+//!
+//! A run that names its agent (the ACP agent record the run was spawned
+//! for) also has a per-agent identity, `ryu-agent-<kind>--<agent>-<hash>`
+//! ([`agent_identity_name`]), created the same way. It narrows the kind's
+//! identity for that one agent ([`PluginSecretStore::run_binding`]): bound,
+//! the run authenticates as the agent's identity; unbound, the run falls back
+//! to the kind's identity, so an operator who only bound the kind keeps that
+//! restriction; either identity disabled leaves the run unbrokered.
 
 use anyhow::Result;
 use rusqlite::{params, Connection};
@@ -33,6 +41,49 @@ pub const NAME_PREFIX: &str = "ryu-agent-";
 /// The machine identity name of a runtime kind (`pi`, `claude-code`, `acp`).
 pub fn identity_name(kind: &str) -> String {
     format!("{NAME_PREFIX}{kind}")
+}
+
+/// Longest machine identity name (`transit::is_valid_key_name`).
+const MAX_NAME_LEN: usize = 64;
+/// Hex digits of the agent id's SHA-256 every per-agent name ends with.
+const AGENT_HASH_LEN: usize = 10;
+
+/// The machine identity name of one agent of runtime `kind`, or `None` for
+/// an empty agent id. The `--` separator never occurs in a kind name, so no
+/// per-agent name equals a per-kind one. The name always ends with a hash of
+/// the raw agent id, so two agents whose readable part is cut or folded to
+/// the same text still get distinct identities.
+pub fn agent_identity_name(kind: &str, agent: &str) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let agent = agent.trim();
+    if agent.is_empty() {
+        return None;
+    }
+    let hash = hex::encode(Sha256::digest(agent.as_bytes()));
+    let prefix = format!("{NAME_PREFIX}{kind}--");
+    let budget = MAX_NAME_LEN
+        .checked_sub(prefix.len() + 1 + AGENT_HASH_LEN)
+        .filter(|budget| *budget > 0)?;
+    let mut slug = String::with_capacity(budget);
+    for character in agent.chars().map(|c| c.to_ascii_lowercase()) {
+        if slug.len() == budget {
+            break;
+        }
+        let keep = character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_';
+        let next = if keep { character } else { '-' };
+        // Collapse runs of `-` so the slug stays readable.
+        if next == '-' && (slug.is_empty() || slug.ends_with('-')) {
+            continue;
+        }
+        slug.push(next);
+    }
+    let slug = slug.trim_end_matches('-');
+    let tail = &hash[..AGENT_HASH_LEN];
+    Some(if slug.is_empty() {
+        format!("{prefix}{tail}")
+    } else {
+        format!("{prefix}{slug}-{tail}")
+    })
 }
 
 /// A run bound to its runtime's identity.
@@ -65,13 +116,18 @@ impl PluginSecretStore {
     /// The identity of runtime `kind`, created (AppRole, no policies) when
     /// missing.
     pub async fn agent_identity(&self, kind: &str) -> Result<MachineIdentity> {
-        let name = identity_name(kind);
-        if let Ok(identity) = self.machine_get(&name).await {
+        self.identity_named(&identity_name(kind)).await
+    }
+
+    /// The identity called `name`, created (AppRole, no policies) when
+    /// missing.
+    async fn identity_named(&self, name: &str) -> Result<MachineIdentity> {
+        if let Ok(identity) = self.machine_get(name).await {
             return Ok(identity);
         }
         let created = self
             .machine_create_as(
-                &name,
+                name,
                 AuthMethod::AppRole {
                     role_id: String::new(),
                 },
@@ -84,7 +140,7 @@ impl PluginSecretStore {
         match created {
             Ok(identity) => Ok(identity),
             // A concurrent first run created it.
-            Err(error) => self.machine_get(&name).await.map_err(|_| error),
+            Err(error) => self.machine_get(name).await.map_err(|_| error),
         }
     }
 
@@ -92,6 +148,49 @@ impl PluginSecretStore {
     /// internal token (living `ttl_secs`) when policies are bound.
     pub async fn agent_binding(&self, kind: &str, ttl_secs: i64) -> Result<AgentBinding> {
         let identity = self.agent_identity(kind).await?;
+        self.bind_identity(&identity, kind, None, ttl_secs).await
+    }
+
+    /// Bind one run of runtime `kind` for `agent`: as the agent's own
+    /// identity when it has policies, else as the kind's identity. Either
+    /// identity disabled means [`AgentBinding::Disabled`]. A run without an
+    /// agent id binds as the kind, exactly as [`Self::agent_binding`].
+    pub async fn run_binding(
+        &self,
+        kind: &str,
+        agent: Option<&str>,
+        ttl_secs: i64,
+    ) -> Result<AgentBinding> {
+        let Some((agent, name)) =
+            agent.and_then(|agent| Some((agent, agent_identity_name(kind, agent)?)))
+        else {
+            return self.agent_binding(kind, ttl_secs).await;
+        };
+        let kind_identity = self.agent_identity(kind).await?;
+        if kind_identity.disabled {
+            return Ok(AgentBinding::Disabled);
+        }
+        let agent_identity = self.identity_named(&name).await?;
+        // Unbound issues no token, so falling back leaks none.
+        match self
+            .bind_identity(&agent_identity, kind, Some(agent), ttl_secs)
+            .await?
+        {
+            AgentBinding::Unbound => {
+                self.bind_identity(&kind_identity, kind, Some(agent), ttl_secs)
+                    .await
+            }
+            binding => Ok(binding),
+        }
+    }
+
+    async fn bind_identity(
+        &self,
+        identity: &MachineIdentity,
+        kind: &str,
+        agent: Option<&str>,
+        ttl_secs: i64,
+    ) -> Result<AgentBinding> {
         if identity.disabled {
             return Ok(AgentBinding::Disabled);
         }
@@ -102,7 +201,7 @@ impl PluginSecretStore {
             return Ok(AgentBinding::Unbound);
         }
         let now = now_millis();
-        let mut new = super::tokens::identity_token(&identity, names.clone(), None, now);
+        let mut new = super::tokens::identity_token(identity, names.clone(), None, now);
         // Never presented by anyone: no use count, network binding, period or
         // renewal, and it lives exactly as long as the run's session may.
         new.ttl_secs = ttl_secs;
@@ -119,7 +218,7 @@ impl PluginSecretStore {
                 "agent.identity.bind",
                 "ok",
             )
-            .details(json!({ "tokenAccessor": token.accessor, "runtime": kind })),
+            .details(json!({ "tokenAccessor": token.accessor, "runtime": kind, "agent": agent })),
         ) {
             super::tokens::withhold_token_locked(&conn, &token.accessor)?;
             return Err(VaultError::AuditUnavailable.into());
@@ -129,7 +228,7 @@ impl PluginSecretStore {
             .filter(|policy| names.contains(&policy.name))
             .collect();
         Ok(AgentBinding::Bound(BoundAgent {
-            identity_id: identity.id,
+            identity_id: identity.id.clone(),
             accessor: token.accessor,
             expires_at: token.expires_at,
             policies,
@@ -243,5 +342,116 @@ mod tests {
             store.agent_binding("pi", 3600).await.unwrap(),
             AgentBinding::Disabled
         );
+    }
+
+    #[test]
+    fn agent_names_are_valid_distinct_and_never_a_kind_name() {
+        let valid = crate::vault::transit::is_valid_key_name;
+        let named = |agent: &str| agent_identity_name("claude-code", agent).unwrap();
+        let plain = named("reviewer");
+        assert!(plain.starts_with("ryu-agent-claude-code--reviewer-"));
+        assert!(valid(&plain));
+        // Folded to the same readable text, still two identities.
+        let (spaced, dashed) = (named("My Agent"), named("my-agent"));
+        assert_ne!(spaced, dashed);
+        assert!(valid(&spaced) && valid(&dashed));
+        // Cut to fit, still distinct and within the name limit.
+        let long_a = named(&"a".repeat(200));
+        let long_b = named(&format!("{}b", "a".repeat(199)));
+        assert_ne!(long_a, long_b);
+        assert!(long_a.len() <= MAX_NAME_LEN && valid(&long_a));
+        // Nothing readable left: the hash alone names it.
+        let symbols = named("+++");
+        assert!(valid(&symbols));
+        for kind in ["pi", "claude-code", "acp"] {
+            let name = agent_identity_name(kind, "pi").unwrap();
+            assert_ne!(name, identity_name(kind));
+            assert_ne!(name, identity_name("pi"));
+        }
+        assert_eq!(agent_identity_name("pi", "  "), None);
+    }
+
+    async fn set_identity(store: &PluginSecretStore, name: &str, policies: &[&str], off: bool) {
+        let identity = store.identity_named(name).await.unwrap();
+        store
+            .machine_update(
+                &identity.id,
+                Some(policies.iter().map(|p| (*p).to_owned()).collect()),
+                None,
+                Some(off),
+                &AuditActor::system(),
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn live_tokens(store: &PluginSecretStore) -> i64 {
+        let conn = store.conn.lock().await;
+        conn.query_row(
+            "SELECT COUNT(*) FROM vault_tokens WHERE revoked_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn bound_id(binding: AgentBinding) -> String {
+        match binding {
+            AgentBinding::Bound(bound) => bound.identity_id,
+            other => panic!("expected a bound run, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_bound_agent_identity_runs_as_itself() {
+        let store = PluginSecretStore::in_memory().unwrap();
+        put_policy(&store, "agents").await;
+        let name = agent_identity_name("acp", "reviewer").unwrap();
+        set_identity(&store, &name, &["agents"], false).await;
+        let binding = store
+            .run_binding("acp", Some("reviewer"), 3600)
+            .await
+            .unwrap();
+        let agent = store.machine_get(&name).await.unwrap();
+        assert_eq!(bound_id(binding), agent.id);
+        // Another agent of the kind has no policies of its own: unbound.
+        assert_eq!(
+            store.run_binding("acp", Some("writer"), 3600).await.unwrap(),
+            AgentBinding::Unbound
+        );
+        assert!(store
+            .machine_get(&agent_identity_name("acp", "writer").unwrap())
+            .await
+            .is_ok());
+        assert_eq!(live_tokens(&store).await, 1);
+    }
+
+    #[tokio::test]
+    async fn an_unbound_agent_falls_back_to_its_bound_kind_without_a_spare_token() {
+        let store = PluginSecretStore::in_memory().unwrap();
+        put_policy(&store, "agents").await;
+        set_identity(&store, &identity_name("pi"), &["agents"], false).await;
+        let kind = store.agent_identity("pi").await.unwrap();
+        let binding = store.run_binding("pi", Some("helper"), 3600).await.unwrap();
+        assert_eq!(bound_id(binding), kind.id);
+        // No agent id binds as the kind, as before.
+        let binding = store.run_binding("pi", None, 3600).await.unwrap();
+        assert_eq!(bound_id(binding), kind.id);
+        assert_eq!(live_tokens(&store).await, 2);
+    }
+
+    #[tokio::test]
+    async fn either_identity_disabled_leaves_the_run_unbrokered() {
+        let store = PluginSecretStore::in_memory().unwrap();
+        put_policy(&store, "agents").await;
+        let agent = agent_identity_name("claude-code", "reviewer").unwrap();
+        set_identity(&store, &agent, &["agents"], false).await;
+        set_identity(&store, &identity_name("claude-code"), &[], true).await;
+        let run = || store.run_binding("claude-code", Some("reviewer"), 3600);
+        assert_eq!(run().await.unwrap(), AgentBinding::Disabled);
+        set_identity(&store, &identity_name("claude-code"), &["agents"], false).await;
+        set_identity(&store, &agent, &["agents"], true).await;
+        assert_eq!(run().await.unwrap(), AgentBinding::Disabled);
+        assert_eq!(live_tokens(&store).await, 0);
     }
 }

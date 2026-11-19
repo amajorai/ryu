@@ -43,6 +43,8 @@ import type {
 	View,
 	ViewSort,
 } from "@/src/lib/api/crm.ts";
+import { CrmUserText } from "./crm-label.tsx";
+import { recordRangeLabel } from "./record-range-label.ts";
 
 /** One page. The server clamps this too; asking for a sane page keeps first paint
  *  to one screen of rows rather than the whole object. */
@@ -334,7 +336,7 @@ export function RecordTable({
 											onClick={() => toggleSort(field)}
 											type="button"
 										>
-											{field.name}
+											<CrmUserText text={field.name} />
 											{sort && (
 												<span aria-hidden="true">
 													{sort.direction === "desc" ? "↓" : "↑"}
@@ -478,8 +480,7 @@ export function RecordTable({
 						Previous
 					</Button>
 					<span className="text-muted-foreground">
-						{formatNumber(offset + 1)}–{formatNumber(offset + records.length)}{" "}
-						of {formatNumber(total)}
+						{recordRangeLabel(offset, records.length, total, tl)}
 					</span>
 					<Button
 						disabled={!hasMore}

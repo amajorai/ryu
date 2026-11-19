@@ -102,42 +102,68 @@ fn encode(value: &str) -> String {
     out
 }
 
-/// Sign a form-encoded POST; returns the headers to send.
+/// Sign a form-encoded STS POST; returns the headers to send.
 pub(crate) fn sign_post(
     config: &AwsStsConfig,
     host: &str,
     body: &str,
     amz_date: &str,
 ) -> Vec<(String, String)> {
-    let date = &amz_date[..8];
-    let body_hash = hex::encode(Sha256::digest(body.as_bytes()));
-    let content_type = "application/x-www-form-urlencoded; charset=utf-8";
-    let canonical_headers =
-        format!("content-type:{content_type}\nhost:{host}\nx-amz-date:{amz_date}\n");
-    let signed_headers = "content-type;host;x-amz-date";
-    let canonical_request =
-        format!("POST\n/\n\n{canonical_headers}\n{signed_headers}\n{body_hash}");
-    let scope = format!("{date}/{}/sts/aws4_request", config.region);
-    let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{}",
-        hex::encode(Sha256::digest(canonical_request.as_bytes()))
-    );
-    let key = signing_key(&config.secret_access_key, date, &config.region, "sts");
-    let signature = hex::encode(hmac(&key, string_to_sign.as_bytes()));
-    vec![
-        ("content-type".into(), content_type.into()),
-        ("x-amz-date".into(), amz_date.into()),
-        (
-            "authorization".into(),
-            format!(
-                "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
-                config.access_key_id
-            ),
-        ),
-    ]
+    let credentials = SigV4 {
+        access_key_id: &config.access_key_id,
+        secret_access_key: &config.secret_access_key,
+        region: &config.region,
+        service: "sts",
+    };
+    credentials.sign_form_post(host, body, amz_date)
 }
 
-fn xml_field<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+/// The credentials and scope a SigV4 signature covers.
+pub(crate) struct SigV4<'a> {
+    pub access_key_id: &'a str,
+    pub secret_access_key: &'a str,
+    pub region: &'a str,
+    pub service: &'a str,
+}
+
+impl SigV4<'_> {
+    /// Sign a form-encoded POST to `/` on `host`; returns the headers to send.
+    pub(crate) fn sign_form_post(
+        &self,
+        host: &str,
+        body: &str,
+        amz_date: &str,
+    ) -> Vec<(String, String)> {
+        let date = &amz_date[..8];
+        let body_hash = hex::encode(Sha256::digest(body.as_bytes()));
+        let content_type = "application/x-www-form-urlencoded; charset=utf-8";
+        let canonical_headers =
+            format!("content-type:{content_type}\nhost:{host}\nx-amz-date:{amz_date}\n");
+        let signed_headers = "content-type;host;x-amz-date";
+        let canonical_request =
+            format!("POST\n/\n\n{canonical_headers}\n{signed_headers}\n{body_hash}");
+        let scope = format!("{date}/{}/{}/aws4_request", self.region, self.service);
+        let string_to_sign = format!(
+            "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{}",
+            hex::encode(Sha256::digest(canonical_request.as_bytes()))
+        );
+        let key = signing_key(self.secret_access_key, date, self.region, self.service);
+        let signature = hex::encode(hmac(&key, string_to_sign.as_bytes()));
+        vec![
+            ("content-type".into(), content_type.into()),
+            ("x-amz-date".into(), amz_date.into()),
+            (
+                "authorization".into(),
+                format!(
+                    "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
+                    self.access_key_id
+                ),
+            ),
+        ]
+    }
+}
+
+pub(crate) fn xml_field<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
     let start = xml.find(&open)? + open.len();

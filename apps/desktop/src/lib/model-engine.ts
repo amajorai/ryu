@@ -1,3 +1,5 @@
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { CatalogItem } from "@ryuhq/core-client/catalog.ts";
 import type { ModelFormat, NodeEngines } from "@/src/lib/api/models.ts";
 
@@ -18,13 +20,19 @@ export interface ModelEngineChoice {
 export interface InstallWaitOptions {
 	pollIntervalMs?: number;
 	timeoutMs?: number;
+	/** Translates the failure messages; the active runtime outside React. */
+	tl?: LiteralMessage;
 }
 
 /** Wait until Core reports the selected inference engine installed or failed. */
 export async function waitForModelEngineInstall(
 	engine: Pick<ModelEngineChoice, "displayName">,
 	readInstallState: () => Promise<ModelEngineStatus["installState"]>,
-	{ pollIntervalMs = 1500, timeoutMs = 15 * 60 * 1000 }: InstallWaitOptions = {}
+	{
+		pollIntervalMs = 1500,
+		timeoutMs = 15 * 60 * 1000,
+		tl = translate,
+	}: InstallWaitOptions = {}
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {
@@ -33,11 +41,18 @@ export async function waitForModelEngineInstall(
 			return;
 		}
 		if (state === "failed") {
-			throw new Error(`${engine.displayName} failed to install. Retry setup.`);
+			throw new Error(
+				tl("{displayName} failed to install. Retry setup.", {
+					displayName: engine.displayName,
+				})
+			);
 		}
 		if (Date.now() >= deadline) {
 			throw new Error(
-				`${engine.displayName} is taking longer than expected. Check Engines and retry.`
+				tl(
+					"{displayName} is taking longer than expected. Check Engines and retry.",
+					{ displayName: engine.displayName }
+				)
 			);
 		}
 		await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));

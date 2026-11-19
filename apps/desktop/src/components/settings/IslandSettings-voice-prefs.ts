@@ -1,4 +1,4 @@
-import { translate as tl } from "@ryu/i18n/core";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useEffect, useMemo, useState } from "react";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import {
@@ -35,6 +35,7 @@ export function useIslandVoicePrefs(
 	getTarget: IslandTargetGetter,
 	persistPreferenceChange: PersistIslandPreferenceChange
 ) {
+	const tl = useLiteralMessages();
 	// Agent routing for the island's chat (voice + typed) and its proactive
 	// suggestion engine. Both default to the flagship `ryu`; the empty string is
 	// surfaced as the "default local model" option. The agent list is the same one
@@ -211,7 +212,7 @@ export function useIslandVoicePrefs(
 				label: fallbackLabels.get(tts.engine) ?? tts.engine,
 			},
 		];
-	}, [ttsEngines, tts.engine]);
+	}, [ttsEngines, tts.engine, tl]);
 	const ttsVoiceOptions = useMemo(
 		() =>
 			(selectedTtsEngine?.voices ?? []).map((v) => ({ value: v, label: v })),

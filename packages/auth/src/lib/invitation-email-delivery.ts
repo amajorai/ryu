@@ -3,21 +3,19 @@ import {
 	emailRetryWaitPhrase,
 } from "@ryu/email/lib/retry-wait.ts";
 import { APIError } from "better-auth/api";
+import {
+	INVITATION_EMAIL_NOT_SENT,
+	INVITATION_EMAIL_NOT_SENT_MESSAGE,
+	INVITATION_EMAIL_RATE_LIMITED,
+	INVITATION_EMAIL_RATE_LIMITED_OUTCOME,
+	type InvitationEmailAttempt,
+} from "./invitation-email-codes.ts";
 
-/** The recipient's email limit refused the invitation email (429). */
-export const INVITATION_EMAIL_RATE_LIMITED = "INVITATION_EMAIL_RATE_LIMITED";
-/**
- * The invitation email failed for any other reason, such as a provider outage
- * or an unavailable email limit (503).
- */
-export const INVITATION_EMAIL_NOT_SENT = "INVITATION_EMAIL_NOT_SENT";
-
-/**
- * - `invite`: a new invitation, which is withdrawn when its email does not go
- *   out, so the owner sends it again.
- * - `resend`: an existing invitation, which stays pending.
- */
-export type InvitationEmailAttempt = "invite" | "resend";
+export {
+	INVITATION_EMAIL_NOT_SENT,
+	INVITATION_EMAIL_RATE_LIMITED,
+	type InvitationEmailAttempt,
+} from "./invitation-email-codes.ts";
 
 const MINUTE_SECONDS = 60;
 const HOUR_SECONDS = 3600;
@@ -53,16 +51,10 @@ export function invitationEmailNotSentError(
 	if (retryAfter === undefined) {
 		return new APIError("SERVICE_UNAVAILABLE", {
 			code: INVITATION_EMAIL_NOT_SENT,
-			message:
-				attempt === "invite"
-					? "Invitation email could not be sent, so no invitation was created. Try again in a few minutes."
-					: "Invitation email could not be sent. Try resending it in a few minutes.",
+			message: INVITATION_EMAIL_NOT_SENT_MESSAGE[attempt],
 		});
 	}
-	const outcome =
-		attempt === "invite"
-			? "Invitation email not sent, so no invitation was created."
-			: "Invitation email not sent.";
+	const outcome = INVITATION_EMAIL_RATE_LIMITED_OUTCOME[attempt];
 	const retry = attempt === "invite" ? "sending it again" : "resending it";
 	const seconds = invitationEmailWaitSeconds(retryAfter);
 	return new APIError(

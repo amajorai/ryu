@@ -25,6 +25,8 @@ const { createRoot } = await import("react-dom/client");
 const { QueryClient, QueryClientProvider } = await import(
 	"@tanstack/react-query"
 );
+const { I18nProvider } = await import("@ryu/i18n/react");
+const { registerLiteralCatalogLoader } = await import("@ryu/i18n/core");
 const { AgentAccountLoginUrlsPanel } = await import(
 	"./AgentAccountLoginUrlsPanel.tsx"
 );
@@ -98,7 +100,7 @@ function saveButton(): HTMLButtonElement {
 	return found;
 }
 
-async function render(): Promise<void> {
+async function render(locale?: string): Promise<void> {
 	container = document.createElement("div");
 	document.body.append(container);
 	const created = createRoot(container);
@@ -106,11 +108,20 @@ async function render(): Promise<void> {
 	const client = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
+	const panel = (
+		<QueryClientProvider client={client}>
+			<AgentAccountLoginUrlsPanel agentId="agent 1" />
+		</QueryClientProvider>
+	);
 	await act(async () =>
 		created.render(
-			<QueryClientProvider client={client}>
-				<AgentAccountLoginUrlsPanel agentId="agent 1" />
-			</QueryClientProvider>
+			locale ? (
+				<I18nProvider initialLocale={locale} initialPackId={null}>
+					{panel}
+				</I18nProvider>
+			) : (
+				panel
+			)
 		)
 	);
 }
@@ -135,9 +146,9 @@ beforeEach(() => {
 					submit_urls: string[];
 				};
 				writes.push({ url: `${url.pathname}${url.search}`, body });
-				if (refuse) {
+				if (refuse !== null) {
 					return Promise.resolve(
-						Response.json({ error: refuse }, { status: 400 })
+						Response.json(refuse ? { error: refuse } : {}, { status: 400 })
 					);
 				}
 				accounts = accounts.map((existing) =>
@@ -158,6 +169,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+	registerLiteralCatalogLoader(null);
 	const mounted = root;
 	root = null;
 	if (mounted) {
@@ -217,7 +229,8 @@ test("saving sends the account and its login URLs to Core", async () => {
 
 test("Core's refusal is shown and the text is kept", async () => {
 	accounts = [account("example.com--1", [])];
-	refuse = "login URL must be on example.com or one of its subdomains";
+	refuse =
+		"vault_invalid_request: login URL must be on the account's site or one of its subdomains";
 	await render();
 	await until(
 		() => container.textContent?.includes("Account login URLs") === true
@@ -225,8 +238,42 @@ test("Core's refusal is shown and the text is kept", async () => {
 	await type("example.com--1", "https://evil.example.net/login");
 	await act(async () => saveButton().click());
 	await until(() => container.querySelector('[role="alert"]') !== null);
-	expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-		"must be on example.com"
+	expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+		"Login URL must be on the account's site or one of its subdomains"
 	);
 	expect(field("example.com--1").value).toBe("https://evil.example.net/login");
+});
+
+test("Core's refusal is shown in the reader's language without its code", async () => {
+	const ja: Record<string, string> = {
+		"Login URL must use https": "ログイン URL には https を使用してください",
+	};
+	registerLiteralCatalogLoader((locale) => (locale.startsWith("ja") ? ja : {}));
+	accounts = [account("example.com--1", [])];
+	refuse = "vault_invalid_request: login URL must use https";
+	await render("ja");
+	await until(() => container.querySelector("textarea") !== null);
+	await type("example.com--1", "http://example.com/login");
+	await act(async () => saveButton().click());
+	await until(() => container.querySelector('[role="alert"]') !== null);
+	const alert = container.querySelector('[role="alert"]')?.textContent ?? "";
+	expect(alert).toBe("ログイン URL には https を使用してください");
+	expect(alert).not.toContain("vault_");
+});
+
+test("a failure without a server sentence shows the translated fallback", async () => {
+	const ja: Record<string, string> = {
+		"The login URLs were not saved.": "ログイン URL を保存できませんでした。",
+	};
+	registerLiteralCatalogLoader((locale) => (locale.startsWith("ja") ? ja : {}));
+	accounts = [account("example.com--1", [])];
+	refuse = "";
+	await render("ja");
+	await until(() => container.querySelector("textarea") !== null);
+	await type("example.com--1", "https://example.com/login");
+	await act(async () => saveButton().click());
+	await until(() => container.querySelector('[role="alert"]') !== null);
+	expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+		"ログイン URL を保存できませんでした。"
+	);
 });

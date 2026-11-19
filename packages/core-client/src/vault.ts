@@ -17,9 +17,12 @@
 // The implementation lives in `./vault/`: one module per area, plus the
 // response codecs (`vault/codecs-*.ts`). This file re-exports the public names.
 
+export * from "./vault/access-requests.ts";
 export * from "./vault/agent-routes.ts";
 export * from "./vault/audit.ts";
+export * from "./vault/audit-devices.ts";
 export * from "./vault/broker.ts";
+export * from "./vault/broker-env.ts";
 export * from "./vault/cards.ts";
 export * from "./vault/change-requests.ts";
 export {
@@ -27,16 +30,25 @@ export {
 	VAULT_TRANSIT_KEY_TYPES,
 } from "./vault/codecs-machine.ts";
 export { VAULT_WRAP_TTL_HEADER } from "./vault/codecs-reply.ts";
+export * from "./vault/control-groups.ts";
 export * from "./vault/dynamic.ts";
 export * from "./vault/environments.ts";
+export * from "./vault/identity-token-verify.ts";
+export * from "./vault/identity-tokens.ts";
 export * from "./vault/items.ts";
+export * from "./vault/lockouts.ts";
 export * from "./vault/machine-identities.ts";
+export * from "./vault/machine-logins.ts";
 export * from "./vault/password-manager.ts";
+export * from "./vault/personal-overrides.ts";
 export * from "./vault/pki.ts";
 export * from "./vault/policies.ts";
+export * from "./vault/quotas.ts";
 export * from "./vault/references.ts";
+export * from "./vault/rekey.ts";
 export * from "./vault/seal.ts";
 export * from "./vault/shared.ts";
+export * from "./vault/shares.ts";
 export * from "./vault/ssh.ts";
 export * from "./vault/tokens.ts";
 export * from "./vault/totp.ts";

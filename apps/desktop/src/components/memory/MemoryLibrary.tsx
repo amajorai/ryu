@@ -10,6 +10,7 @@
 import {
 	Add01Icon,
 	AiBrain01Icon,
+	Download01Icon,
 	GitBranchIcon,
 	MoreHorizontalIcon,
 } from "@hugeicons/core-free-icons";
@@ -67,6 +68,7 @@ import {
 	storedMemoryGitRoot,
 } from "./MemoryGitSourceCard.tsx";
 import { MemoryGraph } from "./MemoryGraph.tsx";
+import { MemoryImportDialog } from "./MemoryImportDialog.tsx";
 import { MemoryLibraryFilters } from "./MemoryLibraryFilters.tsx";
 import {
 	ALL,
@@ -125,6 +127,7 @@ export function MemoryLibrary({
 	// The Git source lives behind the header's `⋯`; the page shows one status
 	// line only when a folder is bound.
 	const [gitOpen, setGitOpen] = useState(false);
+	const [importOpen, setImportOpen] = useState(false);
 	const gitRoot = storedMemoryGitRoot();
 
 	const reload = useCallback(() => {
@@ -302,6 +305,12 @@ export function MemoryLibrary({
 				open={editorOpen}
 				target={target}
 			/>
+			<MemoryImportDialog
+				onClose={() => setImportOpen(false)}
+				onImported={reload}
+				open={importOpen}
+				target={target}
+			/>
 			<MemoryDeleteDialog
 				onConfirm={confirmDelete}
 				pendingDelete={pendingDelete}
@@ -336,6 +345,10 @@ export function MemoryLibrary({
 							}
 						/>
 						<DropdownMenuContent align="end" className="min-w-48">
+							<DropdownMenuItem onClick={() => setImportOpen(true)}>
+								<HugeiconsIcon className="size-4" icon={Download01Icon} />
+								Import from another assistant…
+							</DropdownMenuItem>
 							<DropdownMenuItem onClick={() => setGitOpen(true)}>
 								<HugeiconsIcon className="size-4" icon={GitBranchIcon} />
 								Git source…

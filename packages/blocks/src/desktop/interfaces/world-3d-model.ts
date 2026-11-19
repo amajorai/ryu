@@ -274,7 +274,7 @@ export function actLine(
 		case "blocked":
 			return act.blockers[0]?.kind === "interrupted"
 				? "My run was interrupted."
-				: "My run stopped. Can you take a look?";
+				: tr("My run stopped. Can you take a look?");
 		case "limited":
 			return "I've hit my limit for now.";
 		default:

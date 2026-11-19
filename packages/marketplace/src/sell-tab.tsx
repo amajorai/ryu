@@ -345,7 +345,14 @@ export function SellTab({
 
 				{showMembership ? (
 					<SettingsSection
-						caption={`${MEMBERSHIP_POOL_COPY} ${MEMBERSHIP_LICENSES_COPY}`}
+						caption={
+							// Two catalogued sentences, each its own text node: the DOM
+							// localizer matches whole nodes and never splits a joined one.
+							<>
+								<span>{MEMBERSHIP_POOL_COPY}</span>{" "}
+								<span>{MEMBERSHIP_LICENSES_COPY}</span>
+							</>
+						}
 						headerAction={<Badge variant="outline">Recurring plans only</Badge>}
 						title="A Major Pass"
 					>

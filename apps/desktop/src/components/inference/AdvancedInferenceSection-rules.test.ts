@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	jsonObjectSchema,
 	logitBiasSchema,
+	samplingNumberError,
 } from "./AdvancedInferenceSection-rules.ts";
 
 function firstMessage(result: { error?: { issues: { message: string }[] } }) {
@@ -38,5 +40,21 @@ describe("advanced inference JSON schemas", () => {
 			"42": -100,
 			"17": 100,
 		});
+	});
+});
+
+describe("samplingNumberError", () => {
+	const tl: LiteralMessage = (source, values) =>
+		`[${source}]${values ? JSON.stringify(values) : ""}`;
+
+	test("the field label is translated before it fills the sentence", () => {
+		expect(
+			samplingNumberError("frequency_penalty", 3, "model", undefined, tl)
+		).toBe(
+			'[{label} must be no greater than {max}.]{"label":"[Frequency penalty]","max":"2"}'
+		);
+		expect(samplingNumberError("seed", 1.5, "model", undefined, tl)).toBe(
+			'[{label} must be a whole number.]{"label":"[Seed]"}'
+		);
 	});
 });

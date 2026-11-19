@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { LibraryItemType } from "@/src/lib/library.ts";
+import { compareNames } from "@/src/lib/name-collator.ts";
 import {
 	CUSTOM_SURFACE_SECTIONS,
 	isItemType,
@@ -92,9 +93,9 @@ export function useLibraryVisibleItems({
 		}
 		const sorted = [...list];
 		if (sort === "name-asc") {
-			sorted.sort((a, b) => a.name.localeCompare(b.name));
+			sorted.sort((a, b) => compareNames(a.name, b.name));
 		} else if (sort === "name-desc") {
-			sorted.sort((a, b) => b.name.localeCompare(a.name));
+			sorted.sort((a, b) => compareNames(b.name, a.name));
 		} else {
 			sorted.sort((a, b) => b.updatedAt - a.updatedAt);
 		}

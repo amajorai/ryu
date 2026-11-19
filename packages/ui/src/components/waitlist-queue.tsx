@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs.tsx";
 import { WaitlistPass } from "./waitlist-pass.tsx";
 import { WaitlistOverviewStep } from "./waitlist-queue-overview.tsx";
 import {
+	reservedHandleTitle,
 	WaitlistHandleStep,
 	WaitlistLeaderboardStep,
 	WaitlistShareStep,
@@ -156,7 +157,7 @@ export function WaitlistQueue({
 	// says nothing the position on the pass does not already say.
 	let headerTitle = "You're on the waitlist";
 	if (reserved) {
-		headerTitle = `@${reserved} is reserved`;
+		headerTitle = reservedHandleTitle(reserved, tl);
 	} else if (userName) {
 		headerTitle = tl("You're in line, {userName}", { userName });
 	}

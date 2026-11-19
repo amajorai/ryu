@@ -10,6 +10,10 @@ import {
 import { spaceDisplayTitle } from "@/src/lib/spaces/display-title.ts";
 import { WHITEBOARD_PLUGIN_ID } from "@/src/lib/whiteboard/app.ts";
 import type { useSpacesPageData } from "./SpacesPage.data.ts";
+import {
+	spaceExportNotice,
+	spaceImportNotice,
+} from "./SpacesPage.portable-notices.ts";
 import { docSegment } from "./SpacesPage.routes.ts";
 
 type SpacesPageActionsInput = Pick<
@@ -185,11 +189,7 @@ export function useSpacesPageActions({
 		try {
 			const exported = await exportSpacePackage(toTarget(node), selected.id);
 			downloadSpacePackage(exported);
-			setPortableNotice(
-				"Exported " +
-					exported.package.files.length +
-					" source files. Embeddings were not included."
-			);
+			setPortableNotice(spaceExportNotice(exported.package.files.length, tl));
 		} catch (error) {
 			setPortableError(
 				error instanceof Error
@@ -199,7 +199,7 @@ export function useSpacesPageActions({
 		} finally {
 			setPortableBusy(false);
 		}
-	}, [node, selected]);
+	}, [node, selected, tl]);
 	const handleImportPackage = useCallback(
 		async (file: File) => {
 			setPortableBusy(true);
@@ -213,11 +213,7 @@ export function useSpacesPageActions({
 				await reload();
 				setSelectedId(imported.spaceId);
 				setPortableNotice(
-					"Imported " +
-						imported.pageCount +
-						" pages and " +
-						imported.databaseCount +
-						" databases. Embeddings were not included; run the manual embedding re-index when you want RAG."
+					spaceImportNotice(imported.pageCount, imported.databaseCount, tl)
 				);
 			} catch (error) {
 				setPortableError(
@@ -229,7 +225,7 @@ export function useSpacesPageActions({
 				setPortableBusy(false);
 			}
 		},
-		[node, reload]
+		[node, reload, tl]
 	);
 	return {
 		cancelRetrievalModeChange,

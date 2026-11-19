@@ -3,6 +3,14 @@
 
 use super::*;
 
+fn response_too_large() -> Refusal {
+    Refusal::new(
+        StatusCode::BAD_GATEWAY,
+        "response_too_large",
+        "the upstream response exceeds the broker limit",
+    )
+}
+
 /// An authorized request's service (none for an unmatched host under
 /// `passthrough`), the environment's merchant-locked cards, and whether
 /// only a card merchant allowlist covers the host.
@@ -26,11 +34,12 @@ impl Broker {
         let method = request.method().clone();
         // Logged as sent: placeholders, never values, and no query string.
         let path = request.uri().path().to_owned();
-        let (response, service, outcome) = match self.forward_inner(session, target, request).await
-        {
-            Ok((response, service)) => (response, service, "forwarded"),
-            Err((refusal, service)) => (refusal.response, service, refusal.outcome),
-        };
+        let mut rpc = Vec::new();
+        let (response, service, outcome) =
+            match self.forward_inner(session, target, request, &mut rpc).await {
+                Ok((response, service)) => (response, service, "forwarded"),
+                Err((refusal, service)) => (refusal.response, service, refusal.outcome),
+            };
         let row = Self::log_row(
             session,
             &method,
@@ -41,15 +50,18 @@ impl Broker {
             started,
             outcome,
         );
-        self.record(row).await;
+        self.record_with(row, rpc).await;
         response
     }
 
+    /// Route, inject, and send one request. `rpc` receives the JSON-RPC
+    /// metadata of the body as the agent sent it (before substitution).
     pub(super) async fn forward_inner(
         &self,
         session: &BrokerSession,
         target: &Target,
         request: Request<Incoming>,
+        rpc: &mut Vec<super::super::jsonrpc::RpcCall>,
     ) -> Result<(Response<ProxyBody>, Option<String>), (Refusal, Option<String>)> {
         let Route {
             service,
@@ -59,9 +71,17 @@ impl Broker {
         let name = service.as_ref().map(|s| s.name().to_owned());
         let fail = |refusal: Refusal| (refusal, name.clone());
         let mut outgoing = self.read_request(request).await.map_err(fail)?;
-        // Service credentials first, so a failed injection never spends a
-        // card approval.
+        *rpc = super::super::jsonrpc::parse(
+            header_str(&outgoing.headers, hyper::header::CONTENT_TYPE.as_str()),
+            header_str(&outgoing.headers, hyper::header::CONTENT_ENCODING.as_str()),
+            &outgoing.body,
+        );
+        // The tool policy before any credential is resolved; then service
+        // credentials, so a failed injection never spends a card approval.
         if let Some(service) = &service {
+            self.check_mcp_tools(session, service, &outgoing)
+                .await
+                .map_err(fail)?;
             let action = super::super::oauth::action_for_method(&outgoing.method);
             self.inject(session, service, &mut outgoing, action)
                 .await
@@ -303,14 +323,29 @@ impl Broker {
                     !error.is_connect(),
                 )
             })?;
+        // A declared length over the cap is refused before any byte reaches
+        // the agent; an undeclared one is cut off once it passes the cap.
+        let limit = self.config.max_response_bytes;
+        if upstream
+            .content_length()
+            .is_some_and(|length| length > limit as u64)
+        {
+            return Err((response_too_large(), true));
+        }
         let mut response = Response::builder().status(upstream.status());
         if let Some(headers) = response.headers_mut() {
             *headers = end_to_end(upstream.headers(), false);
         }
-        let stream = upstream.bytes_stream().map(|chunk| {
-            chunk
-                .map(Frame::data)
-                .map_err(|error| Box::new(error) as BoxError)
+        let mut relayed = 0usize;
+        let stream = upstream.bytes_stream().map(move |chunk| {
+            let chunk = chunk.map_err(|error| Box::new(error) as BoxError)?;
+            relayed = relayed.saturating_add(chunk.len());
+            if relayed > limit {
+                return Err(BoxError::from(
+                    "the upstream response exceeds the broker limit",
+                ));
+            }
+            Ok(Frame::data(chunk))
         });
         response
             .body(StreamBody::new(stream).boxed_unsync())

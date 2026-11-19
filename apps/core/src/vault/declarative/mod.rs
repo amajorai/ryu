@@ -52,7 +52,8 @@
 //! alone, and items that differ are reported as drift and left unchanged
 //! unless the file sets `"reconcile": true`. Changes that would lose data or
 //! credentials (a transit key's type, a machine identity's auth method) are
-//! only ever reported. It runs at startup once the store opens, and again from
+//! only ever reported, though a declared `disabled: true` still disables such
+//! an identity on reconcile. It runs at startup once the store opens, and again from
 //! `POST /api/vault/sys/init/apply`. Every change is audited with the actor
 //! `system:bootstrap`.
 
@@ -75,6 +76,8 @@ mod base;
 mod fields;
 mod folders;
 mod identity;
+#[cfg(test)]
+mod machine_tests;
 #[cfg(test)]
 mod module_tests;
 mod parse;
@@ -160,7 +163,9 @@ pub struct ApplyReport {
     pub created: Vec<String>,
     /// `kind:id` of each drifted item that `reconcile` overwrote.
     pub updated: Vec<String>,
-    /// `kind:id` of each drifted item left unchanged.
+    /// `kind:id` of each drifted item left unchanged. A machine identity whose
+    /// auth method differs is always listed here; if `reconcile` disabled it
+    /// as declared, it is listed in `updated` too.
     pub drifted: Vec<String>,
     pub unchanged: usize,
     /// Per-item failures; one bad item does not stop the rest.
@@ -290,10 +295,28 @@ pub async fn apply_at_startup(store: &PluginSecretStore) {
     match apply_configured(store).await {
         Ok(None) => {}
         Ok(Some(report)) => {
-            if !report.drifted.is_empty() {
+            // A machine identity with auth drift is in both lists when
+            // reconcile disabled it: it was changed, so it is not "left".
+            let left: Vec<&String> = report
+                .drifted
+                .iter()
+                .filter(|label| !report.updated.contains(label))
+                .collect();
+            if !left.is_empty() {
                 tracing::warn!(
-                    drifted = ?report.drifted,
-                    "vault init file: drifted items left unchanged (set reconcile: true to overwrite)"
+                    drifted = ?left,
+                    "vault init file: drifted items left unchanged (reconcile: true overwrites them, except a transit key type or a machine identity's auth method)"
+                );
+            }
+            let disabled_with_auth_drift: Vec<&String> = report
+                .drifted
+                .iter()
+                .filter(|label| report.updated.contains(label))
+                .collect();
+            if !disabled_with_auth_drift.is_empty() {
+                tracing::warn!(
+                    identities = ?disabled_with_auth_drift,
+                    "vault init file: disabled as declared; their auth method still differs from the file"
                 );
             }
             if !report.errors.is_empty() {

@@ -1,5 +1,5 @@
 import { translate as tr } from "@ryu/i18n/lite";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -157,12 +157,28 @@ export function QuizClueCard({
 	tile: QuizTile;
 }) {
 	const tl = useLiteralMessages();
+	const tlRich = useRichLiteralMessages();
 	const agent = agentById(snapshot, tile.agentId);
-	const speaker =
-		tile.thread.lastMessageRole === "user"
-			? "You"
-			: (agent?.name ?? tr("Agent"));
 	const hasMessage = Boolean(tile.thread.lastMessage?.trim());
+	const title = threadTitle(tile.thread);
+	const titleTag = (chunks: ReactNode) => (
+		<span className="font-semibold text-(--quiz-ink)">{chunks}</span>
+	);
+	let meta: ReactNode = titleTag(title);
+	if (hasMessage) {
+		meta =
+			tile.thread.lastMessageRole === "user"
+				? tlRich(
+						"You in <title>{title}</title>",
+						{ title },
+						{ title: titleTag }
+					)
+				: tlRich(
+						"{speaker} in <title>{title}</title>",
+						{ speaker: agent?.name ?? tr("Agent"), title },
+						{ title: titleTag }
+					);
+	}
 	const headingId = useId();
 	return (
 		<BoardCard
@@ -191,12 +207,7 @@ export function QuizClueCard({
 					    nearer the keys than the clue. */}
 					<div className="mt-8 flex min-w-0 max-w-full items-center gap-2 text-(--quiz-ink-muted) text-[15px]">
 						{agent ? <QuizAvatar agent={agent} className="size-6" /> : null}
-						<span className="truncate">
-							{hasMessage ? `${speaker} in ` : ""}
-							<span className="font-semibold text-(--quiz-ink)">
-								{threadTitle(tile.thread)}
-							</span>
-						</span>
+						<span className="truncate">{meta}</span>
 						<span aria-hidden="true">·</span>
 						<span className="shrink-0">{threadStatusLabel(tile.status)}</span>
 					</div>

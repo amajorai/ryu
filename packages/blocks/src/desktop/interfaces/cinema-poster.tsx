@@ -1,4 +1,5 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { memo, type PointerEvent } from "react";
 import { CinemaArt } from "./cinema-art.tsx";
@@ -153,25 +154,33 @@ export function CinemaBoxart({
 	);
 }
 
-/** A ranked numeral, outlined like the reference's Top 10 row. */
+/**
+ * A ranked numeral, outlined like the reference's Top 10 row. It sits on the
+ * poster's inline-start side, so in right-to-left reading the numeral hugs
+ * the poster from the right: the anchor, x and alignment mirror, while the
+ * digits themselves stay left-to-right.
+ */
 function RankNumeral({ rank }: { rank: number }) {
+	const rtl = useDirection() === "rtl";
+	const overhang = rank >= 10 ? 12 : 4;
 	return (
 		<svg
 			aria-hidden="true"
 			className="h-full w-1/2 shrink-0 overflow-visible"
 			focusable="false"
-			preserveAspectRatio="xMaxYMax meet"
+			preserveAspectRatio={rtl ? "xMinYMax meet" : "xMaxYMax meet"}
 			viewBox="0 0 100 150"
 		>
 			<text
 				className="fill-background stroke-foreground/45 font-black"
+				direction="ltr"
 				fontSize={rank >= 10 ? 118 : 150}
 				letterSpacing={rank >= 10 ? -10 : 0}
 				paintOrder="stroke"
 				strokeLinejoin="round"
 				strokeWidth={4}
-				textAnchor="end"
-				x={rank >= 10 ? 112 : 104}
+				textAnchor={rtl ? "start" : "end"}
+				x={rtl ? -overhang : 100 + overhang}
 				y={146}
 			>
 				{rank}
@@ -260,7 +269,7 @@ export const CinemaPoster = memo(function CinemaPoster({
 					aria-hidden="true"
 					className={cn(
 						"pointer-events-none absolute rounded-sm ring-2 ring-primary ring-inset",
-						layout === "top" ? "inset-y-0 right-0 w-1/2" : "inset-0"
+						layout === "top" ? "inset-y-0 end-0 w-1/2" : "inset-0"
 					)}
 				/>
 			) : null}

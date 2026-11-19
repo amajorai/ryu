@@ -16,7 +16,7 @@ import {
 	respondToChatQuestion,
 } from "../../core/chatQuestion.ts";
 import { appendToolOutputPart } from "../../core/chatTranscript.ts";
-import { nativeErrorMessage as errText } from "../../core/native-errors.ts";
+import { failureText as errText } from "../../i18n/failure-text.ts";
 import { tf } from "../../i18n/translate.ts";
 import {
 	PERMISSION_BODY_PAGE_ROWS,

@@ -4,8 +4,15 @@
 
 import { expect, test } from "bun:test";
 import { runCli } from "../cli/dispatch.ts";
-import { credentialDotenv, parseMigrateArgs } from "../cli/migrate.ts";
+import {
+	credentialDotenv,
+	parseMigrateArgs,
+	renderPlan,
+	renderReport,
+} from "../cli/migrate.ts";
+import { nextSteps } from "../cli/migrate-render.ts";
 import type { CliIO, CoreApi } from "../cli/types.ts";
+import { createCliTranslator } from "../i18n/translate.ts";
 
 function makeIo() {
 	let out = "";
@@ -292,4 +299,73 @@ test("credentialDotenv keeps only credential-looking keys", () => {
 	);
 	expect(names).toEqual(["OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN"]);
 	expect(content).toBe("OPENAI_API_KEY=sk-1\nTELEGRAM_BOT_TOKEN='1:x'\n");
+});
+
+// The shipped catalog has no Japanese for the new sentences yet, so the
+// translator gets a stub pack, the way `LANG=ja_JP.UTF-8` loads one.
+const japanese = createCliTranslator("ja", {
+	"Found {source} setup at {root}":
+		"{root} に {source} のセットアップが見つかりました",
+	Agents: "エージェント",
+	Skills: "スキル",
+	"(already in Ryu)": "（すでに Ryu にあります）",
+	"Review before cutover:": "切り替え前に確認:",
+	Imported: "インポート済み",
+	Failed: "失敗",
+	"Migration complete: {imported} imported, {skipped} skipped, {failed} failed.":
+		"移行完了: インポート {imported} 件、スキップ {skipped} 件、失敗 {failed} 件。",
+	"Next steps:": "次の手順:",
+	"Start a new chat; imported agents, skills, and memory apply to new sessions.":
+		"新しいチャットを開始してください。インポートしたエージェント、スキル、メモリーは新しいセッションに適用されます。",
+});
+
+test("migrate plan, report and next steps render in Japanese", () => {
+	const plan = renderPlan(openclawScan, [], japanese);
+	expect(plan).toContain(
+		"/home/sam/.openclaw に OpenClaw のセットアップが見つかりました"
+	);
+	expect(plan).toContain("エージェント (1)");
+	expect(plan).toContain("= Skill 'deploy'  （すでに Ryu にあります）");
+	expect(plan).toContain("切り替え前に確認:");
+	expect(plan).not.toContain("already in Ryu");
+
+	const report = renderReport(
+		[
+			{
+				id: "a",
+				kind: "agent",
+				status: "imported",
+				title: "Clawd",
+				detail: "renamed",
+			},
+			{ id: "b", kind: "skill", status: "failed", title: "deploy" },
+		],
+		japanese
+	);
+	expect(report).toContain(
+		"移行完了: インポート 1 件、スキップ 0 件、失敗 1 件。"
+	);
+	// "インポート済み" is 14 columns wide, so "失敗" (4) pads to the same column.
+	expect(report).toContain("  インポート済み Clawd — renamed");
+	expect(report).toContain(`  失敗${" ".repeat(10)} deploy`);
+
+	const steps = nextSteps(japanese);
+	expect(
+		steps.startsWith("次の手順:\n  1. 新しいチャットを開始してください。")
+	).toBe(true);
+	expect(steps).toContain("  4. Keep the source folder");
+});
+
+test("migrate with no source lists each setup with a counted noun and its command", async () => {
+	const cap = makeIo();
+	const single = { ...openclawScan, items: openclawScan.items.slice(0, 1) };
+	const code = await runCli(["migrate"], {
+		io: cap.io,
+		api: stubApi(() => Promise.resolve(single)),
+	});
+	expect(code).toBe(0);
+	expect(cap.out()).toContain(
+		"Found setups you can migrate:\n  OpenClaw   /home/sam/.openclaw (1 item)\n    → ryu migrate openclaw --dry-run\n"
+	);
+	expect(cap.out()).not.toContain("1 items");
 });

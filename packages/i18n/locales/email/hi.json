@@ -1,5 +1,4 @@
 {
-  "1 second": "1 सेकंड",
   "A Ryu credential was exposed publicly": "एक Ryu क्रेडेंशियल सार्वजनिक रूप से उजागर हुआ",
   "A Ryu internal organization crossed the {level} threshold. It was not throttled or suspended automatically.": "Ryu के एक आंतरिक संगठन ने {level} सीमा पार कर ली है। इसे अपने आप थ्रॉटल या निलंबित नहीं किया गया।",
   "A child safety case was opened": "एक बाल सुरक्षा मामला खोला गया",
@@ -656,7 +655,10 @@
   "{amount} in Ryu Credits": "Ryu Credits में {amount}",
   "{amount} is now available in your Ryu balance": "आपके Ryu बैलेंस में अब {amount} उपलब्ध है",
   "{code} is your Ryu for Students code": "{code} आपका Ryu for Students कोड है",
+  "{count, plural, one {# hour} other {# hours}}": "{count, plural, one {# घंटा} other {# घंटे}}",
+  "{count, plural, one {# minute} other {# minutes}}": "{count, plural, one {# मिनट} other {# मिनट}}",
   "{count, plural, one {# seat in {organizationName} is unassigned} other {# seats in {organizationName} are unassigned}}": "{count, plural, one {{organizationName} में # सीट असाइन नहीं है} other {{organizationName} में # सीटें असाइन नहीं हैं}}",
+  "{count, plural, one {# second} other {# seconds}}": "{count, plural, one {# सेकंड} other {# सेकंड}}",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month} and cost {cost}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, one {इस एजेंट} other {इन # एजेंटों}} की गतिविधि {month} में लगभग हर दिन रही, और कुल लागत {cost} रही। अगर यह जानबूझकर है, तो कुछ करने की ज़रूरत नहीं है। अगर कोई गलती से चालू रह गया, तो आप उसे Ryu के एजेंट व्यू से रोक सकते हैं।",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, one {इस एजेंट} other {इन # एजेंटों}} की गतिविधि {month} में लगभग हर दिन रही। अगर यह जानबूझकर है, तो कुछ करने की ज़रूरत नहीं है। अगर कोई गलती से चालू रह गया, तो आप उसे Ryu के एजेंट व्यू से रोक सकते हैं।",
   "{didntAsk} Someone may have your session. Ignore this link, then change your password and sign out your other devices from Settings.": "{didntAsk} हो सकता है किसी के पास आपका सत्र हो। इस लिंक को अनदेखा करें, फिर अपना पासवर्ड बदलें और सेटिंग्स से अपने अन्य डिवाइस साइन आउट करें।",

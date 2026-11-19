@@ -1,4 +1,5 @@
 import type { LiteralMessage } from "@ryu/i18n";
+import { translate } from "@ryu/i18n/core";
 import {
 	type CloudEnvironmentRuntime,
 	DEFAULT_CLOUD_ENVIRONMENT_RUNTIME,
@@ -24,9 +25,12 @@ export const errorMessage = <TError>(error: TError) =>
 // sentence and stay available on hover; server messages read as written.
 const TECHNICAL_ERROR = /^(?:invalid cloud environment|[[{])/iu;
 
-export const paneErrorHeadline = (error: string) =>
+export const paneErrorHeadline = (
+	error: string,
+	tl: LiteralMessage = translate
+) =>
 	TECHNICAL_ERROR.test(error.trim())
-		? "Couldn’t read the saved cloud environment settings."
+		? tl("Couldn't read the saved cloud environment settings.")
 		: error;
 
 // The name is user-editable, so it is written in the creator's UI language.

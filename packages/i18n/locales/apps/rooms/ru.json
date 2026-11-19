@@ -65,6 +65,7 @@
   "The room is generating…": "Комната генерирует ответ…",
   "The room is ready. Send the first prompt.": "Комната готова. Отправьте первый промпт.",
   "The room is temporarily unavailable. Try again.": "Комната временно недоступна. Повторите попытку.",
+  "The room request was not accepted.": "Запрос комнаты не принят.",
   "The turn response was not a valid room.": "Ответ на ход не является допустимой комнатой.",
   "This closes the room and revokes its current guest sessions.": "Комната будет закрыта, а ее текущие гостевые сеансы — отозваны.",
   "This invite is invalid, expired, or revoked.": "Это приглашение недействительно, истекло или отозвано.",

@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod folder_moves;
+
 impl PluginSecretStore {
     // ── Environments, folders, imports ────────────────────────────────────
 

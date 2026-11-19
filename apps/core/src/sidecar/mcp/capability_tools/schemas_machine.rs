@@ -121,6 +121,20 @@ pub(super) fn schema_browser_annotate() -> Value {
     })
 }
 
+pub(super) fn schema_browser_execute_webmcp_tool() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "tab_id": { "type": "string", "description": "Target tab id." },
+            "tool_name": { "type": "string", "description": "Exact WebMCP tool name from browser.list_webmcp_tools." },
+            "tool_id": { "type": "string", "description": "Exact tool_id from browser.list_webmcp_tools; required when a name appears more than once." },
+            "arguments": { "type": "object", "description": "JSON object matching the tool's input_schema." }
+        },
+        "required": ["tab_id", "tool_name"]
+    })
+}
+
 pub(super) fn schema_browser_hover() -> Value {
     json!({
         "type": "object",

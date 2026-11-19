@@ -5,6 +5,11 @@ import {
 	promptCacheStatus,
 	summarizeAudit,
 } from "./AgentObservabilityView.tsx";
+import {
+	type PromptCacheStatus,
+	promptCacheStatusLabel,
+	promptCacheStatusText,
+} from "./AgentObservabilityView-audit.ts";
 
 function entry(overrides: Partial<AuditEntry> = {}): AuditEntry {
 	return {
@@ -111,7 +116,7 @@ describe("agent observability aggregates", () => {
 					prompt_cache_write_tokens: 0,
 				})
 			)
-		).toBe("Hit");
+		).toBe("hit");
 		expect(
 			promptCacheStatus(
 				entry({
@@ -120,7 +125,7 @@ describe("agent observability aggregates", () => {
 					prompt_cache_write_tokens: 100,
 				})
 			)
-		).toBe("Miss + write");
+		).toBe("miss-write");
 		expect(promptCacheStatus(entry())).toBeNull();
 	});
 
@@ -175,5 +180,43 @@ describe("agent observability aggregates", () => {
 		expect(
 			filterAuditEntries(values, "", "tool").map((item) => item.id)
 		).toEqual(["audit-2"]);
+	});
+});
+
+describe("prompt cache status labels", () => {
+	const english = (source: string) => source;
+	const JA: Record<string, string> = {
+		"Cache write": "キャッシュ書き込み",
+		Hit: "ヒット",
+		"Hit + write": "ヒット + 書き込み",
+		Miss: "ミス",
+		"Miss + write": "ミス + 書き込み",
+		"No cached tokens": "キャッシュされたトークンなし",
+	};
+	const ja = (source: string) => JA[source] ?? source;
+
+	test("each status reads as its whole English label", () => {
+		const labels: [PromptCacheStatus, string][] = [
+			["hit", "Hit"],
+			["hit-write", "Hit + write"],
+			["miss", "Miss"],
+			["miss-write", "Miss + write"],
+			["cache-write", "Cache write"],
+			["no-cached-tokens", "No cached tokens"],
+		];
+		for (const [status, label] of labels) {
+			expect(promptCacheStatusLabel(status, english)).toBe(label);
+		}
+	});
+
+	test("the label follows the UI language while the miss count keeps working", () => {
+		const miss = entry({
+			prompt_cache_outcome: "injected",
+			prompt_cache_read_tokens: 0,
+			prompt_cache_write_tokens: 0,
+		});
+		expect(promptCacheStatusText(miss, ja)).toBe("ミス");
+		expect(promptCacheStatusText(entry(), ja)).toBeNull();
+		expect(summarizeAudit([miss]).promptCacheMissRequests).toBe(1);
 	});
 });

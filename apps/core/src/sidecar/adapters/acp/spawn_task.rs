@@ -187,6 +187,7 @@ pub fn spawn_acp_task(
         additional_directories,
         environment,
         account_confinement,
+        agent_id: agent_key.clone(),
     };
     let grants = AcpLaunchGrants {
         tool_authority: tool_authority.as_ref(),

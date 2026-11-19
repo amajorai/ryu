@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { motion } from "motion/react";
 import {
@@ -115,6 +115,8 @@ export function WikiInterface({
 	threadView,
 }: InterfaceRendererProps<Record<string, never>>) {
 	const tl = useLiteralMessages();
+	// The talk-page tab, not the speak verb the bare catalog "Talk" carries.
+	const i18n = useOptionalI18n();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
@@ -272,7 +274,7 @@ export function WikiInterface({
 			},
 			{
 				id: "talk",
-				label: "Talk",
+				label: i18n?.t("wiki.talkTab", {}, "Talk") ?? "Talk",
 				onSelect: () => selectTab("talk"),
 				selected: shownTab === "talk",
 			},

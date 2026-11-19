@@ -73,6 +73,7 @@ const RULE_KEYS: &[&str] = &[
     "deniedParameters",
     "requiredParameters",
     "controlGroup",
+    "valueRules",
 ];
 const CONTROL_GROUP_KEYS: &[&str] = &["ttlSecs", "factors"];
 const CONTROL_GROUP_FACTOR_KEYS: &[&str] = &["name", "approvers", "approvals"];

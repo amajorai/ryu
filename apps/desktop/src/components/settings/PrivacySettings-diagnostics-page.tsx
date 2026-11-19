@@ -18,8 +18,9 @@ import { Switch } from "@ryu/ui/components/switch.tsx";
 import { formatDateTime } from "@/src/lib/timezone.ts";
 import {
 	CONTENT_MODE_OPTIONS,
-	EXPORTER_FIELD_COPY,
 	EXPORTER_PRESET_OPTIONS,
+	exporterFieldLabel,
+	exporterFieldPlaceholder,
 	SUPPORT_DURATION_OPTIONS,
 } from "./PrivacySettings-options.ts";
 import type { PrivacyPreferences } from "./PrivacySettings-preferences.ts";
@@ -134,7 +135,7 @@ export function DiagnosticsPage({
 								)?.fields ?? []
 							).map((field) => (
 								<Input
-									aria-label={EXPORTER_FIELD_COPY[field].label}
+									aria-label={exporterFieldLabel(field, tl)}
 									disabled={
 										!privacyReady || busyKeys.includes(`exporter-${field}`)
 									}
@@ -143,7 +144,7 @@ export function DiagnosticsPage({
 									onChange={(event) =>
 										handleExporterField(field, event.target.value)
 									}
-									placeholder={`${EXPORTER_FIELD_COPY[field].label}: ${EXPORTER_FIELD_COPY[field].placeholder}`}
+									placeholder={exporterFieldPlaceholder(field, tl)}
 									value={exporter[field]}
 								/>
 							))}

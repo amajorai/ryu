@@ -153,7 +153,11 @@ function ProfileCard({ info }: { info: AuthInfo }) {
 			<box height={1} />
 			<InfoRow
 				label="Password"
-				value={info.hasPassword ? "Set" : `Not set (via ${info.authMethod})`}
+				value={
+					info.hasPassword
+						? tf("Configured", {})
+						: tf("Not set (via {authMethod})", { authMethod: info.authMethod })
+				}
 				valueColor={
 					info.hasPassword ? theme.colors.success : theme.colors.mutedForeground
 				}

@@ -7,6 +7,7 @@ import { BotScene } from "./product-scenes/bot.tsx";
 import { ConsoleScene } from "./product-scenes/console.tsx";
 import { GatewayScene } from "./product-scenes/gateway.tsx";
 import { Scene } from "./product-scenes/scene.tsx";
+import { SenseLabel } from "./sense-label.tsx";
 
 type SceneId = ProductRealmId | "apps";
 
@@ -277,7 +278,11 @@ export function ProductRealmScene({ id }: { id: SceneId }) {
 								<p className="mt-1 font-medium">Compute workcell</p>
 							</div>
 							<div>
-								<p className="text-muted-foreground">Availability</p>
+								<p className="text-muted-foreground">
+									<SenseLabel id="computeShare.availabilityWindow">
+										Availability
+									</SenseLabel>
+								</p>
 								<p className="mt-1 font-medium">Only when idle</p>
 							</div>
 						</div>

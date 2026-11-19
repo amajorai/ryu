@@ -315,6 +315,28 @@
       "addedOn": "2026-11-07"
     },
     {
+      "id": "browser.list_webmcp_tools",
+      "name": "List page WebMCP tools",
+      "description": "List the structured tools a page declares through WebMCP, with their input schemas and hints.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.list_webmcp_tools"],
+      "addedOn": "2026-11-10"
+    },
+    {
+      "id": "browser.execute_webmcp_tool",
+      "name": "Run a page WebMCP tool",
+      "description": "Run one tool a page declares through WebMCP with JSON arguments and return its result as untrusted data.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.execute_webmcp_tool"],
+      "addedOn": "2026-11-10"
+    },
+    {
       "id": "computer.capture",
       "name": "Capture the screen",
       "description": "Capture the screen with accessibility metadata for later targeting.",

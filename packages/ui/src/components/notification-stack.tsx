@@ -390,7 +390,7 @@ export function NotificationStack({
 							isExpanded
 								? tl("{count} notifications. {expandedLabel}.", {
 										count: String(items.length),
-										expandedLabel,
+										expandedLabel: tl(expandedLabel),
 									})
 								: tl("{count} notifications. Expand {collapsedLabel}.", {
 										collapsedLabel: sentenceLabel(tl, collapsedLabel),

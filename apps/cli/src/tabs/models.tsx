@@ -10,6 +10,7 @@ import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { setActiveModel } from "@ryuhq/core-client/models";
 import { featureListLoader, type ListRow } from "../core/featureList.ts";
 import { ListTab } from "../ui/ListTab.tsx";
+import { activeModelNotice, queuedInstallNotice } from "../ui/list-notices.ts";
 import type { TabProps } from "./types.ts";
 
 const loadModels = featureListLoader({
@@ -34,7 +35,7 @@ const installModel = async (
 		},
 		appResponseValueSchema
 	);
-	return `install queued: ${row.id}`;
+	return queuedInstallNotice(row.id);
 };
 
 const activateModel = async (
@@ -42,7 +43,7 @@ const activateModel = async (
 	target: ApiTarget
 ): Promise<string> => {
 	await setActiveModel(target, row.id);
-	return `active model: ${row.id}`;
+	return activeModelNotice(row.id);
 };
 
 export function ModelsTab({ active }: TabProps) {

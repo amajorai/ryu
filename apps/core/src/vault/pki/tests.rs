@@ -1,3 +1,5 @@
+//! Shared PKI test fixtures and tests of the module's own helpers.
+
 use super::*;
 
 pub(super) fn actor() -> AuditActor {

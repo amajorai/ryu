@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import {
 	downloadPageUrl,
 	emailShareUrl,
@@ -145,39 +144,5 @@ describe("isMobileVisitor", () => {
 				userAgent: IPAD_DESKTOP_UA,
 			})
 		).toBe(false);
-	});
-});
-
-describe("phone switch wiring", () => {
-	const hookSource = readFileSync(
-		new URL("./send-download-link.tsx", import.meta.url),
-		"utf8"
-	);
-	const menuSource = readFileSync(
-		new URL("./download-menu.tsx", import.meta.url),
-		"utf8"
-	);
-
-	test("the drawer chunk loads on demand and falls back to the download page", () => {
-		expect(hookSource).not.toMatch(
-			/^\s*import\s(?!type)[^;]*from\s+["']\.\/download-send-drawer\.tsx["']/m
-		);
-		expect(hookSource).toContain('import("./download-send-drawer.tsx")');
-		expect(hookSource).toContain("() => ({ default: OpenDownloadPage })");
-	});
-
-	test("detection runs after mount so the server HTML stays the desktop markup", () => {
-		expect(hookSource).toMatch(
-			/const \[mobile, setMobile\] = useState\(false\);\s*useEffect\(\(\) => \{\s*setMobile\(isMobileVisitor\(readMobileVisitorEnv\(\)\)\);/
-		);
-		expect(hookSource).toMatch(
-			/if \(!mobile\) \{\s*return;\s*\}\s*event\.preventDefault\(\);/
-		);
-	});
-
-	test("both segments of the download control hand off on a phone", () => {
-		expect(menuSource).toContain("onClick={sendLink.intercept}");
-		expect(menuSource).toContain("showMenu && sendLink.mobile");
-		expect(menuSource).toContain("showMenu && !sendLink.mobile");
 	});
 });

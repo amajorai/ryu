@@ -1,4 +1,4 @@
-//! Roles and leaf certificates: issue, sign, revoke, list, and the CRL.
+//! PKI roles and leaf certificates: issue, sign, revoke, list, and the CRL.
 
 use super::*;
 
@@ -50,7 +50,7 @@ impl PluginSecretStore {
         Ok(removed)
     }
 
-    fn load_role(conn: &Connection, name: &str) -> Result<PkiRole> {
+    pub(super) fn load_role(conn: &Connection, name: &str) -> Result<PkiRole> {
         let definition: String = conn
             .query_row(
                 "SELECT definition FROM vault_pki_roles WHERE name = ?1",
@@ -152,6 +152,22 @@ impl PluginSecretStore {
         let (serial, serial_hex) = fresh_serial();
         params.serial_number = Some(serial);
         Ok((params, serial_hex, not_after.unix_timestamp() * 1000))
+    }
+
+    pub(super) fn record_cert(
+        &self,
+        conn: &Connection,
+        serial: &str,
+        issuer: &str,
+        common_name: &str,
+        not_after: i64,
+    ) -> Result<()> {
+        conn.execute(
+            "INSERT INTO vault_pki_certs (serial, issuer, common_name, not_after, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![serial, issuer, common_name, not_after, now_millis()],
+        )?;
+        Ok(())
     }
 
     /// Issue a certificate and a fresh private key under `role`.
@@ -348,6 +364,29 @@ impl PluginSecretStore {
     }
 }
 
-#[cfg(test)]
-#[path = "certs_tests.rs"]
-mod tests;
+pub(super) fn issuer_info_locked(conn: &Connection, name: &str) -> Result<IssuerInfo> {
+    conn.query_row(
+        "SELECT name, common_name, certificate, not_after, kind, ca_chain, csr
+         FROM vault_pki_issuers WHERE name = ?1",
+        params![name],
+        |row| {
+            Ok(IssuerInfo {
+                name: row.get(0)?,
+                common_name: row.get(1)?,
+                certificate: lf_pem(row.get(2)?),
+                not_after: row.get(3)?,
+                kind: row.get(4)?,
+                ca_chain: split_chain(&row.get::<_, String>(5)?),
+                csr: row.get::<_, Option<String>>(6)?.map(lf_pem),
+                key_type: String::new(),
+            })
+        },
+    )
+    .optional()?
+    .map(|mut info| {
+        let source = info.csr.as_deref().unwrap_or(&info.certificate);
+        info.key_type = key_type_of_pem(source);
+        info
+    })
+    .ok_or_else(|| VaultError::NotFound(format!("PKI issuer `{name}`")).into())
+}

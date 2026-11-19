@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { VaultBrokerService } from "@/src/lib/api/vault-broker.ts";
 import {
 	emptyServiceForm,
+	parseHeaders,
 	serviceFormFrom,
 	serviceFormFromHost,
 	serviceInputFrom,
@@ -173,4 +175,13 @@ test("a discovered host suggests a name and keeps a non-default port", () => {
 			requests: 1,
 		}).port
 	).toBe("8080");
+});
+
+test("a malformed header line is refused with a catalogued sentence", () => {
+	const tl: LiteralMessage = (source, values) =>
+		`[${source}]${values ? JSON.stringify(values) : ""}`;
+	expect(parseHeaders("no colon here", tl)).toEqual({
+		error:
+			'[Write each header as Name: {example}.]{"example":"{{secret:REF}}"}',
+	});
 });

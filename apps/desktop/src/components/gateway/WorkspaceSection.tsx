@@ -43,6 +43,7 @@ import {
 import { NodeOrganizationBindingCard } from "./NodeOrganizationBindingCard.tsx";
 import { MemberRolesControl } from "./WorkspaceSection-member-roles.tsx";
 import { LoadErrorRow, RoleBadge } from "./WorkspaceSection-role-badge.tsx";
+import { workspaceRoleSentence } from "./WorkspaceSection-role-labels.ts";
 import { RolesMatrix } from "./WorkspaceSection-roles-matrix.tsx";
 
 /** Where members are invited / roles changed (Better Auth owns those mutations). */
@@ -214,9 +215,7 @@ export function WorkspaceSection() {
 					<SettingsItem
 						description={
 							activeOrg
-								? tl("You are {role} of this workspace.", {
-										role: activeOrg.role ?? tl("a member"),
-									})
+								? workspaceRoleSentence(tl, activeOrg.role)
 								: "You are not in an organization yet. Create one to share this node with a team."
 						}
 						title={

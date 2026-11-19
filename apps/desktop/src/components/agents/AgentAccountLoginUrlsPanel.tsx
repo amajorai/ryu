@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
@@ -13,17 +14,9 @@ import {
 	SettingsCard,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
+import { vaultErrorMessage } from "@/src/components/vault/vault-errors.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import { ApiError, type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
-
-function errorText(cause: unknown): string {
-	if (cause instanceof ApiError && cause.serverMessage) {
-		return cause.serverMessage;
-	}
-	return cause instanceof Error
-		? cause.message
-		: "The login URLs were not saved.";
-}
+import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 
 function AccountLoginUrls({
 	account,
@@ -43,6 +36,7 @@ function AccountLoginUrls({
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const fieldId = `agent-account-login-urls-${account.id}`;
+	const tl = useLiteralMessages();
 
 	const save = async () => {
 		setSaving(true);
@@ -57,7 +51,11 @@ function AccountLoginUrls({
 			setText(stored.join("\n"));
 			onSaved();
 		} catch (cause) {
-			setError(errorText(cause));
+			// Core's refusal is one whole sentence ("vault_invalid_request: login
+			// URL must use https"); show it without the code, translated.
+			setError(
+				vaultErrorMessage(cause, tl("The login URLs were not saved."), tl)
+			);
 		} finally {
 			setSaving(false);
 		}

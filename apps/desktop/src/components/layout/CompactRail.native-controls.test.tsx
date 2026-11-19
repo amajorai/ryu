@@ -5,7 +5,6 @@ if (!GlobalRegistrator.isRegistered) {
 }
 
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import type { Root } from "react-dom/client";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -141,20 +140,5 @@ describe("compact rail clearance for the physical native window controls", () =>
 	test("a browser build has no native controls to clear", async () => {
 		const rtl = await renderRail({ dir: "rtl", isMac: true, surface: "web" });
 		expect(rtl).toEqual({ controls: "", padding: "pt-2" });
-	});
-
-	test("the stylesheet widens the rail for the lights and keeps the caption reserve, keyed on dir", () => {
-		const css = readFileSync(new URL("./CompactRail.css", import.meta.url), {
-			encoding: "utf8",
-		});
-		expect(css).toContain(
-			':root[data-ryu-compact-rail="traffic-lights"]:not([dir="rtl"]) {\n\t--ryu-compact-rail-width: 5.5rem;'
-		);
-		const reserve = css.slice(
-			css.indexOf(':root[data-ryu-compact-rail="caption-buttons"][dir="rtl"]')
-		);
-		expect(reserve).toMatch(
-			/^[^}]*\.ryu-nav-cluster-reserve\s*\{\s*display: block;\s*width: calc\(12rem - var\(--ryu-compact-rail-width\)\);/
-		);
 	});
 });

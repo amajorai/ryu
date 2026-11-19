@@ -42,6 +42,7 @@ fn from_peer(peer: &str) -> HostedClient {
     HostedClient {
         peer: Some(format!("{peer}:4100").parse().unwrap()),
         forwarded_for: None,
+        quota_key: None,
     }
 }
 
@@ -268,4 +269,16 @@ async fn a_cidr_bound_credential_is_judged_by_the_mcp_callers_address() {
             "{unknown}"
         );
     }
+}
+
+#[test]
+fn copied_credentials_are_marked_sensitive() {
+    let mut incoming = HeaderMap::new();
+    incoming.insert(VAULT_TOKEN_HEADER, HeaderValue::from_static("rvt_machine"));
+    let copied = agent_headers(&incoming).unwrap();
+    assert!(copied.get(VAULT_TOKEN_HEADER).unwrap().is_sensitive());
+    let mut incoming = HeaderMap::new();
+    incoming.insert(BROKER_SESSION_HEADER, HeaderValue::from_static("rvb_session"));
+    let copied = agent_headers(&incoming).unwrap();
+    assert!(copied.get(header::AUTHORIZATION).unwrap().is_sensitive());
 }

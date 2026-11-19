@@ -1,6 +1,9 @@
 import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import type { ReactNode } from "react";
-import type { InterfaceRendererProps } from "./interface-renderer.ts";
+import {
+	formatNameList,
+	type InterfaceRendererProps,
+} from "./interface-renderer.ts";
 import { AgentArticle, GroupArticle, ThreadArticle } from "./wiki-articles.tsx";
 import {
 	byRecency,
@@ -182,9 +185,9 @@ export function ChatTalk({
 	const home =
 		wikiGroup(snapshot, thread?.projectId) ??
 		wikiGroup(snapshot, thread?.teamId);
-	let note = "A new conversation. Your first message starts the thread.";
+	let note = tl("A new conversation. Your first message starts the thread.");
 	if (thread) {
-		const agentNames = names.join(", ");
+		const agentNames = formatNameList(names);
 		if (names.length > 0) {
 			note = home
 				? tl("Conversation with {agentNames}, filed under {home}.", {

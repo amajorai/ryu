@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use super::ai_keys::{self, MintedKey};
 use super::iam::{iam_call, iam_delete_access_keys, xml_text};
 use super::provider::apply_password;
+use super::vendor_keys;
 use super::{password_generator, rotation_lock, SealedState, StaticProvider, StaticRoleInfo};
 use crate::plugin_secrets::{PluginSecretStore, SecretMetadataPatch, VersionSource, WriteRequest};
 use crate::vault::audit::{AuditActor, AuditEntry};
@@ -67,6 +68,33 @@ async fn mint_key(provider: &StaticProvider) -> Result<String> {
             ai_keys::anthropic_probe(staged).await?;
             Ok(adopted.to_pending())
         }
+        StaticProvider::Stripe {
+            admin_api_key,
+            current_api_key_id,
+            stripe_context,
+            stripe_version,
+        } => {
+            let current = current_api_key_id
+                .as_deref()
+                .ok_or_else(|| anyhow!("currentApiKeyId is not set"))?;
+            Ok(vendor_keys::stripe_rotate(
+                admin_api_key,
+                current,
+                stripe_context.as_deref(),
+                stripe_version,
+            )
+            .await?
+            .to_pending())
+        }
+        StaticProvider::Cloudflare {
+            admin_api_token,
+            token_id,
+            account_id,
+        } => Ok(
+            vendor_keys::cloudflare_roll(admin_api_token, token_id, account_id.as_deref())
+                .await?
+                .to_pending(),
+        ),
         other => Err(anyhow!("{} roles do not mint keys", other.kind())),
     }
 }
@@ -104,6 +132,8 @@ async fn retire_keys(provider: &StaticProvider, ids: Vec<String>) -> (Vec<String
         StaticProvider::Anthropic { admin_api_key, .. } => {
             ai_keys::anthropic_retire(admin_api_key, ids).await
         }
+        // Stripe expires the old key as part of the rotation, and a rolled
+        // Cloudflare token keeps its id; neither leaves a key to retire.
         _ => (Vec::new(), None),
     }
 }

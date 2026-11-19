@@ -12,7 +12,7 @@ ryu-gw-credentials = { path = "../credentials" }
 ryu-sidecar-runtime = { path = "../../core/sidecar-runtime", version = "0.5.1" }
 serde = { version = "1", features = ["derive"] }
 dashmap = "6"
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 tracing = "0.1"
 anyhow = "1"
 # Free-space probe before the one-time raw-key rebuild (VACUUM).

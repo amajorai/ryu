@@ -28,6 +28,7 @@
   "Group created": "已创建群组",
   "Group deleted": "已删除群组",
   "Group updated": "已更新群组",
+  "Groups cannot reach its sidecar. Check the {permission} permission and try again.": "Groups 无法连接其边车服务。请检查 {permission} 权限后重试。",
   "Groups couldn't load": "无法加载群组",
   "Groups loaded, but agents could not: {error}": "群组已加载，但智能体无法加载：{error}",
   "Groups returned an invalid group record.": "群组返回了无效的群组记录。",

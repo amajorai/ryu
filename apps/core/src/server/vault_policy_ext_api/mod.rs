@@ -1,5 +1,7 @@
 //! Policy-extension routes (HashiCorp Vault / OpenBao parity).
 //!
+//! * `GET  /api/vault/capabilities-accessor?accessor=…&paths=a,b`: a machine
+//!   token's capabilities, for an administrator (see [`capabilities_accessor`]).
 //! * `GET  /api/vault/capabilities-self?paths=a,b`: the caller's capabilities
 //!   on each policy key (`sys/...` or `ENV/folder/NAME`), with identity
 //!   templates expanded, and whether a control group gates `read` there.
@@ -29,6 +31,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 pub(super) mod access_requests;
+mod capabilities_accessor;
+pub use capabilities_accessor::*;
 
 use super::vault_api::{
     ctx, invalid_request, respond, rfc3339_fields, vault_error, Ctx, MAX_REQUEST_BODY_BYTES,
@@ -50,6 +54,10 @@ pub fn routes() -> Router<ServerState> {
     let body = || DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES);
     Router::new()
         .route("/api/vault/capabilities-self", get(capabilities_self))
+        .route(
+            "/api/vault/capabilities-accessor",
+            get(capabilities_accessor),
+        )
         .route("/api/vault/control-groups", get(list_control_groups))
         .route("/api/vault/control-groups/:id", get(get_control_group))
         .route(
@@ -159,8 +167,12 @@ pub async fn capabilities_self(
     Query(query): Query<CapabilitiesQuery>,
 ) -> Response {
     let ctx = ctx!(state, caller, headers);
-    let paths: Vec<&str> = query
-        .paths
+    capabilities_with(&ctx, &query.paths)
+}
+
+/// The `capabilities-self` answer for `ctx` and its comma-separated `paths`.
+pub(super) fn capabilities_with(ctx: &Ctx, paths: &str) -> Response {
+    let paths: Vec<&str> = paths
         .split(',')
         .map(str::trim)
         .filter(|path| !path.is_empty())

@@ -8,6 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Alert,
 	AlertDescription,
@@ -189,6 +190,7 @@ function FactGrid({
 }
 
 function ContractGrid({ mode }: { mode: ComputeShareMode }) {
+	const tl = useLiteralMessages();
 	return (
 		<FactGrid
 			headingId={`${mode}-contract-heading`}
@@ -196,7 +198,7 @@ function ContractGrid({ mode }: { mode: ComputeShareMode }) {
 			title={
 				mode === "compute" ? "What a lane includes" : "What providers control"
 			}
-			trailing="Intended contract"
+			trailing={tl("Intended contract")}
 		/>
 	);
 }

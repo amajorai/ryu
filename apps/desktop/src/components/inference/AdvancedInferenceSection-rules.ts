@@ -87,10 +87,10 @@ export function samplingNumberError(
 	tl: LiteralMessage
 ): string | null {
 	const rule = SAMPLING_NUMBER_RULES.get(key);
+	// Each field label is a catalog key; translate it before it fills a sentence.
+	const label = rule ? tl(rule.label) : key;
 	if (!Number.isFinite(value)) {
-		return tl("{label} must be a finite number.", {
-			label: rule?.label ?? key,
-		});
+		return tl("{label} must be a finite number.", { label });
 	}
 	if (
 		scope === "engine" &&
@@ -101,17 +101,17 @@ export function samplingNumberError(
 		return "Repeat window must be at least 0.";
 	}
 	if (rule?.integer && !Number.isSafeInteger(value)) {
-		return tl("{label} must be a whole number.", { label: rule.label });
+		return tl("{label} must be a whole number.", { label });
 	}
 	if (rule?.min !== undefined && value < rule.min) {
 		return tl("{label} must be at least {min}.", {
-			label: rule.label,
+			label,
 			min: String(rule.min),
 		});
 	}
 	if (rule?.max !== undefined && value > rule.max) {
 		return tl("{label} must be no greater than {max}.", {
-			label: rule.label,
+			label,
 			max: String(rule.max),
 		});
 	}

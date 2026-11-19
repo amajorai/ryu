@@ -1,4 +1,5 @@
 import { useBoundProp } from "@json-render/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
@@ -26,6 +27,7 @@ import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { type CSSProperties, useId } from "react";
 import { z } from "zod";
+import { localizeA2uiDefaultLabel } from "./a2ui-default-labels.ts";
 import { formatChartValue } from "./registry-chart.tsx";
 import {
 	type AgentUiClassLookup,
@@ -152,11 +154,13 @@ export const InputRenderer: Render<{
 }> = ({ props, bindings }) => {
 	const [value, setValue] = useBoundProp(props.value, bindings?.value);
 	const fieldId = useId();
+	const tl = useLiteralMessages();
+	const label = localizeA2uiDefaultLabel(props.label, tl);
 	return (
 		<div className="flex flex-col gap-1.5">
-			{props.label && <Label htmlFor={fieldId}>{props.label}</Label>}
+			{label && <Label htmlFor={fieldId}>{label}</Label>}
 			<Input
-				aria-label={props.label ? undefined : props.placeholder}
+				aria-label={label ? undefined : props.placeholder}
 				id={fieldId}
 				onChange={(event) => setValue(event.target.value)}
 				placeholder={props.placeholder}

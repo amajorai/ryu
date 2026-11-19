@@ -21,9 +21,10 @@ import {
 	vaultLease,
 } from "@ryuhq/core-client/vault";
 import { z } from "zod";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { formatTable } from "./output.ts";
 import { arg, flag, parseDuration, type SecretsArgs } from "./secrets-args.ts";
+import { providerSchema } from "./secrets-dynamic-providers.ts";
 import { agentTarget, printJson } from "./secrets-output.ts";
 import { type CliContext, UsageError } from "./types.ts";
 
@@ -31,38 +32,6 @@ const DYNAMIC_USAGE =
 	"Usage: ryu-cli secrets dynamic roles | put ROLE FILE | delete ROLE | issue ROLE [--ttl 1h] | revoke-all ROLE";
 const LEASE_USAGE =
 	"Usage: ryu-cli secrets lease list [--name ROLE] [--all] | renew ID [--increment 1h] | revoke ID";
-
-const charsetSchema = z.enum(["alphanumeric", "hex", "base64url", "symbols"]);
-
-const providerSchema = z.discriminatedUnion("kind", [
-	z.strictObject({
-		kind: z.literal("postgres"),
-		connectionUrl: z.string().min(1),
-		creationStatements: z.array(z.string().min(1)).min(1),
-		revocationStatements: z.array(z.string().min(1)).optional(),
-		usernamePrefix: z.string().optional(),
-	}),
-	z.strictObject({
-		kind: z.literal("aws-sts"),
-		accessKeyId: z.string().min(1),
-		secretAccessKey: z.string().min(1),
-		region: z.string().min(1),
-		roleArn: z.string().min(1),
-		endpoint: z.string().optional(),
-		sessionPolicy: z.string().optional(),
-	}),
-	z.strictObject({
-		kind: z.literal("webhook"),
-		url: z.string().min(1),
-		signingSecret: z.string().min(1),
-	}),
-	z.strictObject({
-		kind: z.literal("random"),
-		charset: charsetSchema,
-		length: z.number().int().positive(),
-		field: z.string().optional(),
-	}),
-]);
 
 const roleFileSchema = z.strictObject({
 	provider: providerSchema,
@@ -157,7 +126,7 @@ export async function dynamic(
 		]);
 		ctx.io.out(
 			rows.length === 0
-				? "No dynamic roles.\n"
+				? `${tr("No dynamic roles.")}\n`
 				: `${formatTable(["ROLE", "PROVIDER", "DEFAULT TTL", "MAX TTL"], rows)}\n`
 		);
 		return 0;
@@ -257,7 +226,7 @@ export async function leases(
 	}
 	ctx.io.out(
 		result.leases.length === 0
-			? "No leases.\n"
+			? `${tr("No leases.")}\n`
 			: `${formatTable(LEASE_HEADERS, leaseRows(result.leases))}\n`
 	);
 	return 0;

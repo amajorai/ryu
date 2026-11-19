@@ -17,8 +17,13 @@ import {
 	MFA_ENROLLMENT_SETUP_URL,
 	mfaEnrollmentCommandMessage,
 } from "../core/mfaEnrollment.ts";
-import { accessRefusalHint } from "../core/native-errors.ts";
-import { tf, tr } from "../i18n/translate.ts";
+import {
+	accessRefusalHint,
+	type HumanizeErrorContext,
+	unreachableMessage,
+} from "../core/native-errors.ts";
+import { CLI_TRANSLATOR, type CliTranslator } from "../i18n/translate.ts";
+import { lifecycleRefusalText } from "../tabs/plugins-lifecycle-refusal.ts";
 import { localizedTextOf, renderLocalized } from "./localizedText.ts";
 
 /** Terminal columns a cell occupies, so CJK and emoji cells keep alignment. */
@@ -71,13 +76,19 @@ function hasLifecycleDetails(error: Error): boolean {
  * Parse caught native errors before displaying Core's optional lifecycle hint.
  * Human output only: an error built with `localize` renders its whole sentence
  * in the CLI locale, a message that is known UI copy (a static `Error`/
- * `UsageError` sentence the extractor collected) is looked up in the catalog,
- * and anything else, such as a server's own text, stays as sent. `--json` uses
+ * `UsageError` sentence the extractor collected, or a template one such as
+ * `Invalid duration '5x'.`) is looked up in the catalog, and anything else,
+ * such as a server's own text, stays as sent. A refused or timed-out
+ * connection reads as "Core isn't reachable at host:port" (`context.url` is
+ * the target when the error does not name it). `--json` uses
  * {@link errorToJson}, which keeps the English `message`.
  */
 export function formatError(
-	error: Parameters<typeof nativeErrorSchema.safeParse>[0]
+	error: Parameters<typeof nativeErrorSchema.safeParse>[0],
+	translator: Pick<CliTranslator, "tf" | "trMessage"> = CLI_TRANSLATOR,
+	context?: HumanizeErrorContext
 ): string {
+	const { tf, trMessage } = translator;
 	const parsed = nativeErrorSchema.safeParse(error);
 	if (!parsed.success) {
 		return String(error);
@@ -87,17 +98,28 @@ export function formatError(
 	}
 	const refusal = accessRefusalHint(parsed.data);
 	if (refusal) {
-		return tr(refusal.hint);
+		return trMessage(refusal.hint);
 	}
 	const localized = localizedTextOf(parsed.data);
-	const message = localized
-		? renderLocalized(localized)
-		: tr(parsed.data.message);
+	const unreachable = localized
+		? null
+		: unreachableMessage(parsed.data, context, tf);
+	if (unreachable) {
+		return unreachable;
+	}
 	if (hasLifecycleDetails(parsed.data)) {
 		const details = lifecycleDetailsSchema.parse(parsed.data);
-		return details.hint ? `${message} (${tr(details.hint)})` : message;
+		const reason = localized
+			? renderLocalized(localized, tf)
+			: lifecycleRefusalText(
+					{ ...details, message: parsed.data.message },
+					translator
+				);
+		return details.hint ? `${reason} (${trMessage(details.hint)})` : reason;
 	}
-	return message;
+	return localized
+		? renderLocalized(localized, tf)
+		: trMessage(parsed.data.message);
 }
 
 interface CliErrorEnvelope {

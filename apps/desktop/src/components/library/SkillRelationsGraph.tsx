@@ -256,9 +256,9 @@ export default function SkillRelationsGraph({
 										{selectedNode.description}
 									</p>
 								) : null}
-								{formatScope(selectedNode) ? (
+								{formatScope(selectedNode, tl) ? (
 									<p className="text-muted-foreground text-xs leading-relaxed">
-										{formatScope(selectedNode)}
+										{formatScope(selectedNode, tl)}
 									</p>
 								) : null}
 								{selectedNode.kind === "skill" ? (

@@ -45,6 +45,25 @@ export {
 	createBoxClient,
 	readServerSentEvents,
 } from "./box.ts";
+export {
+	BOX_BROWSER_VERBS,
+	type BoxBrowserArgs,
+	type BoxBrowserFillCommit,
+	type BoxBrowserFillCommitted,
+	type BoxBrowserFillField,
+	type BoxBrowserFillPrepared,
+	type BoxBrowserFillStatus,
+	type BoxBrowserFillTarget,
+	type BoxBrowserResult,
+	type BoxBrowserVerb,
+	type BoxDesktopAction,
+	type BoxDesktopActionDone,
+	type BoxDesktopActionResult,
+	BoxDesktopAPI,
+	type BoxDesktopScreenshot,
+	createBoxDesktopClient,
+	isBoxBrowserVerb,
+} from "./box-desktop.ts";
 export { createRyuClient, RyuClient } from "./client.ts";
 export type {
 	ApprovalMode,

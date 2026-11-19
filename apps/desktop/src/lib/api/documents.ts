@@ -34,7 +34,8 @@
 // and writes, and which is what the removed doc comment already claimed these routes
 // were "a thin view of".
 
-import { translate as tl } from "@ryu/i18n/core";
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { z } from "zod";
 import {
 	CapabilityBindingConflictError,
@@ -57,6 +58,9 @@ import {
 	documentErrorWireSchema,
 	documentJobWireSchema,
 } from "./document-wire-contracts.ts";
+
+/** The module translator for copy built outside a component. */
+const tl: LiteralMessage = translate;
 
 /** What this node can extract text from, right now. */
 export interface ParseCapability {
@@ -212,6 +216,17 @@ const POLL_TIMEOUT_MS = 5 * 60 * 1000;
  * `{ status: "failed", error }` so the caller can put the reason on the chip.
  * Throws only for transport/refusal, which the caller treats the same way.
  */
+/** Why a parse failed on this side of the wire, as a sentence for the
+ *  attachment chip (Core's own parser errors are shown as Core wrote them). */
+export function parserFailureMessage(
+	reason: "no-job-id" | "timeout",
+	tl: LiteralMessage = translate
+): string {
+	return reason === "no-job-id"
+		? tl("The parser accepted the file but returned no job ID.")
+		: tl("The parser did not finish in time.");
+}
+
 export async function parseDocument(
 	target: ApiTarget,
 	file: File,
@@ -225,7 +240,7 @@ export async function parseDocument(
 	if (!jobId) {
 		return {
 			status: "failed",
-			error: "the parser accepted the file but returned no job id",
+			error: parserFailureMessage("no-job-id"),
 		};
 	}
 
@@ -250,7 +265,7 @@ export async function parseDocument(
 	}
 	return {
 		status: "failed",
-		error: "the parser did not finish in time",
+		error: parserFailureMessage("timeout"),
 		jobId,
 	};
 }

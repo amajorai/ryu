@@ -1,4 +1,4 @@
-import { nativeErrorMessage as errText } from "../../core/native-errors.ts";
+import { failureText as errText } from "../../i18n/failure-text.ts";
 /* @jsxImportSource @opentui/react */
 // Workflows surface (/workflows) - the desktop Workflows page, terminal edition.
 // The desktop WorkflowsPage is a React Flow canvas editor; there is no canvas in

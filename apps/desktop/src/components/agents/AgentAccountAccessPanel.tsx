@@ -22,7 +22,7 @@ import {
 	modeUsesYourAccounts,
 } from "@/src/components/agents/AgentIdentityModePicker.tsx";
 import {
-	NO_SANDBOX_NOTE,
+	noSandboxNote,
 	showsNoSandboxNote,
 } from "@/src/components/agents/AgentLaunchWarning.tsx";
 import { savedModeHasOwnApps } from "@/src/components/agents/agent-account-keys.ts";
@@ -383,7 +383,7 @@ export function AgentAccountAccessPanel({
 				loading: gatewayConfig.isLoading,
 				rows: providerRows,
 			}}
-			noSandboxNote={noSandbox ? NO_SANDBOX_NOTE : null}
+			noSandboxNote={noSandbox ? noSandboxNote() : null}
 			onConnectApp={() => openTab("/store/connections")}
 			onLimitChange={(on) => {
 				if (on) {

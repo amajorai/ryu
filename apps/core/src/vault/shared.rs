@@ -27,7 +27,13 @@
 //! node, then treats the request exactly as that session (org access policy,
 //! required two-factor, that session's `ryu secrets confirm` step-up). It
 //! accepts a forwarded JWT only on [`PROXIED_SUBPATHS`] (its
-//! `CORE_FORWARDED_JWT_ROUTES`, `packages/api/src/lib/forwarded-user-jwt.ts`).
+//! `CORE_FORWARDED_JWT_ROUTES`, in
+//! `packages/api/src/lib/forwarded-user-jwt-routes.ts`).
+//!
+//! [`links`] adds one-time share links and inbound secret-request links,
+//! opened in the Ryu web app through the same control plane.
+
+pub mod links;
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -283,10 +289,9 @@ pub fn forward_gateway_audit(key: &str, user_id: Option<String>, conversation_id
 /// Every management request Core proxies to
 /// `/api/control-plane/orgs/{org}/vault`, as `(method, subpath pattern)`.
 /// A `:name` segment matches one non-empty path segment. The control plane
-/// takes a forwarded user JWT on exactly these routes
-/// (`CORE_FORWARDED_JWT_ROUTES` in `packages/api/src/lib/forwarded-user-jwt.ts`,
-/// whose guard test reads this list), so a new proxied route must be added to
-/// both.
+/// takes a forwarded user JWT on exactly these routes (`CORE_FORWARDED_JWT_ROUTES`
+/// in `packages/api/src/lib/forwarded-user-jwt-routes.ts`, whose guard test
+/// reads this list), so a new proxied route must be added to both.
 pub const PROXIED_SUBPATHS: &[(&str, &str)] = &[
     ("GET", "/secrets"),
     ("PUT", "/secrets/:name"),
@@ -296,6 +301,11 @@ pub const PROXIED_SUBPATHS: &[(&str, &str)] = &[
     ("POST", "/secrets/:name/rollback"),
     ("POST", "/secrets/:name/restore"),
     ("POST", "/secrets/:name/destroy"),
+    ("PATCH", "/secrets/:name/metadata"),
+    ("PATCH", "/secrets/:name/data"),
+    ("GET", "/secrets/:name/subkeys"),
+    ("POST", "/secrets/:name/versions/delete"),
+    ("POST", "/secrets/:name/versions/undelete"),
     ("POST", "/export"),
     ("POST", "/import"),
     ("GET", "/change-requests"),
@@ -379,7 +389,7 @@ fn minted_jwt_on_refusal(status: u16, value: &Value) -> MintedJwtOnRefusal {
 /// Build a proxied management request. The gateway key always rides along:
 /// it is what tells the control plane the request comes through this node.
 /// `node_proof` adds the vouch header, which the control plane honours only
-/// on `reveal` and `export`.
+/// on `reveal`, `export` and `subkeys`.
 #[allow(clippy::too_many_arguments)]
 fn build_proxy_request(
     client: &reqwest::Client,
@@ -411,11 +421,12 @@ fn build_proxy_request(
 /// must be one of [`PROXIED_SUBPATHS`].
 ///
 /// With `node_proof`, this node vouches for the read (`x-ryu-node-vouch: 1`).
-/// The control plane uses it on `reveal` and `export`, the two routes that
-/// return plaintext: there it is the proof that the request comes through this
-/// enrolled org or team node rather than from a session alone. Without it
-/// those routes ask for an `org.credentials` step-up on the session the JWT
-/// was minted from (`ryu secrets confirm`). RBAC still comes from the JWT's
+/// The control plane uses it on `reveal`, `export` and `subkeys` (whose key
+/// names are part of the plaintext, decision `subkeysProof`): there it is the
+/// proof that the request comes through this enrolled org or team node rather
+/// than from a session alone. Without it those routes ask for an
+/// `org.credentials` step-up on the session the JWT was minted from
+/// (`ryu secrets confirm`). RBAC still comes from the JWT's
 /// session, never from the node. Callers pass `node_proof` only for a
 /// plaintext read made at this machine with the node's owner token and whose
 /// JWT is the verified caller's (`vault_api::Ctx::node_vouches`).
@@ -480,6 +491,9 @@ pub async fn proxy(
         Err(ProxyError::Status(status.as_u16(), value))
     }
 }
+
+/// Whether a user's personal values override shared ones.
+pub mod personal_overrides;
 
 #[cfg(test)]
 #[path = "shared_tests.rs"]

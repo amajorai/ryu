@@ -9,11 +9,13 @@ import { formatMessage, type LiteralMessage } from "@ryu/i18n";
 if (!GlobalRegistrator.isRegistered) {
 	GlobalRegistrator.register();
 }
-const { createEnvironment } = await import(
+const { createEnvironment, paneErrorHeadline } = await import(
 	"./CloudEnvironmentsSettings-shared.ts"
 );
 
 const GERMAN: Record<string, string> = {
+	"Couldn't read the saved cloud environment settings.":
+		"Die gespeicherten Cloud-Umgebungseinstellungen konnten nicht gelesen werden.",
 	"New environment": "Neue Umgebung",
 };
 const german: LiteralMessage = (source, values) =>
@@ -32,5 +34,17 @@ describe("createEnvironment", () => {
 		expect(first.name).toBe("New environment");
 		expect(first.id).not.toBe(second.id);
 		expect(first.repositories).toEqual([]);
+	});
+});
+
+describe("paneErrorHeadline", () => {
+	it("headlines a technical parser error in the reader's language", () => {
+		expect(paneErrorHeadline("Invalid cloud environment state", german)).toBe(
+			"Die gespeicherten Cloud-Umgebungseinstellungen konnten nicht gelesen werden."
+		);
+	});
+
+	it("shows a server sentence as written", () => {
+		expect(paneErrorHeadline("Quota reached.", german)).toBe("Quota reached.");
 	});
 });

@@ -83,6 +83,16 @@ describe("localizeCoreError", () => {
 		).toEqual({ message: "stored", title: "Stored title" });
 	});
 
+	test("fills a live frame's templated Core reason from the catalog", () => {
+		const stub = createCliTranslator("de", {
+			"Model {model} is not available.": "Modell {model} ist nicht verfügbar.",
+		});
+		expect(
+			localizeCoreError({ message: "Model gpt-x is not available." }, stub)
+				.message
+		).toBe("Modell gpt-x ist nicht verfügbar.");
+	});
+
 	test("joins line bodies with newlines", () => {
 		expect(
 			localizeCoreError(

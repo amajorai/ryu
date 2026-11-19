@@ -3,6 +3,7 @@ import { useLiteralMessages, useRichLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
+import { useHeatmapLegendWords } from "../heatmap-legend.ts";
 import { logicalArrowKey } from "./inline-direction.ts";
 import {
 	countLabel,
@@ -275,6 +276,7 @@ export function JournalStatsPage({
 }) {
 	const tl = useLiteralMessages();
 	const tlRich = useRichLiteralMessages();
+	const legend = useHeatmapLegendWords();
 	const muted = (chunks: ReactNode) => (
 		<span className="text-muted-foreground">{chunks}</span>
 	);
@@ -357,14 +359,14 @@ export function JournalStatsPage({
 					aria-hidden="true"
 					className="mt-2 flex items-center justify-end gap-1 text-muted-foreground text-xs"
 				>
-					<span className="me-1">Less</span>
+					<span className="me-1">{legend.less}</span>
 					{([0, 1, 2, 3, 4] as const).map((level) => (
 						<span
 							className={cn("size-3 rounded-[3px]", HEAT_LEVEL[level])}
 							key={level}
 						/>
 					))}
-					<span className="ms-1">More</span>
+					<span className="ms-1">{legend.more}</span>
 				</div>
 			</section>
 
@@ -380,7 +382,7 @@ export function JournalStatsPage({
 						<thead className="sr-only">
 							<tr>
 								<th scope="col">Agent</th>
-								<th scope="col">Share</th>
+								<th scope="col">{tl("Share of entries")}</th>
 								<th scope="col">Entries</th>
 								<th scope="col">Messages</th>
 							</tr>

@@ -17,6 +17,7 @@ import {
 	resumeArguments,
 } from "../core/herdr.ts";
 import { buildInteractiveTarget, buildTarget } from "../core/target.ts";
+import { createCliTranslator } from "../i18n/translate.ts";
 
 const node = "https://core.example.test";
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -306,6 +307,16 @@ test("error attention messages are one capped line without control characters", 
 	const long = herdrErrorMessage("x".repeat(500));
 	expect([...long]).toHaveLength(80);
 	expect(long.endsWith("…")).toBe(true);
+});
+
+test("error attention messages read in the CLI locale and keep the cap", () => {
+	const german = createCliTranslator("de", {
+		"Error: {message}": "Fehler: {message}",
+		Error: "Fehler",
+	});
+	expect(herdrErrorMessage("HTTP 500", german)).toBe("Fehler: HTTP 500");
+	expect(herdrErrorMessage("", german)).toBe("Fehler");
+	expect([...herdrErrorMessage("x".repeat(500), german)]).toHaveLength(80);
 });
 
 test("metadata reports title and model on their own latest-wins queue", async () => {

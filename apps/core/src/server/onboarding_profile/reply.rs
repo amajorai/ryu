@@ -2,6 +2,7 @@
 //! agent suggestions.
 
 use super::*;
+use crate::i18n::{messages, Message};
 
 pub(super) fn single_line(value: &str, max_chars: usize) -> String {
     value
@@ -38,7 +39,11 @@ pub(super) fn suggestion_id(name: &str, index: usize) -> String {
     format!("agent-suggestion-{slug}")
 }
 
-pub(super) fn normalize_agent_suggestions(raw: Vec<RawAgentSuggestion>) -> Vec<AgentSuggestion> {
+pub(super) fn normalize_agent_suggestions(
+    raw: Vec<RawAgentSuggestion>,
+    locale: &str,
+) -> Vec<AgentSuggestion> {
+    let fallback = |template| Message::new(template).render(locale);
     let mut seen_names = std::collections::HashSet::new();
     let mut suggestions = Vec::new();
     for (index, item) in raw.into_iter().enumerate() {
@@ -68,7 +73,7 @@ pub(super) fn normalize_agent_suggestions(raw: Vec<RawAgentSuggestion>) -> Vec<A
             description: {
                 let description = single_line(&item.description, 240);
                 if description.is_empty() {
-                    "A focused helper for a repeated workflow.".to_owned()
+                    fallback(messages::ONBOARDING_SUGGESTION_SUMMARY_FALLBACK_MESSAGE)
                 } else {
                     description
                 }
@@ -78,7 +83,7 @@ pub(super) fn normalize_agent_suggestions(raw: Vec<RawAgentSuggestion>) -> Vec<A
             reason: {
                 let reason = single_line(&item.reason, 240);
                 if reason.is_empty() {
-                    "This workflow showed up repeatedly in your recent work.".to_owned()
+                    fallback(messages::ONBOARDING_SUGGESTION_REASON_FALLBACK_MESSAGE)
                 } else {
                     reason
                 }
@@ -87,7 +92,7 @@ pub(super) fn normalize_agent_suggestions(raw: Vec<RawAgentSuggestion>) -> Vec<A
             title: {
                 let title = single_line(&item.title, 48);
                 if title.is_empty() {
-                    "Suggested agent".to_owned()
+                    fallback(messages::ONBOARDING_SUGGESTION_TITLE_FALLBACK_MESSAGE)
                 } else {
                     title
                 }
@@ -120,7 +125,7 @@ pub(super) fn json_object_from_reply(reply: &str) -> Option<Value> {
 /// The marker is an HTML comment so it stays out of the rendered profile chat;
 /// the strict JSON fallback keeps older/less obedient models useful without
 /// exposing arbitrary generated tool ids to the client.
-pub(super) fn parse_profile_reply(reply: &str) -> (String, Vec<AgentSuggestion>) {
+pub(super) fn parse_profile_reply(reply: &str, locale: &str) -> (String, Vec<AgentSuggestion>) {
     const MARKER: &str = "<!-- RYU_AGENT_SUGGESTIONS_JSON";
     if let Some(marker_start) = reply.find(MARKER) {
         let after_marker = &reply[marker_start + MARKER.len()..];
@@ -133,7 +138,7 @@ pub(super) fn parse_profile_reply(reply: &str) -> (String, Vec<AgentSuggestion>)
                 ) {
                     return (
                         reply[..marker_start].trim().to_owned(),
-                        normalize_agent_suggestions(value.agent_suggestions),
+                        normalize_agent_suggestions(value.agent_suggestions, locale),
                     );
                 }
             }
@@ -154,7 +159,7 @@ pub(super) fn parse_profile_reply(reply: &str) -> (String, Vec<AgentSuggestion>)
                     } else {
                         profile.to_owned()
                     },
-                    normalize_agent_suggestions(parsed.agent_suggestions),
+                    normalize_agent_suggestions(parsed.agent_suggestions, locale),
                 );
             }
         }

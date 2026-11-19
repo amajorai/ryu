@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -44,7 +45,7 @@ export function BudgetRuleDialog({
 	target,
 	idLabel = "Agent ID",
 	idPlaceholder = "e.g. claude or my-agent",
-	idRequiredError = "Agent ID is required.",
+	idRequiredError,
 	onSave,
 }: {
 	trigger: ReactElement;
@@ -59,10 +60,12 @@ export function BudgetRuleDialog({
 	idLabel?: string;
 	/** Placeholder for the free-text identity input. */
 	idPlaceholder?: string;
-	/** Validation message when the identity is left blank. */
+	/** Validation message when the identity is left blank; defaults to the
+	 * translated "Agent ID is required.". */
 	idRequiredError?: string;
 	onSave: (form: BudgetFormState) => Promise<void>;
 }) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [form, setForm] = useState<BudgetFormState>(initial ?? DEFAULT_FORM);
 	const [saving, setSaving] = useState(false);
@@ -78,7 +81,7 @@ export function BudgetRuleDialog({
 
 	const handleSave = async () => {
 		if (!form.agentId.trim()) {
-			setErr(idRequiredError);
+			setErr(idRequiredError ?? tl("Agent ID is required."));
 			return;
 		}
 		if (budgetUsdToMicroUsd(form.limitUsd) === null) {

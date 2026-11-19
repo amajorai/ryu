@@ -338,7 +338,7 @@ export function AgentMysteryBox({
 								{prize.kind === "runtime"
 									? "Agent"
 									: tl("Agent Template · {author}", {
-											author: prize.card.author ?? "Community",
+											author: prize.card.author ?? tl("Community"),
 										})}
 							</Badge>
 						</div>

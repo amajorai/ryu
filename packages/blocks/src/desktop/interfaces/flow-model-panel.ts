@@ -148,15 +148,15 @@ export interface FlowLogEntry {
 function threadVerb(thread: InterfaceThread): string {
 	switch (threadStatus(thread)) {
 		case "attention":
-			return thread.runState === "interrupted" ? "Stopped" : "Failed";
+			return thread.runState === "interrupted" ? tr("Stopped") : tr("Failed");
 		case "working":
-			return "Working";
+			return tr("Working");
 		case "your-turn":
-			return "Replied";
+			return tr("Replied");
 		case "waiting":
-			return "Asked";
+			return tr("Asked");
 		default:
-			return "Opened";
+			return tr("Opened");
 	}
 }
 
@@ -194,7 +194,7 @@ export function flowLogs(
 			threadId: null,
 			title: event.title,
 			tone: failed ? "attention" : "success",
-			verb: failed ? "Failed" : "Ran",
+			verb: failed ? tr("Failed") : tr("Ran"),
 		});
 	}
 	return entries

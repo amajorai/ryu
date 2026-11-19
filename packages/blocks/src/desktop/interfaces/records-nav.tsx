@@ -130,7 +130,7 @@ export function RecordsNav({
 						/>
 					))}
 				</NavSection>
-				<NavSection label="Views">
+				<NavSection label="Saved views">
 					{RECORDS_VIEWS.map((view) => (
 						<NavItem
 							active={activeViewId === view.id}

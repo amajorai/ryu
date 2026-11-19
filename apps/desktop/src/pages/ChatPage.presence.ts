@@ -1,4 +1,5 @@
-import { translate as tl } from "@ryu/i18n/core";
+import { formatList } from "@ryu/i18n";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import type { JoinAck } from "@ryuhq/core-client/realtime.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -36,6 +37,35 @@ export type UseChatPresenceInput = ReturnType<typeof useChatAssistantIdentity> &
 	ReturnType<typeof useChatMediaAndVoice> &
 	ReturnType<typeof useChatRealtimeRoom>;
 
+/**
+ * A short human-readable presence line: who is typing wins; otherwise who is
+ * here. Null when alone, so nothing renders in the common single-user case.
+ * Names are joined as a list in the reader's language.
+ */
+export function presenceLine(
+	members: readonly { name?: string | null; typing?: boolean }[],
+	tl: LiteralMessage
+): string | null {
+	const typing = members
+		.filter((m) => m.typing)
+		.map((m) => m.name?.trim() || tl("Someone"));
+	if (typing.length > 0) {
+		return tl(
+			"{count, plural, one {{names} is typing…} other {{names} are typing…}}",
+			{ count: typing.length, names: formatList(typing) }
+		);
+	}
+	const present = members.map((m) => m.name?.trim() || tl("Someone"));
+	if (present.length > 0) {
+		return present.length === 1
+			? tl("{name} is here", { name: present[0] ?? "" })
+			: tl("{count, plural, one {# other here} other {# others here}}", {
+					count: present.length,
+				});
+	}
+	return null;
+}
+
 /** Room presence, typing, and follow-up suggestions. */
 export function useChatPresence({
 	myMemberIdRef,
@@ -60,6 +90,7 @@ export function useChatPresence({
 	scrollToMessageId,
 	clearScrollToMessage,
 }: UseChatPresenceInput) {
+	const tl = useLiteralMessages();
 	const handleRealtimeJoinAck = useCallback((ack: JoinAck) => {
 		myMemberIdRef.current = ack.memberId;
 		setRemotePresence((prev) => {
@@ -139,29 +170,10 @@ export function useChatPresence({
 		}, TYPING_IDLE_MS);
 	}, []);
 
-	// A short human-readable presence line: who is typing wins; otherwise who is
-	// here. Empty when alone, so nothing renders in the common single-user case.
-	const presenceLabel = useMemo(() => {
-		const members = Object.values(remotePresence);
-		const typing = members
-			.filter((m) => m.typing)
-			.map((m) => m.name?.trim() || tl("Someone"));
-		if (typing.length > 0) {
-			return tl(
-				"{count, plural, one {{names} is typing…} other {{names} are typing…}}",
-				{ count: typing.length, names: typing.join(", ") }
-			);
-		}
-		const present = members.map((m) => m.name?.trim() || tl("Someone"));
-		if (present.length > 0) {
-			return present.length === 1
-				? tl("{name} is here", { name: present[0] ?? "" })
-				: tl("{count, plural, one {# other here} other {# others here}}", {
-						count: present.length,
-					});
-		}
-		return null;
-	}, [remotePresence]);
+	const presenceLabel = useMemo(
+		() => presenceLine(Object.values(remotePresence), tl),
+		[remotePresence, tl]
+	);
 
 	// The conversation id of the most recently completed run. Used to query the
 	// worktree diff after stream completion. Reset when a new conversation starts.

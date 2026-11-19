@@ -93,6 +93,29 @@ export const sanitizeTerminalText = (value: string): string =>
 const normalizedLimit = (value: number): number =>
 	Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;
 
+/** The kinds of text a truncation marker names, spelled out so the catalog
+ * extractor keeps each label; any other label still goes through `tr`. */
+const truncatedLabel = (label: string): string => {
+	switch (label) {
+		case "argument":
+			return tr("argument");
+		case "error":
+			return tr("error");
+		case "message":
+			return tr("message");
+		case "text":
+			return tr("text");
+		case "thinking":
+			return tr("thinking");
+		case "todo":
+			return tr("todo");
+		case "tool output":
+			return tr("tool output");
+		default:
+			return tr(label);
+	}
+};
+
 const truncationMarker = (
 	label: string,
 	omittedChars: number,
@@ -101,12 +124,12 @@ const truncationMarker = (
 	if (omittedLines > 0) {
 		return tf(
 			"[{label} truncated: {count, plural, one {# more line} other {# more lines}}]",
-			{ count: omittedLines, label: tr(label) }
+			{ count: omittedLines, label: truncatedLabel(label) }
 		);
 	}
 	return tf(
 		"[{label} truncated: {count, plural, one {# more character} other {# more characters}}]",
-		{ count: omittedChars, label: tr(label) }
+		{ count: omittedChars, label: truncatedLabel(label) }
 	);
 };
 

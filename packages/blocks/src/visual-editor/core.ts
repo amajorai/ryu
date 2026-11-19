@@ -104,10 +104,14 @@ export function findNode(document: Document, id: string): Element | null {
 	return document.querySelector(`[${NODE_ATTRIBUTE}="${id}"]`);
 }
 
-function requireNode(document: Document, id: string): Element {
+function requireNode(
+	document: Document,
+	id: string,
+	tl: LiteralMessage
+): Element {
 	const node = findNode(document, id);
 	if (!node) {
-		throw new EditError(`Node ${id} no longer exists`);
+		throw new EditError(tl("Node {id} no longer exists", { id }));
 	}
 	return node;
 }
@@ -164,35 +168,45 @@ function sanitizeFragment(root: ParentNode): void {
 	}
 }
 
-function parseFragment(document: Document, html: string): Node[] {
+function parseFragment(
+	document: Document,
+	html: string,
+	tl: LiteralMessage
+): Node[] {
 	const template = document.createElement("template");
 	template.innerHTML = html;
 	sanitizeFragment(template.content);
 	const nodes = [...template.content.childNodes];
 	if (!nodes.some((node) => node.nodeType === 1 || node.textContent?.trim())) {
 		throw new EditError(
-			"The inserted HTML is empty after removing unsafe content"
+			tl("The inserted HTML is empty after removing unsafe content")
 		);
 	}
 	return nodes;
 }
 
-function assertContainer(parent: Element): void {
+function assertContainer(parent: Element, tl: LiteralMessage): void {
 	if (!canContainChildren(parent.tagName)) {
 		throw new EditError(
-			`<${parent.tagName.toLowerCase()}> cannot contain other elements`
+			tl("The {tag} element cannot contain other elements", {
+				tag: parent.tagName.toLowerCase(),
+			})
 		);
 	}
 }
 
-function applyOne(document: Document, operation: VisualOperation): string[] {
+function applyOne(
+	document: Document,
+	operation: VisualOperation,
+	tl: LiteralMessage
+): string[] {
 	switch (operation.kind) {
 		case "insertHtml": {
-			const parent = requireNode(document, operation.parentId);
-			assertContainer(parent);
+			const parent = requireNode(document, operation.parentId, tl);
+			assertContainer(parent, tl);
 			insertAt(
 				parent,
-				parseFragment(document, operation.html),
+				parseFragment(document, operation.html, tl),
 				operation.index
 			);
 			return [operation.parentId];
@@ -200,32 +214,34 @@ function applyOne(document: Document, operation: VisualOperation): string[] {
 		case "replaceHtml": {
 			if (operation.nodeId === ROOT_NODE_ID) {
 				throw new EditError(
-					"Replace the page's sections instead of the page body"
+					tl("Replace the page's sections instead of the page body")
 				);
 			}
-			const node = requireNode(document, operation.nodeId);
-			node.replaceWith(...parseFragment(document, operation.html));
+			const node = requireNode(document, operation.nodeId, tl);
+			node.replaceWith(...parseFragment(document, operation.html, tl));
 			return [operation.nodeId];
 		}
 		case "move": {
-			const node = requireNode(document, operation.nodeId);
-			const parent = requireNode(document, operation.parentId);
+			const node = requireNode(document, operation.nodeId, tl);
+			const parent = requireNode(document, operation.parentId, tl);
 			if (operation.nodeId === ROOT_NODE_ID) {
-				throw new EditError("The page body cannot move");
+				throw new EditError(tl("The page body cannot move"));
 			}
 			if (node === parent || node.contains(parent)) {
-				throw new EditError("A node cannot move inside itself");
+				throw new EditError(tl("A node cannot move inside itself"));
 			}
-			assertContainer(parent);
+			assertContainer(parent, tl);
 			node.remove();
 			insertAt(parent, [node], operation.index);
 			return [operation.nodeId];
 		}
 		case "setText": {
-			const node = requireNode(document, operation.nodeId);
+			const node = requireNode(document, operation.nodeId, tl);
 			if (node.children.length > 0) {
 				throw new EditError(
-					"Only elements without child elements can have their text replaced"
+					tl(
+						"Only elements without child elements can have their text replaced"
+					)
 				);
 			}
 			node.textContent = operation.text;
@@ -235,12 +251,14 @@ function applyOne(document: Document, operation: VisualOperation): string[] {
 			// SAFETY: supported text/html HTML, SVG and MathML elements expose the native
 			// inline-style mixin. This describes only the existing style operation; an
 			// unsupported injected element still fails at the same missing-style access.
-			const node = requireNode(document, operation.nodeId) as Element &
+			const node = requireNode(document, operation.nodeId, tl) as Element &
 				ElementCSSInlineStyle;
 			if (operation.value === null || operation.value.trim() === "") {
 				node.style.removeProperty(operation.property);
 			} else if (UNSAFE_CSS.test(operation.value)) {
-				throw new EditError(`Unsafe value for ${operation.property}`);
+				throw new EditError(
+					tl("Unsafe value for {property}", { property: operation.property })
+				);
 			} else {
 				node.style.setProperty(operation.property, operation.value);
 			}
@@ -250,7 +268,7 @@ function applyOne(document: Document, operation: VisualOperation): string[] {
 			return [operation.nodeId];
 		}
 		case "setAttribute": {
-			const node = requireNode(document, operation.nodeId);
+			const node = requireNode(document, operation.nodeId, tl);
 			const name = operation.name.toLowerCase();
 			if (operation.value === null) {
 				if (name !== NODE_ATTRIBUTE) {
@@ -260,23 +278,23 @@ function applyOne(document: Document, operation: VisualOperation): string[] {
 				node.setAttribute(name, operation.value);
 			} else {
 				throw new EditError(
-					`The ${name} attribute cannot be set to that value`
+					tl("The {name} attribute cannot be set to that value", { name })
 				);
 			}
 			return [operation.nodeId];
 		}
 		case "remove": {
 			if (operation.nodeId === ROOT_NODE_ID) {
-				throw new EditError("The page body cannot be removed");
+				throw new EditError(tl("The page body cannot be removed"));
 			}
-			requireNode(document, operation.nodeId).remove();
+			requireNode(document, operation.nodeId, tl).remove();
 			return [operation.nodeId];
 		}
 		case "duplicate": {
 			if (operation.nodeId === ROOT_NODE_ID) {
-				throw new EditError("The page body cannot be duplicated");
+				throw new EditError(tl("The page body cannot be duplicated"));
 			}
-			const node = requireNode(document, operation.nodeId);
+			const node = requireNode(document, operation.nodeId, tl);
 			// SAFETY: requireNode returns an Element, and native cloneNode preserves its
 			// element node type; the base Node signature does not express that return.
 			const copy = node.cloneNode(true) as Element;
@@ -288,7 +306,7 @@ function applyOne(document: Document, operation: VisualOperation): string[] {
 			return [operation.nodeId];
 		}
 		default:
-			throw new EditError("Unknown operation");
+			throw new EditError(tl("Unknown operation"));
 	}
 }
 
@@ -319,7 +337,7 @@ export function editHtml(
 		return {
 			ok: false,
 			error: tl("Invalid edit: {reason}", {
-				reason: parsed.error.issues[0]?.message ?? "unknown",
+				reason: parsed.error.issues[0]?.message ?? tl("unknown"),
 			}),
 		};
 	}
@@ -328,12 +346,12 @@ export function editHtml(
 	const affected = new Set<string>();
 	for (const [position, operation] of parsed.data.entries()) {
 		try {
-			for (const id of applyOne(document, operation)) {
+			for (const id of applyOne(document, operation, tl)) {
 				affected.add(id);
 			}
 		} catch (cause) {
 			const message =
-				cause instanceof EditError ? cause.message : "The edit failed";
+				cause instanceof EditError ? cause.message : tl("The edit failed");
 			return {
 				ok: false,
 				error: tl("Edit {position} ({kind}): {message}", {

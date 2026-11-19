@@ -9,6 +9,7 @@ import type { ApiTarget } from "@ryuhq/core-client/client";
 import { installSkill, setSkillActive } from "@ryuhq/core-client/skills";
 import { featureListLoader, type ListRow } from "../core/featureList.ts";
 import { ListTab } from "../ui/ListTab.tsx";
+import { activatedNotice, queuedInstallNotice } from "../ui/list-notices.ts";
 import type { TabProps } from "./types.ts";
 
 const loadSkills = featureListLoader({
@@ -25,7 +26,7 @@ const installSkillRow = async (
 	target: ApiTarget
 ): Promise<string> => {
 	await installSkill(target, row.id);
-	return `install queued: ${row.id}`;
+	return queuedInstallNotice(row.id);
 };
 
 const activateSkill = async (
@@ -33,7 +34,7 @@ const activateSkill = async (
 	target: ApiTarget
 ): Promise<string> => {
 	await setSkillActive(target, row.id, true);
-	return `activated: ${row.id}`;
+	return activatedNotice(row.id);
 };
 
 export function SkillsTab({ active }: TabProps) {

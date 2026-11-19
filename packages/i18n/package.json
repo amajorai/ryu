@@ -13,6 +13,7 @@
     "./format-intl": "./src/format-intl.ts",
     "./format-percent": "./src/format-percent.ts",
     "./lite": "./src/lite.ts",
+    "./literal-templates": "./src/literal-templates.ts",
     "./messages": "./src/messages.ts",
     "./official-catalog": "./src/official-catalog.ts",
     "./official-catalog/app": "./src/official-catalog-app.ts",

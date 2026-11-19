@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { ProjectRecord } from "./api/hierarchy.ts";
 import {
 	DESKTOP_ONBOARDING_PROJECT_KEY,
@@ -229,5 +230,12 @@ test("padded acknowledgement IDs are refused without overwriting a valid pointer
 	});
 	expect(calls).toEqual(
 		Array.from({ length: 4 }, () => "GET /api/projects/projects")
+	);
+});
+
+test("the missing-project error is a translated sentence", () => {
+	const tl: LiteralMessage = (source) => `[${source}]`;
+	expect(new OnboardingProjectMissingError(tl).message).toBe(
+		"[Your saved onboarding project is no longer available. Create a project or skip this step.]"
 	);
 });

@@ -13,6 +13,7 @@ import { copyMarker as t } from "./copy-marker.ts";
 import { LinkArrow } from "./link-arrow.tsx";
 import { LiteralText } from "./literal-text.tsx";
 import { MinimalCard, Node, WindowFrame } from "./mockups.tsx";
+import { SenseLabel } from "./sense-label.tsx";
 import { Slot, WindowDots } from "./visuals-primitives.tsx";
 
 // Desktop, vertical, connection and service hero visuals. Re-exported from
@@ -254,17 +255,24 @@ export function CloudVisual() {
 /** One row of a segmented choice, with the first matching option selected. */
 function Segmented({
 	label,
+	labelSense,
 	options,
 	selected,
 }: {
 	label: string;
+	/** A keyed word sense for a label whose bare word means something else. */
+	labelSense?: string;
 	options: readonly string[];
 	selected: string;
 }) {
 	return (
 		<div className="space-y-1.5">
 			<p className="text-muted-foreground text-xs">
-				<LiteralText text={label} />
+				{labelSense ? (
+					<SenseLabel id={labelSense}>{label}</SenseLabel>
+				) : (
+					<LiteralText text={label} />
+				)}
 			</p>
 			<div className="grid auto-cols-fr grid-flow-col gap-1 rounded-lg border border-border p-1">
 				{options.map((option) => (
@@ -321,6 +329,7 @@ export function ComputeExchangeVisual({
 						/>
 						<Segmented
 							label="Availability"
+							labelSense="computeShare.availabilityWindow"
 							options={[t("When idle"), t("On a schedule")]}
 							selected={t("When idle")}
 						/>

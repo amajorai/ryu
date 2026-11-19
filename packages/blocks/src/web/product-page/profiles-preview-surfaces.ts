@@ -214,6 +214,7 @@ const MOBILE_AVAILABILITY: readonly ProductAvailabilityRow[] = [
 	},
 	{
 		platform: "Watch",
+		senseId: "hardware.deviceWatch",
 		state: "planned",
 		note: "Reaches your agents through the phone, on a remote node only.",
 		source: WATCH_AND_CAR,
@@ -334,6 +335,7 @@ export const MOBILE_PROFILE: ProductProfile = {
 const DEVICES_AVAILABILITY: readonly ProductAvailabilityRow[] = [
 	{
 		platform: "Watch",
+		senseId: "hardware.deviceWatch",
 		state: "planned",
 		note: "A small round color screen, for chat when you ask.",
 		source: {

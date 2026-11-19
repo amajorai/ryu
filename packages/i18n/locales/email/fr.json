@@ -1,5 +1,4 @@
 {
-  "1 second": "1 seconde",
   "A Ryu credential was exposed publicly": "Un identifiant Ryu a été exposé publiquement",
   "A Ryu internal organization crossed the {level} threshold. It was not throttled or suspended automatically.": "Une organisation interne Ryu a franchi le seuil {level}. Elle n’a pas été limitée ni suspendue automatiquement.",
   "A child safety case was opened": "Un dossier de protection de l’enfance a été ouvert",
@@ -656,7 +655,10 @@
   "{amount} in Ryu Credits": "{amount} en Ryu Credits",
   "{amount} is now available in your Ryu balance": "{amount} est désormais disponible sur votre solde Ryu",
   "{code} is your Ryu for Students code": "{code} est votre code Ryu for Students",
+  "{count, plural, one {# hour} other {# hours}}": "{count, plural, one {# heure} other {# heures}}",
+  "{count, plural, one {# minute} other {# minutes}}": "{count, plural, one {# minute} other {# minutes}}",
   "{count, plural, one {# seat in {organizationName} is unassigned} other {# seats in {organizationName} are unassigned}}": "{count, plural, one {# place dans {organizationName} n'est pas attribuée} other {# places dans {organizationName} ne sont pas attribuées}}",
+  "{count, plural, one {# second} other {# seconds}}": "{count, plural, one {# seconde} other {# secondes}}",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month} and cost {cost}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, one {Cet agent a été actif} other {Ces # agents ont été actifs}} presque tous les jours de {month} pour un coût de {cost}. Si c'est voulu, il n'y a rien à faire. Si l'un d'eux est resté actif par erreur, vous pouvez le mettre en pause depuis la vue Agents de Ryu.",
   "{count, plural, one {This agent was} other {These # agents were}} active on almost every day of {month}. If that's intentional, there's nothing to do. If one was left on by accident, you can pause it from the Agents view in Ryu.": "{count, plural, one {Cet agent a été actif} other {Ces # agents ont été actifs}} presque tous les jours de {month}. Si c'est voulu, il n'y a rien à faire. Si l'un d'eux est resté actif par erreur, vous pouvez le mettre en pause depuis la vue Agents de Ryu.",
   "{didntAsk} Someone may have your session. Ignore this link, then change your password and sign out your other devices from Settings.": "{didntAsk} Quelqu’un a peut-être accès à votre session. Ignorez ce lien, puis changez votre mot de passe et déconnectez vos autres appareils depuis les Paramètres.",

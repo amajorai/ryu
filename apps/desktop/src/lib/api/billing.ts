@@ -21,6 +21,8 @@
 //   POST /api/billing/license/validate    -> { active, status, expiresAt, productId }
 
 import type { Entitlement, PlanId } from "@ryu/auth/lib/plans";
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 import {
 	checkoutReplySchema,
@@ -178,6 +180,19 @@ export async function fetchEntitlementStatus(): Promise<SubscriptionStatus> {
 /** Why a checkout attempt could not produce a URL. */
 export type CheckoutErrorKind = "auth" | "unavailable" | "unknown";
 
+/** The toasted sentence for a checkout or license call that failed with an
+ *  unexpected HTTP status, whole so the catalog can translate it. */
+export function billingFailureMessage(
+	call: "checkout" | "license",
+	status: number,
+	tl: LiteralMessage = translate
+): string {
+	const values = { status: String(status) };
+	return call === "checkout"
+		? tl("Checkout failed ({status}).", values)
+		: tl("License validation failed ({status}).", values);
+}
+
 export class CheckoutError extends Error {
 	readonly kind: CheckoutErrorKind;
 	constructor(kind: CheckoutErrorKind, message: string) {
@@ -227,7 +242,10 @@ export async function createCheckout(slug: string): Promise<string> {
 		);
 	}
 	if (!resp.ok) {
-		throw new CheckoutError("unknown", `Checkout failed (${resp.status}).`);
+		throw new CheckoutError(
+			"unknown",
+			billingFailureMessage("checkout", resp.status)
+		);
 	}
 	const json = checkoutReplySchema.parse(await resp.json());
 	if (!json.url) {
@@ -327,7 +345,7 @@ export async function validateLicenseKey(
 	if (!resp.ok) {
 		throw new LicenseValidateError(
 			"unknown",
-			`License validation failed (${resp.status}).`
+			billingFailureMessage("license", resp.status)
 		);
 	}
 	return licenseValidateSchema.parse(await resp.json());

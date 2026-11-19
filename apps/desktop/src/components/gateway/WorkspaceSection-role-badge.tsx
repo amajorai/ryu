@@ -1,11 +1,14 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SettingsItem } from "@/src/components/settings/shared/settings-items.tsx";
 import type { OrgRole } from "@/src/lib/api/org.ts";
+import { workspaceRoleLabel } from "./WorkspaceSection-role-labels.ts";
 
 export function RoleBadge({ role }: { role: OrgRole }) {
+	const tl = useLiteralMessages();
 	return (
-		<span className="text-muted-foreground text-sm capitalize">
-			{role ?? "member"}
+		<span className="text-muted-foreground text-sm">
+			{workspaceRoleLabel(tl, role)}
 		</span>
 	);
 }

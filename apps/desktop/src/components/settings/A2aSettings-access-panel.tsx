@@ -105,7 +105,7 @@ export function AccessPanel({
 						token is issued.
 					</p>
 					<code className="block select-all break-all rounded bg-background p-2 text-xs">
-						<SensitiveValue label="A2A token" value={issuedToken} />
+						<SensitiveValue label={tl("A2A token")} value={issuedToken} />
 					</code>
 					<Button
 						aria-label="Copy A2A token"

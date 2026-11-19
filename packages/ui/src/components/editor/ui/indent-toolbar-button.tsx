@@ -13,7 +13,7 @@ export function IndentToolbarButton(
 
 	return (
 		<ToolbarButton {...props} {...buttonProps} tooltip="Indent">
-			<IndentIcon />
+			<IndentIcon className="rtl:-scale-x-100" />
 		</ToolbarButton>
 	);
 }
@@ -25,7 +25,7 @@ export function OutdentToolbarButton(
 
 	return (
 		<ToolbarButton {...props} {...buttonProps} tooltip="Outdent">
-			<OutdentIcon />
+			<OutdentIcon className="rtl:-scale-x-100" />
 		</ToolbarButton>
 	);
 }

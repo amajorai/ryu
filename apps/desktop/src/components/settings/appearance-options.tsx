@@ -66,7 +66,8 @@ export const FILE_TREE_DENSITY_OPTIONS = [
 export const FILE_TREE_ICON_OPTIONS = [
 	{ value: "standard", label: "Standard" },
 	{ value: "minimal", label: "Minimal" },
-	{ value: "complete", label: "Complete" },
+	// "Complete" reads as "finished" in most locales; this is the full icon set.
+	{ value: "complete", label: "Full set" },
 	{ value: "none", label: "No icons" },
 ] as const;
 export const FILE_TREE_SEARCH_MODE_OPTIONS = [

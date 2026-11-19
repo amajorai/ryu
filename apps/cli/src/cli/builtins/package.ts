@@ -11,7 +11,7 @@ import {
 	writePackageFolder,
 } from "@ryu/portable-packages";
 import { tf, tr } from "../../i18n/translate.ts";
-import { localize } from "../localizedText.ts";
+import { LocalizedError, localize } from "../localizedText.ts";
 import { type CliContext, type Command, UsageError } from "../types.ts";
 import {
 	asRecord,
@@ -48,8 +48,10 @@ async function packageUnlockKey(_ctx: CliContext): Promise<string> {
 		return key;
 	}
 	if (!(process.stdin.isTTY && process.stdout.isTTY)) {
-		throw new Error(
-			"An encrypted package requires RYU_PACKAGE_KEY when stdin is not interactive."
+		throw new LocalizedError(
+			localize(
+				"An encrypted package requires RYU_PACKAGE_KEY when stdin is not interactive."
+			)
 		);
 	}
 	const { createInterface } = await import("node:readline/promises");
@@ -58,9 +60,9 @@ async function packageUnlockKey(_ctx: CliContext): Promise<string> {
 		output: process.stdout,
 	});
 	try {
-		const answer = await readline.question("Package unlock key: ");
+		const answer = await readline.question(`${tr("Package unlock key:")} `);
 		if (!answer.trim()) {
-			throw new Error("A package unlock key is required");
+			throw new LocalizedError(localize("A package unlock key is required."));
 		}
 		return answer;
 	} finally {
@@ -162,8 +164,10 @@ export const packageCommand: Command = {
 				return 0;
 			}
 			if (!hasEncryptedSecrets(tree)) {
-				throw new Error(
-					"--include-secrets requires a package that already contains an encrypted secrets.enc envelope"
+				throw new LocalizedError(
+					localize(
+						"--include-secrets requires a package that already contains an encrypted secrets.enc envelope."
+					)
 				);
 			}
 			decryptSecrets(

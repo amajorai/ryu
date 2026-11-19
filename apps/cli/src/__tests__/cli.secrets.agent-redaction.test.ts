@@ -236,7 +236,7 @@ test("an agent's broker run gets the config values but never a secret", async ()
 					id: "bs_1",
 					environment: "dev",
 					services: ["github"],
-					label: "ryu secrets run node",
+					label: "ryu-cli secrets run node",
 					mintedBy: "user:u1",
 					createdAt: T,
 					expiresAt: T,
@@ -272,7 +272,8 @@ test("an agent's broker run gets the config values but never a secret", async ()
 	expect(children[0]?.HTTPS_PROXY).toBe(proxyUrl);
 	// The broker's own variables win over a config value of the same name.
 	expect(children[0]?.LOG_LEVEL).toBe("proxy-wins");
-	expect(children[0]?.GITHUB_TOKEN).toBeUndefined();
+	// The brokered secret's variable holds only the broker placeholder.
+	expect(children[0]?.GITHUB_TOKEN).toBe("__ryu_broker__");
 });
 
 test("set --type sends the value type and list shows it", async () => {

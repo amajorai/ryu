@@ -28,6 +28,7 @@
   "Group created": "그룹을 만들었습니다",
   "Group deleted": "그룹을 삭제했습니다",
   "Group updated": "그룹을 업데이트했습니다",
+  "Groups cannot reach its sidecar. Check the {permission} permission and try again.": "Groups가 사이드카에 연결할 수 없습니다. {permission} 권한을 확인한 뒤 다시 시도하세요.",
   "Groups couldn't load": "그룹을 불러올 수 없습니다",
   "Groups loaded, but agents could not: {error}": "그룹은 로드되었지만 에이전트를 로드하지 못했습니다: {error}",
   "Groups returned an invalid group record.": "그룹에서 잘못된 그룹 레코드를 반환했습니다.",

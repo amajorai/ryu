@@ -6,7 +6,6 @@ import {
 	STEP_UP_METHOD_LABEL,
 	type StepUpClient,
 	type StepUpMethod,
-	StepUpRequestError,
 	type StepUpScope,
 	stepUpPromptLine,
 } from "@ryu/step-up";
@@ -20,6 +19,7 @@ import {
 } from "@ryu/ui/components/dialog";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { stepUpEmailWaitLine } from "./step-up-email-wait.ts";
 import StepUpPage, { type StepUpPagePending } from "./step-up-page.tsx";
 import StepUpVerify from "./step-up-verify.tsx";
 
@@ -104,9 +104,10 @@ export function useStepUp({
 			) {
 				await client.challenge(scope, first).catch((challengeError) => {
 					initialError =
-						challengeError instanceof Error
+						stepUpEmailWaitLine(challengeError) ??
+						(challengeError instanceof Error
 							? challengeError.message
-							: "We couldn't send the verification email. Try again.";
+							: "We couldn't send the verification email. Try again.");
 				});
 			}
 			return await new Promise<boolean>((resolve) => {
@@ -216,14 +217,12 @@ export function useStepUp({
 				await client
 					.challenge(pending.scope, method)
 					.catch((challengeError: unknown) => {
-						// A send inside the one-minute email cooldown is a wait, not a
-						// failure, and the server's message says how long. Anything else
-						// keeps the generic line rather than a server's wording.
+						// A send inside the email cooldown is a wait, not a failure, said
+						// in the reader's language. Anything else keeps the generic line
+						// rather than a server's wording.
 						setError(
-							challengeError instanceof StepUpRequestError &&
-								challengeError.status === 429
-								? challengeError.message
-								: "We couldn't send the code. Try again."
+							stepUpEmailWaitLine(challengeError) ??
+								"We couldn't send the code. Try again."
 						);
 					});
 			}

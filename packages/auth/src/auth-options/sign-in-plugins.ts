@@ -1,13 +1,4 @@
 import { polar } from "@polar-sh/better-auth";
-import { User } from "@ryu/db/models/auth.model";
-import {
-	EmailVerificationOTPEmail,
-	MagicLinkEmail,
-	PasswordResetOTPEmail,
-	SignInOTPEmail,
-	sendEmail,
-	TwoFactorOTPEmail,
-} from "@ryu/email";
 import { env } from "@ryu/env/server";
 import type { BetterAuthOptions } from "better-auth";
 import {
@@ -23,15 +14,19 @@ import { adminAbuseGuardPlugin } from "../lib/admin-abuse-guard-plugin.ts";
 import { ageEligibilityPlugin } from "../lib/age-eligibility-plugin.ts";
 import { createRyuAuthI18nPlugin } from "../lib/auth-i18n.ts";
 import { bannedSignInPlugin } from "../lib/banned-sign-in-plugin.ts";
+import { emailCooldownPlugin } from "../lib/email-cooldown-plugin.ts";
 import { ryuEmailHarmony } from "../lib/email-harmony.ts";
 import { polarClient } from "../lib/payments.ts";
-import { retryAfterSeconds } from "./email-rate-limit.ts";
+import {
+	sendEmailCode,
+	sendMagicLinkEmail,
+	sendTwoFactorCode,
+} from "../lib/sign-in-email-senders.ts";
 import { createRyuPasskeyPlugin } from "./identity-plugins.ts";
 import {
 	TURNSTILE_CAPTCHA_ENABLED,
 	TURNSTILE_SECRET_KEY,
 } from "./login-activity.ts";
-import { errorCode } from "./schemas.ts";
 
 // Plugins that guard and provide sign-in: abuse guard, age gate, captcha,
 // guest, one-tap, passkey, two-factor, email OTP, magic link and billing.
@@ -71,6 +66,12 @@ export const signInPlugins = [
 						"/sign-in/email",
 						"/request-password-reset",
 						"/email-otp/request-password-reset",
+						// The deprecated alias of the route above. No Ryu client calls
+						// it, so requiring the token breaks none and closes a way round.
+						"/forget-password/email-otp",
+						// Web is the only client that requests a sign-in link, and it
+						// sends the Turnstile token with it (auth-sign-in-redirects.ts).
+						"/sign-in/magic-link",
 					],
 					provider: "cloudflare-turnstile",
 					secretKey: TURNSTILE_SECRET_KEY ?? "",
@@ -101,32 +102,7 @@ export const signInPlugins = [
 	twoFactor({
 		issuer: "Ryu",
 		otpOptions: {
-			async sendOTP({ user, otp }) {
-				try {
-					await sendEmail({
-						to: user.email,
-						subject: "One more step to get you in",
-						react: TwoFactorOTPEmail({
-							userName: user.name || undefined,
-							otpCode: otp,
-						}),
-					});
-				} catch (error) {
-					console.error("Failed to send 2FA OTP email:", error);
-					if (
-						error instanceof Error &&
-						errorCode(error) === "RATE_LIMIT_EXCEEDED"
-					) {
-						const retryAfter = retryAfterSeconds(error);
-						throw new Error(
-							retryAfter
-								? `Please wait ${retryAfter} seconds before requesting another 2FA code`
-								: "Please wait before requesting another 2FA code"
-						);
-					}
-					throw error;
-				}
-			},
+			sendOTP: sendTwoFactorCode,
 			period: 5,
 			storeOTP: "encrypted",
 		},
@@ -138,48 +114,7 @@ export const signInPlugins = [
 	}),
 	ryuEmailHarmony,
 	emailOTP({
-		async sendVerificationOTP({ email, otp, type }) {
-			try {
-				let userName: string | undefined;
-				try {
-					const user = await User.findOne({ email: email.toLowerCase() })
-						.select("name")
-						.lean<{ name?: string }>();
-					userName = user?.name || undefined;
-				} catch {
-					// Use a generic greeting if the account lookup is unavailable.
-				}
-
-				const react =
-					type === "sign-in"
-						? SignInOTPEmail({ userName, otpCode: otp })
-						: type === "email-verification"
-							? EmailVerificationOTPEmail({ userName, otpCode: otp })
-							: PasswordResetOTPEmail({ userName, otpCode: otp });
-				const subject =
-					type === "sign-in"
-						? `Your sign-in code is ${otp}`
-						: type === "email-verification"
-							? "Your email verification code"
-							: "Your password reset code";
-
-				await sendEmail({ to: email, subject, react });
-			} catch (error) {
-				console.error("Failed to send email OTP:", error);
-				if (
-					error instanceof Error &&
-					errorCode(error) === "RATE_LIMIT_EXCEEDED"
-				) {
-					const retryAfter = retryAfterSeconds(error);
-					throw new Error(
-						retryAfter
-							? `Please wait ${retryAfter} seconds before requesting another email code`
-							: "Please wait before requesting another email code"
-					);
-				}
-				throw error;
-			}
-		},
+		sendVerificationOTP: sendEmailCode,
 		otpLength: 6,
 		expiresIn: 300,
 		sendVerificationOnSignUp: false,
@@ -187,49 +122,15 @@ export const signInPlugins = [
 		disableSignUp: false,
 	}),
 	magicLink({
-		sendMagicLink: async ({ email, url }, ctx) => {
-			try {
-				let userName: string | undefined;
-				try {
-					const user = await ctx?.context?.adapter?.findOne?.<{
-						name?: string;
-					}>({
-						model: "user",
-						where: [{ field: "email", value: email.toLowerCase() }],
-					});
-					userName = user?.name || undefined;
-				} catch {
-					// Use generic greeting if user not found
-				}
-
-				await sendEmail({
-					to: email,
-					subject: "Let's get you signed in",
-					react: MagicLinkEmail({
-						userName,
-						magicLinkUrl: url,
-					}),
-				});
-			} catch (error) {
-				console.error("Failed to send magic link email:", error);
-				if (
-					error instanceof Error &&
-					errorCode(error) === "RATE_LIMIT_EXCEEDED"
-				) {
-					const retryAfter = retryAfterSeconds(error);
-					throw new Error(
-						retryAfter
-							? `Please wait ${retryAfter} seconds before requesting another sign-in link`
-							: "Please wait before requesting another sign-in link"
-					);
-				}
-				throw error;
-			}
-		},
+		sendMagicLink: sendMagicLinkEmail,
 		expiresIn: 300,
 		// The emailed link carries the token; only its digest is stored.
 		storeToken: "hashed",
 	}),
+	// After email harmony, email OTP and magic link, whose own request checks
+	// refuse first: the recipient's cooldown is spent only on a request that
+	// would otherwise go ahead (lib/email-cooldown-plugin.ts).
+	emailCooldownPlugin(),
 	polar({
 		client: polarClient,
 		// Keep the Polar integration for customer/subscription webhooks, but do

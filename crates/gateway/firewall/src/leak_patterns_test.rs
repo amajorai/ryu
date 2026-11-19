@@ -154,11 +154,14 @@ fn mutate(rng: &mut Rng, token: &str) -> String {
 fn dense(rng: &mut Rng) -> String {
     let mut text = String::new();
     for _ in 0..=rng.below(12) {
-        text.push_str(rng.pick(GLUE));
+        // Bind first so `T` infers as `&str`; inline `push_str(rng.pick(GLUE))` infers `T = str`.
+        let glue = rng.pick(GLUE);
+        text.push_str(glue);
         let token = rng.pick(TOKENS);
         text.push_str(&mutate(rng, token));
     }
-    text.push_str(rng.pick(GLUE));
+    let glue = rng.pick(GLUE);
+    text.push_str(glue);
     text
 }
 

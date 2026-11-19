@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Tabs,
 	TabsIndicator,
@@ -53,6 +54,7 @@ export function GovernanceScopeSwitcher({
 	onValueChange: (value: GovernanceView) => void;
 	value: GovernanceView;
 }) {
+	const tl = useLiteralMessages();
 	const hint = scopeHint(layers, value);
 	// Its own grouped row: a segmented control on the right, the level's meaning
 	// as the iOS footer caption under the card.
@@ -80,7 +82,7 @@ export function GovernanceScopeSwitcher({
 						view.value === "effective"
 							? undefined
 							: (layer?.unavailableReason ??
-								(layer ? undefined : "This scope is unavailable."));
+								(layer ? undefined : tl("This scope is unavailable.")));
 					return (
 						<TabsTrigger
 							disabled={Boolean(unavailable)}

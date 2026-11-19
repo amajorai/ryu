@@ -441,7 +441,7 @@ export function MailInterface({
 					{conversationOpen ? (
 						<MailReader
 							backLabel={tl("Back to {view}", {
-								view: searching ? "Search results" : viewLabel,
+								view: searching ? tl("Search results") : viewLabel,
 							})}
 							model={readerModel}
 							onBack={closeThread}

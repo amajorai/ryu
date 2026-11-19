@@ -3,6 +3,7 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { useEffect, useState } from "react";
 import { CloudSpeechAccountRow } from "@/src/components/gateway/GatewaySpeechSettings-account-row.tsx";
+import { cloudSpeechSummaryRows } from "@/src/components/gateway/GatewaySpeechSettings-cloud-account-rows.ts";
 import { CaptionInfo, Segmented } from "@/src/components/gateway/quiet.tsx";
 import {
 	SettingsCard,
@@ -117,28 +118,7 @@ export function GatewayCloudSpeechAccounts({
 	};
 	const parsedExpiry = expiry.trim() ? Number(expiry) : undefined;
 	const canEdit = Boolean(view && canConfigure && !managed && !busy);
-	const rows = [
-		providers?.google_tts || view?.googleTts.length
-			? {
-					context: "Supplied OAuth tokens and quota project",
-					count:
-						view?.googleTts.length ?? providers?.google_tts?.account_count ?? 0,
-					id: "google-tts",
-					label: "Google Cloud Text-to-Speech",
-				}
-			: null,
-		providers?.polly || view?.polly.accounts.length
-			? {
-					context: tl("Explicit AWS credentials · {region}", {
-						region: view?.polly.region ?? providers?.polly?.region ?? region,
-					}),
-					count:
-						view?.polly.accounts.length ?? providers?.polly?.account_count ?? 0,
-					id: "polly",
-					label: "Amazon Polly",
-				}
-			: null,
-	].filter((row): row is NonNullable<typeof row> => row !== null);
+	const rows = cloudSpeechSummaryRows({ providers, region, view }, tl);
 	return (
 		<SettingsSection
 			caption={

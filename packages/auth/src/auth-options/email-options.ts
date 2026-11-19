@@ -1,20 +1,20 @@
 import { User } from "@ryu/db/models/auth.model";
-import {
-	AccountExistsEmail,
-	PasswordResetEmail,
-	sendEmail,
-	VerificationEmail,
-} from "@ryu/email";
+import { AccountExistsEmail, sendEmail } from "@ryu/email";
 import type { BetterAuthOptions } from "better-auth";
+import { deferredReplayHeaders } from "../lib/deferred-replay-marker.ts";
+import { runDetached } from "../lib/detached-delivery.ts";
+import { withEmailBudget } from "../lib/email-send-budget.ts";
+import {
+	sendPasswordResetLink,
+	sendVerificationLink,
+} from "../lib/password-email-senders.ts";
 import { creditPendingReferral } from "../lib/referral-credit.ts";
 import {
 	revokeUnprovenSocialSignupAccessInAuthContext,
 	type UnprovenAccessUser,
 } from "../lib/unproven-social-signup-access.ts";
 import { authApi } from "./auth-instance.ts";
-import { retryAfterSeconds } from "./email-rate-limit.ts";
 import type { EmailUser } from "./login-activity.ts";
-import { errorCode } from "./schemas.ts";
 import { reconcileAdminRole } from "./team-claims.ts";
 
 // Email-and-password sign-up and the email verification flow.
@@ -47,37 +47,41 @@ export const emailAuthOptions = {
 		// (`api/routes/sign-up.mjs`) but absent from its published `.d.mts`, so
 		// nothing type-checks the name — a rename on upgrade goes silently inert.
 		// Re-grep the option name in `better-auth/dist` when bumping.
-		onExistingUserSignUp: async ({
+		onExistingUserSignUp: ({
 			user,
 		}: {
 			user: EmailUser & { emailVerified?: boolean };
-		}) => {
-			try {
-				if (user.emailVerified) {
-					const frontendUrl =
-						process.env.FRONTEND_URL || "http://localhost:3001";
-					await sendEmail({
-						to: user.email,
-						subject: "You already have a Ryu account",
-						react: AccountExistsEmail({
-							userName: user.name || undefined,
-							signInUrl: `${frontendUrl}/login?view=signin`,
-							resetPasswordUrl: `${frontendUrl}/login?view=forgot`,
-						}),
+		}): Promise<void> => {
+			// Detached, so a registered address answers after the same work as a
+			// new one, and from the request budget: anyone can cause this mail by
+			// signing up with an address (lib/email-send-budget.ts). A failure is
+			// logged without the address and never reaches the generic 200.
+			withEmailBudget("request", () =>
+				runDetached("existing-account sign-up email", async () => {
+					if (user.emailVerified) {
+						const frontendUrl =
+							process.env.FRONTEND_URL || "http://localhost:3001";
+						await sendEmail({
+							to: user.email,
+							subject: "You already have a Ryu account",
+							react: AccountExistsEmail({
+								userName: user.name || undefined,
+								signInUrl: `${frontendUrl}/login?view=signin`,
+								resetPasswordUrl: `${frontendUrl}/login?view=forgot`,
+							}),
+						});
+						return;
+					}
+					// Account exists but was never verified: re-send the verification
+					// email so this sign-up attempt actually completes the signup. The
+					// send claims its own slot; the cooldown hook does not claim again.
+					await authApi().sendVerificationEmail({
+						body: { email: user.email, callbackURL: "/" },
+						headers: deferredReplayHeaders(),
 					});
-					return;
-				}
-				// Account exists but was never verified: re-send the verification
-				// email so this sign-up attempt actually completes the signup.
-				await authApi().sendVerificationEmail({
-					body: { email: user.email, callbackURL: "/" },
-				});
-			} catch (error) {
-				// Never propagate. A throw here would turn the generic 200 into a
-				// 5xx and hand back the exact enumeration oracle this branch exists
-				// to close — including on a benign rate-limit hit.
-				console.error("Failed to send existing-account sign-up email:", error);
-			}
+				})
+			);
+			return Promise.resolve();
 		},
 		// A password reset proves the mailbox. An unverified account a social
 		// identity created must not keep that identity's link or sessions once
@@ -88,82 +92,12 @@ export const emailAuthOptions = {
 				keepCredential: true,
 			});
 		},
-		sendResetPassword: async ({
-			user,
-			url,
-		}: {
-			user: EmailUser;
-			url: string;
-			token: string;
-		}) => {
-			try {
-				await sendEmail({
-					to: user.email,
-					subject: "Let's get you a new password",
-					react: PasswordResetEmail({
-						userName: user.name || undefined,
-						resetUrl: url,
-					}),
-				});
-			} catch (error) {
-				console.error("Failed to send password reset email:", error);
-				if (
-					error instanceof Error &&
-					errorCode(error) === "RATE_LIMIT_EXCEEDED"
-				) {
-					const retryAfter = retryAfterSeconds(error);
-					throw new Error(
-						retryAfter
-							? `Please wait ${retryAfter} seconds before requesting another password reset email`
-							: "Please wait before requesting another password reset email"
-					);
-				}
-				throw error;
-			}
-		},
+		sendResetPassword: sendPasswordResetLink,
 	},
 	emailVerification: {
 		sendOnSignUp: true,
 		autoSignInAfterVerification: true,
-		sendVerificationEmail: async ({
-			user,
-			url,
-		}: {
-			user: EmailUser;
-			url: string;
-			token: string;
-		}) => {
-			try {
-				const parsedUrl = new URL(url);
-				parsedUrl.searchParams.set(
-					"callbackURL",
-					`${process.env.FRONTEND_URL || "http://localhost:3001"}/email-verified`
-				);
-
-				await sendEmail({
-					to: user.email,
-					subject: "Let's make it official",
-					react: VerificationEmail({
-						userName: user.name || undefined,
-						verificationUrl: parsedUrl.toString(),
-					}),
-				});
-			} catch (error) {
-				console.error("Failed to send verification email:", error);
-				if (
-					error instanceof Error &&
-					errorCode(error) === "RATE_LIMIT_EXCEEDED"
-				) {
-					const retryAfter = retryAfterSeconds(error);
-					throw new Error(
-						retryAfter
-							? `Please wait ${retryAfter} seconds before requesting another verification email`
-							: "Please wait before requesting another verification email"
-					);
-				}
-				throw error;
-			}
-		},
+		sendVerificationEmail: sendVerificationLink,
 		// The verification link and the email-OTP verification flip
 		// emailVerified without Better Auth's unproven-link cleanup, so strip
 		// what an unverified social sign-up holds first. A failure throws and

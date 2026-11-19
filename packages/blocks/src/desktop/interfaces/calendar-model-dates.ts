@@ -1,3 +1,4 @@
+import { type WeekStart, weekStartForLocale } from "@ryu/i18n/format-intl";
 import {
 	activeLocale,
 	dateFormatter,
@@ -11,8 +12,13 @@ import { localDayKey } from "@ryuhq/protocol/interfaces";
 
 export type CalendarScale = CalendarParams["scale"];
 
-/** Weeks start on Sunday, like the reference calendars' default. */
-export const WEEK_START = 0;
+/**
+ * The UI language's first day of the week, `Date#getDay()` style (Monday in
+ * `de`, Saturday in `ar`); Sunday when the engine has no week data.
+ */
+export function weekStart(locale: string = activeLocale()): WeekStart {
+	return weekStartForLocale(locale) ?? 0;
+}
 export const DAY_MS = 86_400_000;
 
 /** Calendar date math and the labels the month and week ranges show. */
@@ -47,7 +53,7 @@ export function addMonths(date: Date, months: number): Date {
 }
 
 export function startOfWeek(date: Date): Date {
-	const offset = (date.getDay() - WEEK_START + 7) % 7;
+	const offset = (date.getDay() - weekStart() + 7) % 7;
 	return addDays(date, -offset);
 }
 

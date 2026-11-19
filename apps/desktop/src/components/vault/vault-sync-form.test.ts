@@ -12,6 +12,7 @@ import {
 	storeSummary,
 	syncStatus,
 	syncTargetInput,
+	syncTargetLabel,
 } from "./vault-sync-form.ts";
 
 test("each platform builds Core's store body with only its own settings", () => {
@@ -178,4 +179,14 @@ test("form problems read in the UI language", () => {
 	} finally {
 		unregisterActiveI18nRuntime(japanese);
 	}
+});
+
+test("store kinds are labelled for sync targets and KV stores alike", () => {
+	expect(syncTargetLabel("vercel")).toBe("Vercel");
+	expect(syncTargetLabel("openbao")).toBe("OpenBao");
+	expect(syncTargetLabel("hashicorp-vault")).toBe("HashiCorp Vault");
+	expect(syncTargetLabel("something-else")).toBe("something-else");
+	expect(vaultTab("dynamic")).toBe("dynamic");
+	expect(vaultTab("tokens")).toBe("tokens");
+	expect(vaultTab("items")).toBe("items");
 });

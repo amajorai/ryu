@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { translate as tr, translateMessage } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import { PlaneLanding, PlaneTakeoff, Plus } from "lucide-react";
@@ -304,7 +304,9 @@ export function BoardColumnHeader({
 				Flight
 			</span>
 			<span className={COLUMN.title} role="columnheader">
-				{board === "departures" ? "Destination" : "From"}
+				{board === "departures"
+					? translateMessage("departures.destinationColumn", {}, "Destination")
+					: translateMessage("departures.origin", {}, "From")}
 			</span>
 			<span className={COLUMN.gate} role="columnheader">
 				Gate

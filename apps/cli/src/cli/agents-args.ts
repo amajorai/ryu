@@ -1,3 +1,4 @@
+import { localize } from "./localizedText.ts";
 import { UsageError } from "./types.ts";
 
 export const USAGE = [
@@ -82,14 +83,18 @@ export function parseAgentsArgs(raw: readonly string[]): AgentsArgs {
 		}
 		const key = AGENTS_VALUE_FLAGS.get(name);
 		if (!key) {
-			throw new UsageError(`Unknown option '${name}'.\nUsage: ${USAGE}`);
+			throw new UsageError(
+				localize("Unknown flag {name}. Usage: {usage}", { name, usage: USAGE })
+			);
 		}
 		const value = eq === -1 ? raw[i + 1] : token.slice(eq + 1);
 		if (eq === -1) {
 			i += 1;
 		}
 		if (value === undefined || value.trim() === "") {
-			throw new UsageError(`${name} needs a value.\nUsage: ${USAGE}`);
+			throw new UsageError(
+				localize("{name} needs a value. Usage: {usage}", { name, usage: USAGE })
+			);
 		}
 		parsed[key] = value.trim();
 	}

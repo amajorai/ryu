@@ -194,7 +194,7 @@ impl rmcp::ServerHandler for RyuMcpHandler {
         &self,
         request: rmcp::model::CallToolRequestParams,
         _context: RequestContext<rmcp::RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let args: Value = request
             .arguments
             .clone()
@@ -214,6 +214,6 @@ impl rmcp::ServerHandler for RyuMcpHandler {
                 offer.mark_tainted_input();
             }
         }
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]).into())
     }
 }

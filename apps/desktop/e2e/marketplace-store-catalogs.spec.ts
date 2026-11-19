@@ -318,7 +318,7 @@ test("Marketplaces retries source reads and reads back selection, order, add, an
 		.getByRole("textbox", { name: "Name" })
 		.fill("Private fixture marketplace");
 	await dialog
-		.getByRole("textbox", { name: "Id" })
+		.getByRole("textbox", { name: "ID" })
 		.fill("fixture/private-catalog");
 	await dialog
 		.getByRole("textbox", { name: "Repository or manifest URL" })

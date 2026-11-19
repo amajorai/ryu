@@ -4,7 +4,7 @@
 // Gateway dialog. Presentational: value in, `onChange` out, no fetching. The
 // host owns loading, saving, step-up and the error it shows.
 
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Input } from "@ryu/ui/components/input";
 import { Label } from "@ryu/ui/components/label";
 import {
@@ -38,7 +38,7 @@ import {
 } from "./policy-model.ts";
 import { EvaluatorRules } from "./policy-rules-editor-evaluators.tsx";
 import {
-	BUDGET_OPTIONS,
+	budgetOptions,
 	LIST_FIELDS,
 	type ListField,
 	pick,
@@ -182,6 +182,10 @@ function BudgetRule({
 	onValidityChange,
 	value,
 }: PolicyRulesEditorProps) {
+	const i18n = useOptionalI18n();
+	const options = budgetOptions(
+		(id, fallback) => i18n?.t(id, {}, fallback) ?? fallback
+	);
 	const budget = value.budgets[0];
 	const [amount, setAmount] = useState(() =>
 		budget ? usdFromMicro(budget.usdMicro) : ""
@@ -220,7 +224,7 @@ function BudgetRule({
 					actions={
 						<Select
 							disabled={disabled}
-							items={BUDGET_OPTIONS}
+							items={options}
 							onValueChange={setWindow}
 							value={budget?.window ?? "none"}
 						>
@@ -228,7 +232,7 @@ function BudgetRule({
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								{BUDGET_OPTIONS.map((option) => (
+								{options.map((option) => (
 									<SelectItem key={option.value} value={option.value}>
 										{option.label}
 									</SelectItem>

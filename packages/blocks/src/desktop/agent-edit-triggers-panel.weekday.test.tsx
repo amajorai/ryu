@@ -87,7 +87,7 @@ async function weekdayRowTitle(locale: string): Promise<string> {
 	await act(async () => {
 		root.render(
 			<I18nProvider initialLocale={locale} initialPackId={null}>
-				<AgentTriggersPanel accountAccessPath="" props={props} />
+				<AgentTriggersPanel props={props} />
 			</I18nProvider>
 		);
 	});

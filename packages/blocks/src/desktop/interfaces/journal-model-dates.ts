@@ -1,3 +1,4 @@
+import { weekStartForLocale } from "@ryu/i18n/format-intl";
 import { activeLocale, dateFormatter } from "@ryu/i18n/lite";
 import { localDayKey } from "@ryuhq/protocol/interfaces";
 
@@ -92,4 +93,57 @@ export function weekdayNarrow(date: Date): string {
 
 export function monthShort(date: Date): string {
 	return MONTH_SHORT().format(date);
+}
+
+/**
+ * Days from the UI language's first weekday (Monday in `de`, Saturday in
+ * `ar`) to `date`, 0 to 6; Sunday first when the engine has no week data.
+ */
+export function weekdayOffset(
+	date: Date,
+	locale: string = activeLocale()
+): number {
+	return (date.getDay() - (weekStartForLocale(locale) ?? 0) + 7) % 7;
+}
+
+/** The week containing a day, from the UI language's first weekday. */
+export function weekOf(key: string): Date[] {
+	const date = parseDayKey(key);
+	const start = new Date(
+		date.getFullYear(),
+		date.getMonth(),
+		date.getDate() - weekdayOffset(date)
+	);
+	return Array.from(
+		{ length: 7 },
+		(_, index) =>
+			new Date(start.getFullYear(), start.getMonth(), start.getDate() + index)
+	);
+}
+
+/** Whole weeks, from the UI language's first weekday, covering a day's month (four to six rows). */
+export function monthWeeks(key: string): Date[][] {
+	const date = parseDayKey(key);
+	const first = new Date(date.getFullYear(), date.getMonth(), 1);
+	const daysInMonth = new Date(
+		date.getFullYear(),
+		date.getMonth() + 1,
+		0
+	).getDate();
+	const rows = Math.ceil((weekdayOffset(first) + daysInMonth) / 7);
+	const weeks: Date[][] = [];
+	for (let row = 0; row < rows; row++) {
+		weeks.push(
+			Array.from(
+				{ length: 7 },
+				(_, column) =>
+					new Date(
+						first.getFullYear(),
+						first.getMonth(),
+						1 - weekdayOffset(first) + row * 7 + column
+					)
+			)
+		);
+	}
+	return weeks;
 }

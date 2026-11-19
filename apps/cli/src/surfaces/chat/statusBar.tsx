@@ -107,6 +107,13 @@ export function busyActivityLabel(
 	return activeTool ? toolActivityLabel(activeTool, tr) : tr("Thinking…");
 }
 
+/** The badge the busy row shows while double-check is on. */
+export function doubleCheckBadgeLabel(
+	tr: (value: string) => string = cliTr
+): string {
+	return tr("double-check");
+}
+
 // The busy row sits above the composer at a fixed one-row height. Route and
 // model live in WorkspaceBar; only the double-check toggle is shown here.
 // The elapsed ticker re-renders this row alone, never the transcript. The
@@ -141,19 +148,24 @@ export function StatusLine({
 			) : null}
 			{doubleCheckOn ? (
 				<Badge bordered={false} variant="secondary">
-					double-check
+					{doubleCheckBadgeLabel()}
 				</Badge>
 			) : null}
 		</box>
 	);
 }
 
-function routeChip(agent: string | null, team: string | null): string {
+/** The route chip: `team:<id>`, `agent:<id>` (syntax), or the automatic route. */
+export function routeChip(
+	agent: string | null,
+	team: string | null,
+	tr: (value: string) => string = cliTr
+): string {
 	if (team) {
 		return `team:${team}`;
 	}
 	if (agent) {
 		return `agent:${agent}`;
 	}
-	return "auto";
+	return tr("auto");
 }

@@ -46,10 +46,25 @@ describe("describeDay", () => {
 	});
 
 	test("uses a caller's unit words", () => {
-		const unit = { plural: "requests", singular: "request" };
+		const unit = { plural: "visits", singular: "visit" };
 		expect(
 			describeDay({ count: 2, date: "2026-10-30", level: 1 }, unit, tl, "en")
+		).toBe("2 visits on Oct 30, 2026");
+	});
+
+	test("the request unit is one whole ICU sentence, even as a copy", () => {
+		const seen: string[] = [];
+		const spy: LiteralMessage = (source, values) => {
+			seen.push(source);
+			return tl(source, values);
+		};
+		const unit = { plural: "requests", singular: "request" };
+		expect(
+			describeDay({ count: 2, date: "2026-10-30", level: 1 }, unit, spy, "en")
 		).toBe("2 requests on Oct 30, 2026");
+		expect(contributionHeading(1, unit, 2026, spy)).toBe("1 request in 2026");
+		expect(contributionHeading(5, unit, null, spy)).toBe("5 requests");
+		expect(seen.some((source) => source.includes("{singular}"))).toBe(false);
 	});
 });
 

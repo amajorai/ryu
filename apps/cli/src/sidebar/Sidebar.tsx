@@ -8,12 +8,11 @@
 //       a "+" create action. Data is loaded in the foundation via useSidebarData.
 //   (c) FOOTER  - NavUser: account row + Inbox, Downloads, Settings gear.
 //
-// Activation is by mouse release (OpenTUI onMouseUp via useSelectionSafeActivate):
-// a nav button or section item calls openTab(path); Search opens the palette;
-// Settings opens the overlay. Sidebar text is not selectable, so a click made
-// while chat text is highlighted only clears the highlight, and a drag-select
-// released over a row never navigates. The active tab's path is highlighted,
-// and a row under the pointer gets a hover background.
+// Activation is by mouse release (useSelectionSafeActivate): a nav button or
+// section item calls openTab(path); Search opens the palette; Settings opens the
+// overlay. Sidebar text is not selectable, so a click over highlighted chat text
+// only clears it, and a drag released over a row never navigates. The active
+// tab's path is highlighted; a hovered row gets a hover background.
 //
 // Keyboard focus mode (F6 / Alt+0, owned by the shell in App.tsx): the shell
 // passes `focused`, and this component walks the flat row list from
@@ -32,14 +31,7 @@
 
 import type { KeyEvent, ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
-import {
-	createContext,
-	type ReactNode,
-	useContext,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
 import { healthCheck } from "../core/nodes.ts";
@@ -47,18 +39,13 @@ import type { ProductMode } from "../core/productMode.ts";
 import { useOverlay } from "../overlays/OverlayHost.tsx";
 import { useSelectionSafeActivate } from "../ui/clipboard.ts";
 import { useWorkspace } from "../workspace/WorkspaceContext.tsx";
-import type { ProjectGroup, SidebarItem } from "./data.ts";
 import {
 	buildSidebarRows,
 	type CollapsedSections,
-	displayWidth,
 	LEADING_SECTIONS,
 	navEntries,
-	PROJECT_CHAT_LIMIT,
 	resolveCollapsed,
-	SECTION_ITEM_LIMIT,
 	type SectionKey,
-	type SectionSpec,
 	SIDEBAR_CONTENT_WIDTH,
 	SIDEBAR_WIDTH,
 	type SidebarRow,
@@ -68,6 +55,8 @@ import {
 	truncateLabel,
 	truncateStart,
 } from "./rows.ts";
+import { RowBox, SidebarFocusContext } from "./sidebar-row.tsx";
+import { ProjectsSection, SidebarSection } from "./sidebar-sections.tsx";
 import { useSidebarData } from "./useSidebarData.ts";
 
 const PROTOCOL_RE = /^https?:\/\//;
@@ -77,44 +66,6 @@ const MARKER_COLUMNS = 2;
 /** The renderer id of the sidebar's root box, so the shell can tell a click
  * inside the sidebar from one in the pane. */
 export const SIDEBAR_ROOT_ID = "sidebar";
-
-/** Keyboard focus mode as rows see it: the focused row key (null outside focus
- * mode) and the hand-back a clicked row runs, like Enter does. */
-const SidebarFocusContext = createContext<{
-	focusKey: string | null;
-	release: () => void;
-}>({ focusKey: null, release: () => undefined });
-
-/** Shared highlight for one focusable row: keyboard focus paints the selection
- * colors, a hovering pointer paints the muted background. */
-function useSidebarRow(rowKey: string) {
-	const theme = useTheme();
-	const { focusKey } = useContext(SidebarFocusContext);
-	const [hovered, setHovered] = useState(false);
-	const focused = focusKey === rowKey;
-	let backgroundColor: string | undefined;
-	if (focused) {
-		backgroundColor = theme.colors.selection;
-	} else if (hovered) {
-		backgroundColor = theme.colors.muted;
-	}
-	return {
-		focused,
-		/** The text color for a row element, readable on the row's background. */
-		tone: (base?: string) => {
-			if (focused) {
-				return theme.colors.selectionForeground;
-			}
-			return base;
-		},
-		rowProps: {
-			backgroundColor,
-			id: sidebarRowId(rowKey),
-			onMouseOut: () => setHovered(false),
-			onMouseOver: () => setHovered(true),
-		},
-	};
-}
 
 export function Sidebar({
 	modeLabel = "Agent",
@@ -286,48 +237,6 @@ export function Sidebar({
 	);
 }
 
-/** A focusable, clickable sidebar row. */
-function RowBox({
-	children,
-	gap = 1,
-	header = false,
-	onSelect,
-	paddingLeft,
-	rowKey,
-}: {
-	children: (
-		tone: (base?: string) => string | undefined,
-		focused: boolean
-	) => ReactNode;
-	gap?: number;
-	/** A section header folds in place, so clicking it keeps focus mode. */
-	header?: boolean;
-	onSelect: () => void;
-	paddingLeft?: number;
-	rowKey: string;
-}) {
-	const activate = useSelectionSafeActivate();
-	const { release } = useContext(SidebarFocusContext);
-	const { focused, rowProps, tone } = useSidebarRow(rowKey);
-	return (
-		<box
-			flexDirection="row"
-			flexShrink={0}
-			gap={gap}
-			paddingLeft={paddingLeft}
-			{...rowProps}
-			{...activate(() => {
-				onSelect();
-				if (!header) {
-					release();
-				}
-			})}
-		>
-			{children(tone, focused)}
-		</box>
-	);
-}
-
 function BotNavCluster({ actions }: { actions: SidebarRowActions }) {
 	const entries = navEntries(actions).filter(
 		(entry) => entry.key === "nav:new-chat" || entry.key === "nav:search"
@@ -491,190 +400,6 @@ function NavButton({ entry }: { entry: SidebarRow & { path?: string } }) {
 				</>
 			)}
 		</RowBox>
-	);
-}
-
-function SectionHeader({
-	collapsed,
-	count,
-	onToggle,
-	section,
-	title,
-}: {
-	collapsed: boolean;
-	count: number;
-	onToggle: () => void;
-	section: SectionKey;
-	title: string;
-}) {
-	const theme = useTheme();
-	return (
-		<RowBox header onSelect={onToggle} rowKey={`section:${section}`}>
-			{(tone) => (
-				<>
-					<text fg={tone(theme.colors.mutedForeground)} selectable={false}>
-						{collapsed ? "▸" : "▾"}
-					</text>
-					<text fg={tone(theme.colors.mutedForeground)} selectable={false}>
-						{title}
-					</text>
-					<text fg={tone(theme.colors.mutedForeground)} selectable={false}>
-						{count}
-					</text>
-				</>
-			)}
-		</RowBox>
-	);
-}
-
-function SidebarSection({
-	collapsed,
-	items,
-	onToggle,
-	section,
-}: {
-	collapsed: boolean;
-	items: SidebarItem[];
-	onToggle: (section: SectionKey) => void;
-	section: SectionSpec;
-}) {
-	const activate = useSelectionSafeActivate();
-	const theme = useTheme();
-	const { openTab } = useWorkspace();
-	const { release } = useContext(SidebarFocusContext);
-	return (
-		<box flexDirection="column" paddingTop={1}>
-			<box flexDirection="row" gap={1} justifyContent="space-between">
-				<SectionHeader
-					collapsed={collapsed}
-					count={items.length}
-					onToggle={() => onToggle(section.key)}
-					section={section.key}
-					title={section.title.toUpperCase()}
-				/>
-				<text
-					fg={theme.colors.mutedForeground}
-					{...activate(() => {
-						openTab(section.createPath);
-						release();
-					})}
-					selectable={false}
-				>
-					+
-				</text>
-			</box>
-			{collapsed ? null : <SectionItems items={items} section={section.key} />}
-		</box>
-	);
-}
-
-function SectionItems({
-	items,
-	section,
-}: {
-	items: SidebarItem[];
-	section: SectionKey;
-}) {
-	const theme = useTheme();
-	const { openTab } = useWorkspace();
-	if (items.length === 0) {
-		return (
-			<text fg={theme.colors.mutedForeground} selectable={false}>
-				empty
-			</text>
-		);
-	}
-	return (
-		<box flexDirection="column">
-			{items.slice(0, SECTION_ITEM_LIMIT).map((item) => {
-				// The badge and its gap come out of the label's budget.
-				const badgeColumns = item.badge ? displayWidth(item.badge) + 1 : 0;
-				return (
-					<RowBox
-						key={item.id}
-						onSelect={() => openTab(item.path)}
-						rowKey={`item:${section}:${item.id}`}
-					>
-						{(tone) => (
-							<>
-								<text fg={tone(theme.colors.foreground)} selectable={false}>
-									{truncateLabel(
-										item.label,
-										SIDEBAR_CONTENT_WIDTH - badgeColumns
-									)}
-								</text>
-								{item.badge ? (
-									<text
-										fg={tone(theme.colors.mutedForeground)}
-										selectable={false}
-									>
-										{item.badge}
-									</text>
-								) : null}
-							</>
-						)}
-					</RowBox>
-				);
-			})}
-		</box>
-	);
-}
-
-function ProjectsSection({
-	collapsed,
-	onToggle,
-	projects,
-}: {
-	collapsed: boolean;
-	onToggle: (section: SectionKey) => void;
-	projects: ProjectGroup[];
-}) {
-	const theme = useTheme();
-	const { openTab } = useWorkspace();
-	return (
-		<box flexDirection="column" paddingTop={1}>
-			<SectionHeader
-				collapsed={collapsed}
-				count={projects.length}
-				onToggle={() => onToggle("projects")}
-				section="projects"
-				title="PROJECTS"
-			/>
-			{collapsed ? null : (
-				<box flexDirection="column">
-					{projects.length === 0 ? (
-						<text fg={theme.colors.mutedForeground} selectable={false}>
-							empty
-						</text>
-					) : (
-						projects.map((project) => (
-							<box flexDirection="column" key={project.id} paddingLeft={1}>
-								<text fg={theme.colors.accent} selectable={false}>
-									{truncateLabel(project.name, SIDEBAR_CONTENT_WIDTH - 1)}
-								</text>
-								{project.chats.slice(0, PROJECT_CHAT_LIMIT).map((chat) => (
-									<RowBox
-										key={chat.id}
-										onSelect={() => openTab(chat.path)}
-										paddingLeft={1}
-										rowKey={`item:projects:${project.id}:${chat.id}`}
-									>
-										{(tone) => (
-											<text
-												fg={tone(theme.colors.foreground)}
-												selectable={false}
-											>
-												{truncateLabel(chat.label, SIDEBAR_CONTENT_WIDTH - 2)}
-											</text>
-										)}
-									</RowBox>
-								))}
-							</box>
-						))
-					)}
-				</box>
-			)}
-		</box>
 	);
 }
 

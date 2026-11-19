@@ -23,6 +23,23 @@ import { logicalArrowKey, logicalScroll } from "./inline-direction.ts";
 const AGENT_GRID_LIMIT = 6;
 const MAX_PROMPT_LENGTH = 8000;
 
+/**
+ * An agent tile's state line: "Idle", "Working", or "Working on 3" as one ICU
+ * sentence, so the count is not concatenated onto an English word.
+ */
+export function hubAgentStateLabel(
+	live: boolean,
+	count: number,
+	tl: LiteralMessage
+): string {
+	if (!live) {
+		return tl("Idle");
+	}
+	return tl("{count, plural, =0 {Working} =1 {Working} other {Working on #}}", {
+		count,
+	});
+}
+
 export function HubAgentsCard({
 	agents,
 	cardRef,
@@ -62,9 +79,7 @@ export function HubAgentsCard({
 					{shown.map((agent) => {
 						const live = hubAgentLive(agent, runs);
 						const count = runs.get(agent.id) ?? 0;
-						const state = live
-							? `Working${count > 1 ? ` on ${count}` : ""}`
-							: "Idle";
+						const state = hubAgentStateLabel(live, count, tl);
 						let label = tl("Message {name}, idle", { name: agent.name });
 						if (live) {
 							label =

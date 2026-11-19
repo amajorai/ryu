@@ -403,7 +403,7 @@ export const ModelUsageBadge = memo(function ModelUsageBadge({
 		return null;
 	}
 	const used = Math.max(0, Math.min(100, scoped.usedPercent));
-	const reset = formatReset(scoped.resetsAt);
+	const reset = formatReset(scoped.resetsAt, tl);
 	return (
 		<Tooltip>
 			<TooltipTrigger

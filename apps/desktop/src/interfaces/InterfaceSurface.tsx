@@ -355,7 +355,7 @@ export function InterfaceSurface({
 
 	const pending = isPendingInterface(descriptor);
 	const leaveForChat = () => backToChat(canSwitchToConsole);
-	const label = descriptor.label || "Interface";
+	const label = descriptor.label || tl("Interface");
 
 	// Every open chat tab stays mounted (in a hidden container) so switching
 	// threads does not unmount the others and abort their resumed streams; the

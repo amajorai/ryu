@@ -45,6 +45,7 @@ function SshConnectionDialog({
 	onSave: (connection: SshConnection) => void;
 	open: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const [name, setName] = useState("");
 	const [host, setHost] = useState("");
 	const [username, setUsername] = useState("");
@@ -124,7 +125,10 @@ function SshConnectionDialog({
 							autoCorrect="off"
 							id="ssh-connection-host"
 							onChange={(event) => setHost(event.target.value)}
-							placeholder="host.com or user@host.com"
+							placeholder={tl("{host} or {userAtHost}", {
+								host: "host.com",
+								userAtHost: "user@host.com",
+							})}
 							value={host}
 							variant="code-caption"
 						/>

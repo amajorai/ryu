@@ -1,6 +1,9 @@
 // The environment `ryu secrets run` (without `--broker`) hands its command:
-// the exported values, narrowed by `--tags`, plus one dynamic credential per
-// `--lease ROLE[=PREFIX]` whose lease is revoked when the command ends.
+// the exported values, narrowed by `--tags` and widened by `--recursive`
+// (`secrets-recursive.ts`), layered with local `.env` files when asked
+// (`secrets-local-env.ts`), plus one dynamic credential per
+// `--lease ROLE[=PREFIX]`, renewed while the command runs
+// (`secrets-run-lease-renewal.ts`) and revoked when it ends.
 //
 // Nothing here prints a value. Warnings and errors name variables, roles, and
 // lease ids only.
@@ -8,7 +11,6 @@
 import {
 	issueVaultDynamicCredential,
 	listVaultSecrets,
-	parseVaultJsonExport,
 	type VaultDynamicCredential,
 	type VaultSecret,
 	vaultAgentDynamicIssue,
@@ -16,10 +18,17 @@ import {
 	vaultLease,
 } from "@ryuhq/core-client/vault";
 import { tf } from "../i18n/translate.ts";
+import { localize } from "./localizedText.ts";
 import { flag, parseDuration, type SecretsArgs } from "./secrets-args.ts";
 import { childRuntimeEnvironment } from "./secrets-broker.ts";
-import { agentTarget, exportResult } from "./secrets-output.ts";
+import { layerLocalEnv } from "./secrets-local-env.ts";
+import { agentTarget } from "./secrets-output.ts";
 import { tagFilter } from "./secrets-project.ts";
+import { exportRunValues } from "./secrets-recursive.ts";
+import {
+	renewRequest,
+	startLeaseRenewal,
+} from "./secrets-run-lease-renewal.ts";
 import { type CliContext, UsageError } from "./types.ts";
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -46,7 +55,12 @@ export function parseLeaseSpec(spec: string): LeaseSpec {
 			? role.toUpperCase().replace(/[^A-Z0-9]+/g, "_")
 			: spec.slice(at + 1).trim();
 	if (!role) {
-		throw new UsageError("--lease needs a dynamic role: --lease ROLE[=PREFIX]");
+		throw new UsageError(
+			localize("{flag} needs a dynamic role: {usage}", {
+				flag: "--lease",
+				usage: "--lease ROLE[=PREFIX]",
+			})
+		);
 	}
 	if (!ENV_NAME.test(prefix)) {
 		throw new UsageError(
@@ -194,7 +208,11 @@ export async function prepareValueRun(
 	ctx: CliContext,
 	args: SecretsArgs
 ): Promise<PreparedRun> {
-	const values = parseVaultJsonExport(await exportResult(ctx, args, "json"));
+	const values = await layerLocalEnv(
+		ctx,
+		args,
+		await exportRunValues(ctx, args)
+	);
 	const env: Record<string, string> = {
 		...childRuntimeEnvironment(ctx.env),
 		...values,
@@ -205,10 +223,17 @@ export async function prepareValueRun(
 			`${tf("Leased {role} ({id}, expires {expiresAt}).", { role: lease.role, id: lease.id, expiresAt: String(lease.expiresAt) })}\n`
 		);
 	}
+	const rawTtl = flag(args, "--lease-ttl");
+	const renewal = startLeaseRenewal(ctx, leases, renewRequest(ctx), {
+		ttlSecs: rawTtl === undefined ? undefined : parseDuration(rawTtl),
+	});
 	return {
 		env,
 		leaseIds: new Set(leases.map((lease) => lease.id)),
-		cleanup: () => revokeAll(ctx, leases),
+		cleanup: async () => {
+			await renewal.stop();
+			await revokeAll(ctx, leases);
+		},
 	};
 }
 

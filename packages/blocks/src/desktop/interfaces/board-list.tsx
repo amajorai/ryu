@@ -22,6 +22,7 @@ import { BoardStatusDot } from "./board-status.tsx";
 import {
 	agentById,
 	compactAge,
+	formatNameList,
 	fullTimestamp,
 	threadStatusLabel,
 } from "./interface-renderer.ts";
@@ -122,7 +123,7 @@ function BoardListRow({
 	const title = thread.title.trim() || tl("Untitled thread");
 	const age = compactAge(thread.updatedAt, now);
 	const detailsId = `board-row-details-${thread.id}`;
-	const names = agents.map((agent) => agent.name).join(", ");
+	const names = formatNameList(agents.map((agent) => agent.name));
 	return (
 		<li
 			className={cn(

@@ -66,6 +66,7 @@
     "./catalog/icon-cache": "./src/catalog/icon-cache.ts",
     "./catalog/import-tools-action": "./src/catalog/import-tools-action.tsx",
     "./catalog/installed-filter": "./src/catalog/installed-filter.tsx",
+    "./catalog/layer-labels": "./src/catalog/layer-labels.ts",
     "./catalog/models": "./src/catalog/models-catalog-section.tsx",
     "./catalog/pack-types": "./src/catalog/pack-types.ts",
     "./catalog/publish-preflight": "./src/catalog/publish-preflight.ts",

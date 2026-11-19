@@ -2,7 +2,11 @@
  * Large bracketed pastes collapse into a short placeholder token in the chat
  * composer so a pasted log or file does not swamp the input box. The real text
  * is kept beside the composer and swapped back in when the prompt is sent.
+ * The token reads in the CLI locale; expansion is keyed on the generated token
+ * itself, so a translated token expands the same way.
  */
+
+import { CLI_TRANSLATOR, type CliTranslator } from "../i18n/translate.ts";
 
 /** A paste with at least this many lines collapses into a placeholder. */
 export const PASTE_PLACEHOLDER_MIN_LINES = 3;
@@ -22,13 +26,22 @@ export function shouldCollapsePaste(text: string): boolean {
 }
 
 /** The placeholder shown in the composer for the `sequence`-th paste. */
-export function pastePlaceholderToken(text: string, sequence: number): string {
+export function pastePlaceholderToken(
+	text: string,
+	sequence: number,
+	translator: Pick<CliTranslator, "tf"> = CLI_TRANSLATOR
+): string {
+	const { tf } = translator;
 	const lines = text.split("\n").length;
-	const size =
-		lines >= PASTE_PLACEHOLDER_MIN_LINES
-			? `${lines} lines`
-			: `${text.length} chars`;
-	return `[Pasted ${size} #${sequence}]`;
+	return lines >= PASTE_PLACEHOLDER_MIN_LINES
+		? tf("[Pasted {count, plural, one {# line} other {# lines}} #{sequence}]", {
+				count: lines,
+				sequence,
+			})
+		: tf("[Pasted {count, plural, one {# char} other {# chars}} #{sequence}]", {
+				count: text.length,
+				sequence,
+			});
 }
 
 /**

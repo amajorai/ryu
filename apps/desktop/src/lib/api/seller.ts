@@ -13,6 +13,7 @@
 //   GET  /api/seller/status   -> stored onboarding + payouts-enabled state
 //   POST /api/seller/onboard  -> a fresh Stripe-hosted onboarding URL (admin-gated)
 
+import { translate as tl } from "@ryu/i18n/core";
 import { appRequestValueSchema } from "@ryuhq/core-client/app-request-json.ts";
 import { z } from "zod";
 import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
@@ -156,7 +157,7 @@ async function toError(resp: Response): Promise<SellerError> {
 	}
 	return new SellerError(
 		"unknown",
-		message ?? `Request failed: ${resp.status}`
+		message ?? tl("Request failed: {status}", { status: String(resp.status) })
 	);
 }
 

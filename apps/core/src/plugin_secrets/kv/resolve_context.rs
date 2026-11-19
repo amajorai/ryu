@@ -32,15 +32,24 @@ impl PluginSecretStore {
         // A chat run's project comes from its workspace folder's mapping.
         let derived = crate::vault::run_project::with_run_project(context).await;
         let context = derived.as_ref();
-        let scopes = Self::candidate_scopes(context);
+        // Off, the user's personal values come after the shared ones.
+        let scopes =
+            crate::vault::shared::personal_overrides::resolution_order(self, context).await;
         let subjects = Self::context_subjects(context);
         let templates = crate::vault::policy_ext::TemplateContext::from_subjects(&subjects);
-        let (chain, policies) = {
+        let (chain, policies, locks) = {
             let conn = self.conn.lock().await;
             (
                 Self::folder_chain(&conn, environment, path)?,
                 policy::policies_for(&conn, &subjects)?,
+                crate::vault::policy::namespace_locks::load(&conn)?,
             )
+        };
+        // A value under a namespace lock is absent, like a policy deny.
+        let locked = |scope: SecretScope, scope_id: &str, env: &str, folder: &str| {
+            locks.iter().any(|lock| {
+                lock.covers(scope, scope_id, env, folder, context.org_id.as_deref())
+            })
         };
         let use_only: CapabilitySet = [Capability::Use].into_iter().collect();
         let now = now_millis();
@@ -53,8 +62,9 @@ impl PluginSecretStore {
             ) && shared
             {
                 let key = policy_key(environment, path, name);
-                if !policy::evaluate_with(&use_only, &policies, &key, &templates)
-                    .contains(&Capability::Use)
+                if locked(*scope, scope_id, environment, path)
+                    || !policy::evaluate_with(&use_only, &policies, &key, &templates)
+                        .contains(&Capability::Use)
                 {
                     denied = true;
                 } else if let Some(shared) = crate::vault::shared::resolve(
@@ -93,8 +103,9 @@ impl PluginSecretStore {
             }
             for (folder_env, folder_path) in &chain {
                 let key = policy_key(folder_env, folder_path, name);
-                if !policy::evaluate_with(&use_only, &policies, &key, &templates)
-                    .contains(&Capability::Use)
+                if locked(*scope, scope_id, folder_env, folder_path)
+                    || !policy::evaluate_with(&use_only, &policies, &key, &templates)
+                        .contains(&Capability::Use)
                 {
                     denied = true;
                     continue;
@@ -370,17 +381,27 @@ impl PluginSecretStore {
         allow: impl Fn(&SecretCoords) -> bool,
     ) -> Result<(BTreeMap<String, (SecretCoords, String)>, BTreeSet<String>)> {
         let path = normalize_path(path).ok_or_else(|| anyhow!("invalid folder path"))?;
-        let chain = {
+        let (chain, locks) = {
             let conn = self.conn.lock().await;
-            Self::folder_chain(&conn, environment, &path)?
+            (
+                Self::folder_chain(&conn, environment, &path)?,
+                crate::vault::policy::namespace_locks::load(&conn)?,
+            )
         };
-        let scopes = Self::candidate_scopes(context);
+        let overrides = crate::vault::shared::personal_overrides::enabled_for(self, context).await;
+        let scopes = crate::vault::shared::personal_overrides::ordered(
+            Self::candidate_scopes(context),
+            overrides,
+        );
         let now = now_millis();
         let listing = self.list_vault_secrets().await?;
         let mut out: BTreeMap<String, (SecretCoords, String)> = BTreeMap::new();
         // Sealed names are withheld, but they still win their name so a
         // lower-precedence value never stands in for them.
         let mut withheld: BTreeSet<String> = BTreeSet::new();
+        // Off, a sealed personal value (the user scope comes last) still wins
+        // its name here but does not outrank a shared value.
+        let mut personal_sealed: BTreeSet<String> = BTreeSet::new();
         for (scope, scope_id) in &scopes {
             for (folder_env, folder_path) in &chain {
                 for info in listing.iter().filter(|info| {
@@ -394,10 +415,17 @@ impl PluginSecretStore {
                         continue;
                     }
                     let coords = info.coords();
-                    if !allow(&coords) {
+                    let org = context.org_id.as_deref();
+                    if !allow(&coords)
+                        || crate::vault::policy::namespace_locks::lock_for(&locks, &coords, org)
+                            .is_some()
+                    {
                         continue;
                     }
                     if !info.metadata.value_type.is_revealable() {
+                        if !overrides && *scope == SecretScope::User {
+                            personal_sealed.insert(info.name.clone());
+                        }
                         withheld.insert(info.name.clone());
                         continue;
                     }
@@ -409,6 +437,7 @@ impl PluginSecretStore {
                 }
             }
         }
+        withheld.retain(|name| !personal_sealed.contains(name));
         Ok((out, withheld))
     }
 }

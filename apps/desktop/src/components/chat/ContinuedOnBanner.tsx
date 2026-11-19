@@ -29,7 +29,7 @@ export function ContinuedOnBadge({
 				nodeLabel: continuedOn.nodeLabel,
 			})}
 		>
-			on {continuedOn.nodeLabel}
+			{tl("on {nodeLabel}", { nodeLabel: continuedOn.nodeLabel })}
 		</span>
 	);
 }

@@ -104,6 +104,7 @@ pub fn instantiate(
         box_relay: false,
         description: template.name.clone(),
         notes: String::new(),
+        mcp_tools: None,
     }
     .normalize()
 }
@@ -125,9 +126,26 @@ mod tests {
             "npm",
             "slack",
             "stripe",
+            "mistral",
+            "openrouter",
+            "cloudflare",
+            "notion",
+            "pypi",
+            "twilio",
         ] {
             assert!(ids.contains(&expected), "{expected}");
         }
+        // Ids and hosts are unique, so a discovered host suggests one template.
+        let unique = |values: Vec<&str>| {
+            values
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+        };
+        assert_eq!(unique(ids.clone()), ids.len());
+        let hosts: Vec<&str> = templates().iter().map(|t| t.host.as_str()).collect();
+        assert_eq!(unique(hosts.clone()), hosts.len());
+        assert!(templates().len() >= 50);
         for template in templates() {
             let service = instantiate(&template.id, None, "default", None).unwrap();
             assert!(

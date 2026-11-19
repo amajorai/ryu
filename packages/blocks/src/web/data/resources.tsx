@@ -156,7 +156,7 @@ export const resources: Resource[] = [
 	},
 	{
 		category: "Updates",
-		label: "Stories",
+		label: "User stories",
 		description: "How people use Ryu, in their own words. Share yours.",
 		href: "/stories",
 		Icon: Quote,

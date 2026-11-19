@@ -209,8 +209,8 @@ export function AccountList({
 						{accounts.map((account) => {
 							const isActive = account.userId === activeId;
 							const label = account.isAnonymous
-								? "Guest"
-								: account.name || account.email || "Account";
+								? tl("Guest")
+								: account.name || account.email || tl("Account");
 							return (
 								<DropdownMenuItem
 									className="group/item"

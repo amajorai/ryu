@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	HoverCard,
 	HoverCardContent,
@@ -47,6 +47,9 @@ export function StatsFooter({
 	usage?: StatsUsageSnapshot | null;
 }) {
 	const tl = useLiteralMessages();
+	// Agent steps, not a stepped curve (the bare catalog "Steps", de "Stufen").
+	const steps =
+		useOptionalI18n()?.t("agentStats.steps", {}, "Steps") ?? "Steps";
 	const [preferences, setPreferencesState] = useState(readPreferences);
 	const [now, setNow] = useState(() => Date.now());
 	const setPreferences = (next: Partial<StatsPreferences>) => {
@@ -134,7 +137,7 @@ export function StatsFooter({
 					value={show(formatStatsCount(stats.turns))}
 				/>
 				<MetricChip
-					label="Steps"
+					label={steps}
 					testId="stats-steps"
 					value={show(formatStatsCount(stats.steps))}
 				/>
@@ -222,7 +225,7 @@ export function StatsFooter({
 						Current session
 					</div>
 					<DetailRow label="Turns" value={formatStatsCount(stats.turns)} />
-					<DetailRow label="Steps" value={formatStatsCount(stats.steps)} />
+					<DetailRow label={steps} value={formatStatsCount(stats.steps)} />
 					<DetailRow
 						label="Tokens Input"
 						value={formatStatsCount(stats.inputTokens)}

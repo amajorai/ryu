@@ -2,6 +2,7 @@ import type { EngineInstallState } from "@ryu/blocks/desktop/store-engines.tsx";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import type { StatusKind } from "@ryu/ui/components/status-badge.tsx";
 import type { SandboxBackendEntry } from "@/src/hooks/useSandboxBackends.ts";
+import { sandboxNotDetected } from "./EnginesCatalogSection-sandbox-copy.ts";
 
 export const SEARCH_DEBOUNCE_MS = 200;
 
@@ -71,6 +72,21 @@ export interface EngineListItem {
 
 export type PendingKind = "install" | "uninstall" | "toggle";
 
+/** A row action's fallback error: one whole sentence per action kind. */
+export function rowActionFailedMessage(
+	kind: PendingKind,
+	name: string,
+	tl: LiteralMessage
+): string {
+	if (kind === "install") {
+		return tl("Failed to install {name}", { name });
+	}
+	if (kind === "uninstall") {
+		return tl("Failed to uninstall {name}", { name });
+	}
+	return tl("Failed to turn {name} on or off", { name });
+}
+
 export interface RowState {
 	error: string | null;
 	gatewayStale: boolean;
@@ -136,15 +152,10 @@ export function hasEngineUpdate(engine: { updateAvailable: boolean }): boolean {
  *  will not install this one, here is where to get it") was indistinguishable
  *  from a broken feature.
  *
- *  The default "needs elevated privileges" copy is true for the container
- *  runtimes. A backend whose install needs no admin rights, or whose
- *  not-detected state is not always a missing install, overrides it with
- *  `notDetected`. */
+ *  The not-detected sentence itself lives in `sandboxNotDetected`
+ *  (EnginesCatalogSection-sandbox-copy.ts), one catalogued line per backend. */
 export interface SandboxInstallDocs {
 	href: string;
-	/** Replaces the default not-detected sentence in the row and its badge. */
-	notDetected?: string;
-	what: string;
 }
 
 export const SANDBOX_INSTALL_DOCS = new Map<string, SandboxInstallDocs>([
@@ -152,33 +163,24 @@ export const SANDBOX_INSTALL_DOCS = new Map<string, SandboxInstallDocs>([
 		"docker",
 		{
 			href: "https://docs.docker.com/get-started/get-docker/",
-			what: "Docker Desktop or Colima",
 		},
 	],
 	[
 		"microsandbox",
 		{
 			href: "https://github.com/microsandbox/microsandbox",
-			what: "the microsandbox CLI",
 		},
 	],
 	[
 		"opensandbox",
 		{
 			href: "https://github.com/agentsea/opensandbox",
-			what: "the opensandbox CLI",
 		},
 	],
 	[
 		"mxc",
 		{
 			href: "https://github.com/microsoft/mxc",
-			// MXC needs no admin setup, and an installed wxc-exec still reads as not
-			// detected when this Windows build is unsupported or the only isolation
-			// tier left needs host permission edits the operator has not allowed.
-			notDetected:
-				"Not detected. Ryu does not install MXC, and installing it needs no administrator rights: put wxc-exec on PATH or point RYU_SANDBOX_MXC_BINARY at it. If wxc-exec is already installed, this Windows build may be unsupported, or MXC may need RYU_SANDBOX_MXC_ALLOW_DACL_MUTATION=1 to edit host file permissions for each run.",
-			what: "the MXC wxc-exec executor",
 		},
 	],
 ]);
@@ -199,18 +201,16 @@ export function sandboxDescription(
 		return unsupportedReason(tl, SANDBOX_PLATFORMS.get(backend.name) ?? []);
 	}
 	if (backend.detected) {
-		return "Detected on this node and ready to use.";
+		return tl("Detected on this node and ready to use.");
 	}
 	if (backend.name === "wasmtime") {
-		return "Built-in WASM sandbox (compile with the sandbox-wasmtime feature).";
-	}
-	const docs = SANDBOX_INSTALL_DOCS.get(backend.name);
-	if (!docs) {
-		return "Not detected — install its CLI on the node to use it.";
+		return tl(
+			"Built-in WASM sandbox (compile with the sandbox-wasmtime feature)."
+		);
 	}
 	return (
-		docs.notDetected ??
-		`Not detected. Ryu does not install this one — it needs elevated privileges on every platform — so install ${docs.what} yourself and it is picked up automatically.`
+		sandboxNotDetected(tl, backend.name) ??
+		tl("Not detected. Install its CLI on the node to use it.")
 	);
 }
 

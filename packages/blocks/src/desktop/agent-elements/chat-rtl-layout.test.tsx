@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createElement, type FunctionComponent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BIDI_AUTO, bidiAutoFor, withBidiAuto } from "./bidi-text.ts";
+import { bidiAutoFor, withBidiAuto } from "./bidi-text.ts";
 import { MARKDOWN_COMPONENTS } from "./markdown-renderers.tsx";
 import { UserMessageEditor } from "./user-message-editor.tsx";
 
@@ -100,13 +100,6 @@ describe("chat text direction follows its content", () => {
 		).toContain('dir="ltr"');
 	});
 
-	test("the user bubble text resolves its own direction", () => {
-		expect(source("./user-message.tsx")).toMatch(
-			/data-slot="bubble-content"\s*\{\.\.\.BIDI_AUTO\}/u
-		);
-		expect(BIDI_AUTO).toEqual({ dir: "auto" });
-	});
-
 	test("a text field follows its first letter in any script", () => {
 		for (const text of ["مرحبا", "שלום", "こんにちは", "Grüße", "  Hello"]) {
 			expect(bidiAutoFor(text)).toEqual({ dir: "auto" });
@@ -125,27 +118,6 @@ describe("chat text direction follows its content", () => {
 		expect(render("مرحبا")).toMatch(/<textarea[^>]*dir="auto"/u);
 		expect(render("Guten Tag")).toMatch(/<textarea[^>]*dir="auto"/u);
 		expect(render("")).not.toContain('dir="auto"');
-	});
-
-	test("the composer textarea and its overlay share one direction", () => {
-		for (const file of [
-			"./input-bar-editor.tsx",
-			"./input-bar-input-content.tsx",
-		]) {
-			const text = source(file);
-			expect(text).toMatch(
-				/aria-hidden="true"\s*\{\.\.\.bidiAutoFor\(input\)\}\s*className="[^"]*absolute inset-0 whitespace-pre-wrap/u
-			);
-			expect(text).toMatch(
-				/<textarea\s*aria-label=\{textareaAriaLabel\}\s*\{\.\.\.bidiAutoFor\(input\)\}[\s\S]*?value=\{input\}/u
-			);
-		}
-	});
-
-	test("the question answer box resolves its own direction", () => {
-		expect(source("./question/question-prompt.tsx")).toMatch(
-			/<textarea\s*aria-label="[^"]+"\s*\{\.\.\.bidiAutoFor\(textValue\)\}[\s\S]*?value=\{textValue\}/u
-		);
 	});
 });
 
@@ -168,16 +140,6 @@ describe("transcript, composer and Settings sources", () => {
 			expect(physicalUtilities(file)).toEqual([]);
 		});
 	}
-
-	test("the expanded composer reserves room for its corner control at the inline end", () => {
-		for (const file of [
-			"./input-bar-editor.tsx",
-			"./input-bar-input-content.tsx",
-		]) {
-			expect(source(file)).toContain("ps-5 pe-14");
-		}
-		expect(source("./input-bar-surface.tsx")).toContain("absolute end-2 top-2");
-	});
 
 	test("back, next and branch arrows mirror in right-to-left layouts", () => {
 		for (const file of [

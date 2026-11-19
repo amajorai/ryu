@@ -172,6 +172,8 @@ export type ProductAvailabilityState =
 export interface ProductAvailabilityRow {
 	readonly note?: string;
 	readonly platform: string;
+	/** A keyed word sense for `platform` when the bare word means something else. */
+	readonly senseId?: string;
 	readonly source: ProductSource;
 	readonly state: ProductAvailabilityState;
 }

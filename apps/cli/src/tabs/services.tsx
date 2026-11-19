@@ -45,7 +45,7 @@ import {
 	type ServicesSnapshot,
 } from "../core/services-snapshot.ts";
 import { errorText } from "../i18n/error-text.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { ConfirmPrompt } from "../ui/ConfirmPrompt.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
@@ -54,6 +54,7 @@ import {
 	useStatusContribution,
 } from "../ui/StatusContext.tsx";
 import { useToast } from "../ui/toast.tsx";
+import { type ServiceAction, serviceActionNotice } from "./services-notices.ts";
 import {
 	CATEGORY_WIDTH,
 	categoryOf,
@@ -176,7 +177,7 @@ export function ServicesTab({ active }: TabProps) {
 	const act = useCallback(
 		async (
 			path: string,
-			label: string,
+			action: ServiceAction,
 			guard: (name: string) => boolean = () => true
 		) => {
 			const name = SIDECAR_ORDER[index];
@@ -184,13 +185,8 @@ export function ServicesTab({ active }: TabProps) {
 				return;
 			}
 			// {name}-bearing paths are per-sidecar; the all-actions ignore the row.
-			const perRow = path.includes("{name}");
 			const ok = await postAction(target, path.replace("{name}", name));
-			const subject = perRow ? ` ${name}` : "";
-			notify(
-				ok ? `${label}${subject}` : `${label} failed${subject}`,
-				ok ? "info" : "error"
-			);
+			notify(serviceActionNotice(action, ok, name), ok ? "info" : "error");
 			runLoad(false);
 		},
 		[index, target, notify, runLoad]
@@ -235,19 +231,20 @@ export function ServicesTab({ active }: TabProps) {
 			if (lower === "a" && shifted) {
 				setConfirm({
 					title: "Start all services?",
-					consequence: "Starts every installed sidecar on this node.",
+					consequence: tr("Starts every installed sidecar on this node."),
 					confirmLabel: "Start all",
-					run: () => act("/api/sidecar/start-all", "Started all"),
+					run: () => act("/api/sidecar/start-all", "startAll"),
 				});
 				return;
 			}
 			if (lower === "z" && shifted) {
 				setConfirm({
 					title: "Stop all services?",
-					consequence:
-						"Stops every running sidecar; features that depend on them stop working.",
+					consequence: tr(
+						"Stops every running sidecar; features that depend on them stop working."
+					),
 					confirmLabel: "Stop all",
-					run: () => act("/api/sidecar/stop-all", "Stopped all"),
+					run: () => act("/api/sidecar/stop-all", "stopAll"),
 				});
 				return;
 			}
@@ -257,14 +254,13 @@ export function ServicesTab({ active }: TabProps) {
 					if (name && isInstalled(name)) {
 						setConfirm({
 							title: tf("Uninstall {name}?", { name }),
-							consequence: `${name} will be stopped and removed from this node; press d to reinstall it.`,
+							consequence: tf(
+								"{name} will be stopped and removed from this node; press d to reinstall it.",
+								{ name }
+							),
 							confirmLabel: "Uninstall",
 							run: () =>
-								act(
-									"/api/setup/{name}/uninstall",
-									"Uninstalled",
-									installedGuard
-								),
+								act("/api/setup/{name}/uninstall", "uninstall", installedGuard),
 						});
 					}
 				} else {
@@ -273,11 +269,11 @@ export function ServicesTab({ active }: TabProps) {
 				return;
 			}
 			if (lower === "s") {
-				act("/api/sidecar/{name}/start", "Started", installedGuard);
+				act("/api/sidecar/{name}/start", "start", installedGuard);
 			} else if (lower === "x") {
-				act("/api/sidecar/{name}/stop", "Stopped");
+				act("/api/sidecar/{name}/stop", "stop");
 			} else if (lower === "r") {
-				act("/api/sidecar/{name}/restart", "Restarted", installedGuard);
+				act("/api/sidecar/{name}/restart", "restart", installedGuard);
 			} else if (lower === "i") {
 				notify("Dependency setup is not available in the TUI", "warning");
 			}

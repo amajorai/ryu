@@ -130,7 +130,9 @@ function LibraryTypeFilter({
 	if (types.length < 2 && typeFilter === null) {
 		return null;
 	}
-	const current = typeFilter ? TYPE_META[typeFilter].label : "All types";
+	const current = typeFilter
+		? tl(TYPE_META[typeFilter].label)
+		: tl("All types");
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger

@@ -1,3 +1,5 @@
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { CANVAS_CELL } from "@/src/components/dashboard/DashboardCanvas.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -62,6 +64,27 @@ export const PRESETS: Array<{ label: string } & WidgetInput> = [
 ];
 
 /**
+ * A preset as the widget it creates, its stored copy worded in the creator's
+ * language: the title (a catalog key) and the starter note's text. The label
+ * stays English because it keys {@link STARTER_LAYOUTS}.
+ */
+export function localizedPresetInput(
+	preset: (typeof PRESETS)[number],
+	tl: LiteralMessage = translate
+): WidgetInput {
+	const { label: _label, ...input } = preset;
+	const title = input.title ? tl(input.title) : input.title;
+	if (input.kind !== "text") {
+		return { ...input, title };
+	}
+	return {
+		...input,
+		config: { markdown: tl("Welcome to your Home dashboard. Edit me.") },
+		title,
+	};
+}
+
+/**
  * Non-overlapping grid placements for the auto-seeded starter (keyed by preset
  * label), so the widgets tile the 12-column grid neatly on first launch. The note
  * sits top-left so a starter of just the presets the host supports still starts at
@@ -105,7 +128,8 @@ export const bootstrappedNodes = new Set<string>();
  */
 export async function seedStarterWidgets(
 	target: ApiTarget,
-	dashboardId: string
+	dashboardId: string,
+	tl: LiteralMessage = translate
 ): Promise<void> {
 	let sourceTypes: string[] = ["static"];
 	try {
@@ -117,8 +141,8 @@ export async function seedStarterWidgets(
 		// No catalog: seed only the host-independent static note.
 	}
 	for (const preset of presetsFor(sourceTypes)) {
-		const { label, ...input } = preset;
-		const layout = STARTER_LAYOUTS.get(label) ?? input.layout;
+		const input = localizedPresetInput(preset, tl);
+		const layout = STARTER_LAYOUTS.get(preset.label) ?? input.layout;
 		try {
 			await createWidget(target, dashboardId, { ...input, layout });
 		} catch {

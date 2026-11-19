@@ -1,4 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { memo, useMemo } from "react";
 import {
@@ -10,6 +11,7 @@ import {
 	type BouncyAccordionItem,
 } from "@/src/components/ui/bouncy-accordion.tsx";
 import type { ResolvedQuest } from "@/src/hooks/useGettingStarted.ts";
+import { questTitle } from "@/src/lib/getting-started.ts";
 
 // Borderless status circle: each quest shows its topic icon inside a filled
 // (never outlined) disc — muted while pending, tinted while current, and a
@@ -50,6 +52,7 @@ export const GettingStartedChecklist = memo(function GettingStartedChecklist({
 	quests: ResolvedQuest[];
 	onRun: (id: string) => void;
 }) {
+	const tl = useLiteralMessages();
 	const items = useMemo<BouncyAccordionItem[]>(
 		() =>
 			quests.map((quest) => {
@@ -66,7 +69,7 @@ export const GettingStartedChecklist = memo(function GettingStartedChecklist({
 								quest.status === "pending" && "text-foreground"
 							)}
 						>
-							{quest.content}
+							{questTitle(tl, quest)}
 						</span>
 					),
 					description: done ? undefined : (
@@ -84,7 +87,7 @@ export const GettingStartedChecklist = memo(function GettingStartedChecklist({
 					),
 				};
 			}),
-		[quests, onRun]
+		[quests, onRun, tl]
 	);
 
 	// Default-open the current step so the next action is one click away.

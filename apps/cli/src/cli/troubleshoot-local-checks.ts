@@ -7,6 +7,7 @@ import {
 	type TroubleshootCheck,
 } from "@ryuhq/core-client/troubleshoot";
 import { tf } from "../i18n/translate.ts";
+import { localize } from "./localizedText.ts";
 import {
 	DISK_FAIL_BYTES,
 	DISK_WARN_BYTES,
@@ -127,7 +128,9 @@ export async function checkDataDir(
 				? tf("Start Core, or run `{commandName} troubleshoot --fix`.", {
 						commandName: host.commandName,
 					})
-				: "Set RYU_DIR to a writable folder, or fix the parent folder's permissions.",
+				: localize(
+						"Set RYU_DIR to a writable folder, or fix the parent folder's permissions."
+					).english,
 			searchTerms: "data directory permission",
 			unit: "apps/core",
 		});
@@ -146,8 +149,13 @@ export async function checkDataDir(
 			detail: tf("{shown} is not writable by this user.", { shown }),
 			fix:
 				host.platform === "win32"
-					? "Give your user Full control of the folder (Properties › Security), or set RYU_DIR to a writable folder."
-					: `sudo chown -R "$(whoami)" ${shown}  (it was likely created by a root install), or set RYU_DIR.`,
+					? localize(
+							"Give your user Full control of the folder (Properties › Security), or set RYU_DIR to a writable folder."
+						).english
+					: localize(
+							'sudo chown -R "$(whoami)" {shown} (it was likely created by a root install), or set RYU_DIR.',
+							{ shown }
+						).english,
 			searchTerms: "permission denied data directory",
 			unit: "apps/core",
 		});
@@ -174,7 +182,9 @@ export async function checkDataDir(
 			detail: tf("{free} free on the data directory's volume.", {
 				free: gib(free),
 			}),
-			fix: "Free up space; models and engines need several GB. Move data with RYU_DIR or Settings › Storage.",
+			fix: localize(
+				"Free up space; models and engines need several GB. Move data with RYU_DIR or Settings › Storage."
+			).english,
 			searchTerms: "disk space download failed",
 			unit: "apps/core",
 		});

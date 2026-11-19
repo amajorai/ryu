@@ -35,6 +35,7 @@ import {
 // Core client module.
 
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
+import { mediaStatusFailure } from "./media-status-failure.ts";
 
 export type {
 	SpeechProcessingEngine,
@@ -80,7 +81,7 @@ async function transcriptionResponse(
 	});
 
 	if (!resp.ok) {
-		let detail = `transcribe failed: ${resp.status}`;
+		let detail = mediaStatusFailure("transcribe", resp.status);
 		try {
 			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {
@@ -162,7 +163,7 @@ export async function installSpeechProcessingModel(
 		}
 	);
 	if (!resp.ok) {
-		let detail = `Speech Processing install failed: ${resp.status}`;
+		let detail = mediaStatusFailure("speech-install", resp.status);
 		try {
 			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {
@@ -196,7 +197,7 @@ export async function processSpeechText(
 		}
 	);
 	if (!resp.ok) {
-		let detail = `Speech Processing failed: ${resp.status}`;
+		let detail = mediaStatusFailure("speech-process", resp.status);
 		try {
 			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {
@@ -245,7 +246,7 @@ export async function installTtsEngine(
 		}
 	);
 	if (!resp.ok) {
-		let detail = `TTS engine install failed: ${resp.status}`;
+		let detail = mediaStatusFailure("tts-install", resp.status);
 		try {
 			const body = voiceEngineInstallErrorProjectionSchema.parse(
 				await resp.json()
@@ -297,7 +298,7 @@ export async function installTtsModel(
 		}
 	);
 	if (!resp.ok) {
-		let detail = `install failed: ${resp.status}`;
+		let detail = mediaStatusFailure("tts-model-install", resp.status);
 		try {
 			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {
@@ -361,7 +362,7 @@ export async function speakText(
 	});
 
 	if (!resp.ok) {
-		let detail = `speak failed: ${resp.status}`;
+		let detail = mediaStatusFailure("speak", resp.status);
 		try {
 			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {

@@ -25,6 +25,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { LocalizedError, localize } from "../cli/localizedText.ts";
 import { useCore } from "../core/CoreContext.tsx";
 import type { ContributedView as ContributedViewModel } from "../core/contributions.ts";
 import { useShellKeyboardCaptured } from "../core/InputFocusContext.tsx";
@@ -42,6 +43,7 @@ import {
 } from "../core/views.ts";
 import { tf } from "../i18n/translate.ts";
 import { useOverlay } from "../overlays/OverlayHost.tsx";
+import { actionFailedText } from "./contributed-view-text.ts";
 import { DeclarativeView } from "./DeclarativeView.tsx";
 import { useToast } from "./toast.tsx";
 
@@ -65,7 +67,9 @@ async function coreJson(
 		body: body === undefined ? undefined : JSON.stringify(body),
 	});
 	if (!resp.ok) {
-		throw new Error(`${path} failed: ${resp.status}`);
+		throw new LocalizedError(
+			localize("{path} failed: {status}", { path, status: resp.status })
+		);
 	}
 	// A 204 / empty body is a perfectly good action result; don't fail on it.
 	const text = await resp.text();
@@ -159,7 +163,7 @@ export function ContributedViewPanel({ focused, view }: ContributedViewProps) {
 				}
 				setReloadToken((n) => n + 1);
 			} catch (err) {
-				notify(err instanceof Error ? err.message : String(err), "error");
+				notify(actionFailedText(action.id, err), "error");
 			}
 		},
 		[target, view, notify]

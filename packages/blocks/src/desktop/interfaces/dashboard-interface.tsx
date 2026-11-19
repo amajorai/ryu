@@ -170,7 +170,7 @@ export function DashboardInterface({
 				tl("{title} moved to position {position} of {count}.", {
 					count: String(layout.length),
 					position: String(toIndex + 1),
-					title: widgetSpec(item.id).title,
+					title: tr(widgetSpec(item.id).title),
 				})
 			);
 		},
@@ -184,7 +184,7 @@ export function DashboardInterface({
 				setAnnouncement(
 					tl("{title} is now {size}.", {
 						size: widgetSizeName(next.size),
-						title: widgetSpec(item.id).title,
+						title: tr(widgetSpec(item.id).title),
 					})
 				);
 			}
@@ -296,7 +296,7 @@ export function DashboardInterface({
 								item={item}
 								key={item.id}
 								meta={meta}
-								title={widgetSpec(item.id).title}
+								title={tr(widgetSpec(item.id).title)}
 							>
 								{body}
 							</DashboardWidget>

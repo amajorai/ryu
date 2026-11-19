@@ -21,6 +21,7 @@ import {
 import {
 	agentById,
 	compactAge,
+	formatNameList,
 	threadStatusLabel,
 } from "./interface-renderer.ts";
 
@@ -38,7 +39,7 @@ function agentNames(snapshot: InterfaceSnapshot, thread: InterfaceThread) {
 		.filter((agent) => agent !== undefined);
 	return {
 		lead: agents[0],
-		names: agents.map((agent) => agent.name).join(", "),
+		names: formatNameList(agents.map((agent) => agent.name)),
 	};
 }
 

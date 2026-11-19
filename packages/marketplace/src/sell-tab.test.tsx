@@ -283,5 +283,12 @@ describe("SellTab — settings layout", () => {
 		expect(html).toContain("Eligible paid apps");
 		expect(html).toContain("12.00");
 		expect(html).not.toContain("bg-primary/5");
+		// Each catalogued sentence is its own text node, never one joined caption.
+		expect(html).toContain(
+			"<span>One-time buyer licenses remain separate. A publisher payout requires a completed Stripe Connect setup.</span>"
+		);
+		expect(html).toMatch(
+			/<span>Opt supported paid apps[^<]*weighted app usage\.<\/span>/
+		);
 	});
 });

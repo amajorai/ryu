@@ -12,7 +12,7 @@ import {
 	minuteOfDay,
 	parseDayKey,
 	shiftDay,
-	WEEK_START,
+	weekStart,
 } from "./calendar-model-dates.ts";
 
 /** Calendar week-grid placement, scroll position, keyboard movement, and the zone label. */
@@ -328,7 +328,7 @@ export function moveDayKey(
 	scale: CalendarScale
 ): string | null {
 	const date = parseDayKey(key);
-	const offset = (date.getDay() - WEEK_START + 7) % 7;
+	const offset = (date.getDay() - weekStart() + 7) % 7;
 	const steps: Record<string, () => Date> = {
 		ArrowDown: () => addDays(date, 7),
 		ArrowLeft: () => addDays(date, -1),

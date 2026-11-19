@@ -82,7 +82,8 @@ export function ProfileStatsPanel({
 	errorMessage = null,
 }: ProfileStatsPanelProps) {
 	const tl = useLiteralMessages();
-	const locale = useOptionalI18n()?.locale;
+	const i18n = useOptionalI18n();
+	const locale = i18n?.locale;
 	if (errorMessage) {
 		return (
 			<SettingsCard>
@@ -136,7 +137,10 @@ export function ProfileStatsPanel({
 				</div>
 			</SettingsCard>
 
-			<SettingsSection title="Lifetime">
+			{/* All-time totals; the bare catalog "Lifetime" is a one-time purchase. */}
+			<SettingsSection
+				title={i18n?.t("usage.lifetime", {}, "Lifetime") ?? "Lifetime"}
+			>
 				<div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
 					<HeroStat
 						label="Lifetime tokens"
@@ -365,7 +369,10 @@ export function ProfileStatsPanel({
 											pointsBalance={balance}
 										/>
 										<Badge variant={tierBadgeVariant(feature.tier)}>
-											{tierLabel(feature.tier)}
+											{tierLabel(
+												feature.tier,
+												(id, english) => i18n?.t(id, {}, english) ?? english
+											)}
 										</Badge>
 									</div>
 								}

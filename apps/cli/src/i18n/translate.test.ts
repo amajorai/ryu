@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { errorToJson, formatError } from "../cli/output.ts";
+import { UsageError } from "../cli/types.ts";
 import {
 	formatCliDate,
 	formatCliDateTime,
@@ -184,5 +186,68 @@ describe("CLI translator", () => {
 		expect(english.tf("{count} agents running", { count: 2 })).toBe(
 			"2 agents running"
 		);
+	});
+});
+
+describe("CLI translator lookups for aligned copy and thrown messages", () => {
+	const RELIABLE = "Reliable {rate}% over 7 days, p50 {p50} ms, p95 {p95} ms";
+	const DURATION =
+		"Invalid duration '{value}'. Use seconds or a suffix: 90m, 12h, 30d, 2w.";
+	const DURATION_ERROR =
+		"Invalid duration '5x'. Use seconds or a suffix: 90m, 12h, 30d, 2w.";
+	const german = createCliTranslator("de", {
+		[RELIABLE]:
+			"Zuverlässigkeit {rate} % über 7 Tage, p50 {p50} ms, p95 {p95} ms",
+		"Press r to retry": "Drücke r, um es erneut zu versuchen",
+	});
+	const japanese = createCliTranslator("ja", {
+		[DURATION]:
+			"期間「{value}」が無効です。秒数またはサフィックスを使用してください: 90m、12h、30d、2w。",
+		"Channels are offline.": "チャネルはオフラインです。",
+	});
+
+	test("finds a whitespace-aligned source under its collapsed key", () => {
+		expect(
+			german.tf("Reliable   {rate}% over 7 days, p50 {p50} ms, p95 {p95} ms", {
+				p50: "180",
+				p95: "420",
+				rate: "99.5",
+			})
+		).toBe("Zuverlässigkeit 99.5 % über 7 Tage, p50 180 ms, p95 420 ms");
+		expect(german.tr(" Press  r to\tretry ")).toBe(
+			" Drücke r, um es erneut zu versuchen "
+		);
+	});
+
+	test("matches a thrown message against its catalog template", () => {
+		expect(japanese.trMessage(DURATION_ERROR)).toBe(
+			"期間「5x」が無効です。秒数またはサフィックスを使用してください: 90m、12h、30d、2w。"
+		);
+		expect(japanese.trMessage("Channels are offline.")).toBe(
+			"チャネルはオフラインです。"
+		);
+		expect(japanese.trMessage("upstream said no")).toBe("upstream said no");
+		expect(japanese.tr(DURATION_ERROR)).toBe(DURATION_ERROR);
+	});
+
+	test("formats a template-matched UsageError in Japanese, English under --json", () => {
+		const error = new UsageError(DURATION_ERROR);
+		expect(formatError(error, japanese)).toBe(
+			"期間「5x」が無効です。秒数またはサフィックスを使用してください: 90m、12h、30d、2w。"
+		);
+		expect(errorToJson(error)).toEqual({ error: DURATION_ERROR });
+		expect(formatError(error)).toBe(DURATION_ERROR);
+	});
+
+	test("translates a thrown message in Arabic and leaves English untouched", () => {
+		const arabic = createCliTranslator("ar", {
+			[DURATION]: "المدة '{value}' غير صالحة. استخدم الثواني أو لاحقة.",
+		});
+		// The captured value is isolated so the Latin token keeps its order.
+		expect(arabic.trMessage(DURATION_ERROR)).toBe(
+			"المدة '\u20685x\u2069' غير صالحة. استخدم الثواني أو لاحقة."
+		);
+		const english = createCliTranslator(null, null);
+		expect(english.trMessage(DURATION_ERROR)).toBe(DURATION_ERROR);
 	});
 });

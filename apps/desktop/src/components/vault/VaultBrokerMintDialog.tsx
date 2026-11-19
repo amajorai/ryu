@@ -25,13 +25,13 @@ import {
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { sileo } from "sileo";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { listVaultBrokerServices } from "@/src/lib/api/vault-broker.ts";
 import {
 	mintVaultBrokerSession,
 	type VaultBrokerMintedSession,
 } from "@/src/lib/api/vault-broker-console.ts";
+import { copyWithToast } from "./vault-copy.ts";
 import { vaultErrorMessage } from "./vault-errors.ts";
 
 export const SESSION_LIFETIMES = [
@@ -50,16 +50,9 @@ export function shellExports(env: Record<string, string>): string {
 		.join("\n");
 }
 
-async function copy(text: string): Promise<void> {
-	try {
-		await navigator.clipboard.writeText(text);
-		sileo.success({ title: "Copied" });
-	} catch {
-		sileo.error({ title: "Could not copy" });
-	}
-}
-
 function Minted({ minted }: { minted: VaultBrokerMintedSession }) {
+	const tl = useLiteralMessages();
+	const copy = (text: string) => copyWithToast(text, tl);
 	const exports = minted.proxy ? shellExports(minted.proxy.env) : "";
 	return (
 		<>

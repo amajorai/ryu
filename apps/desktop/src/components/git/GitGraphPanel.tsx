@@ -153,7 +153,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 	const currentBranch = branches.find((branch) => branch.current);
 	const folderLabel = folder
 		? folder.split(/[\\/]/).at(-1) || folder
-		: "Workspace";
+		: tl("Workspace");
 	if (!folder) {
 		return (
 			<GraphEmptyState text="Open a project folder to see its Git graph." />

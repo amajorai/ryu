@@ -1,4 +1,4 @@
-import { formatMessage } from "@ryu/i18n/lite";
+import { formatList, formatMessage } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 import {
 	type DependencyError,
@@ -27,8 +27,12 @@ export interface AppLifecycleError {
 	gatewayUnreachable: boolean;
 	/** True when the Gateway denied one or more grants. */
 	grantsDenied: boolean;
+	/** True when Core refused because the caller lacks the node's app permission. */
+	lifecyclePermissionDenied: boolean;
 	/** Human-readable reason suitable for display in a UI primitive. */
 	message: string;
+	/** The permission Core named for a lifecycle refusal, when it named one. */
+	requiredPermission: string | null;
 	/** HTTP status from Core, used for narrow built-in-vs-bundle fallback. */
 	status: number;
 	/** Why the Gateway was unreachable, when `gatewayUnreachable`. */
@@ -44,15 +48,22 @@ const englishMessages: LiteralMessage = (source, values) =>
  *  `displayName` maps a plugin id to its human name when the caller has the app
  *  list in scope (`useApps` passes one; the id is the fallback). The blocked-disable
  *  case is the one a user hits most: Core refuses by default rather than silently
- *  cascading, so the message must name exactly which plugins to disable first. */
+ *  cascading, so the message must name exactly which plugins to disable first.
+ *  `locale` joins the dependents list ("A, B and C", "A、B、C"); it defaults to
+ *  the language the UI is showing. */
 export function describeDependencyError(
 	err: DependencyError,
 	tl: LiteralMessage,
-	displayName: (id: string) => string = (id) => id
+	displayName: (id: string) => string = (id) => id,
+	locale?: string
 ): string {
 	switch (err.code) {
 		case "blocked_by_dependents": {
-			const names = err.dependents.map(displayName).join(", ");
+			const names = formatList(
+				err.dependents.map(displayName),
+				"conjunction",
+				locale
+			);
 			return tl("{plugin} is needed by {names}. Disable {names} first.", {
 				plugin: displayName(err.plugin),
 				names,
@@ -161,6 +172,39 @@ export function describeGatewayRefusal(
 	return null;
 }
 
+/** Render Core's node app-permission refusal (`app_lifecycle_permission_denied`),
+ *  naming the permission when Core sent one. */
+export function describeLifecyclePermissionRefusal(
+	permission: string | null,
+	tl: LiteralMessage
+): string {
+	return permission
+		? tl(
+				"You don't have permission ({permission}) to change apps on this node.",
+				{ permission }
+			)
+		: tl("You don't have permission to change apps on this node.");
+}
+
+const lifecyclePermissionRefusalSchema = z.object({
+	lifecyclePermissionDenied: z.literal(true),
+	requiredPermission: z.string().nullable().catch(null),
+});
+
+/** Read the node app-permission refusal attached by the lifecycle client, or
+ *  `null` when the failure is something else. */
+export function lifecyclePermissionRefusalOf(
+	error: unknown
+): Pick<AppLifecycleError, "requiredPermission"> | null {
+	if (!(error instanceof Error)) {
+		return null;
+	}
+	const refusal = lifecyclePermissionRefusalSchema.safeParse({ ...error });
+	return refusal.success
+		? { requiredPermission: refusal.data.requiredPermission }
+		: null;
+}
+
 /** Complete dependency-graph refusal serialized by Core's native enum. */
 export const dependencyErrorSchema = z.discriminatedUnion("code", [
 	z.object({ code: z.literal("not_installed"), plugin: z.string() }),
@@ -237,6 +281,9 @@ export async function parseLifecycleError(
 	const lifecyclePermissionDenied =
 		status === 403 &&
 		pluginStringField(body.error) === "app_lifecycle_permission_denied";
+	const requiredPermission = lifecyclePermissionDenied
+		? (pluginStringField(body.required_permission) ?? null)
+		: null;
 	const gatewayUnreachable = status === 503;
 	// 409 = the dependency graph refused (an enabled dependent blocks a disable, a
 	// dependency is missing/too old, or the graph cycles). Core flipped nothing, and
@@ -263,7 +310,12 @@ export async function parseLifecycleError(
 	// Meetings, Whiteboard first") from the structured fields below.
 	let message = rawMessage;
 	if (dependencyError) {
-		message = describeDependencyError(dependencyError, englishMessages);
+		message = describeDependencyError(
+			dependencyError,
+			englishMessages,
+			undefined,
+			"en"
+		);
 	} else if (
 		status === 409 &&
 		pluginStringField(pluginRecord(body.dependency_error)?.code) !== undefined
@@ -272,19 +324,21 @@ export async function parseLifecycleError(
 			"This change conflicts with the current plugin dependencies."
 		);
 	} else if (lifecyclePermissionDenied) {
-		const permission = pluginStringField(body.required_permission);
-		message = permission
-			? englishMessages(
-					"You don't have permission ({permission}) to change apps on this node.",
-					{ permission }
-				)
-			: englishMessages(
-					"You don't have permission to change apps on this node."
-				);
+		message = describeLifecyclePermissionRefusal(
+			requiredPermission,
+			englishMessages
+		);
 	} else {
 		message =
 			describeGatewayRefusal(gatewayRefusal, englishMessages) ?? message;
 	}
 
-	return { message, dependencyError, status, ...gatewayRefusal };
+	return {
+		message,
+		dependencyError,
+		lifecyclePermissionDenied,
+		requiredPermission,
+		status,
+		...gatewayRefusal,
+	};
 }

@@ -2990,6 +2990,28 @@
     ],
     "reason": "product name"
   },
+  "Jules · Team": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Team' is the German word; Jules is a name"
+  },
+  "Perplexity": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
   "Copywriting": {
     "locales": [
       "de",
@@ -3247,6 +3269,22 @@
       "zh-CN"
     ],
     "reason": "company name"
+  },
+  "Datadog Logs": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "vendor product name"
   },
   "Datadog for Startups": {
     "locales": [
@@ -7252,6 +7290,12 @@
     ],
     "reason": "'Minimum' is the same word in German and French"
   },
+  "Minutes": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Minutes' is the same word in French"
+  },
   "Mirostat": {
     "locales": [
       "ar",
@@ -9981,9 +10025,19 @@
   },
   "Ryu Credits": {
     "locales": [
-      "de"
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
     ],
-    "reason": "German uses Credits (glossary de: Credits)"
+    "reason": "Ryu Credits is a brand name, kept in English per the glossary."
   },
   "Ryu Desktop": {
     "locales": [
@@ -11232,9 +11286,11 @@
   },
   "Skill": {
     "locales": [
-      "it"
+      "de",
+      "it",
+      "pt-BR"
     ],
-    "reason": "'Skill' is the established Italian term, matching existing 'Skills' translation"
+    "reason": "official glossary uses 'Skill(s)'; 'Skill' is also the established Italian term"
   },
   "Skill {label}": {
     "locales": [
@@ -11975,6 +12031,13 @@
     "reason": "'Team' and 'optional' are correct German words"
   },
   "Team {teamId}": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Team' is the German and Italian term the catalog uses"
+  },
+  "Team {id}": {
     "locales": [
       "de",
       "it"
@@ -17263,6 +17326,15 @@
     ],
     "reason": "'fps' is the standard frame-rate unit abbreviation in these locales"
   },
+  "{working} <total>of {count}</total>": {
+    "locales": [
+      "hi",
+      "ja",
+      "ko",
+      "zh-CN"
+    ],
+    "reason": "These locales write the count as \"3 / 5\" with a slash, so the translation has no letters to differ from the English."
+  },
   "~{latency}": {
     "locales": [
       "ar",
@@ -17625,5 +17697,502 @@
       "pt-BR"
     ],
     "reason": "TokenEconomizer feature name; pt-BR catalog keeps 'skills' as a loanword"
+  },
+  "AWS STS": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "AWS product name AWS STS"
+  },
+  "HashiCorp Vault": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name HashiCorp Vault"
+  },
+  "Infisical": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name Infisical"
+  },
+  "Leases": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Leases' is the established loanword for secret leases in German"
+  },
+  "TTL {ttl}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "TTL is the standard technical abbreviation"
+  },
+  "Version {version} · {actor} · {when}": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Version' is the German and French word"
+  },
+  "Skills": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "official glossary uses 'Skill(s)'"
+  },
+  "Core": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu Core product name, kept in English like the other product names."
+  },
+  "{category} · {name}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a separator; there is nothing to translate."
+  },
+  "{names} · {group}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a separator; there is nothing to translate."
+  },
+  "{used} / {total}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Only placeholders and a separator; there is nothing to translate."
+  },
+  "{name}: {color}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Only placeholders and a colon; these locales use the same separator."
+  },
+  "Agent: {name} ({id})": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German glossary term: Agent."
+  },
+  "Engine: {engine}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German glossary term: Engine."
+  },
+  "Broker": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "The Vault broker is a product term these glossaries keep in English."
+  },
+  "Tickets": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German uses Tickets for support tickets (glossary)."
+  },
+  "{amount} in Ryu Credits": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "Ryu Credits is a brand kept in English, and \"in\" is the same preposition in German and Italian."
+  },
+  "Dial {number}": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "Dial is the Spanish and Portuguese word for a rotary control (a Stream Deck dial)."
+  },
+  "Idea · {name}": {
+    "locales": [
+      "es",
+      "it"
+    ],
+    "reason": "Idea is the same word in Spanish and Italian."
+  },
+  "Action": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Action is the French word for an operation, the reviewed sense of this key."
+  },
+  "Communication": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Communication is the same word in French."
+  },
+  "Agent Inboxes": {
+    "locales": [
+      "zh-CN"
+    ],
+    "reason": "Agent Inboxes is a product name; the zh-CN catalog keeps it in English in every sentence."
+  },
+  "Administrator": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Administrator' is the German word"
+  },
+  "Commercial": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Commercial' is the French word"
+  },
+  "$0 self-hosted": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Italian keeps the English term self-hosted after the amount"
+  },
+  "Intelligent": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Intelligent' is the German and French word"
+  },
+  "production, staging": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "example environment slugs in a placeholder; slugs are identifiers"
+  },
+  "Commits": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Commits' is the word used for version-control commits in these locales"
+  },
+  "Production": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Production' is the French word"
+  },
+  "Protection": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Protection' is the French word"
+  },
+  "argument": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'argument' is the same word in French"
+  },
+  "←→ sections": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'sections' is the same word in French; key names unchanged"
+  },
+  "Agent: {agent}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Agent' is the German word too; only the placeholder follows"
+  },
+  "agenda": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'agenda' is the native word in these languages"
+  },
+  "{kindLabel}: {role}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "only placeholders and a colon; these locales keep the ASCII colon"
+  },
+  "{label}: {example}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "only placeholders and a colon; these locales keep the ASCII colon"
+  },
+  "{title}: {notice}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "only placeholders and a colon; these locales keep the ASCII colon"
+  },
+  "ARR (annual recurring revenue)": {
+    "locales": [
+      "hi",
+      "ja",
+      "ko",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "the CRM field keeps the ARR abbreviation used in these markets"
+  },
+  "TTL": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "time-to-live abbreviation used as a technical field label in every locale"
+  },
+  "URL": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "URL abbreviation used as a technical field label"
+  },
+  "HTTP {status} · {reason}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "protocol name, status code, separator and placeholders only; nothing to translate"
+  },
+  "{recipient}: {reason}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Only placeholders and a colon; nothing to translate"
+  },
+  "{filename} ({contentType}, {size, plural, one {# byte} other {# bytes}})": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'byte'/'bytes' are the Spanish and Portuguese words"
+  },
+  "AWS IAM": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name AWS IAM"
+  },
+  "Kubernetes": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name Kubernetes"
+  },
+  "Machines": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'machines' is the French word"
+  },
+  "Account {id}": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Account' is the Italian loanword used across the app"
+  },
+  "ID": {
+    "locales": [
+      "ja",
+      "ko"
+    ],
+    "reason": "'ID' is the standard abbreviation in Japanese and Korean UI"
+  },
+  "Error · {message}": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Error' is the Spanish word"
+  },
+  "Marker {number}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Marker' is the German word, as in Video Studio's Marker"
   }
 }

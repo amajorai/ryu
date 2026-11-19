@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createCliTranslator } from "../i18n/translate.ts";
-import { mcpSignInRows } from "./agentAccountCatalog-rows.ts";
+import {
+	mcpSignInRows,
+	modelProviderRows,
+} from "./agentAccountCatalog-rows.ts";
 
 const germanCatalog: Record<string, string> = JSON.parse(
 	readFileSync(
@@ -53,5 +56,36 @@ describe("mcpSignInRows", () => {
 		]);
 		expect(rows[0]?.title).toBe("Files · drive");
 		expect(rows[1]?.status).toBe("Sign in again");
+	});
+});
+
+describe("modelProviderRows", () => {
+	const providers = { openai: { api_key: "***", api_key_count: 1 } };
+	const japanese = createCliTranslator("ja", {
+		"Also covers {label}": "{label} にも適用",
+	});
+
+	test("the engine vendor's note is one translated sentence", () => {
+		const rows = modelProviderRows(
+			providers,
+			"acp:codex",
+			"openai",
+			japanese.tf
+		);
+		expect(rows[0]?.detail).toBe(
+			"OpenAI (Codex's ChatGPT sign-in or key) にも適用"
+		);
+	});
+
+	test("English keeps the vendor in the note", () => {
+		const rows = modelProviderRows(
+			providers,
+			"acp:codex",
+			"openai",
+			english.tf
+		);
+		expect(rows[0]?.detail).toBe(
+			"Also covers OpenAI (Codex's ChatGPT sign-in or key)"
+		);
 	});
 });

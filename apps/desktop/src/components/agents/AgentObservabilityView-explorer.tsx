@@ -1,6 +1,7 @@
 import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { usageProviderLabel } from "@ryu/blocks/desktop/usage-analytics.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	NativeSelect,
@@ -19,6 +20,7 @@ import {
 	type ObservabilityFilter,
 	type ObservabilityWindow,
 	promptCacheStatus,
+	promptCacheStatusLabel,
 } from "./AgentObservabilityView-audit.ts";
 import { formatLatencyMs } from "./agent-latency-format.ts";
 import observabilityStyles from "./agent-observability.module.css";
@@ -48,6 +50,7 @@ export function ObservabilityExplorerSection({
 	timeRange,
 	visibleEntries,
 }: ObservabilityTraceExplorerProps) {
+	const tl = useLiteralMessages();
 	return (
 		<SettingsSection
 			caption="Select a row to inspect its correlated trace."
@@ -163,7 +166,7 @@ export function ObservabilityExplorerSection({
 												className="shrink-0 text-muted-foreground text-xs"
 												data-testid={`prompt-cache-status-${entry.id}`}
 											>
-												{cacheStatus}
+												{promptCacheStatusLabel(cacheStatus, tl)}
 											</span>
 										) : null}
 										<span className="hidden shrink-0 text-muted-foreground/70 text-xs tabular-nums md:inline">

@@ -51,12 +51,21 @@ export const tierBadgeVariant = (
 	return "outline";
 };
 
-export const tierLabel = (tier: ProfileFeatureUnlock["tier"]): string => {
+/** Resolves a word-sense id to its label; English by default. */
+export type SenseLabel = (id: string, english: string) => string;
+
+const englishSense: SenseLabel = (_id, english) => english;
+
+/** The unlock tier's badge: "Paid" is a paid tier, "Points" unlocks by points. */
+export const tierLabel = (
+	tier: ProfileFeatureUnlock["tier"],
+	sense: SenseLabel = englishSense
+): string => {
 	if (tier === "paid") {
-		return "Paid";
+		return sense("plans.paidTier", "Paid");
 	}
 	if (tier === "progressive") {
-		return "Points";
+		return sense("profile.unlockPoints", "Points");
 	}
 	return "Included";
 };

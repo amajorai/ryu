@@ -107,7 +107,10 @@ export function useMentionableResources(
 						});
 						if (!result.ok) {
 							throw new Error(
-								result.error ?? `Mention search failed for ${tool.server}`
+								result.error ??
+									tl("Mention search failed for {server}", {
+										server: tool.server,
+									})
 							);
 						}
 						return mcpMentionSources(tool, result.output);

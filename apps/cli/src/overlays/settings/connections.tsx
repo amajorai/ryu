@@ -16,9 +16,14 @@ import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import { errorText } from "../../i18n/error-text.ts";
-import { tf, tr } from "../../i18n/translate.ts";
+import {
+	CLI_TRANSLATOR,
+	type CliTranslator,
+	tf,
+	tr,
+} from "../../i18n/translate.ts";
 
-type AccessLevel = "risk_based" | "read_only" | "write" | "full";
+export type AccessLevel = "risk_based" | "read_only" | "write" | "full";
 
 interface PendingConnection {
 	id: string;
@@ -52,6 +57,17 @@ const ACCESS_LABELS = {
 	write: "Write",
 	full: "Full",
 } satisfies Record<AccessLevel, string>;
+
+/** An active connection's state: `connected · <access level>`, translated. */
+export function connectedStateText(
+	accessLevel: AccessLevel,
+	translator: Pick<CliTranslator, "tf" | "tr"> = CLI_TRANSLATOR
+): string {
+	const { tf, tr } = translator;
+	return tf("connected · {accessLevel}", {
+		accessLevel: tr(ACCESS_LABELS[accessLevel]),
+	});
+}
 
 function normalizeStatus(value: ConnectionStatusValue): string {
 	const parsed = connectionStatusStringSchema.safeParse(value);
@@ -347,7 +363,7 @@ export function ConnectionsPanel({
 							);
 							const selected = index === selectedIndex;
 							const state = connection?.active
-								? `connected · ${ACCESS_LABELS[connection.accessLevel]}`
+								? connectedStateText(connection.accessLevel)
 								: connection
 									? normalizeStatus(connection.status)
 									: "not connected";

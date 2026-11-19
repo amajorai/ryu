@@ -17,6 +17,7 @@ const { ColorPicker, ColorPickerContent, ColorPickerPanel } = await import(
 );
 
 const DE: Record<string, string> = {
+	"Saturation and brightness": "Sättigung und Helligkeit",
 	"Select {group} {value}": "{group} {value} auswählen",
 	Swatches: "Farbfelder",
 };
@@ -88,6 +89,12 @@ test("the swatch group heading renders in German", async () => {
 	expect(swatch?.getAttribute("aria-label")).toBe(
 		"Farbfelder #FF3B30 auswählen"
 	);
+	// The saturation and brightness area is named by the picker itself too.
+	expect(
+		container
+			.querySelector('[role="group"][tabindex]')
+			?.getAttribute("aria-label")
+	).toBe("Sättigung und Helligkeit");
 });
 
 test("the swatch button keeps English sentence casing", async () => {

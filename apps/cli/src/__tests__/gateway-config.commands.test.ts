@@ -2,12 +2,14 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { applyGatewayConfigCommand } from "../cli/builtins/catalog.ts";
 import { runCli } from "../cli/dispatch.ts";
 import {
 	gatewayConfigDiff,
 	parseGatewayConfigPatch,
 } from "../cli/gatewayConfig.ts";
-import type { CliIO, CoreApi } from "../cli/types.ts";
+import { localizedTextOf, renderLocalized } from "../cli/localizedText.ts";
+import type { CliContext, CliIO, CoreApi } from "../cli/types.ts";
 
 let tempDir = "";
 
@@ -235,4 +237,40 @@ test("ryu config show reads current state; unsupported revision commands fail wi
 		2
 	);
 	expect(invalid.err()).toContain("Usage: ryu-cli config [show]");
+});
+
+test("an invalid gateway file keeps the parser's reason localizable", async () => {
+	const path = configFile("");
+	const ctx = {
+		args: [],
+		flags: { file: path },
+	} as unknown as CliContext;
+	const thrown = await applyGatewayConfigCommand
+		.run(ctx)
+		.then(() => null)
+		.catch((error: unknown) => error);
+	if (!(thrown instanceof Error)) {
+		throw new Error("expected the apply command to refuse an empty file");
+	}
+	const localized = localizedTextOf(thrown);
+	if (!localized) {
+		throw new Error("expected localized error copy");
+	}
+	const catalog: Record<string, string> = {
+		"Invalid gateway config '{path}': {message}":
+			"Ungültige Gateway-Konfiguration '{path}': {message}",
+		"Gateway TOML must include a writable section.":
+			"Gateway-TOML muss einen beschreibbaren Abschnitt enthalten.",
+	};
+	const rendered = renderLocalized(localized, (source, values) =>
+		(catalog[source] ?? source).replace(/\{(\w+)\}/gu, (_, name: string) =>
+			String(values[name] ?? "")
+		)
+	);
+	expect(rendered).toBe(
+		`Ungültige Gateway-Konfiguration '${path}': Gateway-TOML muss einen beschreibbaren Abschnitt enthalten.`
+	);
+	expect(thrown.message).toBe(
+		`Invalid gateway config '${path}': Gateway TOML must include a writable section.`
+	);
 });

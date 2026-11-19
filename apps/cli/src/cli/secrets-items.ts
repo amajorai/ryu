@@ -10,11 +10,13 @@ import {
 	vaultAgentTotpCode,
 	vaultAgentTotpValidate,
 } from "@ryuhq/core-client/vault";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
+import { localize } from "./localizedText.ts";
 import { formatTable } from "./output.ts";
 import { arg, flag, type SecretsArgs } from "./secrets-args.ts";
 import { agentTarget, printJson } from "./secrets-output.ts";
 import { type CliContext, UsageError } from "./types.ts";
+import { yesNo } from "./yesNo.ts";
 
 // ── TOTP ─────────────────────────────────────────────────────────────────────
 
@@ -49,7 +51,7 @@ export async function totp(
 		if (ctx.flags.json) {
 			printJson(ctx, { valid });
 		} else {
-			ctx.io.out(valid ? "valid\n" : "invalid\n");
+			ctx.io.out(`${valid ? tr("valid") : tr("invalid")}\n`);
 		}
 		return valid ? 0 : 1;
 	}
@@ -81,7 +83,11 @@ export function parseItemField(spec: string): {
 	const name = eq === -1 ? "" : spec.slice(0, eq).trim();
 	if (!name) {
 		throw new UsageError(
-			`Invalid --field '${spec}'. Use --field name=value[:plain].`
+			localize("Invalid {flag} '{spec}'. Use {usage}.", {
+				flag: "--field",
+				spec,
+				usage: "--field name=value[:plain]",
+			})
 		);
 	}
 	let value = spec.slice(eq + 1);
@@ -117,7 +123,7 @@ export async function itemsList(
 		return 0;
 	}
 	if (items.length === 0) {
-		ctx.io.out("No items.\n");
+		ctx.io.out(`${tr("No items.")}\n`);
 		return 0;
 	}
 	const rows = items.map((item) => [
@@ -146,16 +152,21 @@ export async function itemsGet(
 		return 0;
 	}
 	ctx.io.out(
-		`${item.key} (${item.kind}, version ${item.version}, ${item.status})\n`
+		`${tf("{key} ({kind}, version {version}, {status})", {
+			key: item.key,
+			kind: item.kind,
+			status: item.status,
+			version: String(item.version),
+		})}\n`
 	);
 	const rows = item.fields.map((field) => {
-		let shown = "(empty)";
+		let shown = tr("(empty)");
 		if (field.value !== undefined) {
 			shown = field.value;
 		} else if (field.hasValue) {
-			shown = "(hidden)";
+			shown = tr("(hidden)");
 		}
-		return [field.name, field.type, field.sensitive ? "yes" : "no", shown];
+		return [field.name, field.type, yesNo(field.sensitive), shown];
 	});
 	ctx.io.out(`${formatTable(["FIELD", "TYPE", "SENSITIVE", "VALUE"], rows)}\n`);
 	return 0;
@@ -185,7 +196,9 @@ export function parseCardStdin(text: string): { cvc?: string; number: string } {
 	const [number, cvc, ...rest] = lines;
 	if (!number || rest.length > 0) {
 		throw new UsageError(
-			"stdin must hold the card number on the first line and, optionally, the CVC on the second."
+			localize(
+				"stdin must hold the card number on the first line and, optionally, the CVC on the second."
+			)
 		);
 	}
 	return cvc === undefined ? { number } : { number, cvc };
@@ -247,7 +260,7 @@ export async function itemsPutCard(
 	if (ctx.flags.json) {
 		printJson(ctx, item);
 	} else {
-		const brand = item.card?.brand ?? "card";
+		const brand = item.card?.brand ?? tr("card");
 		const last4 = item.card?.last4 ?? "????";
 		ctx.io.out(
 			`${tf("Stored card {key} ({brand} ending {last4}, version {version}).", { key: item.key, brand, last4, version: String(item.version) })}\n`

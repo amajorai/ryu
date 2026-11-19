@@ -2,7 +2,8 @@ import {
 	SettingsGroup,
 	SettingsItem,
 } from "@ryu/blocks/desktop/settings-items.tsx";
-import { translate as tl } from "@ryu/i18n/core";
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { cn } from "@/lib/utils.ts";
 import {
@@ -13,26 +14,31 @@ import {
 } from "@/src/store/useNodeStore.ts";
 import { displayName } from "./NodeSelector-status.tsx";
 
-/** The policy, in one line — used for both the OFF-state hint and the a11y label. */
-const AUTO_SELECT_POLICY =
-	"Prefer a reachable remote computer, else use your computer";
+/** The policy, in one line: used for both the OFF-state hint and the a11y label. */
+export function autoSelectPolicy(tl: LiteralMessage = translate): string {
+	return tl("Prefer a reachable remote computer, else use your computer");
+}
 
 /**
  * Subline under the auto-select switch: what the setting is actually DOING right
  * now, never a promise the store does not keep. `picked` is the node the probe
  * landed on (already resolved from `autoSelectedNode`), or null before it has run.
  */
-function autoSelectSubline(autoSelect: boolean, picked: Node | null): string {
+export function autoSelectSubline(
+	autoSelect: boolean,
+	picked: Node | null,
+	tl: LiteralMessage = translate
+): string {
 	if (!autoSelect) {
-		return "Always use your default computer";
+		return tl("Always use your default computer");
 	}
 	if (!picked) {
-		return AUTO_SELECT_POLICY;
+		return autoSelectPolicy(tl);
 	}
 	// Branch on the URL, not the name: a remote node someone named "local" must not
 	// be reported as local compute.
 	if (isLocalNode(picked)) {
-		return "No remote computer reachable — using your computer";
+		return tl("No remote computer is reachable, so Ryu is using your computer");
 	}
 	return tl("Using {name}", { name: displayName(picked.name) });
 }
@@ -76,7 +82,7 @@ export function AutoSelectRow({
 				<SettingsItem
 					actions={
 						<Switch
-							aria-label={AUTO_SELECT_POLICY}
+							aria-label={autoSelectPolicy()}
 							checked={autoSelect}
 							onCheckedChange={setAutoSelect}
 						/>
@@ -101,7 +107,7 @@ export function AutoSelectRow({
 					</p>
 				</div>
 				<Switch
-					aria-label={AUTO_SELECT_POLICY}
+					aria-label={autoSelectPolicy()}
 					checked={autoSelect}
 					className="shrink-0"
 					onCheckedChange={setAutoSelect}

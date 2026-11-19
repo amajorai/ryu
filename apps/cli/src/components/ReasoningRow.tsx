@@ -16,6 +16,7 @@ import {
 	reasoningTitle,
 	TRANSCRIPT_LIMITS,
 } from "../core/transcriptPresentation.ts";
+import { CLI_TRANSLATOR, type CliTranslator } from "../i18n/translate.ts";
 
 export interface ReasoningRowProps {
 	endedAt?: number;
@@ -28,25 +29,35 @@ export interface ReasoningRowProps {
  * Header segments for a reasoning row. The lead and suffix never shrink, so a
  * narrow pane truncates only the title and always keeps the marker and duration.
  */
-export function reasoningHeaderParts({
-	endedAt,
-	expanded,
-	startedAt,
-	streaming,
-	text,
-}: ReasoningRowProps & { expanded: boolean }): {
+export function reasoningHeaderParts(
+	{
+		endedAt,
+		expanded,
+		startedAt,
+		streaming,
+		text,
+	}: ReasoningRowProps & { expanded: boolean },
+	translator: Pick<CliTranslator, "tf" | "tr"> = CLI_TRANSLATOR
+): {
 	lead: string;
 	suffix: string;
 	title: string;
 } {
+	const { tf, tr } = translator;
 	const title = reasoningTitle(text);
 	if (streaming) {
-		return { lead: title ? "Thinking:" : "Thinking", title, suffix: "" };
+		return {
+			lead: title ? tr("Thinking:") : tr("Thinking"),
+			title,
+			suffix: "",
+		};
 	}
 	const duration = formatReasoningDuration(startedAt, endedAt);
 	const marker = expanded ? "-" : "+";
 	return {
-		lead: title ? `${marker} Thought:` : `${marker} Thought`,
+		lead: title
+			? tf("{marker} Thought:", { marker })
+			: tf("{marker} Thought", { marker }),
 		title,
 		suffix: duration ? `· ${duration}` : "",
 	};

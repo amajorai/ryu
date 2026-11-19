@@ -37,10 +37,10 @@ function CloseButton({
 	const tl = useLiteralMessages();
 	return (
 		<Button
-			aria-label={label}
+			aria-label={tl(label)}
 			onClick={onClose}
 			size="icon-sm"
-			title={tl("{label} (Esc)", { label })}
+			title={tl("{label} (Esc)", { label: tl(label) })}
 			type="button"
 			variant="ghost"
 		>
@@ -160,7 +160,7 @@ export function BankTransactionPanel({
 	const inlineSign = useInlineSign();
 	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
-	const label = transaction.label.trim() || "Transaction";
+	const label = transaction.label.trim() || tl("Transaction");
 	return (
 		<motion.aside
 			animate={{ opacity: 1, x: 0 }}

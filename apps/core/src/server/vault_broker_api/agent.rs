@@ -14,6 +14,9 @@ use crate::vault::broker::oauth::OAuthStatus;
 pub async fn agent_create_session(headers: HeaderMap, Json(body): Json<SessionBody>) -> Response {
     let store = tri!(store());
     let (principal, policies) = tri!(machine_only(&headers).await);
+    if body.never_expires {
+        return invalid_request("a machine token cannot mint a session that never expires");
+    }
     {
         let conn = store.conn.lock().await;
         if let Err(error) = sessions::check_minting_token(&conn, &principal.accessor) {
@@ -35,6 +38,19 @@ pub async fn agent_create_session(headers: HeaderMap, Json(body): Json<SessionBo
         })
         .await
     );
+    // Delegation and remote use need explicit grants: no baseline.
+    let attrs = tri!(
+        session_attrs(&body, |key| {
+            crate::vault::policy::evaluate_with(
+                &CapabilitySet::new(),
+                &policies,
+                key,
+                &template_context,
+            )
+            .contains(&Capability::Use)
+        })
+        .await
+    );
     let request = sessions::MintRequest {
         environment,
         services: body.services,
@@ -47,7 +63,7 @@ pub async fn agent_create_session(headers: HeaderMap, Json(body): Json<SessionBo
         minted_token: Some(principal.accessor.clone()),
         minter_scope: None,
     };
-    mint_session(store, &principal.actor(), request).await
+    mint_session(store, &principal.actor(), request, attrs).await
 }
 
 /// Discovery for one agent: the services it may broker through, their

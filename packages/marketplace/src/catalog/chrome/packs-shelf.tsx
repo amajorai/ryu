@@ -23,6 +23,7 @@ import {
 } from "@ryu/blocks/desktop/store-error-details.tsx";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { DirectionalIcon } from "@ryu/ui/components/directional-icon.tsx";
 import {
 	Empty,
@@ -39,6 +40,11 @@ import { type KeyboardEvent, useCallback, useRef, useState } from "react";
 import { useCatalogHost } from "../host.tsx";
 import type { SkillPacksState } from "../pack-types.ts";
 import PackCatalogCard from "./pack-catalog-card.tsx";
+import {
+	type InlineSign,
+	packStackTransform,
+	packStepForKey,
+} from "./packs-shelf-motion.ts";
 import SkillBadgeCard from "./skill-badge-card.tsx";
 
 export default function PacksShelf() {
@@ -78,6 +84,7 @@ function PacksShelfBody({
 		Math.max(packs.length - 1, 0)
 	);
 	const isExpanded = hoveredIndex !== null || focusedIndex !== null;
+	const inlineSign: InlineSign = useDirection() === "rtl" ? -1 : 1;
 
 	const focusPack = (index: number) => {
 		if (index < 0 || index >= packs.length) {
@@ -96,14 +103,13 @@ function PacksShelfBody({
 		}
 
 		let nextIndex: number | null = null;
+		const step = packStepForKey(event.key, inlineSign);
 		switch (event.key) {
 			case "ArrowLeft":
 			case "ArrowUp":
-				nextIndex = Math.max(index - 1, 0);
-				break;
 			case "ArrowRight":
 			case "ArrowDown":
-				nextIndex = Math.min(index + 1, packs.length - 1);
+				nextIndex = Math.min(Math.max(index + step, 0), packs.length - 1);
 				break;
 			case "Home":
 				nextIndex = 0;
@@ -241,7 +247,13 @@ function PacksShelfBody({
 						const stackStyle: PackStackStyle = {
 							"--marketplace-z-index":
 								activeIndex === index ? packs.length + 1 : packs.length - index,
-							"--marketplace-transform": `translateX(${isExpanded ? (index - activeIndex) * 3.5 : 0}rem) rotate(${(index - (packs.length - 1) / 2) * 2.5 + (isExpanded ? (index - activeIndex) * 4 : 0)}deg) scale(${activeIndex === index && isExpanded ? 1.03 : 1})`,
+							"--marketplace-transform": packStackTransform({
+								activeIndex,
+								count: packs.length,
+								index,
+								isExpanded,
+								sign: inlineSign,
+							}),
 						};
 						return (
 							<PackCatalogCard

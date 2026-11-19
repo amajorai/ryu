@@ -17,6 +17,12 @@ pub struct IssuerBody {
     common_name: String,
     #[serde(default)]
     ttl_secs: Option<i64>,
+    /// `ec` (default), `rsa`, or `ed25519`.
+    #[serde(default)]
+    key_type: crate::vault::pki::PkiKeyType,
+    /// `ec`: 256 (default) or 384; `rsa`: 2048 (default), 3072, or 4096.
+    #[serde(default)]
+    key_bits: Option<u32>,
 }
 
 /// GET /api/vault/pki/issuers.
@@ -34,7 +40,7 @@ pub async fn pki_issuers(
 
 /// POST /api/vault/pki/issuers creates a root CA.
 #[utoipa::path(post, path = "/api/vault/pki/issuers", tag = "Vault",
-    summary = "Create a root certificate authority (admin)",
+    summary = "Create a root certificate authority (admin; keyType ec, rsa, or ed25519)",
     request_body = serde_json::Value,
     responses((status = 200, description = "Issuer", body = serde_json::Value)))]
 pub async fn pki_create_issuer(
@@ -48,12 +54,17 @@ pub async fn pki_create_issuer(
     {
         return response;
     }
+    let spec = match crate::vault::pki::KeySpec::new(body.key_type, body.key_bits) {
+        Ok(spec) => spec,
+        Err(error) => return vault_error(error),
+    };
     ok_or(
         who.store()
-            .pki_create_root(
+            .pki_create_root_with(
                 &body.name,
                 &body.common_name,
                 body.ttl_secs.unwrap_or(10 * 365 * 86_400),
+                spec,
                 &who.actor(),
             )
             .await,
@@ -265,8 +276,14 @@ pub async fn pki_crl(
 // ── SSH ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-pub struct NameBody {
+#[serde(rename_all = "camelCase")]
+pub struct CreateCaBody {
     name: String,
+    /// `ed25519` (default), `rsa`, or `ecdsa`.
+    #[serde(default)]
+    key_type: crate::vault::ssh::SshCaKeyType,
+    #[serde(default)]
+    key_bits: Option<u32>,
 }
 
 /// GET /api/vault/ssh/cas lists SSH CAs with their public keys.
@@ -287,7 +304,8 @@ pub async fn ssh_cas(
     }
 }
 
-/// POST /api/vault/ssh/cas creates an Ed25519 SSH CA.
+/// POST /api/vault/ssh/cas creates an SSH CA (Ed25519 by default, or RSA or
+/// ECDSA with `keyType` and `keyBits`).
 #[utoipa::path(post, path = "/api/vault/ssh/cas", tag = "Vault",
     summary = "Create an SSH certificate authority (admin)",
     request_body = serde_json::Value,
@@ -296,14 +314,16 @@ pub async fn ssh_create_ca(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
     headers: HeaderMap,
-    Json(body): Json<NameBody>,
+    Json(body): Json<CreateCaBody>,
 ) -> Response {
     let who = who!(human(&state, caller, &headers).await);
     if let Err(response) = who.require(&format!("sys/ssh/cas/{}", body.name), Capability::Admin) {
         return response;
     }
     ok_or(
-        who.store().ssh_create_ca(&body.name, &who.actor()).await,
+        who.store()
+            .ssh_create_ca_with(&body.name, body.key_type, body.key_bits, &who.actor())
+            .await,
         "publicKey",
     )
 }

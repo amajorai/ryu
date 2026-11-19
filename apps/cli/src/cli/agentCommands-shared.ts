@@ -4,7 +4,7 @@
 
 import { resolveLocalNodeToken } from "@ryuhq/core-client/node-token";
 import { cliUserHome } from "../core/cliStatePath.ts";
-import { tf } from "../i18n/translate.ts";
+import { tf, trMessage } from "../i18n/translate.ts";
 import {
 	type AgentTarget,
 	DEFAULT_RYU_AGENT,
@@ -108,7 +108,7 @@ export function printSnippet(
 	} else {
 		if (reason) {
 			ctx.io.err(
-				`${tf("{reason}\nNothing was written. Add this to {configPath}:", { reason, configPath })}\n`
+				`${tf("{reason}\nNothing was written. Add this to {configPath}:", { reason: trMessage(reason), configPath })}\n`
 			);
 		} else {
 			ctx.io.err(`${tf("Add this to {configPath}:", { configPath })}\n`);

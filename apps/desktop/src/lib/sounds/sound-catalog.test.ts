@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { APP_SOUNDS_SETTINGS_ENTRIES } from "../settings-index/app-sounds.ts";
 import {
 	isSoundEventId,
 	isSoundSettingRowId,
@@ -45,6 +46,20 @@ describe("sound catalog", () => {
 		expect(soundSettingRow("mute-unmute").ids).toEqual(["mute", "unmute"]);
 		expect(soundSettingRow("alerts").ids).toEqual(["alert"]);
 		expect(SOUND_SETTING_ROWS).toHaveLength(14);
+	});
+
+	it("files the call cues under Voice calls, in Settings and its search index", () => {
+		// The bare word "Calls" is catalogued as API call counts (ja 呼び出し数).
+		const callRows = SOUND_SETTING_ROWS.filter(
+			(row) => row.group === "Voice calls"
+		).map((row) => row.id);
+		expect(callRows).toEqual(["calling", "join-leave", "mute-unmute"]);
+		for (const row of SOUND_SETTING_ROWS) {
+			const entry = APP_SOUNDS_SETTINGS_ENTRIES.find(
+				(candidate) => candidate.id === `sounds.events.${row.id}`
+			);
+			expect(entry?.group).toBe(row.group);
+		}
 	});
 
 	it("leaves message-sent off by default and everything else on", () => {

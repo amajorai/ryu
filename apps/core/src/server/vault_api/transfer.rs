@@ -43,18 +43,19 @@ pub(super) fn is_caller_refusal(status: u16, value: &Value) -> bool {
 /// Lay the caller's effective local values over the control plane's shared
 /// ones, as runtime resolution does: a local value wins its name, and a name
 /// a local sealed value holds (`withheld`) is dropped, so the shared value it
-/// shadows is never exported in its place.
+/// shadows is never exported in its place. With the caller's personal
+/// overrides off, a personal value only fills a name nothing shared has.
 pub(super) fn overlay_local_values(
-    mut values: BTreeMap<String, String>,
+    values: BTreeMap<String, String>,
     local: BTreeMap<String, (SecretCoords, String)>,
     withheld: &BTreeSet<String>,
+    personal_overrides: bool,
 ) -> BTreeMap<String, String> {
-    values.retain(|name, _| !withheld.contains(name));
-    for (name, (_, value)) in local {
-        values.insert(name, value);
-    }
-    values
+    crate::vault::shared::personal_overrides::overlay(values, local, withheld, personal_overrides)
 }
+
+/// `GET`/`PUT /api/vault/personal-overrides`.
+pub(crate) mod personal_overrides;
 
 /// Body of `POST /api/vault/export`.
 #[derive(Debug, Deserialize)]
@@ -250,7 +251,9 @@ pub(super) async fn export_with(ctx: &Ctx, body: ExportBody) -> Response {
     if let Some(error) = shared_error.as_deref().filter(|_| project_requested) {
         return project_unavailable(StatusCode::SERVICE_UNAVAILABLE, error);
     }
-    let mut values = overlay_local_values(values, local, &withheld);
+    let overrides =
+        crate::vault::shared::personal_overrides::enabled_for(ctx.store, &context).await;
+    let mut values = overlay_local_values(values, local, &withheld, overrides);
     if let Some(names) = &body.names {
         values.retain(|name, _| names.contains(name));
     }

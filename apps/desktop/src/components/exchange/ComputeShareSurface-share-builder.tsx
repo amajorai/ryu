@@ -1,5 +1,5 @@
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -39,6 +39,14 @@ const AVAILABILITY_OPTIONS: readonly {
 
 export function ShareBuilder() {
 	const tl = useLiteralMessages();
+	// When the node is offered (idle or scheduled hours), not the bare
+	// "Availability" status that product pages use (ja 提供状況).
+	const availabilityLabel =
+		useOptionalI18n()?.t(
+			"computeShare.availabilityWindow",
+			{},
+			"Availability"
+		) ?? "Availability";
 	const activeNode = useNodeStore((state) => state.getActiveNode());
 	const origins = useMemo(
 		() => (activeNode.managed ? [] : shareOriginsForNode(activeNode, null)),
@@ -95,11 +103,14 @@ export function ShareBuilder() {
 					</p>
 				</fieldset>
 				<fieldset className="space-y-2">
-					<legend className="font-medium text-muted-foreground text-xs">
-						Availability
+					<legend
+						className="font-medium text-muted-foreground text-xs"
+						data-ryu-i18n="off"
+					>
+						{availabilityLabel}
 					</legend>
 					<ToggleGroup
-						aria-label="Availability"
+						aria-label={availabilityLabel}
 						multiple={false}
 						onValueChange={(values: string[]) => {
 							const value = values[0];

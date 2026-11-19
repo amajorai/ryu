@@ -94,6 +94,7 @@ import {
 	type ToolBridgePlan,
 } from "@/src/lib/api/agent-egress.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { agentEgressCaptionSentences } from "./AgentEgressSection-caption.ts";
 import { ToolsPlanPreview } from "./AgentEgressSection-plan-preview.tsx";
 import { EgressRow } from "./AgentEgressSection-row.tsx";
 
@@ -143,25 +144,15 @@ export function AgentEgressSection({ target }: { target: ApiTarget }) {
 	// have Ryu's tools and still talk to its provider directly, so a single total
 	// would be a number with no referent.
 	const caption = view
-		? `${tl(
-				"Tools: {toolsOnCount} have Ryu's tools · {toolsOffCount} do not · {toolsOtherCount} not applicable.",
-				{
-					toolsOnCount: String(view.toolsOnCount),
-					toolsOffCount: String(view.toolsOffCount),
-					toolsOtherCount: String(view.toolsOtherCount),
-				}
-			)} ${tl(
-				"Model traffic: {governedCount} through the gateway · {bestEffortCount} pointed at it · {directCount} straight to the provider · {otherCount} local or unknown.",
-				{
-					governedCount: String(view.governedCount),
-					bestEffortCount: String(view.bestEffortCount),
-					directCount: String(view.directCount),
-					otherCount: String(view.otherCount),
-				}
-			)} ` +
-			"Only calls that reach the gateway are filtered by the rules above, counted against your spending limits, or recorded in the activity log. " +
-			"These are the only two layers shown here. Command approval above is node-wide, and plugin hooks are a separate layer again."
-		: "What each agent can reach: Ryu's tools, and whether its model calls pass through this gateway.";
+		? agentEgressCaptionSentences(view, tl).map((sentence, index) => (
+				<span key={sentence}>
+					{index > 0 ? " " : null}
+					{sentence}
+				</span>
+			))
+		: tl(
+				"What each agent can reach: Ryu's tools, and whether its model calls pass through this gateway."
+			);
 
 	return (
 		<SettingsSection caption={caption} title="Agent tools and model traffic">

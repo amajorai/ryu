@@ -25,12 +25,17 @@ const TIER_SUBSEQUENCE = 1;
 const SUBSEQUENCE_COMPACTNESS_BONUS = 0.3;
 const RECENT_BOOST = 0.1;
 
-const WHITESPACE = /\s+/g;
-const WORD_SPLIT = /[^a-z0-9]+/;
+const WHITESPACE = /\s+/gu;
+/** Any run of characters that is neither a letter nor a digit, in any script. */
+const WORD_SPLIT = /[^\p{L}\p{M}\p{N}]+/u;
 
-/** Lowercase and collapse runs of whitespace (keeps inner single spaces). */
+/**
+ * Fold width variants (full-width ｃｈａｔ, half-width ｶﾅ) with NFKC, lowercase
+ * without the host locale's special cases, and collapse runs of whitespace
+ * (keeps inner single spaces).
+ */
 export function normalisePaletteQuery(query: string): string {
-	return query.toLowerCase().replace(WHITESPACE, " ").trim();
+	return query.normalize("NFKC").toLowerCase().replace(WHITESPACE, " ").trim();
 }
 
 function compact(text: string): string {

@@ -280,7 +280,7 @@ export function PersonaContext({
 											latest
 												? tl("Open {threadTitle}", {
 														threadTitle:
-															latest.title || "the latest conversation",
+															latest.title || tl("the latest conversation"),
 													})
 												: "Show goals"
 										}

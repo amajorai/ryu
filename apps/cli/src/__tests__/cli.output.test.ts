@@ -117,6 +117,30 @@ test("formatError omits the parenthetical when a lifecycle error has no hint", (
 	expect(formatError(err)).toBe("Blocked.");
 });
 
+test("formatError renders a lifecycle refusal from its typed fields in the CLI locale", () => {
+	const translator = createCliTranslator("de", {
+		"{plugin} is needed by {names}. Disable {names} first.":
+			"{plugin} wird von {names} benötigt. Deaktivieren Sie zuerst {names}.",
+		"Use --force": "Verwenden Sie --force",
+	});
+	const err = Object.assign(
+		new Error(
+			"calendar is needed by meetings, notes. Disable meetings, notes first."
+		),
+		{
+			dependencyError: {
+				code: "blocked_by_dependents",
+				plugin: "calendar",
+				dependents: ["meetings", "notes"],
+			},
+			hint: "Use --force",
+		}
+	);
+	expect(formatError(err, translator)).toBe(
+		"calendar wird von meetings und notes benötigt. Deaktivieren Sie zuerst meetings und notes. (Verwenden Sie --force)"
+	);
+});
+
 // ── errorToJson ─────────────────────────────────────────────────────────────
 
 test("errorToJson emits a flat {error} for a plain Error", () => {
@@ -281,4 +305,28 @@ test("localized values nest, keeping each part English for machines", () => {
 		"App- oder Plugin-ID fehlt. Aufruf: ryu-cli add <id>"
 	);
 	expect(formatError(new UsageError(text))).toBe(text.english);
+});
+
+test("formatError names Core's address for a refused connection, in the CLI locale", () => {
+	const translator = createCliTranslator("de", {
+		"Core isn't reachable at {hostPort}":
+			"Core ist unter {hostPort} nicht erreichbar",
+		"Core isn't reachable": "Core ist nicht erreichbar",
+	});
+	const refused = Object.assign(new Error("Unable to connect."), {
+		code: "ConnectionRefused",
+	});
+	expect(
+		formatError(refused, translator, { url: "http://127.0.0.1:7979/api" })
+	).toBe("Core ist unter 127.0.0.1:7979 nicht erreichbar");
+	expect(formatError(refused, translator)).toBe("Core ist nicht erreichbar");
+	const identity = new TypeError(
+		"Ryu Core is not reachable at http://localhost:7980"
+	);
+	expect(formatError(identity, translator)).toBe(
+		"Core ist unter localhost:7980 nicht erreichbar"
+	);
+	expect(errorToJson(identity)).toEqual({
+		error: "Ryu Core is not reachable at http://localhost:7980",
+	});
 });

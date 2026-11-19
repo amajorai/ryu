@@ -69,10 +69,10 @@ export function VaultSealControl({
 			await sealVault(target);
 			setConfirmSeal(false);
 			await refresh();
-			sileo.success({ title: "Vault sealed" });
+			sileo.success({ title: tl("Vault sealed") });
 		} catch (caught) {
 			sileo.error({
-				title: "Could not seal",
+				title: tl("Could not seal"),
 				description: vaultErrorMessage(caught, "Try again.", tl),
 			});
 		} finally {
@@ -99,7 +99,7 @@ export function VaultSealControl({
 				});
 			} else {
 				setUnsealOpen(false);
-				sileo.success({ title: "Vault unsealed" });
+				sileo.success({ title: tl("Vault unsealed") });
 			}
 		} catch (caught) {
 			setShare("");

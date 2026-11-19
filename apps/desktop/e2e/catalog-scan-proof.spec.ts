@@ -26,7 +26,7 @@ test("catalog scorecards expose the configured-agent review", async ({
 		"catalog-reviewer"
 	);
 	await expect(page.getByTestId("catalog-scan-result").first()).toContainText(
-		"Complete"
+		"Full audit"
 	);
 	await page.screenshot({
 		fullPage: true,

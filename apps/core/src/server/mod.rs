@@ -210,6 +210,7 @@ pub mod vault_engines_api;
 pub mod vault_external_api;
 pub mod vault_items_api;
 pub mod vault_kv_api;
+mod vault_kv_shared;
 pub mod vault_pm_api;
 pub mod vault_policy_ext_api;
 pub mod vault_seal_dynamic_api;

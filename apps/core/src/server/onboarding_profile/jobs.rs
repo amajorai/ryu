@@ -60,7 +60,8 @@ pub(super) fn prune_profile_jobs(guard: &mut HashMap<String, ProfileJob>, now: i
             job.cancel_requested = true;
             job.cancel.cancel();
             job.state = JobState::Failed;
-            job.error = Some("profile job expired; start onboarding again".to_owned());
+            job.error = Some(ProfileBuildError::Expired.to_string());
+            job.error_code = Some(ProfileBuildError::Expired.code());
         }
     }
     guard.retain(|_, job| {
@@ -92,10 +93,10 @@ pub(super) async fn verify_profile_onboarding_snapshot(
         .await
         .context("node onboarding state became unavailable")?;
     if !profile_onboarding_snapshot_matches(&current, expected) {
-        anyhow::bail!("node onboarding context changed; restart the profile build");
+        anyhow::bail!(ProfileBuildError::ContextChanged);
     }
     if expected.setup_kind == NodeSetupKind::Team && !expected.company_knowledge_enabled {
-        anyhow::bail!("shared company knowledge is disabled for this node");
+        anyhow::bail!(ProfileBuildError::CompanyKnowledgeDisabled);
     }
     Ok(())
 }
@@ -106,6 +107,7 @@ pub(super) fn view(id: &str, job: &ProfileJob) -> ProfileJobView {
         background: job.background,
         conversation_id: job.conversation_id.clone(),
         error: job.error.clone(),
+        error_code: job.error_code,
         id: id.to_owned(),
         // Older desktops show "Continue setup" (and hide "Run in background")
         // only once this is true, and older nodes set it as soon as the user

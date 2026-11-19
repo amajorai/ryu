@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { stepUpConfirmSentence } from "./copy.ts";
 
 /**
  * The step-up ("confirm it's you") client, shared by every surface that can be
@@ -14,6 +15,13 @@ import { z } from "zod";
  * The server half lives in packages/api/src/routers/step-up.ts; the scopes and
  * their meaning in packages/auth/src/lib/step-up.ts.
  */
+
+export {
+	STEP_UP_CONFIRM_COPY,
+	STEP_UP_METHOD_LABEL,
+	stepUpConfirmSentence,
+} from "./copy.ts";
+export { type EmailRetryWait, emailRetryWait } from "./retry-wait.ts";
 
 /** Kept in step with STEP_UP_SCOPES in packages/auth/src/lib/step-up.ts. */
 export type StepUpScope =
@@ -90,7 +98,19 @@ interface StepUpRequestBody {
 const stepUpErrorSchema = z.object({
 	message: z.unknown().optional(),
 	error: z.unknown().optional(),
+	retryAfter: z.unknown().optional(),
 });
+/** A wait in seconds: a JSON number in the body, decimal digits in the header. */
+const retryAfterSchema = z
+	.union([
+		z.number(),
+		z
+			.string()
+			.trim()
+			.regex(/^\d+(?:\.\d+)?$/u)
+			.transform(Number),
+	])
+	.pipe(z.number().positive().finite());
 const stepUpRequiredSchema = z.object({
 	error: z.union([
 		z.literal("STEP_UP_REQUIRED"),
@@ -147,17 +167,21 @@ export interface StepUpClient {
 }
 
 /**
- * A refused step-up request. `message` is the server's reason in the user's
- * language; `status` lets a surface tell a wait (429, e.g. the one-minute email
- * cooldown, whose message says how long) from a failure.
+ * A refused step-up request. `message` is the server's reason; `status` lets a
+ * surface tell a wait (429, e.g. the one-minute email cooldown) from a
+ * failure. `retryAfter` is that wait in whole seconds, from the body or the
+ * `Retry-After` header, so a surface can say it in the user's language
+ * (`emailRetryWait`) instead of showing the server's English sentence.
  */
 export class StepUpRequestError extends Error {
+	readonly retryAfter: number | undefined;
 	readonly status: number;
 
-	constructor(message: string, status: number) {
+	constructor(message: string, status: number, retryAfter?: number) {
 		super(message);
 		this.name = "StepUpRequestError";
 		this.status = status;
+		this.retryAfter = retryAfter;
 	}
 }
 
@@ -171,8 +195,10 @@ const MAX_MESSAGE_LENGTH = 500;
  * `res.json()` failing still drains it. Hono's `HTTPException` answers in plain
  * text, so both shapes have to work.
  */
-async function reasonFrom(res: Response): Promise<string> {
-	const fallback = `Request failed (${res.status})`;
+async function reasonFrom(
+	res: Response
+): Promise<{ message: string; retryAfter?: unknown }> {
+	const fallback = { message: `Request failed (${res.status})` };
 	let text: string;
 	try {
 		text = await res.text();
@@ -190,7 +216,10 @@ async function reasonFrom(res: Response): Promise<string> {
 				.string()
 				.safeParse(body.data.message ?? body.data.error);
 			if (fromJson.success && fromJson.data.trim()) {
-				return fromJson.data.trim();
+				return {
+					message: fromJson.data.trim(),
+					retryAfter: body.data.retryAfter,
+				};
 			}
 		}
 	} catch {
@@ -199,11 +228,30 @@ async function reasonFrom(res: Response): Promise<string> {
 	if (trimmed.startsWith("<") || trimmed.length > MAX_MESSAGE_LENGTH) {
 		return fallback;
 	}
-	return trimmed;
+	return { message: trimmed };
+}
+
+/** The wait a 429 names, in whole seconds: the body's, else `Retry-After`. */
+function retryAfterFrom(res: Response, fromBody: unknown): number | undefined {
+	if (res.status !== 429) {
+		return undefined;
+	}
+	for (const candidate of [fromBody, res.headers.get("retry-after")]) {
+		const seconds = retryAfterSchema.safeParse(candidate ?? undefined);
+		if (seconds.success) {
+			return Math.ceil(seconds.data);
+		}
+	}
+	return undefined;
 }
 
 async function refusal(res: Response): Promise<StepUpRequestError> {
-	return new StepUpRequestError(await reasonFrom(res), res.status);
+	const { message, retryAfter } = await reasonFrom(res);
+	return new StepUpRequestError(
+		message,
+		res.status,
+		retryAfterFrom(res, retryAfter)
+	);
 }
 
 export function createStepUpClient(options: StepUpClientOptions): StepUpClient {
@@ -286,8 +334,14 @@ export function isStepUpRequired(
 
 /**
  * The prompt's single instruction line: what is about to happen and which code
- * answers for it. One sentence, not two — the same shape as the subtitle on the
+ * answers for it. One sentence, not two: the same shape as the subtitle on the
  * device-activation page every surface already shows.
+ *
+ * A known `scope` reads its whole catalogued sentence from `copy.ts`, so every
+ * surface can translate it by exact match. A scope this client does not know
+ * (a newer server), or a caller with no scope, falls back to the server's
+ * English `action` in the template below, which is also what each catalogued
+ * sentence is byte-for-byte in English.
  */
 const WHERE_THE_CODE_IS = {
 	backup: "one of your backup codes",
@@ -301,7 +355,12 @@ export function stepUpPromptLine(input: {
 	action: string;
 	enrolmentRequired?: boolean;
 	method: StepUpMethod;
+	scope?: StepUpScope;
 }): string {
+	const catalogued = stepUpConfirmSentence(input);
+	if (catalogued !== null) {
+		return catalogued;
+	}
 	if (input.enrolmentRequired) {
 		return `You're about to ${input.action}. This can't be undone.`;
 	}
@@ -331,12 +390,3 @@ export const STEP_UP_CODE_LENGTH = {
 export function isFreeTextCode(method: StepUpMethod): boolean {
 	return method === "backup" || method === "password";
 }
-
-/** Label for the button that switches to a given factor. */
-export const STEP_UP_METHOD_LABEL = {
-	backup: "Use a backup code",
-	"magic-link": "Email me a verification link",
-	otp: "Email me a code",
-	password: "Use your password",
-	totp: "Use my authenticator app",
-} satisfies Record<StepUpMethod, string>;

@@ -1,4 +1,4 @@
-import { translate as tr } from "@ryu/i18n/lite";
+import { translate as tr, translateMessage } from "@ryu/i18n/lite";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -180,7 +180,9 @@ export function QaAsk({
 			<Field
 				hint="One specific question. It becomes the thread's title."
 				htmlFor={titleId}
-				label="Question"
+				// An asked question, not an exam item (the bare catalog
+				// "Question", ja "問題").
+				label={translateMessage("qa.question", {}, "Question")}
 			>
 				<Input
 					autoComplete="off"

@@ -9,6 +9,7 @@ import type {
 	VaultExternalStore,
 	VaultExternalStoreInput,
 } from "@/src/lib/api/vault-external.ts";
+import { kvStoreLabel } from "./vault-store-form.ts";
 
 export type SyncTargetKind =
 	| "github-actions"
@@ -71,7 +72,11 @@ const STORE_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 export function syncTargetLabel(kind: string): string {
-	return SYNC_TARGETS.find((target) => target.kind === kind)?.label ?? kind;
+	return (
+		SYNC_TARGETS.find((target) => target.kind === kind)?.label ??
+		kvStoreLabel(kind) ??
+		kind
+	);
 }
 
 function optional(value: string): string | undefined {

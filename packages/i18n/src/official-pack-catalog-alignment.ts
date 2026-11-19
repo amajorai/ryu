@@ -14,6 +14,9 @@ import type { LanguagePack } from "./pack.ts";
  * built-in list. `tools/check-i18n-named-packs.mjs` fails when a pack value is
  * English again while the catalog translates it, unless `untranslated.json`
  * allowlists the word for that locale.
+ *
+ * German and Brazilian Portuguese keep the glossary term "Skills" for the
+ * Skills page and Store tab, so their packs carry no "Skills" override here.
  */
 export const OFFICIAL_PACK_CATALOG_ALIGNMENT: Readonly<
 	Record<string, Readonly<Record<string, string>>>
@@ -32,13 +35,10 @@ export const OFFICIAL_PACK_CATALOG_ALIGNMENT: Readonly<
 		[literalMessageId("Self-hosted")]: "Selbst gehostet",
 		[literalMessageId("Threads")]: "Unterhaltungen",
 		"marketplace.section.marketplaces": "Marktplätze",
-		"marketplace.section.skills": "Fähigkeiten",
-		"marketplace.skills": "Fähigkeiten",
 		"marketplace.support.legacy": "Veraltet",
 		"nav.marketplace": "Marktplatz",
 		"settings.nav.updates": "Aktualisierungen",
 		"settings.page.updates": "Aktualisierungen",
-		"sidebar.section.skills": "Fähigkeiten",
 		"sidebar.section.tabs": "Registerkarten",
 	},
 	es: {
@@ -84,11 +84,8 @@ export const OFFICIAL_PACK_CATALOG_ALIGNMENT: Readonly<
 		[literalMessageId("Threads")]: "Conversas",
 		"marketplace.section.engines": "Motores",
 		"marketplace.section.marketplaces": "Mercados",
-		"marketplace.section.skills": "Habilidades",
-		"marketplace.skills": "Habilidades",
 		"nav.marketplace": "Mercado",
 		"sidebar.section.engines": "Motores",
-		"sidebar.section.skills": "Habilidades",
 	},
 	ru: {
 		"common.marketplace": "Маркетплейс",

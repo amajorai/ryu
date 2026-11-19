@@ -16,6 +16,7 @@ import { Modal, modalRowId } from "../../ui/Modal.tsx";
 import { SelectableRow } from "../../ui/SelectableRow.tsx";
 import { useTerminalTheme } from "../../ui/TerminalThemeProvider.tsx";
 import { useToast } from "../../ui/toast.tsx";
+import { helpOverlayLines } from "./help-lines.ts";
 import type { Overlay } from "./types.ts";
 
 function ThemePickerOverlay({
@@ -379,9 +380,7 @@ export function OverlayView({
 				)
 			: rows;
 		const matchingRows = requestedRows.length > 0 ? requestedRows : rows;
-		const lines = matchingRows.map(
-			(row) => `${row.usage} — ${row.description}`
-		);
+		const lines = helpOverlayLines(matchingRows);
 		return (
 			<Modal
 				hint="Enter/Esc close"

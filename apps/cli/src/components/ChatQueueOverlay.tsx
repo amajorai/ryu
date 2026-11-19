@@ -3,8 +3,7 @@
 import { useKeyboard } from "@opentui/react";
 
 import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { tf } from "../i18n/translate.ts";
-
+import { tf, tr } from "../i18n/translate.ts";
 import {
 	type ChatQueueEntry,
 	type ChatQueueMoveHandler,
@@ -13,6 +12,7 @@ import {
 	type ChatQueueSelectHandler,
 	chatQueueEntryKey,
 } from "./ChatQueueBar.tsx";
+import { queueActionHints } from "./chat-queue-hints.ts";
 
 const DEFAULT_MAX_VISIBLE_ROWS = 8;
 const DEFAULT_PREVIEW_LENGTH = 68;
@@ -78,18 +78,16 @@ const overlayHints = (
 	onMove: ChatQueueOverlayProps["onMove"],
 	onRemove: ChatQueueOverlayProps["onRemove"]
 ): string =>
-	[
-		"↑↓ move",
-		onMove ? "⇧↑↓ reorder" : null,
-		onRemove ? "x remove" : null,
-		onClear ? clearHint : null,
-		"Esc cancel",
-	]
-		.filter((hint): hint is string => Boolean(hint))
-		.join(" · ");
+	queueActionHints({
+		cancelHint: tr("Esc cancel"),
+		clearHint,
+		onClear,
+		onMove,
+		onRemove,
+	});
 
 export function ChatQueueOverlay({
-	clearHint = "c clear",
+	clearHint = tr("c clear"),
 	focused = true,
 	items,
 	maxPreviewLength = DEFAULT_PREVIEW_LENGTH,

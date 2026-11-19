@@ -4,7 +4,7 @@ import {
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import {
@@ -185,20 +185,25 @@ export function toFlowEdges(
 	}));
 }
 
-export function formatScope(node: SkillRelationNode): string | null {
+export function formatScope(
+	node: SkillRelationNode,
+	tl: LiteralMessage
+): string | null {
 	if (node.kind !== "agent") {
 		return null;
 	}
 	if (node.scopeUnavailable) {
-		return "Scope unavailable; showing the all-enabled default.";
+		return tl("Scope unavailable; showing the all-enabled default.");
 	}
 	if (node.scope === "all-enabled") {
-		return "Can use every enabled skill on this node.";
+		return tl("Can use every enabled skill on this node.");
 	}
 	if (node.scope === "none") {
-		return "Explicitly configured with no skills.";
+		return tl("Explicitly configured with no skills.");
 	}
-	return "Can use the skills in its allowlist that are enabled on this node.";
+	return tl(
+		"Can use the skills in its allowlist that are enabled on this node."
+	);
 }
 
 export function edgeLabel(edge: SkillRelationEdge): string {

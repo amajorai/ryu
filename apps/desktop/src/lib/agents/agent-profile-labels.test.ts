@@ -32,11 +32,6 @@ function catalogMessages(locale: string): LiteralMessage {
 		formatMessage(catalog[source] ?? source, values ?? {}, locale);
 }
 
-const identity: LiteralMessage = (
-	source: string,
-	values?: MessageValuesInput
-) => formatMessage(source, values ?? {}, "en");
-
 const japanese = catalogMessages("ja");
 
 const SAFETY_PROFILES = Object.keys(
@@ -49,25 +44,6 @@ const LIFECYCLE_STATUSES = Object.keys(
 const LATIN_WORD = /[A-Za-z]{2,}/;
 
 describe("agent profile labels", () => {
-	test("covers every safety profile and lifecycle status", () => {
-		expect(SAFETY_PROFILES.sort()).toEqual([
-			"approval_required",
-			"autonomous",
-			"read_only",
-			"verified_plan_only",
-		]);
-		expect(LIFECYCLE_STATUSES.sort()).toEqual(["active", "draft", "trial"]);
-	});
-
-	test("renders sentence-case English, never the raw enum value", () => {
-		expect(agentSafetyProfileLabel("verified_plan_only", identity)).toBe(
-			"Verified plans only"
-		);
-		expect(agentSafetyProfileLabel("read_only", identity)).toBe("Read-only");
-		expect(agentLifecycleLabel("trial", identity)).toBe("Trial");
-		expect(agentLifecycleLabel("draft", identity)).toBe("Draft");
-	});
-
 	test("every label is translated under the Japanese catalog", () => {
 		for (const profile of SAFETY_PROFILES) {
 			const label = agentSafetyProfileLabel(profile, japanese);

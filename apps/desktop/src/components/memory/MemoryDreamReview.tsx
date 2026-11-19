@@ -42,13 +42,6 @@ import {
 	undoConflictKind,
 } from "./memory-dream-copy.ts";
 
-function formatReviewDate(timestamp: number): string {
-	if (!timestamp) {
-		return "Not run yet";
-	}
-	return formatLocalDateTime(timestamp);
-}
-
 function reviewConflictDescription(kind: ReviewConflictKind): string {
 	switch (kind) {
 		case "already_accepted":
@@ -415,9 +408,11 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 					<div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground text-xs">
 						<span>{dreamSummary(review, tl)}</span>
 						<span>
-							{tl("Last run {date}", {
-								date: formatReviewDate(review.generatedAt),
-							})}
+							{review.generatedAt
+								? tl("Last run {date}", {
+										date: formatLocalDateTime(review.generatedAt),
+									})
+								: tl("Not run yet")}
 						</span>
 					</div>
 					<div className="flex flex-col gap-3">

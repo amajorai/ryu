@@ -1,4 +1,4 @@
-import { OWN_SUPPLY_POOLS } from "@ryu/auth/lib/credit-pools";
+import { OWN_SUPPLY_POOLS, RETIRED_POOL_IDS } from "@ryu/auth/lib/credit-pools";
 import type { UsageGranularity, UsageSource } from "./usage-analytics-types.ts";
 
 export const GRANULARITY_LABELS = {
@@ -124,6 +124,10 @@ export const POOL_PROVIDER_LABELS: Record<string, string> = {
 			pool.gatewayProviders.map((provider) => [provider, RYU_ROUTER_LABEL])
 		)
 	),
+	// A retired pool (Bedrock) has no gateway slot of its own any more, but the
+	// gateway still holds and masks its slot id as Ryu (`RETIRED_RYU_SLOTS`), and
+	// existing usage and ledger rows carry that id.
+	...Object.fromEntries(RETIRED_POOL_IDS.map((id) => [id, RYU_ROUTER_LABEL])),
 	// The provider id the gateway reports for managed Ryu Router work.
 	ryu: RYU_ROUTER_LABEL,
 };

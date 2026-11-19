@@ -195,7 +195,9 @@ pub fn is_tool(name: &str) -> bool {
 pub fn agent_headers(incoming: &HeaderMap) -> Option<HeaderMap> {
     let mut headers = HeaderMap::new();
     if let Some(token) = header_value(incoming, VAULT_TOKEN_HEADER) {
-        headers.insert(VAULT_TOKEN_HEADER, HeaderValue::from_str(token).ok()?);
+        let mut value = HeaderValue::from_str(token).ok()?;
+        value.set_sensitive(true);
+        headers.insert(VAULT_TOKEN_HEADER, value);
         return Some(headers);
     }
     let session = header_value(incoming, BROKER_SESSION_HEADER)?;
@@ -207,7 +209,8 @@ pub fn agent_headers(incoming: &HeaderMap) -> Option<HeaderMap> {
     if !session.starts_with(sessions::TOKEN_PREFIX) {
         return None;
     }
-    let bearer = HeaderValue::from_str(&format!("Bearer {session}")).ok()?;
+    let mut bearer = HeaderValue::from_str(&format!("Bearer {session}")).ok()?;
+    bearer.set_sensitive(true);
     headers.insert(header::AUTHORIZATION, bearer);
     Some(headers)
 }
@@ -220,7 +223,15 @@ pub fn agent_headers(incoming: &HeaderMap) -> Option<HeaderMap> {
 pub struct HostedClient {
     pub peer: Option<SocketAddr>,
     pub forwarded_for: Option<HeaderValue>,
+    /// Rate-quota bucket for an in-process caller that has no address of its
+    /// own (an ACP run's bridge): see [`QuotaClientKey`].
+    pub quota_key: Option<String>,
 }
+
+/// A request extension naming the rate-quota bucket of an in-process call.
+/// Only Core code inserts extensions, so a network client cannot pick one.
+#[derive(Debug, Clone)]
+pub struct QuotaClientKey(pub String);
 
 impl HostedClient {
     /// The client of the HTTP request currently being served.
@@ -228,6 +239,7 @@ impl HostedClient {
         Self {
             peer: crate::server::trace_context::request_peer(),
             forwarded_for: incoming.get("x-forwarded-for").cloned(),
+            quota_key: None,
         }
     }
 }
@@ -308,6 +320,9 @@ fn agent_request(
     );
     if let Some(forwarded) = client.forwarded_for {
         headers.insert("x-forwarded-for", forwarded);
+    }
+    if let Some(key) = client.quota_key {
+        request.extensions_mut().insert(QuotaClientKey(key));
     }
     if let Some(peer) = client.peer {
         request.extensions_mut().insert(ConnectInfo(peer));

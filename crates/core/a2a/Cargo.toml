@@ -15,7 +15,7 @@ chrono = { version = "0.4", features = ["serde"] }
 ed25519-dalek = "2"
 rand = "0.8"
 reqwest = { version = "0.12", features = ["json", "stream"] }
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

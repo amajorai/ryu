@@ -50,7 +50,10 @@ async fn writes_are_normalized_validated_and_need_an_existing_agent() {
     let (status, body) =
         read(write_allowlist(&state, &None, &agent_id, Some(bad.as_slice())).await).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(body["error"].as_str().unwrap().contains("host name"));
+    assert_eq!(
+        body["error"],
+        "Each allowed site must be a host name such as example.com, or *.example.com for its subdomains."
+    );
     assert_eq!(
         super::global().get(&agent_id).unwrap(),
         Some(strings(&["*.example.org", "example.com"])),

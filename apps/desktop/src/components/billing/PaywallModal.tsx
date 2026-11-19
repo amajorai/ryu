@@ -9,7 +9,7 @@
 // license (the primary action), or reveal the license field and enter a key
 // (validated via the control plane → Polar).
 
-import { DESKTOP_TRIAL_LABEL, planLimit } from "@ryu/auth/lib/plans";
+import { planLimit } from "@ryu/auth/lib/plans";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -26,6 +26,7 @@ import { useEffect, useRef, useState } from "react";
 import { sileo } from "sileo";
 import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { desktopTrialLabel } from "@/src/components/settings/desktop-trial-copy.ts";
 import type { LicenseValidateResult } from "@/src/lib/api/billing.ts";
 import { LicenseValidateError } from "@/src/lib/api/billing.ts";
 
@@ -113,7 +114,7 @@ export function PaywallModal({
 						{intent === "tabs"
 							? "Open more tabs with a desktop license"
 							: tl("Your {trialLabel} has ended", {
-									trialLabel: DESKTOP_TRIAL_LABEL,
+									trialLabel: desktopTrialLabel(tl),
 								})}
 					</DialogTitle>
 					<DialogDescription>

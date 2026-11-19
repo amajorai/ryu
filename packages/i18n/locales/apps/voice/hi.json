@@ -273,6 +273,7 @@
   "Replay, regenerate or download a take, or send its script and settings back to the Studio.": "किसी टेक को फिर से चलाएँ, दोबारा जनरेट करें या डाउनलोड करें, या उसकी स्क्रिप्ट और सेटिंग वापस स्टूडियो में भेजें।",
   "Reroll": "फिर से बनाएँ",
   "Reset to defaults": "डिफ़ॉल्ट पर रीसेट करें",
+  "Respell words the engine gets wrong. Entries match whole words; write {syntax} in a script for a one-off.": "जिन शब्दों का उच्चारण इंजन गलत करता है, उनकी वर्तनी बदलें। प्रविष्टियाँ पूरे शब्दों से मेल खाती हैं; एक बार के लिए स्क्रिप्ट में {syntax} लिखें।",
   "Retry part {part}": "भाग {part} फिर से आज़माएं",
   "Reverb": "रिवर्ब",
   "Robotic": "रोबोटिक",

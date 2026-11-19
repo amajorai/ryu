@@ -27,6 +27,7 @@ import type {
 	DetailSetupStep,
 	MarketplaceDetail,
 } from "@/src/lib/api/marketplace.ts";
+import { languagePackRowValue } from "./DetailMedia-language-pack.ts";
 import { externalLinks } from "./DetailSections.tsx";
 
 export function ScreenshotGallery({
@@ -225,6 +226,7 @@ export function RunnablesSection({
  *  developer, category, and version, followed by the listing's external links
  *  rendered as external-link icons. Each row renders only when its value exists. */
 export function InformationBlock({ detail }: { detail: MarketplaceDetail }) {
+	const tl = useLiteralMessages();
 	const rows: { label: string; icon: IconSvgElement; value: ReactNode }[] = [];
 	if (detail.capabilities.length > 0) {
 		rows.push({
@@ -266,7 +268,7 @@ export function InformationBlock({ detail }: { detail: MarketplaceDetail }) {
 		rows.push({
 			label: "Language",
 			icon: InformationCircleIcon,
-			value: `${detail.languagePack.locale} · ${detail.languagePack.baseLocale} · ${detail.languagePack.direction.toUpperCase()} · ${detail.languagePack.messageCount} strings`,
+			value: languagePackRowValue(detail.languagePack, tl),
 		});
 	}
 

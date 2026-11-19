@@ -5,7 +5,7 @@ import {
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
 import { AgentIdentityModePicker } from "@/src/components/agents/AgentIdentityModePicker.tsx";
-import { NO_SANDBOX_NOTE } from "@/src/components/agents/AgentLaunchWarning.tsx";
+import { noSandboxNote } from "@/src/components/agents/AgentLaunchWarning.tsx";
 import type { AgentIdentityMode } from "@/src/lib/api/agents.ts";
 
 interface CreateAgentIdentityStepProps {
@@ -37,7 +37,7 @@ export function CreateAgentIdentityStep({
 			/>
 			{showNoSandboxNote ? (
 				<p className="text-detail text-muted-foreground" role="status">
-					{NO_SANDBOX_NOTE}
+					{noSandboxNote()}
 				</p>
 			) : null}
 			<div className="flex justify-end">

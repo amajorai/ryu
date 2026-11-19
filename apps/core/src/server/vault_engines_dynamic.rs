@@ -4,7 +4,8 @@
 //! public paths (and OpenAPI `__path_*` items) stay stable.
 //!
 //! test-exempt: handlers moved verbatim out of `vault_engines_api.rs`; covered by
-//! vault_public_routes_auth_test.rs, vault_engine_roles_tests.rs, and the vault engine tests.
+//! vault_public_routes_auth_test.rs, vault_engine_roles_tests.rs, the vault engine tests, and
+//! vault_engines_dynamic_test.rs (the role write).
 
 use super::*;
 use crate::vault::dynamic::target_guard::RoleWriter;
@@ -37,6 +38,11 @@ pub struct DynamicRoleBody {
     default_ttl_secs: Option<i64>,
     #[serde(default)]
     max_ttl_secs: Option<i64>,
+    /// A configuration manager's explicit acknowledgement that the role's
+    /// current target is right for its pending retry leases (rebinds them
+    /// even when this save does not change the provider config).
+    #[serde(default)]
+    rebind_retry_leases: bool,
 }
 
 /// PUT /api/vault/dynamic/roles/{name}.
@@ -53,19 +59,25 @@ pub async fn dynamic_put_role(
     Json(body): Json<DynamicRoleBody>,
 ) -> Response {
     let who = who!(human(&state, caller, &headers).await);
+    dynamic_put_role_op(&who, &name, body).await
+}
+
+/// [`dynamic_put_role`] for a resolved caller.
+pub(super) async fn dynamic_put_role_op(who: &Who, name: &str, body: DynamicRoleBody) -> Response {
     if let Err(response) = who.require(&format!("sys/dynamic/{name}"), Capability::Admin) {
         return response;
     }
     // A delegated admin's role may only target public hosts (screened at
     // every connect); a configuration manager's keeps the host's network.
-    let manager = matches!(&who, Who::Human(ctx) if ctx.manager);
+    let manager = matches!(who, Who::Human(ctx) if ctx.manager);
     ok_or(
         who.store()
-            .dynamic_put_role_as(
-                &name,
+            .dynamic_put_role_with(
+                name,
                 &body.provider,
                 (body.default_ttl_secs, body.max_ttl_secs),
                 RoleWriter::from_manager(manager),
+                body.rebind_retry_leases,
                 &who.actor(),
             )
             .await,
@@ -240,3 +252,7 @@ pub async fn lease_operation(
     let who = who!(human(&state, caller, &headers).await);
     lease_op(&who, &id, &op, body.and_then(|Json(body)| body.ttl_secs)).await
 }
+
+#[cfg(test)]
+#[path = "vault_engines_dynamic_test.rs"]
+mod tests;

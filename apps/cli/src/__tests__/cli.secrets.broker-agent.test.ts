@@ -201,7 +201,7 @@ test("a machine token takes precedence over the broker session", async () => {
 		}
 	);
 	expect(code).toBe(0);
-	expect(out).toContain("is approved");
+	expect(out).toContain("was approved");
 	expect(node.calls[0]?.vaultToken).toBe("rvt_machine");
 	expect(node.calls[0]?.auth).toBeNull();
 });

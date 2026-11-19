@@ -191,19 +191,48 @@ impl McpRegistry {
         conversation_scope: Option<&'a [String]>,
         configure_approved: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
-        let dispatch = self.call_tool_with_identity_no_gate_scoped_inner(
-            agent_id,
-            tool_id,
-            arguments,
-            allowlist,
-            user_id,
-            profile_ids,
-            session_id,
-            host_conversation_id,
-            composio_connection_scope,
-            conversation_scope,
-            configure_approved,
-        );
+        // The core's future is built and boxed in this synchronous frame, so no
+        // poll frame holds a copy of its state. An app-tool alias hands its target
+        // back through the slot instead of re-entering from inside the core, so the
+        // target dispatches after the core's poll frame has unwound (`app_alias`).
+        let alias_reentry = app_alias::AppAliasSlot::default();
+        let core: std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> =
+            Box::pin(self.call_tool_with_identity_no_gate_scoped_inner(
+                agent_id,
+                tool_id,
+                arguments,
+                allowlist,
+                user_id,
+                profile_ids,
+                session_id,
+                host_conversation_id,
+                composio_connection_scope,
+                conversation_scope,
+                configure_approved,
+                alias_reentry.clone(),
+            ));
+        let dispatch = async move {
+            let result = core.await;
+            match alias_reentry.take() {
+                Some(reentry) => {
+                    self.call_tool_with_identity_no_gate_scoped(
+                        agent_id,
+                        &reentry.tool,
+                        reentry.arguments,
+                        None,
+                        user_id,
+                        &reentry.profile_ids,
+                        reentry.session_id,
+                        host_conversation_id,
+                        composio_connection_scope,
+                        conversation_scope,
+                        configure_approved,
+                    )
+                    .await
+                }
+                None => result,
+            }
+        };
         // Every plane reaches this core, so a sub-turn a tool starts (delegate,
         // coordinator worker, app or workflow run) inherits the profile-activity
         // attribution of the turn that called it, also when the call arrives over

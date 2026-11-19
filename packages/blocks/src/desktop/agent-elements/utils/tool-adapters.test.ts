@@ -43,11 +43,22 @@ describe("mapToolInvocationToStep - naming + detail", () => {
 		expect(
 			mapToolInvocationToStep("1", { toolName: "PlanWrite", state: "call" })
 				.toolName
-		).toBe("Plan");
+		).toBe("Agent plan");
 		expect(
 			mapToolInvocationToStep("2", { toolName: "TodoWrite", state: "call" })
 				.toolName
 		).toBe("Todo");
+	});
+
+	it("keeps other tool names, including Object prototype keys", () => {
+		expect(
+			mapToolInvocationToStep("9", { toolName: "toString", state: "call" })
+				.toolName
+		).toBe("toString");
+		expect(
+			mapToolInvocationToStep("10", { toolName: "Bash", state: "call" })
+				.toolName
+		).toBe("Bash");
 	});
 
 	it("extracts the basename for file tools", () => {

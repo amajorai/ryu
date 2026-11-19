@@ -80,11 +80,11 @@ function CardApprovals({ target }: { target: ApiTarget }) {
 		}) => decideVaultCardApproval(target, id, decision),
 		onSuccess: async (_, { decision }) => {
 			await queryClient.invalidateQueries({ queryKey: ["vault", "broker"] });
-			sileo.success({ title: CARD_DECISION_TOAST[decision] });
+			sileo.success({ title: tl(CARD_DECISION_TOAST[decision]) });
 		},
 		onError: (error) => {
 			sileo.error({
-				title: "Could not update the card approval",
+				title: tl("Could not update the card approval"),
 				description: vaultErrorMessage(error, "Try again.", tl),
 			});
 		},

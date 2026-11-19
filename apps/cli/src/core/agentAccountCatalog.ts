@@ -34,6 +34,20 @@ import { toAgentLaunchCheckBody } from "@ryuhq/core-client/agents";
 import { ApiError } from "@ryuhq/core-client/client";
 import { tf } from "../i18n/translate.ts";
 import {
+	APPS_LOAD_FAILED,
+	COMPOSIO_MISSING,
+	CONNECTED_APPS_LOAD_FAILED,
+	MCP_SERVERS_LOAD_FAILED,
+	MODEL_PROVIDERS_LOAD_FAILED,
+	NO_CONNECTED_APPS,
+	NO_MCP_SIGN_INS,
+	NO_OWN_LOGINS,
+	NO_PROVIDERS_YET,
+	NO_SAVED_SERVICES,
+	OWN_APPS_LOAD_FAILED,
+	OWN_LOGINS_LOAD_FAILED,
+} from "./agentAccountCatalog-notices.ts";
+import {
 	composioRows,
 	mcpOAuthApps,
 	mcpSignInRows,
@@ -132,6 +146,16 @@ const HIDDEN_YOURS =
 	"Your accounts: not shown, because this agent has only its own identity and never uses yours.";
 const HIDDEN_OWN =
 	"Its own accounts: not shown, because this agent acts as you and has no accounts of its own.";
+// Section notices, held as named copy so the catalog carries them.
+const COMPOSIO_UNCHECKED =
+	"Couldn't check whether Composio is set up on this node.";
+const OWN_UNSAVED =
+	"Save the agent first. It can then have accounts of its own.";
+const OWN_APPS_NEED_SAVE =
+	"Save the agent as Its own identity or Both first. It can then connect apps of its own.";
+const NO_OWN_APPS = "No apps connected to its own identity yet.";
+const CATALOG_LOAD_FAILED =
+	"Couldn't load your accounts. Press r to try again.";
 
 // ── Loading ─────────────────────────────────────────────────────────────────
 
@@ -244,25 +268,20 @@ async function loadYourSections(
 			"yours",
 			[],
 			"",
-			"Couldn't check whether Composio is set up on this node."
+			COMPOSIO_UNCHECKED
 		);
 	} else if (connections === null) {
-		connectedApps = section(
-			"connected-apps",
-			"yours",
-			[],
-			"Composio isn't set up on this node."
-		);
+		connectedApps = section("connected-apps", "yours", [], COMPOSIO_MISSING);
 	} else {
 		const rows = connections.ok ? connections.value : [];
 		connectedApps = section(
 			"connected-apps",
 			"yours",
 			rows,
-			"No connected apps yet.",
+			NO_CONNECTED_APPS,
 			connections.ok
 				? null
-				: failure(connections.error, "Couldn't load your connected apps.")
+				: failure(connections.error, CONNECTED_APPS_LOAD_FAILED)
 		);
 	}
 
@@ -271,10 +290,8 @@ async function loadYourSections(
 		"model-providers",
 		"yours",
 		modelProviderRows(providers, input.engine, vendorProvider),
-		"No provider keys yet.",
-		gateway.ok
-			? null
-			: failure(gateway.error, "Couldn't load your model providers.")
+		NO_PROVIDERS_YET,
+		gateway.ok ? null : failure(gateway.error, MODEL_PROVIDERS_LOAD_FAILED)
 	);
 
 	const apps = plugins.ok ? plugins.value : [];
@@ -301,7 +318,7 @@ async function loadYourSections(
 	}
 	let mcpError: string | null = null;
 	if (!plugins.ok) {
-		mcpError = failure(plugins.error, "Couldn't load your apps.");
+		mcpError = failure(plugins.error, APPS_LOAD_FAILED);
 	} else if (mcpFailures.length > 0) {
 		mcpError = tf("Couldn't load the sign-ins of {apps}.", {
 			apps: mcpFailures.join(", "),
@@ -311,25 +328,22 @@ async function loadYourSections(
 		"mcp-sign-ins",
 		"yours",
 		mcpRows,
-		"No MCP servers signed in yet.",
+		NO_MCP_SIGN_INS,
 		mcpError
 	);
 
 	const servers = mcpServers.ok ? mcpServers.value : [];
 	let savedKeysError: string | null = null;
 	if (!mcpServers.ok) {
-		savedKeysError = failure(
-			mcpServers.error,
-			"Couldn't load your MCP servers."
-		);
+		savedKeysError = failure(mcpServers.error, MCP_SERVERS_LOAD_FAILED);
 	} else if (!plugins.ok) {
-		savedKeysError = "Couldn't load your apps.";
+		savedKeysError = APPS_LOAD_FAILED;
 	}
 	const savedKeys = section(
 		"saved-keys",
 		"yours",
 		savedKeyRows(servers, apps),
-		"No services use your saved keys yet.",
+		NO_SAVED_SERVICES,
 		savedKeysError
 	);
 
@@ -349,11 +363,9 @@ async function loadOwnSections(
 ): Promise<AccountSection[]> {
 	const { agentId } = input;
 	if (agentId === null) {
-		const unsaved =
-			"Save the agent first. It can then have accounts of its own.";
 		return [
-			section("own-logins", "own", [], unsaved),
-			section("own-connected-apps", "own", [], unsaved),
+			section("own-logins", "own", [], OWN_UNSAVED),
+			section("own-connected-apps", "own", [], OWN_UNSAVED),
 		];
 	}
 	const savedMode = input.savedIdentityMode ?? input.identityMode;
@@ -381,43 +393,23 @@ async function loadOwnSections(
 		"own-logins",
 		"own",
 		logins.ok ? logins.value : [],
-		"No accounts yet. The agent adds one when it signs up for a site.",
-		logins.ok
-			? null
-			: failure(logins.error, "Couldn't load this agent's accounts.")
+		NO_OWN_LOGINS,
+		logins.ok ? null : failure(logins.error, OWN_LOGINS_LOAD_FAILED)
 	);
 	let ownApps: AccountSection;
 	if (appsNeedSave) {
-		ownApps = section(
-			"own-connected-apps",
-			"own",
-			[],
-			"Save the agent as Its own identity or Both first. It can then connect apps of its own."
-		);
+		ownApps = section("own-connected-apps", "own", [], OWN_APPS_NEED_SAVE);
 	} else if (composioConfigured === null) {
-		ownApps = section(
-			"own-connected-apps",
-			"own",
-			[],
-			"",
-			"Couldn't check whether Composio is set up on this node."
-		);
+		ownApps = section("own-connected-apps", "own", [], "", COMPOSIO_UNCHECKED);
 	} else if (apps === null) {
-		ownApps = section(
-			"own-connected-apps",
-			"own",
-			[],
-			"Composio isn't set up on this node."
-		);
+		ownApps = section("own-connected-apps", "own", [], COMPOSIO_MISSING);
 	} else {
 		ownApps = section(
 			"own-connected-apps",
 			"own",
 			apps.ok ? apps.value : [],
-			"No apps connected to its own identity yet.",
-			apps.ok
-				? null
-				: failure(apps.error, "Couldn't load this agent's connected apps.")
+			NO_OWN_APPS,
+			apps.ok ? null : failure(apps.error, OWN_APPS_LOAD_FAILED)
 		);
 	}
 	return [ownLogins, ownApps];
@@ -472,13 +464,7 @@ export function accountCatalogLoadFailed(error: unknown): AvailableAccounts {
 	return {
 		hiddenGroups: [],
 		sections: [
-			section(
-				"treg",
-				"platform",
-				[],
-				"",
-				failure(error, "Couldn't load your accounts. Press r to try again.")
-			),
+			section("treg", "platform", [], "", failure(error, CATALOG_LOAD_FAILED)),
 		],
 	};
 }

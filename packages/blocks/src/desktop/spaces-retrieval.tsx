@@ -220,7 +220,7 @@ export function RetrievalModeChoice({
  * learns to extract file text, so the sentence does not need a third revision.
  */
 export const RETRIEVAL_MODE_SWITCH_DISCLOSURE =
-	"Changing this rebuilds the entity graph from the documents already in this space; switching back to Vector discards that graph. Documents are never re-embedded, so you can switch back. Switching modes never re-reads an uploaded file's contents.";
+	"Changing this rebuilds the entity graph from the documents already in this space. Switching back to Vector discards that graph. Documents are never re-embedded, so you can switch back. Switching modes never re-reads an uploaded file's contents.";
 
 /**
  * The same disclosure in friendly mode — every clause kept, no term of art.
@@ -238,4 +238,4 @@ export const RETRIEVAL_MODE_SWITCH_DISCLOSURE =
  * next, and it cannot help them.
  */
 export const RETRIEVAL_MODE_SWITCH_DISCLOSURE_FRIENDLY =
-	"Changing this re-reads the documents already in this space to build a map of how they connect; switching back to Quick search throws that map away. Your documents are never read from scratch again, so you can switch back. Switching never re-opens an uploaded file's contents.";
+	"Changing this re-reads the documents already in this space to build a map of how they connect. Switching back to Quick search throws that map away. Your documents are never read from scratch again, so you can switch back. Switching never re-opens an uploaded file's contents.";

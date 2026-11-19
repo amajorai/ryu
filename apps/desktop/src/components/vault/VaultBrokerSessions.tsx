@@ -61,11 +61,11 @@ export function BrokerSessions({
 			await queryClient.invalidateQueries({
 				queryKey: ["vault", "broker", "sessions"],
 			});
-			sileo.success({ title: "Session revoked" });
+			sileo.success({ title: tl("Session revoked") });
 		},
 		onError: (error) => {
 			sileo.error({
-				title: "Could not revoke the session",
+				title: tl("Could not revoke the session"),
 				description: vaultErrorMessage(error, "Try again.", tl),
 			});
 		},

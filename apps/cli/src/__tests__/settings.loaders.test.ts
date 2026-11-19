@@ -7,6 +7,7 @@ import { expect, test } from "bun:test";
 import type { appRequestValueSchema } from "@ryuhq/core-client/app-request-json";
 import type { ApiTarget } from "@ryuhq/core-client/client";
 import type { z } from "zod";
+import { createCliTranslator } from "../i18n/translate.ts";
 import {
 	formatBytes,
 	loadDataCounts,
@@ -18,6 +19,7 @@ import {
 	loadStorage,
 	oneLine,
 	PRIVACY_PREFS,
+	questRows,
 } from "../overlays/settings/loaders.ts";
 
 interface FixtureResponseRoute {
@@ -171,6 +173,30 @@ test("loadQuests shows kind, condition and pinned status", async () => {
 		},
 		{ id: "q2", title: "Keep link", subtitle: "link", badge: "done" },
 	]);
+});
+
+test("quest rows render the default kind and pinned badge in the locale", () => {
+	const german = createCliTranslator("de", {
+		task: "Aufgabe",
+		open: "offen",
+		"{status} · pinned": "{status} · angeheftet",
+	});
+	const [row] = questRows(
+		[
+			{
+				id: "q1",
+				title: "Ship release",
+				completion_condition: "",
+				status: "open",
+				pinned: true,
+				created_at: "2026-09-01T10:00:00Z",
+				updated_at: "2026-09-01T10:00:00Z",
+			},
+		],
+		german
+	);
+	expect(row?.subtitle).toBe("Aufgabe");
+	expect(row?.badge).toBe("offen · angeheftet");
 });
 
 test("loadFeatures labels install and enable state", async () => {

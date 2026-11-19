@@ -3,6 +3,7 @@ import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { listMentionTargetUsers } from "@ryuhq/core-client/notifications";
 import { fetchApps } from "@ryuhq/core-client/plugins";
 import { z } from "zod";
+import { CLI_TRANSLATOR, type CliTranslator } from "../i18n/translate.ts";
 
 export interface SelectedHumanMention {
 	id: string;
@@ -126,6 +127,25 @@ export function selectHumanNotificationTargets({
 	return targets;
 }
 
+/**
+ * The inbox title and body for a mention, the same sentences the desktop
+ * sends. They render in the sender's CLI locale, as on desktop.
+ */
+export function mentionNotificationText(
+	senderName: string,
+	content: string,
+	translator: Pick<CliTranslator, "tf"> = CLI_TRANSLATOR
+): { body: string; title: string } {
+	const { tf } = translator;
+	return {
+		body: tf("{senderName} mentioned you in chat:\n{content}", {
+			content: content.trim(),
+			senderName,
+		}).slice(0, 1800),
+		title: tf("{senderName} mentioned you", { senderName }).slice(0, 120),
+	};
+}
+
 /** Send through Core's existing Inbox host bridge, which revalidates each recipient. */
 export async function notifyMentionedUsers({
 	content,
@@ -137,11 +157,7 @@ export async function notifyMentionedUsers({
 		return { failedNames: [] };
 	}
 
-	const title = `${senderName} mentioned you`.slice(0, 120);
-	const body = `${senderName} mentioned you in chat:\n${content.trim()}`.slice(
-		0,
-		1800
-	);
+	const { body, title } = mentionNotificationText(senderName, content);
 	const results = await Promise.allSettled(
 		mentions.map((mention) =>
 			request(

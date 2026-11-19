@@ -24,8 +24,8 @@ export function defaultInputDir({
 	type,
 	variant,
 }: {
-	type?: string | null;
-	variant?: string | null;
+	type?: string | null | undefined;
+	variant?: string | null | undefined;
 }): InputDirection {
 	if (type && LEFT_TO_RIGHT_TYPES.has(type.toLowerCase())) {
 		return "ltr";

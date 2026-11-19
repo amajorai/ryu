@@ -51,15 +51,21 @@ export function inboxEmptyDescription(
 export function inboxTrayStatus(
 	riskyCount: number,
 	decisionCount: number,
-	totalCount: number
+	totalCount: number,
+	tl: LiteralMessage
 ): string | undefined {
 	let status: string | undefined;
 	if (riskyCount > 0) {
-		status = `${riskyCount} flagged risky`;
+		status = tl(
+			"{count, plural, one {# flagged risky} other {# flagged risky}}",
+			{ count: riskyCount }
+		);
 	} else if (decisionCount > 0) {
 		status = "Waiting on you";
 	} else if (totalCount > 0) {
-		status = `${totalCount} new`;
+		status = tl("{count, plural, one {# new} other {# new}}", {
+			count: totalCount,
+		});
 	}
 	return status;
 }

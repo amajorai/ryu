@@ -4,6 +4,8 @@
 // values. Fields the form does not edit (substitutions, notes, plain-HTTP
 // opt-in, an OAuth binding) are carried over unchanged from the original.
 
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type {
 	VaultBrokerAuth,
 	VaultBrokerAuthType,
@@ -138,8 +140,11 @@ export function serviceFormFromHost(
 	};
 }
 
-function parseHeaders(
-	text: string
+/** Parse "Name: template" header lines; a malformed line is refused with a
+ *  catalogued sentence (the template example is a value, not ICU syntax). */
+export function parseHeaders(
+	text: string,
+	tl: LiteralMessage = translate
 ): { headers: Record<string, string> } | { error: string } {
 	const headers: Record<string, string> = {};
 	for (const raw of text.split("\n")) {
@@ -151,7 +156,11 @@ function parseHeaders(
 		const name = colon > 0 ? line.slice(0, colon).trim() : "";
 		const template = colon > 0 ? line.slice(colon + 1).trim() : "";
 		if (!(HEADER_NAME.test(name) && template)) {
-			return { error: "Write each header as Name: {{secret:REF}}." };
+			return {
+				error: tl("Write each header as Name: {example}.", {
+					example: "{{secret:REF}}",
+				}),
+			};
 		}
 		headers[name] = template;
 	}

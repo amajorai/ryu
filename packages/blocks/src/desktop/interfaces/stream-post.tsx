@@ -208,8 +208,14 @@ function PostHeader({
 						className="size-3.5 shrink-0 text-muted-foreground rtl:-scale-x-100"
 						strokeWidth={2}
 					/>
-					<span className="sr-only">in</span>
-					<span className="truncate">{post.topic}</span>
+					{/* One sentence for screen readers: a bare "in" read as an
+					    environment label (ja "· 環境:") in some catalogs. */}
+					<span className="sr-only" data-ryu-i18n="off">
+						{tr("in {topic}", { topic: post.topic })}
+					</span>
+					<span aria-hidden="true" className="truncate">
+						{post.topic}
+					</span>
 				</span>
 			) : null}
 			<time

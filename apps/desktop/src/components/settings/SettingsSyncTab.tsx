@@ -102,9 +102,9 @@ function relativeTime(at: number, tl: LiteralMessage): string {
 }
 
 /** A short, readable rendering of a stored value for the conflict list. */
-function preview(value: string | null): string {
+function preview(value: string | null, tl: LiteralMessage): string {
 	if (value === null) {
-		return "(not set)";
+		return tl("(not set)");
 	}
 	const trimmed = value.trim();
 	return trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
@@ -138,7 +138,10 @@ export function SettingsSyncTab() {
 		grouped.set(entry.group, list);
 	}
 	grouped.set("shortcuts", [
-		`Every shortcut, stored separately per operating system (this machine uses the ${PLATFORM_LABEL[platform]} set)`,
+		tl(
+			"Every shortcut, stored separately per operating system (this machine uses the {platform} set)",
+			{ platform: PLATFORM_LABEL[platform] }
+		),
 	]);
 
 	const handleSyncNow = async () => {
@@ -299,8 +302,18 @@ export function SettingsSyncTab() {
 							<div className="grid gap-4 sm:grid-cols-2">
 								{(
 									[
-										["local", conflict.localAt, conflict.local, "Keep this"],
-										["remote", conflict.remoteAt, conflict.remote, "Use cloud"],
+										[
+											"local",
+											conflict.localAt,
+											conflict.local,
+											tl("Keep this"),
+										],
+										[
+											"remote",
+											conflict.remoteAt,
+											conflict.remote,
+											tl("Use cloud"),
+										],
 									] as const
 								).map(([side, at, value, action]) => (
 									<div className="flex min-w-0 flex-col gap-1" key={side}>
@@ -312,7 +325,7 @@ export function SettingsSyncTab() {
 												: tl("Cloud · {when}", { when: relativeTime(at, tl) })}
 										</span>
 										<span className="break-all font-mono text-xs">
-											{preview(value)}
+											{preview(value, tl)}
 										</span>
 										<Button
 											className="mt-1 self-start"

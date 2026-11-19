@@ -22,6 +22,7 @@ mod domains;
 mod node_agents;
 mod runtime;
 mod vault;
+mod vault_compat;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -116,6 +117,7 @@ pub fn api_doc() -> utoipa::openapi::OpenApi {
     super::qoder_api::register_security(&mut doc);
     doc.merge(node_agents::NodeAgentsPaths::openapi());
     doc.merge(vault::VaultPaths::openapi());
+    doc.merge(vault_compat::VaultCompatPaths::openapi());
     doc.merge(runtime::RuntimePaths::openapi());
     doc.merge(domains::DomainPaths::openapi());
     doc.merge(super::cloud_environments::openapi());

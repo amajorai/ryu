@@ -34,6 +34,7 @@ import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardView } from "@/src/components/panels/crm/BoardView.tsx";
+import { CrmUserText } from "@/src/components/panels/crm/crm-label.tsx";
 import { Duplicates } from "@/src/components/panels/crm/Duplicates.tsx";
 import { ImportWizard } from "@/src/components/panels/crm/ImportWizard.tsx";
 import { Insights } from "@/src/components/panels/crm/Insights.tsx";
@@ -321,12 +322,11 @@ export function CrmPanel() {
 											}}
 											type="button"
 										>
-											<span
+											<CrmUserText
 												className="truncate capitalize"
-												title={entry.object.plural}
-											>
-												{entry.object.plural}
-											</span>
+												text={entry.object.plural}
+												withTitle
+											/>
 											<Badge typography="normal" variant="secondary">
 												{entry.record_count}
 											</Badge>
@@ -347,7 +347,7 @@ export function CrmPanel() {
 															}}
 															type="button"
 														>
-															{candidate.name}
+															<CrmUserText text={candidate.name} />
 															<span className="ms-1 text-muted-foreground">
 																{candidate.kind === "board" ? "▤" : "▦"}
 															</span>

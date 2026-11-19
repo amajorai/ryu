@@ -16,7 +16,7 @@ import {
 	vaultAgentBrokerDiscover,
 } from "@ryuhq/core-client/vault";
 import { z } from "zod";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { flag, type SecretsArgs } from "./secrets-args.ts";
 import { dumpsEnvironment, readsScriptFromStdin } from "./secrets-env-dump.ts";
 import { agentTarget } from "./secrets-output.ts";
@@ -78,10 +78,39 @@ export function printsSecretValues(args: SecretsArgs): boolean {
 			return true;
 		case "dynamic":
 			return action === "issue";
+		case "identity":
+			return action === "token";
 		case "items":
 			return action === "reveal";
 		case "pm":
 			return action === "read";
+		case "pki":
+			return action === "issue";
+		case "rekey":
+			return action === "update";
+		case "machine":
+		case "machines":
+			return action === "secret-id";
+		case "token":
+			return action === "create";
+		case "transit":
+			return action === "decrypt" || action === "datakey";
+		case "cloud":
+			return action === "get";
+		case "cg":
+		case "control-group":
+		case "control-groups":
+			return action === "redeem";
+		case "share":
+			// A share link grants its secret to whoever opens it.
+			return ![
+				"list",
+				"ls",
+				"claim",
+				"revoke",
+				"request",
+				"request-credential",
+			].includes(action ?? "");
 		default:
 			return false;
 	}
@@ -112,7 +141,7 @@ export async function guardedAgentSession(
 		return null;
 	}
 	ctx.io.err(
-		"--human needs a person to confirm at an interactive terminal; the agent guard stays on.\n"
+		`${tr("--human needs a person to confirm at an interactive terminal; the agent guard stays on.")}\n`
 	);
 	return marker;
 }

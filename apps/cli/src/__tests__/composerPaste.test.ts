@@ -5,6 +5,7 @@ import {
 	pastePlaceholderToken,
 	shouldCollapsePaste,
 } from "../core/composerPaste.ts";
+import { createCliTranslator } from "../i18n/translate.ts";
 
 test("normalizes CRLF and bare CR line breaks to LF", () => {
 	expect(normalizePastedText("a\r\nb\rc\nd")).toBe("a\nb\nc\nd");
@@ -39,4 +40,21 @@ test("expands every surviving placeholder and leaves edited ones literal", () =>
 	expect(expandPastePlaceholders("see [Pasted 3 lines #", pastes)).toBe(
 		"see [Pasted 3 lines #"
 	);
+});
+
+test("the placeholder token reads in the CLI locale and still expands", () => {
+	const german = createCliTranslator("de", {
+		"[Pasted {count, plural, one {# line} other {# lines}} #{sequence}]":
+			"[{count, plural, one {# Zeile} other {# Zeilen}} eingefügt #{sequence}]",
+		"[Pasted {count, plural, one {# char} other {# chars}} #{sequence}]":
+			"[{count, plural, one {# Zeichen} other {# Zeichen}} eingefügt #{sequence}]",
+	});
+	const token = pastePlaceholderToken("a\nb\nc", 1, german);
+	expect(token).toBe("[3 Zeilen eingefügt #1]");
+	expect(pastePlaceholderToken("x".repeat(200), 2, german)).toBe(
+		"[200 Zeichen eingefügt #2]"
+	);
+	expect(
+		expandPastePlaceholders(`see ${token}`, new Map([[token, "a\nb\nc"]]))
+	).toBe("see a\nb\nc");
 });

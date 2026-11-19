@@ -184,7 +184,7 @@ test("voice errors keep status fallback and native binary speech replies", async
 	);
 	reply = new NativeResponse("plain text", { status: 503 });
 	await expect(transcribeAudio(target, new Blob(["audio"]))).rejects.toThrow(
-		"transcribe failed: 503"
+		"Transcription failed: 503"
 	);
 	reply = NativeResponse.json({ error: "" }, { status: 403 });
 	await expect(processSpeechText(target, "raw")).rejects.toThrow(

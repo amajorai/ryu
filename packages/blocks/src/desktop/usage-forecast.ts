@@ -9,6 +9,7 @@
  * share it.
  */
 
+import { formatMessage } from "@ryu/i18n/core";
 import { formatPercent } from "@ryu/i18n/format-percent";
 
 /** Two-sided 80% prediction range, z for the 90th percentile. */
@@ -174,12 +175,21 @@ export function utcMonthBounds(
 	};
 }
 
-export function formatForecastChange(forecast: UsageForecast): string {
+/** Translator shape: `useLiteralMessages()` in React, English by default. */
+export type ForecastLiteral = (source: string) => string;
+
+const englishForecastLiteral: ForecastLiteral = (source) =>
+	formatMessage(source, {}, "en");
+
+export function formatForecastChange(
+	forecast: UsageForecast,
+	tl: ForecastLiteral = englishForecastLiteral
+): string {
 	if (forecast.changePercent === null) {
-		return "No recent baseline";
+		return tl("No recent baseline");
 	}
 	if (forecast.direction === "flat") {
-		return "Steady";
+		return tl("Steady");
 	}
 	const rounded = Math.round(Math.abs(forecast.changePercent));
 	const arrow = forecast.direction === "up" ? "↑" : "↓";

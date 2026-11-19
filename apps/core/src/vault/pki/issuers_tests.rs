@@ -1,5 +1,25 @@
+//! Tests for [`super::issuers`].
+
+use super::tests::{actor, setup};
 use super::*;
-use crate::vault::pki::tests::{actor, setup};
+
+#[test]
+fn an_expired_issuer_cannot_issue() {
+    let role = PkiRole {
+        name: "web".into(),
+        issuer: "internal".into(),
+        allowed_domains: vec!["svc.local".into()],
+        allow_ip_sans: false,
+        default_ttl_secs: 3600,
+        max_ttl_secs: 86_400,
+        server_flag: true,
+        client_flag: false,
+    };
+    let expired = (OffsetDateTime::now_utc() - Duration::days(1)).unix_timestamp() * 1000;
+    assert!(PluginSecretStore::leaf_params(&role, "svc.local", &[], &[], None, expired).is_err());
+    let valid = (OffsetDateTime::now_utc() + Duration::days(1)).unix_timestamp() * 1000;
+    assert!(PluginSecretStore::leaf_params(&role, "svc.local", &[], &[], None, valid).is_ok());
+}
 
 #[tokio::test]
 async fn intermediates_chain_under_a_root_and_issue_leaves() {

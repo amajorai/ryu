@@ -10,112 +10,37 @@
 
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { tf } from "../i18n/translate.ts";
+import {
+	type ConnectArgs,
+	integer,
+	parseConnectArgs,
+	VALUE_FLAGS,
+} from "./connect-args.ts";
+import { CONNECT_USAGE, renderConnectHelp } from "./connect-help.ts";
 import { refusal } from "./connect-refusal.ts";
+import {
+	renderBalance,
+	renderDescribe,
+	renderIndex,
+	renderPlatform,
+	renderReceipt,
+	renderSearch,
+	renderStatus,
+} from "./connect-render.ts";
 import {
 	type CallAnswer,
 	CatalogClient,
 	ConnectClient,
 	ConnectError,
-	type DescribedTool,
-	formatMicroUsd,
-	type PlatformDetail,
-	type PlatformIndex,
 } from "./connectClient.ts";
-import { formatTable, truncate } from "./output.ts";
+import { localize } from "./localizedText.ts";
 import { type CliContext, type Command, UsageError } from "./types.ts";
 import { VERSION } from "./version.ts";
 
-const USAGE =
-	"ryu-cli connect [status|browse [platform]|search <words>|describe <id>|request <text>|call <id>|balance]";
+export { type ConnectArgs, parseConnectArgs } from "./connect-args.ts";
+export { formatCatalogCost } from "./connect-render.ts";
 
-const HELP = `ryu-cli connect: Ryu Connect from the terminal
-
-Usage:
-  ryu-cli connect                      Live status: Connect URL, health, key, balance
-  ryu-cli connect browse [platform]    Ryu's tool catalog: platforms, or one platform's endpoints with USD prices
-  ryu-cli connect search <words…>      Search the tools your key can call (--limit 1-25, --kind any|composio|mcp)
-  ryu-cli connect describe <id>        One tool's price, verification, reliability and argument schema
-  ryu-cli connect request <text…>      Ask for a missing tool (--toolkit, --query)
-  ryu-cli connect call <id>            Call a tool (--args '<json>', --args-file <path|->, --max-cost <micro-USD>,
-                                       --idempotency-key <label>); prints the result, then one JSON line with
-                                       the call id and charge on stderr
-  ryu-cli connect balance              What new calls can spend right now
-  ryu-cli connect <agent>              Add Ryu's MCP tools to a coding agent (claude-code, codex, …)
-
-Environment:
-  RYU_CONNECT_URL       Connect base URL (or --url <url>)
-  RYU_CONNECT_KEY       Connect key, sent only to RYU_CONNECT_URL
-  RYU_TOOL_CATALOG_URL  Catalog base URL for 'browse' (or --catalog-url <url>)
-
-Add --json for machine-readable output.`;
-
-type ValueName =
-	| "args"
-	| "argsFile"
-	| "catalogUrl"
-	| "idempotencyKey"
-	| "kind"
-	| "limit"
-	| "maxCost"
-	| "query"
-	| "toolkit"
-	| "url";
-
-const VALUE_FLAGS = new Map<string, ValueName>([
-	["--args", "args"],
-	["--args-file", "argsFile"],
-	["--catalog-url", "catalogUrl"],
-	["--idempotency-key", "idempotencyKey"],
-	["--kind", "kind"],
-	["--limit", "limit"],
-	["--max-cost", "maxCost"],
-	["--query", "query"],
-	["--toolkit", "toolkit"],
-	["--url", "url"],
-]);
-
-export interface ConnectArgs {
-	positional: string[];
-	values: Partial<Record<ValueName, string>>;
-}
-
-/** Parse `ryu-cli connect`'s own argv (everything after `connect`). */
-export function parseConnectArgs(argv: readonly string[]): ConnectArgs {
-	const positional: string[] = [];
-	const values: Partial<Record<ValueName, string>> = {};
-	for (let index = 0; index < argv.length; index++) {
-		const token = argv[index] ?? "";
-		if (token === "--") {
-			positional.push(...argv.slice(index + 1));
-			break;
-		}
-		if (token === "--json") {
-			continue;
-		}
-		if (token.startsWith("--")) {
-			const eq = token.indexOf("=");
-			const name = eq === -1 ? token : token.slice(0, eq);
-			const key = VALUE_FLAGS.get(name);
-			if (!key) {
-				throw new UsageError(
-					`Unknown option '${name}' (see 'ryu-cli connect help').`
-				);
-			}
-			const value = eq === -1 ? argv[index + 1] : token.slice(eq + 1);
-			if (value === undefined || (eq === -1 && value.startsWith("--"))) {
-				throw new UsageError(`${name} needs a value.`);
-			}
-			if (eq === -1) {
-				index++;
-			}
-			values[key] = value;
-			continue;
-		}
-		positional.push(token);
-	}
-	return { positional, values };
-}
+const USAGE = CONNECT_USAGE;
 
 function connectClient(ctx: CliContext, args: ConnectArgs): ConnectClient {
 	const url = args.values.url ?? ctx.env.RYU_CONNECT_URL?.trim();
@@ -136,7 +61,9 @@ export function catalogUrl(
 	const explicit = flag ?? env.RYU_TOOL_CATALOG_URL?.trim();
 	if (explicit === "off") {
 		throw new UsageError(
-			"The Ryu tool catalog is turned off (RYU_TOOL_CATALOG_URL=off)."
+			localize("The Ryu tool catalog is turned off ({setting}).", {
+				setting: "RYU_TOOL_CATALOG_URL=off",
+			})
 		);
 	}
 	if (explicit) {
@@ -156,59 +83,6 @@ function catalogClient(ctx: CliContext, args: ConnectArgs): CatalogClient {
 
 function printJson(ctx: CliContext, value: unknown): void {
 	ctx.io.out(`${JSON.stringify(value, null, 2)}\n`);
-}
-
-function integer(
-	value: string | undefined,
-	name: string,
-	min: number,
-	max: number
-): number | undefined {
-	if (value === undefined) {
-		return;
-	}
-	if (
-		!/^\d{1,15}$/u.test(value) ||
-		Number(value) < min ||
-		Number(value) > max
-	) {
-		throw new UsageError(
-			`${name} must be a whole number from ${min} to ${max}.`
-		);
-	}
-	return Number(value);
-}
-
-interface CostLike {
-	basis: string;
-	free: boolean;
-	usd: number | null;
-}
-
-/** One call's price from the catalog: `free`, `$0.005`, `$0.005+` (more meters), `usage`, `unverified`. */
-export function formatCatalogCost(cost: CostLike | null): string {
-	if (!cost) {
-		return "-";
-	}
-	if (cost.free) {
-		return "free";
-	}
-	if (cost.basis === "usage") {
-		return "usage";
-	}
-	if (cost.usd === null) {
-		return "unverified";
-	}
-	const text = formatMicroUsd(Math.round(cost.usd * 1_000_000));
-	return cost.basis === "base_call" ? `${text}+` : text;
-}
-
-function priceText(price: DescribedTool["price"]): string {
-	if (price.source === "unmetered") {
-		return "unmetered";
-	}
-	const amount = formatMicroUsd(price.amountMicroUsd);
-	return price.estimated ? `~${amount}` : amount;
 }
 
 async function status(ctx: CliContext, args: ConnectArgs): Promise<number> {
@@ -233,70 +107,15 @@ async function status(ctx: CliContext, args: ConnectArgs): Promise<number> {
 		});
 		return 0;
 	}
-	const rows: string[][] = [
-		[
-			"Connect",
-			`${client.origin}  ${health.service} ${health.version ?? ""}`.trim(),
-		],
-		[
-			"Key",
-			client.hasKey
-				? "set (RYU_CONNECT_KEY)"
-				: "not set: export RYU_CONNECT_KEY",
-		],
-	];
-	if (balance) {
-		rows.push([
-			"Balance",
-			balance.billed
-				? `${formatMicroUsd(balance.availableMicroUsd)} available, ${formatMicroUsd(balance.heldMicroUsd)} held${balance.suspended ? " (suspended)" : ""}`
-				: "not billed by Ryu",
-		]);
-	}
-	rows.push(["Catalog", catalog ?? "off"]);
-	ctx.io.out(
-		`${rows.map(([name, value]) => `${(name ?? "").padEnd(9)}${value}`).join("\n")}\n`
-	);
+	const view = {
+		balance,
+		catalog,
+		hasKey: client.hasKey,
+		health,
+		origin: client.origin,
+	};
+	ctx.io.out(`${renderStatus(view)}\n`);
 	return 0;
-}
-
-function renderIndex(ctx: CliContext, index: PlatformIndex): void {
-	if (index.platforms.length === 0) {
-		ctx.io.out("The catalog lists no platforms yet.\n");
-		return;
-	}
-	const rows = index.platforms.map((platform) => [
-		platform.slug,
-		String(platform.endpoints),
-		String(platform.verified_endpoints),
-		formatCatalogCost(platform.price_from),
-		truncate(platform.providers.join(", "), 40),
-	]);
-	ctx.io.out(
-		`${formatTable(["PLATFORM", "ENDPOINTS", "VERIFIED", "FROM", "PROVIDERS"], rows)}\n`
-	);
-}
-
-function renderPlatform(ctx: CliContext, detail: PlatformDetail): void {
-	ctx.io.out(`${detail.label} (${detail.slug})\n`);
-	const rows: string[][] = [];
-	for (const domain of detail.domains) {
-		for (const row of domain.rows) {
-			for (const endpoint of row.endpoints) {
-				rows.push([
-					truncate(row.capability_name, 32),
-					endpoint.id,
-					endpoint.provider_display,
-					formatCatalogCost(endpoint.cost),
-					endpoint.verification.state,
-					endpoint.id === row.cheapest_endpoint ? "cheapest" : "",
-				]);
-			}
-		}
-	}
-	ctx.io.out(
-		`${formatTable(["CAPABILITY", "ENDPOINT", "PROVIDER", "PER CALL", "STATE", ""], rows)}\n`
-	);
 }
 
 async function browse(ctx: CliContext, args: ConnectArgs): Promise<number> {
@@ -307,7 +126,7 @@ async function browse(ctx: CliContext, args: ConnectArgs): Promise<number> {
 		if (ctx.flags.json) {
 			printJson(ctx, detail);
 		} else {
-			renderPlatform(ctx, detail);
+			ctx.io.out(`${renderPlatform(detail)}\n`);
 		}
 		return 0;
 	}
@@ -315,7 +134,7 @@ async function browse(ctx: CliContext, args: ConnectArgs): Promise<number> {
 	if (ctx.flags.json) {
 		printJson(ctx, index);
 	} else {
-		renderIndex(ctx, index);
+		ctx.io.out(`${renderIndex(index)}\n`);
 	}
 	return 0;
 }
@@ -337,40 +156,7 @@ async function search(ctx: CliContext, args: ConnectArgs): Promise<number> {
 		printJson(ctx, result);
 		return 0;
 	}
-	if (result.data.length === 0) {
-		const lines = ["No tools matched."];
-		if (result.missedTerms?.length) {
-			lines.push(
-				tf("No tool matched: {terms}", { terms: result.missedTerms.join(", ") })
-			);
-		}
-		if (result.didYouMean?.length) {
-			lines.push(
-				tf("Did you mean: {ids}", { ids: result.didYouMean.join(", ") })
-			);
-		}
-		lines.push(
-			"File it with: ryu-cli connect request <what the tool should do>"
-		);
-		ctx.io.out(`${lines.join("\n")}\n`);
-		return 0;
-	}
-	const rows = result.data.map((tool) => [
-		tool.id,
-		tool.provider,
-		tool.tier,
-		priceText(tool.price),
-		tool.catalog?.state ?? "",
-		tool.score === undefined ? "" : tool.score.toFixed(2),
-	]);
-	ctx.io.out(
-		`${formatTable(["ID", "PROVIDER", "TIER", "PRICE", "CATALOG", "SCORE"], rows)}\n`
-	);
-	if (result.partial) {
-		ctx.io.out(
-			"Some tool sources did not answer; the list may be incomplete.\n"
-		);
-	}
+	ctx.io.out(`${renderSearch(result)}\n`);
 	return 0;
 }
 
@@ -384,39 +170,7 @@ async function describe(ctx: CliContext, args: ConnectArgs): Promise<number> {
 		printJson(ctx, tool);
 		return 0;
 	}
-	const reliability = tool.reliability;
-	const lines = [
-		`${tool.name} (${tool.id})`,
-		tf("Provider   {provider} · {tier}{toolkit}", {
-			provider: tool.provider,
-			tier: tool.tier,
-			toolkit: tool.toolkit ? ` · ${tool.toolkit}` : "",
-		}),
-		tf("Price      {price} per call ({source})", {
-			price: priceText(tool.price),
-			source: tool.price.source,
-		}),
-	];
-	if (tool.catalog?.state) {
-		lines.push(
-			tf("Catalog    {state} ({source})", {
-				state: tool.catalog.state,
-				source: tool.catalog.source ?? "ryu",
-			})
-		);
-	}
-	if (reliability?.sufficient && typeof reliability.successRate === "number") {
-		lines.push(
-			tf("Reliable   {rate}% over 7 days, p50 {p50} ms, p95 {p95} ms", {
-				rate: (reliability.successRate * 100).toFixed(1),
-				p50: String(reliability.p50Ms ?? "-"),
-				p95: String(reliability.p95Ms ?? "-"),
-			})
-		);
-	}
-	lines.push("", tool.description, "", "Parameters:");
-	lines.push(JSON.stringify(tool.parameters ?? {}, null, 2));
-	ctx.io.out(`${lines.join("\n")}\n`);
+	ctx.io.out(`${renderDescribe(tool)}\n`);
 	return 0;
 }
 
@@ -440,9 +194,7 @@ async function request(ctx: CliContext, args: ConnectArgs): Promise<number> {
 	if (ctx.flags.json) {
 		printJson(ctx, receipt);
 	} else {
-		ctx.io.out(
-			`Request ${receipt.status}${receipt.id ? ` (${receipt.id})` : ""}.\n`
-		);
+		ctx.io.out(`${renderReceipt(receipt)}\n`);
 	}
 	return 0;
 }
@@ -550,28 +302,7 @@ async function balance(ctx: CliContext, args: ConnectArgs): Promise<number> {
 		printJson(ctx, current);
 		return 0;
 	}
-	if (!current.billed) {
-		ctx.io.out(
-			"This Connect is not billed by Ryu; calls are never refused for credit.\n"
-		);
-		return 0;
-	}
-	const lines = [
-		tf("Available  {amount}", {
-			amount: formatMicroUsd(current.availableMicroUsd),
-		}),
-		tf("Held       {amount}", { amount: formatMicroUsd(current.heldMicroUsd) }),
-		tf("Unsettled  {amount}", {
-			amount: formatMicroUsd(current.unsettledMicroUsd),
-		}),
-	];
-	if (current.suspended) {
-		lines.push("Suspended  yes: add credit to resume calls");
-	}
-	if (current.topUpUrl) {
-		lines.push(tf("Top up     {url}", { url: current.topUpUrl }));
-	}
-	ctx.io.out(`${lines.join("\n")}\n`);
+	ctx.io.out(`${renderBalance(current)}\n`);
 	return 0;
 }
 
@@ -631,7 +362,7 @@ export const connectCommand: Command = {
 		const args = parseConnectArgs(ctx.rawArgs);
 		const subcommand = args.positional[0] ?? "status";
 		if (subcommand === "help") {
-			ctx.io.out(`${HELP}\n`);
+			ctx.io.out(`${renderConnectHelp()}\n`);
 			return 0;
 		}
 		const handler = SUBCOMMANDS.get(subcommand);

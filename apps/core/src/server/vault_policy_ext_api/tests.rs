@@ -236,3 +236,107 @@ async fn open_requests_are_capped_per_requester() {
     let response = open_control_group(&carol, &coords, None, &spec).await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 }
+
+fn reader(manager: bool) -> Ctx {
+    let store: &'static PluginSecretStore =
+        Box::leak(Box::new(PluginSecretStore::in_memory().unwrap()));
+    let rule = |path: &str, capabilities: &[Capability], deny: bool| PolicyRule {
+        path: path.into(),
+        capabilities: capabilities.to_vec(),
+        deny,
+        ..Default::default()
+    };
+    let policy = Policy {
+        name: "reader".into(),
+        description: String::new(),
+        rules: vec![
+            rule(
+                "staging/app/**",
+                &[Capability::List, Capability::Read],
+                false,
+            ),
+            rule("staging/app/ROOT_KEY", &[Capability::Read], true),
+            rule(
+                "sys/transit/{{identity.user.id}}",
+                &[Capability::Use],
+                false,
+            ),
+        ],
+    };
+    Ctx {
+        manager,
+        ..ctx_for(store, "alice", policy)
+    }
+}
+
+async fn capabilities(ctx: &Ctx, paths: &str) -> (StatusCode, Value) {
+    let response = capabilities_with(ctx, paths);
+    let status = response.status();
+    (status, body_json(response).await)
+}
+
+#[tokio::test]
+async fn capabilities_self_reports_grants_denies_and_expanded_templates() {
+    let ctx = reader(false);
+    let (status, body) = capabilities(
+        &ctx,
+        " staging/app/API_KEY, staging/app/ROOT_KEY ,sys/transit/alice,sys/transit/bob,prod/app/API_KEY",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let caps = |key: &str| body["paths"][key]["capabilities"].clone();
+    assert_eq!(caps("staging/app/API_KEY"), json!(["list", "read"]));
+    // The deny removes `read` but leaves the glob's `list`.
+    assert_eq!(caps("staging/app/ROOT_KEY"), json!(["list"]));
+    // `{{identity.user.id}}` expands to the caller, and only the caller.
+    assert_eq!(caps("sys/transit/alice"), json!(["use"]));
+    assert_eq!(caps("sys/transit/bob"), json!([]));
+    assert_eq!(caps("prod/app/API_KEY"), json!([]));
+    assert_eq!(body["paths"]["staging/app/API_KEY"]["controlGroup"], false);
+    assert_eq!(body["paths"].as_object().unwrap().len(), 5);
+}
+
+#[tokio::test]
+async fn capabilities_self_flags_control_groups_and_starts_managers_from_every_capability() {
+    let store: &'static PluginSecretStore =
+        Box::leak(Box::new(PluginSecretStore::in_memory().unwrap()));
+    let gated = ctx_for(store, "alice", gate(true));
+    let (_, body) = capabilities(&gated, "staging/app/API_KEY").await;
+    assert_eq!(body["paths"]["staging/app/API_KEY"]["controlGroup"], true);
+
+    // A manager keeps every capability a policy does not deny.
+    let (_, body) = capabilities(&reader(true), "sys/pki/web,staging/app/ROOT_KEY").await;
+    assert_eq!(
+        body["paths"]["sys/pki/web"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .len(),
+        Capability::ALL.len()
+    );
+    assert!(!body["paths"]["staging/app/ROOT_KEY"]["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("read")));
+}
+
+#[tokio::test]
+async fn capabilities_self_bounds_the_path_list() {
+    let ctx = reader(false);
+    for paths in ["", " , ,"] {
+        let (status, _) = capabilities(&ctx, paths).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{paths:?}");
+    }
+    let many = vec!["staging/app/A"; MAX_CAPABILITY_PATHS + 1].join(",");
+    let (status, _) = capabilities(&ctx, &many).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let most = (0..MAX_CAPABILITY_PATHS)
+        .map(|index| format!("staging/app/K{index}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let (status, body) = capabilities(&ctx, &most).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["paths"].as_object().unwrap().len(),
+        MAX_CAPABILITY_PATHS
+    );
+}

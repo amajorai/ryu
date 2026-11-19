@@ -34,11 +34,11 @@ import {
 	type VaultItemFieldInput,
 } from "@ryuhq/core-client/vault";
 import { tf } from "../i18n/translate.ts";
+import { accessRequests } from "./secrets-access.ts";
 import {
 	approvals,
 	audit,
 	environments,
-	login,
 	logout,
 	policies,
 	sealCommand,
@@ -50,6 +50,7 @@ import {
 	refuseValueOutput,
 } from "./secrets-agent-guard.ts";
 import { agentExport, agentGet } from "./secrets-agent-redaction.ts";
+import { agentCommand } from "./secrets-agentd.ts";
 import {
 	arg,
 	flag,
@@ -58,9 +59,14 @@ import {
 } from "./secrets-args.ts";
 import { broker } from "./secrets-broker-admin.ts";
 import { cards } from "./secrets-cards.ts";
+import { cloud } from "./secrets-cloud.ts";
+import { controlGroups } from "./secrets-control-groups.ts";
+import { devServer } from "./secrets-dev-server.ts";
 import { dynamic, leases } from "./secrets-dynamic.ts";
+import { exampleEnv } from "./secrets-example-env.ts";
 import { external } from "./secrets-external.ts";
 import { SUBCOMMAND_HELP } from "./secrets-help.ts";
+import { identity } from "./secrets-identity.ts";
 import {
 	itemLocation,
 	itemsGet,
@@ -69,12 +75,23 @@ import {
 	parseItemField,
 	totp,
 } from "./secrets-items.ts";
+import { lockouts } from "./secrets-lockouts.ts";
+import { login } from "./secrets-login.ts";
+import { machines } from "./secrets-machines.ts";
 import { printJson } from "./secrets-output.ts";
+import { overrides } from "./secrets-overrides.ts";
+import { pki } from "./secrets-pki.ts";
 import { passwordManagers } from "./secrets-pm.ts";
 import { applyProjectDefaults, init } from "./secrets-project.ts";
+import { rekey } from "./secrets-rekey.ts";
 import { runWithSecrets } from "./secrets-run.ts";
 import { scan } from "./secrets-scan.ts";
+import { share } from "./secrets-share.ts";
+import { shell } from "./secrets-shell.ts";
+import { ssh } from "./secrets-ssh.ts";
+import { auditDevices, quotas } from "./secrets-sys-admin.ts";
 import { tokenCommand, unwrap, wrap } from "./secrets-tokens.ts";
+import { transit } from "./secrets-transit.ts";
 import {
 	deleteSecret,
 	destroySecret,
@@ -207,40 +224,64 @@ async function items(ctx: CliContext, args: SecretsArgs): Promise<number> {
 type SecretsHandler = (ctx: CliContext, args: SecretsArgs) => Promise<number>;
 
 const SUBCOMMANDS = new Map<string, SecretsHandler>([
+	["access", accessRequests],
+	["agent", agentCommand],
 	["approvals", approvals],
 	["audit", audit],
+	["audit-device", auditDevices],
+	["audit-devices", auditDevices],
 	["broker", broker],
 	["cards", cards],
+	["cg", controlGroups],
+	["cloud", cloud],
 	["confirm", confirmIdentity],
+	["control-group", controlGroups],
+	["control-groups", controlGroups],
 	["delete", deleteSecret],
 	["destroy", destroySecret],
 	["dynamic", dynamic],
 	["env", environments],
+	["example-env", exampleEnv],
 	["export", exportSecrets],
 	["external", external],
 	["get", getSecret],
+	["identity", identity],
 	["import", importSecrets],
 	["init", init],
 	["items", items],
 	["lease", leases],
 	["leases", leases],
 	["list", listSecrets],
+	["lockout", lockouts],
+	["lockouts", lockouts],
 	["login", login],
 	["logout", (ctx) => logout(ctx)],
 	["ls", listSecrets],
+	["machine", machines],
+	["machines", machines],
+	["overrides", overrides],
+	["pki", pki],
 	["pm", passwordManagers],
 	["policy", policies],
+	["quota", quotas],
+	["quotas", quotas],
+	["rekey", rekey],
 	["restore", restore],
 	["rm", deleteSecret],
 	["rollback", rollback],
 	["run", runWithSecrets],
 	["scan", scan],
+	["shell", shell],
 	["seal", sealCommand],
 	["set", setSecret],
+	["server", devServer],
+	["share", share],
 	["snapshot", snapshot],
+	["ssh", ssh],
 	["status", sealCommand],
 	["token", tokenCommand],
 	["totp", totp],
+	["transit", transit],
 	["unseal", sealCommand],
 	["unwrap", unwrap],
 	["versions", listVersions],
@@ -276,6 +317,43 @@ export const secretsCommand: Command = {
 				return await agentExport(ctx, args, agentSession);
 			}
 			return refuseValueOutput(ctx, agentSession);
+		}
+		// The client agent writes values to files an AI agent could read.
+		if (agentSession && subcommand === "agent") {
+			ctx.io.err(
+				`${tf("Refusing to start the vault agent in an AI agent session ({marker} is set): it writes secret values to files. A person at a terminal can add --human.", { marker: agentSession })}\n`
+			);
+			return 1;
+		}
+		if (agentSession && subcommand === "shell") {
+			ctx.io.err(
+				`${tf("Refusing to start an interactive shell in an AI agent session ({marker} is set). Run one command with 'ryu-cli secrets run --broker SERVICE -- CMD'. A person at a terminal can add --human.", { marker: agentSession })}\n`
+			);
+			return 1;
+		}
+		if (
+			agentSession &&
+			subcommand === "broker" &&
+			args.positional[1] === "review"
+		) {
+			ctx.io.err(
+				`${tf("Refusing to review broker proposals in an AI agent session ({marker} is set): a person decides them. A person at a terminal can add --human.", { marker: agentSession })}\n`
+			);
+			return 1;
+		}
+		// Starting or cancelling a rekey discards the share holders' progress.
+		if (
+			agentSession &&
+			subcommand === "rekey" &&
+			(args.positional[1] === "init" || args.positional[1] === "cancel")
+		) {
+			ctx.io.err(
+				`${tf("Refusing to start or cancel a rekey in an AI agent session ({marker} is set): the key share holders run it. A person at a terminal can add --human.", { marker: agentSession })}\n`
+			);
+			return 1;
+		}
+		if (agentSession && subcommand === "access") {
+			return await accessRequests(ctx, args, agentSession);
 		}
 		if (agentSession && subcommand === "set") {
 			return await setSecret(ctx, args, agentSession);

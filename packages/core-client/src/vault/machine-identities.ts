@@ -25,9 +25,55 @@ export interface VaultJwtConfig {
 	publicKeyPem?: string;
 }
 
+/** TLS client certificates signed by one of the CA certificates in `caPem`. */
+export interface VaultCertAuthConfig {
+	allowedCommonNames?: string[];
+	allowedDnsSans?: string[];
+	allowedUriSans?: string[];
+	caPem: string;
+}
+
+/** Presigned `sts:GetCallerIdentity` requests from matching ARNs. */
+export interface VaultAwsIamAuthConfig {
+	/** ARN globs; an assumed-role session also matches its `iam::…:role/…` form. */
+	boundIamPrincipalArns: string[];
+	/** Value the client must sign into `X-Ryu-Server-ID` (required). */
+	serverIdHeaderValue: string;
+	/** An https AWS STS endpoint (default `https://sts.amazonaws.com/`). */
+	stsEndpoint?: string;
+}
+
+/** Kubernetes service-account tokens checked with a TokenReview. */
+export interface VaultKubernetesAuthConfig {
+	audiences?: string[];
+	boundServiceAccountNames: string[];
+	boundServiceAccountNamespaces: string[];
+	caPem?: string;
+	/** API server URL (https). */
+	host: string;
+	/** Env var (prefix `RYU_VAULT_K8S_REVIEWER_`) holding a reviewer token. */
+	reviewerJwtEnv?: string;
+}
+
+/** Create-time auth. AppRole's role id is generated, so it is optional here. */
 export type VaultMachineAuth =
-	| { kind: "approle"; roleId: string }
-	| ({ kind: "jwt" } & VaultJwtConfig);
+	| { kind: "approle"; roleId?: string }
+	| ({ kind: "jwt" } & VaultJwtConfig)
+	| ({ kind: "cert" } & VaultCertAuthConfig)
+	| ({ kind: "aws-iam" } & VaultAwsIamAuthConfig)
+	| ({ kind: "kubernetes" } & VaultKubernetesAuthConfig);
+
+export type VaultMachineKind = VaultMachineAuth["kind"];
+
+/** Token lifecycle settings of an identity (`PUT …/token-config` replaces them). */
+export interface VaultMachineTokenConfig {
+	boundCidrs?: string[];
+	explicitMaxTtlSecs?: number;
+	maxTtlSecs?: number;
+	numUses?: number;
+	periodSecs?: number;
+	renewable?: boolean;
+}
 
 export type VaultMachineAuthResponse = z.output<typeof vaultHumanMachineAuth>;
 
@@ -39,6 +85,7 @@ export interface VaultMachineIdentity {
 	id: string;
 	name: string;
 	policies: string[];
+	tokenConfig?: VaultMachineTokenConfig;
 	tokenTtlSecs: number;
 }
 
@@ -105,6 +152,20 @@ export function deleteVaultMachine(
 	);
 }
 
+/** Replace an identity's token settings; `id` is the identity id or name. */
+export function setVaultMachineTokenConfig(
+	target: ApiTarget,
+	id: string,
+	config: VaultMachineTokenConfig
+): Promise<{ machine: VaultMachineIdentity }> {
+	return request(
+		target,
+		`/api/vault/machines/${encodeURIComponent(id)}/token-config`,
+		{ method: "PUT", body: config },
+		vaultHumanMachineResponse
+	);
+}
+
 export function listVaultSecretIds(
 	target: ApiTarget,
 	machineId: string
@@ -121,7 +182,14 @@ export function listVaultSecretIds(
 export function issueVaultSecretId(
 	target: ApiTarget,
 	machineId: string,
-	input: { ttlSecs?: number; uses?: number } = {}
+	input: {
+		/** Client CIDRs allowed to log in with the secret id. */
+		cidrList?: string[];
+		/** CIDRs bound to tokens issued with the secret id. */
+		tokenBoundCidrs?: string[];
+		ttlSecs?: number;
+		uses?: number;
+	} = {}
 ): Promise<{ info: VaultSecretIdInfo; secretId: string }> {
 	return request(
 		target,

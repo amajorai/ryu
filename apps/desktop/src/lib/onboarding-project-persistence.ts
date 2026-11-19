@@ -1,3 +1,5 @@
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { z } from "zod";
 import type { ApiTarget } from "./api/client.ts";
@@ -5,10 +7,14 @@ import { fetchProjects, type ProjectRecord } from "./api/hierarchy.ts";
 import { DESKTOP_ONBOARDING_PROJECT_KEY } from "./desktop-onboarding-state.ts";
 import type { OnboardingProjectSeed } from "./onboarding-navigation.ts";
 
+/** Thrown when the saved onboarding project is gone; the message is toasted
+ *  as written, so it is translated when the error is made. */
 export class OnboardingProjectMissingError extends Error {
-	constructor() {
+	constructor(tl: LiteralMessage = translate) {
 		super(
-			"Your saved onboarding project is no longer available. Create a project or skip this step."
+			tl(
+				"Your saved onboarding project is no longer available. Create a project or skip this step."
+			)
 		);
 	}
 }

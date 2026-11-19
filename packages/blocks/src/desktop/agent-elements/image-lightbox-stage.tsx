@@ -251,7 +251,7 @@ export function Stage({
 		return null;
 	}
 
-	const filename = currentImage.filename?.trim() || "Image preview";
+	const filename = currentImage.filename?.trim() || tl("Image preview");
 
 	return (
 		<div

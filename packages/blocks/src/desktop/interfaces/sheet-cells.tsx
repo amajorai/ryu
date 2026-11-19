@@ -14,7 +14,7 @@ import {
 import { Check } from "lucide-react";
 import { BoardAvatar } from "./board-avatar.tsx";
 import { BoardStatusDot } from "./board-status.tsx";
-import { threadStatusLabel } from "./interface-renderer.ts";
+import { formatNameList, threadStatusLabel } from "./interface-renderer.ts";
 import {
 	type SheetRow,
 	sheetAbsoluteTime,
@@ -210,7 +210,7 @@ export function SheetAgents({
 	const rest = agents.filter((agent) => agent.id !== lead.id);
 	const shown = [lead, ...rest].slice(0, STACK_LIMIT);
 	const overflow = agents.length - shown.length;
-	const names = agents.map((agent) => agent.name).join(", ");
+	const names = formatNameList(agents.map((agent) => agent.name));
 	const content = (
 		<>
 			<span className="flex shrink-0 -space-x-1.5">

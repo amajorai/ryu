@@ -9,7 +9,8 @@
 //! (dropped with the process).
 //!
 //! Each runtime kind has its own machine identity (`ryu-agent-<kind>`, see
-//! [`crate::vault::agent_identity`]). Until the operator binds policies to
+//! [`crate::vault::agent_identity`]), and each agent a narrower one that
+//! takes over once policies are bound to it. Until the operator binds policies to
 //! it, a runtime session is minted by Core on the local node's behalf: it
 //! resolves `secret:` references as an operator-minted session does, and
 //! carries no minter scope, so it never uses payment cards. Each such run
@@ -57,10 +58,14 @@ use crate::vault::policy::{Capability, CapabilitySet};
 pub const SUBJECT_PREFIX: &str = "runtime:";
 
 /// What Core knows about a runtime it is about to start.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeLaunch {
     /// `pi`, `claude-code`, or `acp`; shown in the session label.
     pub kind: &'static str,
+    /// The agent record the run was spawned for (server-resolved, the id
+    /// the ACP pool keys on). Selects the agent's own machine identity
+    /// before the kind's ([`PluginSecretStore::run_binding`]).
+    pub agent: Option<String>,
     /// The workspace is trusted (no network cut).
     pub trusted_workspace: bool,
     /// The agent's account access is limited.
@@ -122,6 +127,8 @@ pub struct RuntimeBrokerLease {
     session_id: String,
     /// The run's internal identity token, when the runtime is bound.
     run_token: Option<String>,
+    /// The session's own `rvb_` token, for the run's in-process broker tools.
+    session_token: Option<String>,
     env: BTreeMap<String, String>,
 }
 
@@ -143,6 +150,7 @@ impl RuntimeBrokerLease {
             store,
             session_id,
             run_token: None,
+            session_token: None,
             env: BTreeMap::new(),
         }
     }
@@ -153,6 +161,12 @@ impl RuntimeBrokerLease {
 
     pub fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    /// The session's `rvb_` token, which the run already holds in its proxy
+    /// URL; `None` for a lease over another caller's session.
+    pub fn session_token(&self) -> Option<&str> {
+        self.session_token.as_deref()
     }
 
     /// The child environment ([`super::proxy_env`]) for the run.
@@ -235,7 +249,7 @@ pub async fn lease(
         return Ok(None);
     }
     let binding = store
-        .agent_binding(launch.kind, sessions::MAX_TTL_SECS)
+        .run_binding(launch.kind, launch.agent.as_deref(), sessions::MAX_TTL_SECS)
         .await?;
     let (bound, names) = match binding {
         AgentBinding::Disabled => {
@@ -272,6 +286,7 @@ pub async fn lease(
         store,
         session_id: session.id.clone(),
         run_token: bound.as_ref().map(|bound| bound.accessor.clone()),
+        session_token: Some(token.clone()),
         env: BTreeMap::new(),
     };
     store
@@ -281,6 +296,7 @@ pub async fn lease(
                 "environment": session.environment,
                 "services": session.services,
                 "runtime": launch.kind,
+                "agent": launch.agent,
                 "identity": bound.as_ref().map(|bound| bound.identity_id.clone()),
             })),
         )
@@ -354,13 +370,11 @@ pub fn runtime_ca_dir() -> std::path::PathBuf {
 pub async fn lease_for_launch(launch: RuntimeLaunch) -> Option<RuntimeBrokerLease> {
     let port = super::listening_port()?;
     let store = crate::plugin_secrets::global()?;
+    let kind = launch.kind;
     match lease(store, port, &runtime_ca_dir(), launch).await {
         Ok(lease) => lease,
         Err(error) => {
-            tracing::warn!(
-                kind = launch.kind,
-                "runtime broker session failed: {error:#}"
-            );
+            tracing::warn!(kind, "runtime broker session failed: {error:#}");
             None
         }
     }
@@ -369,3 +383,6 @@ pub async fn lease_for_launch(launch: RuntimeLaunch) -> Option<RuntimeBrokerLeas
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "runtime_token_test.rs"]
+mod token_tests;

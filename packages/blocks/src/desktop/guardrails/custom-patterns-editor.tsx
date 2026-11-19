@@ -2,6 +2,7 @@
 
 import { Add01Icon, Delete01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import {
@@ -53,6 +54,7 @@ export function CustomPatternsEditor({
 		source.map((pattern) => ({ ...pattern, id: crypto.randomUUID() }))
 	);
 
+	const tl = useLiteralMessages();
 	const editable = !ctx.disabled && (!ctx.isOverlay || ctx.overlayReady);
 
 	const commit = (next: PatternRow[]) => {
@@ -116,7 +118,7 @@ export function CustomPatternsEditor({
 										onChange={(event) =>
 											updateRow(row.id, { name: event.target.value })
 										}
-										placeholder="Name (e.g. internal_id)"
+										placeholder={tl("Name (e.g. internal_id)")}
 										value={row.name}
 									/>
 									<Select

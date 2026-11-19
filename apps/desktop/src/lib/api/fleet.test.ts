@@ -5,6 +5,7 @@ import { z } from "zod";
 import { vaultHydrated } from "@/lib/auth-client.ts";
 import {
 	bindSelfHostedNodeToOrganization,
+	fleetTimeoutMessage,
 	getFleetBindingStatus,
 	NodeAlreadyBoundError,
 	parseFleetBindingStatus,
@@ -339,4 +340,17 @@ test("cloud enrollment errors preserve message priority, whitespace, and status 
 			})
 		).rejects.toThrow(expected);
 	}
+});
+
+test("each Fleet timeout is one whole catalogued sentence", () => {
+	const marked: LiteralMessage = (source) => `[${source}]`;
+	expect(fleetTimeoutMessage("create-code", marked)).toBe(
+		"[Creating the enrollment code timed out after 20 seconds.]"
+	);
+	expect(fleetTimeoutMessage("read-status", marked)).toBe(
+		"[Reading Fleet status timed out after 20 seconds.]"
+	);
+	expect(fleetTimeoutMessage("enroll", marked)).toBe(
+		"[Enrolling this node timed out after 20 seconds.]"
+	);
 });

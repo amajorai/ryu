@@ -1,3 +1,4 @@
+import { translateMessage } from "@ryu/i18n/lite";
 import { cn } from "@ryu/ui/lib/utils";
 import { Check, House, PackageCheck, Truck, Warehouse } from "lucide-react";
 import { motion } from "motion/react";
@@ -197,6 +198,16 @@ const STATE_TEXT: Record<StepState, string> = {
 	upcoming: "Not yet",
 };
 
+/**
+ * A step's state for screen readers. A step not reached reads through the
+ * keyed `time.notYet` (ja まだ); the bare "Not yet" is a dismiss button.
+ */
+export function stepStateText(state: StepState): string {
+	return state === "upcoming"
+		? translateMessage("time.notYet", {}, STATE_TEXT.upcoming)
+		: STATE_TEXT[state];
+}
+
 /** The step that carries the latest known time. */
 function latestStep(parcel: TrackingParcel): number {
 	return parcel.stage === "awaiting" ? 0 : stageStep(parcel.stage);
@@ -312,7 +323,7 @@ export function TrackingStepper({ parcel }: { parcel: TrackingParcel }) {
 								)}
 							>
 								{stepLabel(step, state, stage)}
-								<span className="sr-only">: {STATE_TEXT[state]}</span>
+								<span className="sr-only">: {stepStateText(state)}</span>
 							</span>
 							<span className="h-4 whitespace-nowrap @md:text-[13px] text-[11px] text-muted-foreground tabular-nums leading-4">
 								{index === timedStep && time ? (

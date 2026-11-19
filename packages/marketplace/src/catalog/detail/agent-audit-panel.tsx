@@ -86,11 +86,13 @@ export function AgentAuditPanel({
 					<div className="flex flex-wrap items-center gap-2">
 						<span className="font-medium text-sm">
 							{assessment?.score == null
-								? "No advisory score"
-								: `${assessment.score}/100 advisory score`}
+								? tl("No advisory score")
+								: tl("{score}/100 advisory score", { score: assessment.score })}
 						</span>
 						<Badge variant="secondary">
-							{result.status === "complete" ? "Complete" : "Partial"}
+							{result.status === "complete"
+								? tl("Full audit")
+								: tl("Partial audit")}
 						</Badge>
 						{result.conversationId && onOpenConversation ? (
 							<Button

@@ -6,6 +6,7 @@ import {
 	SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useOptionalI18n } from "@ryu/i18n/react";
 import {
 	type ContributionDay,
 	ContributionsGraph,
@@ -75,6 +76,10 @@ export function StatsUsageSections({
 	totalTokens,
 	usageDays,
 }: StatsUsageSectionsProps) {
+	// All-time totals; the bare catalog "Lifetime" is a one-time purchase
+	// (ja 買い切り), the Billing sense.
+	const lifetime =
+		useOptionalI18n()?.t("usage.lifetime", {}, "Lifetime") ?? "Lifetime";
 	return (
 		<>
 			<SettingsSection
@@ -90,7 +95,7 @@ export function StatsUsageSections({
 				</SettingsCard>
 			</SettingsSection>
 
-			<SettingsSection title="Lifetime">
+			<SettingsSection title={lifetime}>
 				<div className="grid grid-cols-2 gap-6 py-3 sm:grid-cols-4">
 					<LifetimeStat
 						sub="input + output"

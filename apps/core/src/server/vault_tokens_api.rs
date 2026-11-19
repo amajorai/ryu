@@ -14,6 +14,8 @@
 //! carries `X-Ryu-Wrap-TTL` (or the `X-Vault-Wrap-TTL` alias). It also runs the
 //! handler inside a policy wrapping scope, so a rule's `minWrappingTtlSecs` /
 //! `maxWrappingTtlSecs` refuses a request whose wrap TTL does not meet it.
+//! On machine-login routes it also applies the login lockout (see
+//! [`lockout_routes`]).
 
 use std::net::SocketAddr;
 
@@ -82,13 +84,17 @@ fn machine_parts(
 }
 
 mod lease_routes;
+mod lockout_routes;
 mod request_layer;
+mod share_routes;
 mod token_routes;
 mod wrap_policy;
 mod wrap_routes;
 
 pub use lease_routes::*;
+pub use lockout_routes::*;
 pub use request_layer::*;
+pub use share_routes::*;
 pub use token_routes::*;
 pub use wrap_routes::*;
 
@@ -134,6 +140,15 @@ pub fn routes() -> axum::Router<ServerState> {
         .route(
             "/api/vault/sys/leases/tidy",
             post(sys_lease_tidy).layer(limit()),
+        )
+        .route("/api/vault/sys/lockouts", get(sys_lockouts))
+        .route(
+            "/api/vault/sys/lockouts/config",
+            put(sys_lockout_config).layer(limit()),
+        )
+        .route(
+            "/api/vault/sys/lockouts/:identity/unlock",
+            post(sys_lockout_unlock),
         )
         .route("/api/vault/sys/quotas", get(sys_quotas))
         .route(

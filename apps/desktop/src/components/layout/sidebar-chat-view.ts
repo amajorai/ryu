@@ -8,6 +8,7 @@
 import { z } from "zod";
 import { conversationRunStatusMeta } from "@/src/lib/conversation-run-status.ts";
 import { folderKey } from "@/src/lib/folder-path.ts";
+import { compareNames } from "@/src/lib/name-collator.ts";
 import { resourceVisibilityGroup } from "@/src/lib/resource-visibility.ts";
 import type { Conversation } from "@/types/chat.ts";
 import { isSectionKey, type SectionKey } from "./sidebar-sections.ts";
@@ -393,7 +394,7 @@ export function groupChats(
 			if (a.key === lastKey || b.key === lastKey) {
 				return a.key === lastKey ? 1 : -1;
 			}
-			return a.label.localeCompare(b.label);
+			return compareNames(a.label, b.label);
 		});
 	}
 	return list;

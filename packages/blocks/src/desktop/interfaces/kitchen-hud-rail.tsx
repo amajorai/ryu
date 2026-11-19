@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { DIRECTIONAL_ICON_CLASS } from "@ryu/ui/components/directional-icon.tsx";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils";
@@ -171,6 +171,7 @@ export function OrderRail({
 	} | null;
 }) {
 	const tl = useLiteralMessages();
+	const i18n = useOptionalI18n();
 	const rail = ticketActs?.rail ?? service.rail;
 	const list = useRef<HTMLOListElement>(null);
 	const reduced = useReducedMotion();
@@ -281,7 +282,9 @@ export function OrderRail({
 			) : null}
 			{!loading && rail.length > 0 ? (
 				<ol
-					aria-label="Tickets"
+					aria-label={
+						i18n?.t("kitchen.orderTickets", {}, "Tickets") ?? "Tickets"
+					}
 					className="pointer-events-auto relative -mx-1 flex min-w-0 flex-1 snap-x snap-mandatory scroll-px-1 gap-3 overflow-x-auto px-1 pb-3 outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 					ref={list}
 					style={{ "--ticket-width": `${ticketWidth}px` } as CSSProperties}

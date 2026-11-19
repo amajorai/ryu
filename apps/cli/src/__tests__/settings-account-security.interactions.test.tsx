@@ -208,7 +208,7 @@ test("Account offered step-up methods cycle both directions, clear input, and ch
 	});
 	trackSetup(setup);
 	await openAccount(setup);
-	expect(setup.captureCharFrame()).toMatch(/Password\s+Set/);
+	expect(setup.captureCharFrame()).toMatch(/Password\s+Configured/);
 	await press(setup, { name: "w" });
 	await waitForFrame(setup, (frame) =>
 		frame.includes("Verify identity: password")

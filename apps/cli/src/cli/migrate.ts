@@ -14,8 +14,15 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { importVaultSecrets } from "@ryuhq/core-client/vault";
-import { tf } from "../i18n/translate.ts";
+import { CLI_TRANSLATOR, tf, tr } from "../i18n/translate.ts";
+import { renderLocalized } from "./localizedText.ts";
 import { parseMigrateArgs } from "./migrate-args.ts";
+import {
+	type MigrateTranslator,
+	nextSteps,
+	padCell,
+	statusLabel,
+} from "./migrate-render.ts";
 import {
 	CORE_SOURCE_IDS,
 	ITEM_KINDS,
@@ -43,7 +50,7 @@ function isMissingFolder(error: unknown): boolean {
 
 async function scanFolder(ctx: CliContext, path: string): Promise<Scan> {
 	if (!ctx.api.call) {
-		throw new Error("This command requires the live Core client.");
+		throw new Error(tr("This command requires the live Core client."));
 	}
 	return scanSchema.parse(
 		await ctx.api.call(ctx.target, "/api/import/scan", {
@@ -59,7 +66,7 @@ async function runImport(
 	items: ScanItem[]
 ): Promise<Outcome[]> {
 	if (!ctx.api.call) {
-		throw new Error("This command requires the live Core client.");
+		throw new Error(tr("This command requires the live Core client."));
 	}
 	const reply = runSchema.parse(
 		await ctx.api.call(ctx.target, "/api/import/run", {
@@ -108,22 +115,29 @@ function cliSourceId(coreId: string | null | undefined): SourceId | null {
 	return parsed.success ? parsed.data : null;
 }
 
-function sourceLabel(id: string | null | undefined): string {
+function sourceLabel(
+	id: string | null | undefined,
+	t: MigrateTranslator = CLI_TRANSLATOR
+): string {
 	const source = cliSourceId(id);
 	if (source) {
 		return SOURCES[source].label;
 	}
-	return id === "persona" ? "a persona folder" : "a local folder";
+	return id === "persona" ? t.tr("a persona folder") : t.tr("a local folder");
 }
 
 function isItemKind(kind: string): kind is ItemKind {
 	return itemKindSchema.safeParse(kind).success;
 }
 
-function renderPlan(scan: Scan, selected: ScanItem[]): string {
+export function renderPlan(
+	scan: Scan,
+	selected: ScanItem[],
+	t: MigrateTranslator = CLI_TRANSLATOR
+): string {
 	const lines = [
-		tf("Found {source} setup at {root}", {
-			source: sourceLabel(scan.source),
+		t.tf("Found {source} setup at {root}", {
+			source: sourceLabel(scan.source, t),
 			root: scan.root,
 		}),
 		"",
@@ -136,22 +150,22 @@ function renderPlan(scan: Scan, selected: ScanItem[]): string {
 		if (items.length === 0) {
 			continue;
 		}
-		lines.push(`${KIND_LABELS[kind]} (${items.length})`);
+		lines.push(`${t.tr(KIND_LABELS[kind])} (${items.length})`);
 		for (const item of items) {
 			const marker = selectedIds.has(`${item.kind}:${item.id}`)
 				? "+"
 				: item.already_exists
 					? "="
 					: "-";
-			const note = item.already_exists ? "  (already in Ryu)" : "";
+			const note = item.already_exists ? `  ${t.tr("(already in Ryu)")}` : "";
 			lines.push(`  ${marker} ${item.title}${note}`);
 		}
 	}
 	if (scan.items.length === 0) {
-		lines.push("Nothing importable was found.");
+		lines.push(t.tr("Nothing importable was found."));
 	}
 	if (scan.warnings.length > 0) {
-		lines.push("", "Review before cutover:");
+		lines.push("", t.tr("Review before cutover:"));
 		for (const warning of scan.warnings) {
 			lines.push(`  ! ${warning}`);
 		}
@@ -159,11 +173,19 @@ function renderPlan(scan: Scan, selected: ScanItem[]): string {
 	return `${lines.join("\n")}\n`;
 }
 
-function renderReport(outcomes: Outcome[]): string {
+export function renderReport(
+	outcomes: Outcome[],
+	t: MigrateTranslator = CLI_TRANSLATOR
+): string {
 	const count = (status: string) =>
 		outcomes.filter((outcome) => outcome.status === status).length;
+	const status = (value: string) => statusLabel(value, t);
+	const width = Math.max(
+		8,
+		...outcomes.map((outcome) => Bun.stringWidth(status(outcome.status)))
+	);
 	const lines = [
-		tf(
+		t.tf(
 			"Migration complete: {imported} imported, {skipped} skipped, {failed} failed.",
 			{
 				imported: String(count("imported")),
@@ -177,23 +199,16 @@ function renderReport(outcomes: Outcome[]): string {
 			continue;
 		}
 		lines.push(
-			`  ${outcome.status.padEnd(8)} ${outcome.title}${outcome.detail ? ` — ${outcome.detail}` : ""}`
+			`  ${padCell(status(outcome.status), width)} ${outcome.title}${outcome.detail ? ` — ${outcome.detail}` : ""}`
 		);
 	}
 	return `${lines.join("\n")}\n`;
 }
 
-const NEXT_STEPS = `Next steps:
-  1. Start a new chat; imported agents, skills, and memory apply to new sessions.
-  2. Review imported MCP servers in Settings → MCP; sign in again where they use OAuth or headers.
-  3. Reconnect messaging channels and schedules listed under "Review before cutover".
-  4. Keep the source folder until you have checked Ryu; migration copies, it never moves.
-`;
-
 async function confirm(ctx: CliContext, question: string): Promise<boolean> {
 	if (!(process.stdin.isTTY && process.stdout.isTTY)) {
 		throw new UsageError(
-			"Pass --yes to import without a prompt, or --dry-run to preview."
+			tr("Pass --yes to import without a prompt, or --dry-run to preview.")
 		);
 	}
 	const { createInterface } = await import("node:readline/promises");
@@ -205,7 +220,7 @@ async function confirm(ctx: CliContext, question: string): Promise<boolean> {
 		const answer = await readline.question(`${question} [y/N] `);
 		return /^y(es)?$/i.test(answer.trim());
 	} catch {
-		ctx.io.err("Cancelled.\n");
+		ctx.io.err(`${tr("Cancelled.")}\n`);
 		return false;
 	} finally {
 		readline.close();
@@ -268,7 +283,7 @@ async function migrateSecrets(
 	if (names.length === 0) {
 		return {
 			created: 0,
-			message: "No credentials found in the source .env.",
+			message: tr("No credentials found in the source .env."),
 			names,
 			skipped: 0,
 		};
@@ -338,10 +353,10 @@ async function detectAll(ctx: CliContext): Promise<number> {
 		);
 		return 0;
 	}
-	ctx.io.out("Found setups you can migrate:\n");
+	ctx.io.out(`${tr("Found setups you can migrate:")}\n`);
 	for (const { command, scan } of found) {
 		ctx.io.out(
-			`  ${tf("{label} {root} ({count} items)\n    → {command} --dry-run", { label: sourceLabel(scan.source).padEnd(10), root: scan.root, count: String(scan.items.length), command })}\n`
+			`  ${tf("{label} {root} ({count, plural, one {# item} other {# items}})", { label: padCell(sourceLabel(scan.source), 10), root: scan.root, count: scan.items.length })}\n    → ${command} --dry-run\n`
 		);
 	}
 	return 0;
@@ -362,15 +377,34 @@ export const migrateCommand: Command = {
 		}
 		const spec = args.source ? SOURCES[args.source] : null;
 		if (spec && "needsPath" in spec && !args.path) {
-			throw new UsageError(`${spec.needsPath}\nUsage: ${MIGRATE_USAGE}`);
+			throw new UsageError(
+				`${renderLocalized(spec.needsPath)}\n${tf("Usage: {usage}", { usage: MIGRATE_USAGE })}`
+			);
 		}
 		const candidates = args.source
 			? candidatesFor(args.source, args.path)
 			: [args.path ?? process.cwd()];
 		const scan = await scanFirst(ctx, candidates);
 		if (!scan) {
+			const paths = candidates.join(", ");
+			const command = `ryu migrate ${args.source ?? ""} <path>`;
 			throw new Error(
-				`No ${spec?.label ?? "source"} folder found at ${candidates.join(", ")}. Pass the folder: ryu migrate ${args.source ?? ""} <path>`
+				spec
+					? tf(
+							"No {source} folder found at {paths}. Pass the folder: {command}",
+							{
+								source: spec.label,
+								paths,
+								command,
+							}
+						)
+					: tf(
+							"No source folder found at {paths}. Pass the folder: {command}",
+							{
+								paths,
+								command,
+							}
+						)
 			);
 		}
 		const wanted = args.source
@@ -406,7 +440,7 @@ export const migrateCommand: Command = {
 			ctx.io.out(
 				ctx.flags.json
 					? `${JSON.stringify({ root: scan.root, source: scan.source ?? null, results: [] }, null, 2)}\n`
-					: "\nNothing new to import.\n"
+					: `\n${tr("Nothing new to import.")}\n`
 			);
 			return 0;
 		}
@@ -428,7 +462,7 @@ export const migrateCommand: Command = {
 				))
 			)
 		) {
-			ctx.io.out("Nothing was changed.\n");
+			ctx.io.out(`${tr("Nothing was changed.")}\n`);
 			return 1;
 		}
 		const outcomes =
@@ -439,7 +473,7 @@ export const migrateCommand: Command = {
 			if (args.secrets) {
 				ctx.io.out(`${(await migrateSecrets(ctx, scan.root)).message}\n`);
 			}
-			ctx.io.out(`\n${NEXT_STEPS}`);
+			ctx.io.out(`\n${nextSteps()}`);
 			return failed ? 1 : 0;
 		}
 		// One JSON document on stdout: the secrets report joins the results.

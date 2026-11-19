@@ -51,8 +51,20 @@ fn anything_but_a_plain_host_or_wildcard_domain_is_refused() {
         "0x7f.1",
         "fe80::1%eth0",
     ] {
-        assert!(normalize_patterns(&[bad]).is_err(), "{bad} must be refused");
+        assert_eq!(
+            normalize_patterns(&[bad]),
+            Err(AllowlistError(INVALID_SITE_REFUSAL.to_owned())),
+            "{bad} must be refused"
+        );
     }
+}
+
+#[test]
+fn an_invalid_entry_is_refused_with_a_whole_sentence() {
+    assert_eq!(
+        normalize_patterns(&["example.com/path"]).unwrap_err().to_string(),
+        "Each allowed site must be a host name such as example.com, or *.example.com for its subdomains."
+    );
 }
 
 #[test]

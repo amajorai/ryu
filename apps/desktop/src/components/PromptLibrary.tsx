@@ -98,11 +98,11 @@ export function PromptLibrary({
 		try {
 			setList(await listPrompts(target));
 		} catch (caught) {
-			setError(message(caught, "Failed to load prompts"));
+			setError(message(caught, tl("Failed to load prompts")));
 		} finally {
 			setLoading(false);
 		}
-	}, [target]);
+	}, [target, tl]);
 
 	useEffect(() => {
 		if (open) {
@@ -171,7 +171,7 @@ export function PromptLibrary({
 				setError(result.reason ?? "This node is not signed in");
 			}
 			await reload();
-		}, "Failed to sync organization prompts");
+		}, tl("Failed to sync organization prompts"));
 
 	const handleSaveAsNew = () =>
 		run(async () => {
@@ -188,7 +188,7 @@ export function PromptLibrary({
 			setCommitMessage("");
 			await reload();
 			setSelectedName(name);
-		}, "Failed to save the prompt");
+		}, tl("Failed to save the prompt"));
 
 	const handleCommit = () =>
 		run(async () => {
@@ -209,7 +209,7 @@ export function PromptLibrary({
 			setCommitMessage("");
 			await reload();
 			await loadVersions(selected.name);
-		}, "Failed to commit a new version");
+		}, tl("Failed to commit a new version"));
 
 	const handleLabel = () =>
 		run(async () => {
@@ -222,7 +222,7 @@ export function PromptLibrary({
 			await reload();
 			await loadVersions(selected.name);
 			setSelectedVersion(current.version);
-		}, "Failed to move the label");
+		}, tl("Failed to move the label"));
 
 	const handleUse = () => {
 		if (current) {

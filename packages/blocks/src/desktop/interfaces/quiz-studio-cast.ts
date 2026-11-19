@@ -1,3 +1,4 @@
+import { translateMessage } from "@ryu/i18n/lite";
 import { jitter } from "./game3d-math.ts";
 import {
 	FACE_CAMERA,
@@ -37,7 +38,8 @@ export function studioExtras(
 			id: HOST_ID,
 			label: "The host",
 			looks: host,
-			name: "Host",
+			// The game-show host, not the bare "Host" (hosting, de "Hosten").
+			name: translateMessage("quiz.hostRole", {}, "Host"),
 			pose: "idle",
 			position: [
 				hostX - TOWARD[0] * 0.65,

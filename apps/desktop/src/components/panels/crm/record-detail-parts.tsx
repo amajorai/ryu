@@ -15,6 +15,7 @@ import type {
 	Field,
 } from "@/src/lib/api/crm.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
+import { activityKindLabel, activityTitle } from "./activity-kind-label.ts";
 import { fieldChangeLine } from "./field-change-line.ts";
 
 /** One timeline row. Audit entries render as a compact sentence with no controls;
@@ -72,7 +73,9 @@ export function TimelineEntry({
 								done && "text-muted-foreground line-through"
 							)}
 						>
-							{activity.title || "(untitled)"}
+							{activity.title
+								? activityTitle(activity.title, tl)
+								: "(untitled)"}
 						</div>
 						{activity.body && (
 							<p className="mt-1 whitespace-pre-wrap text-muted-foreground text-sm">
@@ -81,7 +84,7 @@ export function TimelineEntry({
 						)}
 						<div className="mt-1 flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
 							<Badge typography="normal" variant="secondary">
-								{activity.kind}
+								{activityKindLabel(activity.kind, tl)}
 							</Badge>
 							<span className="tabular-nums">{stamp}</span>
 							{activity.assignee && <span>· {activity.assignee}</span>}

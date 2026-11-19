@@ -13,16 +13,14 @@ import {
 	ArrowDown01Icon,
 	BrowserIcon,
 	ComputerIcon,
-	Mic01Icon,
 	PauseIcon,
 	PlayIcon,
 	StopIcon,
 	Tick02Icon,
 	Video01Icon,
-	VolumeHighIcon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -37,14 +35,17 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
-	type ClipCaptureSources,
 	type ClipContext,
 	type ClipSources,
-	type ClipTarget,
 	getSources,
 } from "@/src/lib/api/clips.ts";
 import { recordingScope, useClipStore } from "@/src/store/useClipStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import {
+	AUDIO_META,
+	audioSourceLabel,
+	describeTarget,
+} from "./RecordingControls-labels.ts";
 
 /** Format a millisecond duration as `mm:ss`. */
 function formatElapsed(ms: number): string {
@@ -56,29 +57,6 @@ function formatElapsed(ms: number): string {
 	return `${mm}:${ss}`;
 }
 
-/** One glyph for each audio input toggle, in display order. */
-const AUDIO_META: {
-	icon: IconSvgElement;
-	key: keyof ClipCaptureSources;
-	label: string;
-}[] = [
-	{ key: "mic", label: "Microphone", icon: Mic01Icon },
-	{ key: "systemAudio", label: "System audio", icon: VolumeHighIcon },
-];
-
-/** Resolve the label + glyph for the currently-selected video surface. */
-function describeTarget(target: ClipTarget, sources: ClipSources | null) {
-	if (target.kind === "display") {
-		const display = sources?.displays.find((d) => d.id === target.displayId);
-		return { label: display?.label ?? "Display", Icon: ComputerIcon };
-	}
-	if (target.kind === "window") {
-		const win = sources?.windows.find((w) => w.id === target.windowId);
-		return { label: win?.title ?? "Window", Icon: BrowserIcon };
-	}
-	return { label: "Screen", Icon: ComputerIcon };
-}
-
 export interface RecordingControlsProps {
 	/** Called once a recording is stopped and its context finalized. */
 	onClipReady: (context: ClipContext) => void;
@@ -86,6 +64,15 @@ export interface RecordingControlsProps {
 
 export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 	const tl = useLiteralMessages();
+	const i18n = useOptionalI18n();
+	// The app windows to capture; the bare "Windows" is the operating system.
+	const windowsLabel =
+		i18n?.t("clips.windowSources", {}, "Windows") ?? "Windows";
+	// A screen recording (ja 録画); the bare words are audio (ja 録音).
+	const startLabel =
+		i18n?.t("clips.startRecording", {}, "Start recording") ?? "Start recording";
+	const stopLabel =
+		i18n?.t("clips.stopRecording", {}, "Stop recording") ?? "Stop recording";
 	const node = useNodeStore((s) => s.getActiveNode());
 	const target = useMemo(() => toTarget(node), [node]);
 	const targetScope = recordingScope(target);
@@ -208,7 +195,8 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 
 	const { Icon: TargetIcon, label: targetLabel } = describeTarget(
 		captureTarget,
-		available
+		available,
+		tl
 	);
 
 	if (isRecording || isStopping) {
@@ -253,7 +241,7 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 				</Button>
 				<Button
 					appearance="dictation-recording"
-					aria-label="Stop recording"
+					aria-label={stopLabel}
 					className="size-7"
 					disabled={isStopping || pendingAction !== null}
 					onClick={handleStop}
@@ -364,7 +352,7 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 					{available && available.windows.length > 0 ? (
 						<DropdownMenuGroup>
 							<DropdownMenuSeparator />
-							<DropdownMenuLabel>Windows</DropdownMenuLabel>
+							<DropdownMenuLabel>{windowsLabel}</DropdownMenuLabel>
 							{available.windows.map((win) => {
 								const activeWindow =
 									captureTarget.kind === "window" &&
@@ -397,8 +385,9 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 				</DropdownMenuContent>
 			</DropdownMenu>
 
-			{AUDIO_META.map(({ key, label, icon: Icon }) => {
+			{AUDIO_META.map(({ key, icon: Icon }) => {
 				const active = sources[key];
+				const label = audioSourceLabel(key, tl);
 				return (
 					<Button
 						aria-label={
@@ -422,13 +411,13 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 				);
 			})}
 			<Button
-				aria-label={isStarting ? "Starting recording" : "Start recording"}
+				aria-label={isStarting ? "Starting recording" : startLabel}
 				className="size-7"
 				disabled={isStarting}
 				onClick={handleStart}
 				radius="pill"
 				size="icon"
-				title="Start recording"
+				title={startLabel}
 				type="button"
 				variant="ghost"
 			>

@@ -1,9 +1,18 @@
-import { translate as tl } from "@ryu/i18n/core";
+import { translate } from "@ryu/i18n/core";
+import type { LiteralMessage } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { copyDiagnostics, reportIssue } from "@/src/lib/preflight.ts";
+
+/** The failure toast's title; the button label is translated before it fills the sentence. */
+export function actionFailedTitle(
+	label: string,
+	tl: LiteralMessage = translate
+): string {
+	return tl("{label} failed", { label: tl(label) });
+}
 
 export function PreflightActionButton({
 	label,
@@ -25,7 +34,7 @@ export function PreflightActionButton({
 				try {
 					await onRun();
 				} catch (error) {
-					toast.error(tl("{label} failed", { label }), {
+					toast.error(actionFailedTitle(label), {
 						description:
 							error instanceof Error ? error.message : "Please try again.",
 					});

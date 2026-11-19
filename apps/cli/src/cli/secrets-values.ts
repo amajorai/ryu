@@ -8,14 +8,14 @@ import {
 	listVaultSecretVersions,
 	putVaultSecret,
 	restoreVaultSecret,
-	revealVaultSecret,
+	revealVaultSecretGated,
 	rollbackVaultSecret,
 	type VaultImportFormat,
 	vaultAgentSecret,
 	vaultValueType,
 } from "@ryuhq/core-client/vault";
 import { z } from "zod";
-import { tf } from "../i18n/translate.ts";
+import { tf, tr } from "../i18n/translate.ts";
 import { formatTable, truncate } from "./output.ts";
 import {
 	arg,
@@ -24,6 +24,13 @@ import {
 	metadataFrom,
 	type SecretsArgs,
 } from "./secrets-args.ts";
+import { reportOpenedControlGroup } from "./secrets-control-groups.ts";
+import { refuseDeletingUsedCredential } from "./secrets-delete-usage.ts";
+import { renderRequestedExport } from "./secrets-export-formats.ts";
+import {
+	foreignImportContent,
+	isForeignImportFormat,
+} from "./secrets-import-sources.ts";
 import {
 	agentTarget,
 	describeChangeRequest,
@@ -32,6 +39,7 @@ import {
 	printJson,
 	reportWrite,
 } from "./secrets-output.ts";
+import { randomGeneratorFrom, randomValue } from "./secrets-random.ts";
 import { selectTagged } from "./secrets-run-env.ts";
 import { type CliContext, UsageError } from "./types.ts";
 import { withStepUpHint } from "./vaultStepUp.ts";
@@ -56,7 +64,7 @@ export async function listSecrets(
 		);
 	}
 	if (result.secrets.length === 0) {
-		ctx.io.out("No secrets.\n");
+		ctx.io.out(`${tr("No secrets.")}\n`);
 		return 0;
 	}
 	const rows = result.secrets.map((secret) => [
@@ -89,22 +97,30 @@ export async function getSecret(
 		throw new UsageError("VERSION is not supported with RYU_VAULT_TOKEN.");
 	}
 	const agent = agentTarget(ctx);
-	let result:
-		| Awaited<ReturnType<typeof vaultAgentSecret>>
-		| Awaited<ReturnType<typeof revealVaultSecret>>;
+	let result: { value: string };
 	if (agent) {
 		result = await vaultAgentSecret(agent, name, {
 			environment: flag(args, "--env"),
 			path: flag(args, "--path"),
 		});
 	} else {
-		const coords: Parameters<typeof revealVaultSecret>[2] = coordsFrom(args);
+		const coords: Parameters<typeof revealVaultSecretGated>[2] =
+			coordsFrom(args);
 		if (version !== undefined) {
 			coords.version = version;
 		}
-		result = await withStepUpHint(() =>
-			revealVaultSecret(ctx.target, name, coords)
+		const revealed = await withStepUpHint(() =>
+			revealVaultSecretGated(ctx.target, name, coords)
 		);
+		// A control group answers with a request to approve, not the value.
+		if (revealed.status === "control_group") {
+			return reportOpenedControlGroup(
+				ctx,
+				revealed.controlGroup,
+				revealed.token
+			);
+		}
+		result = { value: revealed.value };
 	}
 	if (ctx.flags.json) {
 		printJson(ctx, result);
@@ -149,8 +165,16 @@ export async function setSecret(
 	agentMarker?: string
 ): Promise<number> {
 	const name = arg(args, 1, "set NAME [VALUE|-]");
-	const metadata = metadataFrom(args);
-	const value = await readValue(ctx, args);
+	const generator = randomGeneratorFrom(args);
+	if (generator && args.positional[2] !== undefined) {
+		throw new UsageError("Pass a VALUE or --random, not both.");
+	}
+	const metadata = generator
+		? { ...metadataFrom(args), generator }
+		: metadataFrom(args);
+	const value = generator
+		? randomValue(generator.length, generator.charset)
+		: await readValue(ctx, args);
 	if (
 		agentMarker !== undefined &&
 		value === undefined &&
@@ -179,10 +203,21 @@ export async function setSecret(
 		input.metadata = metadata;
 	}
 	const result = await putVaultSecret(ctx.target, name, input);
-	return reportWrite(
-		ctx,
-		result,
-		(version) => `Set ${name} (version ${version}).`
+	return reportWrite(ctx, result, (version) =>
+		generator
+			? tf(
+					"Set {name} to a new random value (version {version}, {length} {charset} characters).",
+					{
+						name,
+						version: String(version),
+						length: String(generator.length),
+						charset: generator.charset,
+					}
+				)
+			: tf("Set {name} (version {version}).", {
+					name,
+					version: String(version),
+				})
 	);
 }
 
@@ -191,6 +226,14 @@ export async function deleteSecret(
 	args: SecretsArgs
 ): Promise<number> {
 	const name = arg(args, 1, "delete NAME");
+	const refused = await refuseDeletingUsedCredential(
+		ctx,
+		name,
+		flag(args, "--env")
+	);
+	if (refused !== null) {
+		return refused;
+	}
 	const result = await deleteVaultSecret(ctx.target, name, coordsFrom(args));
 	if (ctx.flags.json) {
 		printJson(ctx, result);
@@ -267,7 +310,10 @@ export async function exportSecrets(
 	args: SecretsArgs
 ): Promise<number> {
 	await selectTagged(ctx, args);
-	const result = await exportResult(ctx, args, exportFormat(args));
+	const result = renderRequestedExport(
+		args,
+		await exportResult(ctx, args, exportFormat(args))
+	);
 	if (ctx.flags.json) {
 		printJson(ctx, result);
 		return 0;
@@ -287,7 +333,9 @@ function importFormat(
 	const inferred = file.endsWith(".json") ? "json" : "dotenv";
 	const format = vaultImportFormatSchema.safeParse(explicit ?? inferred);
 	if (!format.success) {
-		throw new UsageError("--format must be dotenv, json, or snapshot.");
+		throw new UsageError(
+			"--format must be dotenv, json, snapshot, doppler, or envkey."
+		);
 	}
 	return format.data;
 }
@@ -297,7 +345,10 @@ export async function importSecrets(
 	args: SecretsArgs
 ): Promise<number> {
 	const file = arg(args, 1, "import FILE [--format dotenv|json|snapshot]");
-	const format = importFormat(file, flag(args, "--format"));
+	const requested = flag(args, "--format");
+	// Doppler and EnvKey exports are converted here and imported as json.
+	const foreign = isForeignImportFormat(requested) ? requested : null;
+	const format = foreign ? "json" : importFormat(file, requested);
 	const onConflict = flag(args, "--on-conflict") ?? "skip";
 	if (onConflict !== "skip" && onConflict !== "overwrite") {
 		throw new UsageError("--on-conflict must be skip or overwrite.");
@@ -308,7 +359,8 @@ export async function importSecrets(
 			"A snapshot import needs --passphrase or RYU_VAULT_PASSPHRASE."
 		);
 	}
-	const content = await readFile(file, "utf8");
+	const text = await readFile(file, "utf8");
+	const content = foreign ? foreignImportContent(foreign, text, file) : text;
 	const input: Parameters<typeof importVaultSecrets>[1] = {
 		...coordsFrom(args),
 		format,

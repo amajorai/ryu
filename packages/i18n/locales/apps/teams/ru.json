@@ -28,6 +28,7 @@
   "Group created": "Группа создана",
   "Group deleted": "Группа удалена",
   "Group updated": "Группа обновлена",
+  "Groups cannot reach its sidecar. Check the {permission} permission and try again.": "Groups не может связаться со своим сайдкаром. Проверьте разрешение {permission} и повторите попытку.",
   "Groups couldn't load": "Не удалось загрузить группы",
   "Groups loaded, but agents could not: {error}": "Группы загружены, но агенты — нет: {error}",
   "Groups returned an invalid group record.": "Группы вернули недопустимую запись группы.",

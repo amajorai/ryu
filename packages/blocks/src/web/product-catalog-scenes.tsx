@@ -7,6 +7,7 @@ import { MarketplaceScene } from "./product-scenes/marketplace.tsx";
 import { Scene } from "./product-scenes/scene.tsx";
 import { SdkScene } from "./product-scenes/sdk.tsx";
 import { SkillsScene } from "./product-scenes/skills.tsx";
+import { SenseLabel } from "./sense-label.tsx";
 
 /**
  * Homepage card scenes for the released products that are not product realms
@@ -60,7 +61,7 @@ function Marker({ children }: { children: string }) {
 function StatusRows({
 	rows,
 }: {
-	rows: readonly (readonly [string, string, string])[];
+	rows: readonly (readonly [string, ReactNode, string])[];
 }) {
 	return (
 		<div className="type-caption">
@@ -105,7 +106,13 @@ export function ProductCatalogScene({ id }: { id: CatalogSceneId }) {
 					<div className="absolute inset-0 overflow-hidden bg-muted/65 px-5 pt-4">
 						<StatusRows
 							rows={[
-								["Trigger · schedule", "Started", COMPLETE],
+								[
+									"Trigger · schedule",
+									// A run step's status (ja 開始済み); the bare catalog
+									// "Started" is a start-time column (ja 開始日時).
+									<SenseLabel id="runs.started">Started</SenseLabel>,
+									COMPLETE,
+								],
 								["Agent · research", "Completed", COMPLETE],
 								["Sub-agents · fan out", "Running", PROGRESS],
 								["Skill · summarize", "Waiting", "text-muted-foreground"],

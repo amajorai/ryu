@@ -2,6 +2,7 @@
 //
 // OS sandbox status helpers for an installed app's sidecars.
 
+import type { LiteralMessage } from "@ryu/i18n/react";
 import type { SidecarSandboxStatus } from "@/src/lib/api/plugins.ts";
 
 const SANDBOX_BACKEND_LABELS = new Map<string, string>([
@@ -39,17 +40,23 @@ export function appSandboxStatus(
 	return weakest;
 }
 
-/** A short "OS sandbox" value for the app's Information card. */
-export function sandboxLabel(status: SidecarSandboxStatus): string {
+/** A short "OS sandbox" value for the app's Information card, as one
+ *  translated message with the (brand) backend name as a value. */
+export function sandboxLabel(
+	status: SidecarSandboxStatus,
+	tl: LiteralMessage
+): string {
 	const backend = SANDBOX_BACKEND_LABELS.get(status.backend) ?? status.backend;
 	if (status.mode === "off") {
-		return "Off";
+		return tl("Off");
 	}
 	if (status.mode === "audit") {
-		return "Audit only";
+		return tl("Audit only");
 	}
 	if (status.fsRestricted) {
-		return `Enforced · ${backend}`;
+		return tl("Enforced · {backend}", { backend });
 	}
-	return status.enforced ? `${backend} · no file limits` : "Unavailable";
+	return status.enforced
+		? tl("{backend} · no file limits", { backend })
+		: tl("Unavailable");
 }

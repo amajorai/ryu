@@ -218,7 +218,9 @@ function TestCaseRowEditor({
 					id={`test-input-${row.id}`}
 					name={`test-input-${row.id}`}
 					onChange={(e) => onUpdate(row.id, { input: e.target.value })}
-					placeholder="The user message. {{vars}} allowed."
+					placeholder={tl("The user message. {example} allowed.", {
+						example: "{{vars}}",
+					})}
 					size="dense"
 					value={row.input}
 					variant="code"

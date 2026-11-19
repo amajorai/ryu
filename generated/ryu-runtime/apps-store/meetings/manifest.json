@@ -469,7 +469,7 @@
             { "value": "recurring", "label": "Team rituals" },
             { "value": "revenue", "label": "Sales & customers" },
             { "value": "hiring", "label": "Hiring" },
-            { "value": "delivery", "label": "Delivery" },
+            { "value": "delivery", "label": "Project delivery" },
             { "value": "research", "label": "Research" },
             { "value": "leadership", "label": "Leadership" }
           ],

@@ -4,7 +4,7 @@ import {
 	Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
@@ -60,20 +60,23 @@ function newRule(index: number): AgentRule {
 	};
 }
 
-function ruleBadgeMode(mode: string | undefined): string {
+export function ruleBadgeMode(
+	mode: string | undefined,
+	tl: LiteralMessage
+): string {
 	if (mode === "path") {
-		return "Path";
+		return tl("Path");
 	}
 	if (mode === "intelligent") {
-		return "Intelligent";
+		return tl("Intelligent");
 	}
 	if (mode === "always") {
-		return "Always";
+		return tl("Always");
 	}
 	if (mode === "manual") {
-		return "Manual";
+		return tl("Manual");
 	}
-	return "Auto";
+	return tl("Auto");
 }
 
 function ProjectRules({
@@ -123,7 +126,9 @@ function ProjectRules({
 								</p>
 							</div>
 							<Badge variant="outline">{rule.provider}</Badge>
-							<Badge variant="secondary">{ruleBadgeMode(rule.applyMode)}</Badge>
+							<Badge variant="secondary">
+								{ruleBadgeMode(rule.applyMode, tl)}
+							</Badge>
 						</div>
 					))}
 				</div>

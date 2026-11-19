@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	CLOUD_NODE_CHANGE_PLAN_IDS,
+	CLOUD_NODE_CHANGE_PLAN_NAMES,
 	CLOUD_NODE_CHANGE_PLANS_LABEL,
 	cloudNodeEntitlementFor,
 	planAllowsCloudNodeChanges,
@@ -31,6 +32,19 @@ describe("managed-server plan access", () => {
 		expect(CLOUD_NODE_CHANGE_PLANS_LABEL).toBe(
 			"Business, Teams, or Enterprise"
 		);
+	});
+
+	it("lists the same public plans as names a client can join", () => {
+		expect(CLOUD_NODE_CHANGE_PLAN_NAMES).toEqual([
+			"Business",
+			"Teams",
+			"Enterprise",
+		]);
+		expect(
+			new Intl.ListFormat("en", { type: "disjunction" }).format(
+				CLOUD_NODE_CHANGE_PLAN_NAMES
+			)
+		).toBe(CLOUD_NODE_CHANGE_PLANS_LABEL);
 	});
 
 	it("never names a private plan in customer-facing copy", () => {

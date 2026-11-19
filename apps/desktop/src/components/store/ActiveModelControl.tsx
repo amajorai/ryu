@@ -159,23 +159,29 @@ export function ActiveModelControl({
 					undefined,
 					target.userJwt ?? null
 				);
-				await waitForModelEngineInstall(engine, async () => {
-					const catalog = await fetchCatalog(
-						target.url,
-						target.token,
-						undefined,
-						target.userJwt ?? null
-					);
-					const installedEngine = catalog.find(
-						(item) => item.name === engine.name
-					);
-					if (!installedEngine) {
-						throw new Error(
-							`${engine.displayName} is no longer available on this node.`
+				await waitForModelEngineInstall(
+					engine,
+					async () => {
+						const catalog = await fetchCatalog(
+							target.url,
+							target.token,
+							undefined,
+							target.userJwt ?? null
 						);
-					}
-					return installedEngine.installState;
-				});
+						const installedEngine = catalog.find(
+							(item) => item.name === engine.name
+						);
+						if (!installedEngine) {
+							throw new Error(
+								tl("{displayName} is no longer available on this node.", {
+									displayName: engine.displayName,
+								})
+							);
+						}
+						return installedEngine.installState;
+					},
+					{ tl }
+				);
 			}
 
 			setSetupStage(tl("Starting {modelName}…", { modelName }));

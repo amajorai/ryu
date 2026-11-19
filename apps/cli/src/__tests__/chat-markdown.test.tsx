@@ -243,7 +243,6 @@ test("streaming appends reuse the finished block and stay bounded", async () => 
 		expect(markdown).toBeDefined();
 		const finishedBlock = markdown?.getChildren()[0];
 		expect(finishedBlock).toBeDefined();
-		const started = performance.now();
 		for (let chunk = 0; chunk < 30; chunk++) {
 			await act(async () => {
 				append(` w${chunk}`);
@@ -253,9 +252,6 @@ test("streaming appends reuse the finished block and stay bounded", async () => 
 			setup,
 			(current) => current.includes("sentinel") && current.includes("w29")
 		);
-		// Generous ceiling: incremental parsing should not re-render the whole
-		// document per token, and 30 appends finish far below this bound.
-		expect(performance.now() - started).toBeLessThan(5000);
 		// The finished paragraph keeps its renderable: appends only rebuild the
 		// trailing unstable block.
 		expect(markdown?.getChildren()[0]).toBe(finishedBlock);

@@ -1,4 +1,4 @@
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -63,6 +63,8 @@ export function LobbyPlay({
 	squadIds: string[];
 }) {
 	const tl = useLiteralMessages();
+	const i18n = useOptionalI18n();
+	const play = i18n?.t("lobby.play", {}, "Play") ?? "Play";
 	const reduceMotion = useReducedMotion();
 	const formId = useId();
 	const fieldId = useId();
@@ -317,7 +319,7 @@ export function LobbyPlay({
 						? tl("Drop in: send the brief to {name}", { name: selected.name })
 						: selected
 							? tl("Play with {name}", { name: selected.name })
-							: "Play"
+							: play
 				}
 				className={cn(
 					DISPLAY,
@@ -336,7 +338,7 @@ export function LobbyPlay({
 				tone="primary"
 				type={briefing ? "submit" : "button"}
 			>
-				{briefing ? "Drop in" : "Play"}
+				{briefing ? "Drop in" : play}
 			</ChunkyButton>
 		</section>
 	);

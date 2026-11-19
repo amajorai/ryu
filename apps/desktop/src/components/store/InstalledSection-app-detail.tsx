@@ -26,7 +26,7 @@ import {
 	ListingStatStrip,
 } from "@ryu/marketplace/catalog/detail/listing-detail-shell";
 import { iconCacheKey } from "@ryu/marketplace/catalog/icon-cache";
-import { catalogLayerBadges } from "@ryu/marketplace/catalog/types";
+import { catalogLayerBadges } from "@ryu/marketplace/catalog/layer-labels";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -238,7 +238,7 @@ export function InstalledAppDetail({
 									value: formatCount(app.permissionGrants.length) ?? "—",
 								},
 								...(sandbox
-									? [{ label: "OS sandbox", value: sandboxLabel(sandbox) }]
+									? [{ label: "OS sandbox", value: sandboxLabel(sandbox, tl) }]
 									: []),
 							]}
 						/>
@@ -265,7 +265,7 @@ export function InstalledAppDetail({
 						deprecation ? DEPRECATED_LABEL : null,
 						app.system && !app.mandatory ? "System" : null,
 						app.runnables.some((r) => r.kind === AGENT_KIND) ? "Agent" : null,
-						...catalogLayerBadges(app.layers, app.external),
+						...catalogLayerBadges(app.layers, tl, app.external),
 					].filter((b): b is string => Boolean(b))}
 					cacheKey={iconCacheKey(app.id, installedVersionOf(app))}
 					dither={app.iconDither}

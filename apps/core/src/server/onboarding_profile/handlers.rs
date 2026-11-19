@@ -163,6 +163,7 @@ pub(crate) async fn start(
         driver_active: true,
         conversation_id: None,
         error: None,
+        error_code: None,
         agent_suggestions: Vec::new(),
     };
     guard.insert(id.clone(), job);

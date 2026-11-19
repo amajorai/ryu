@@ -29,6 +29,7 @@ import { humanizeError } from "../../core/native-errors.ts";
 import { tf } from "../../i18n/translate.ts";
 import { ErrorView } from "../../ui/ErrorView.tsx";
 import { Loading } from "../../ui/Loading.tsx";
+import { nameFieldLabel } from "../../ui/name-field-label.ts";
 import { errText, PageHeader, type Theme } from "./index-shared.tsx";
 
 const LIST_HEIGHT = 16;
@@ -364,7 +365,7 @@ function DetailBody({
 
 	return (
 		<box flexDirection="column" paddingTop={1}>
-			<KvRow label="name" theme={theme}>
+			<KvRow label={nameFieldLabel()} theme={theme}>
 				<text fg={theme.colors.foreground}>
 					<b>{agent.name}</b>
 				</text>

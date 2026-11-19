@@ -72,6 +72,7 @@ pub(super) fn test_job() -> ProfileJob {
         driver_active: true,
         conversation_id: None,
         error: None,
+        error_code: None,
         agent_suggestions: Vec::new(),
     }
 }
@@ -88,4 +89,23 @@ fn the_wire_materialized_flag_keeps_its_legacy_background_meaning() {
     // The internal flag is untouched, so the draft stays cancellable.
     assert!(!job.materialized);
     assert!(request_cancel(&mut job));
+}
+
+#[test]
+fn an_expired_job_reports_the_expired_code() {
+    let mut job = test_job();
+    job.started_at_ms = now_ms() - PROFILE_JOB_MAX_AGE_MS - 1;
+    let mut guard = HashMap::from([("job".to_owned(), job)]);
+    prune_profile_jobs(&mut guard, now_ms());
+    let expired = view("job", &guard["job"]);
+    assert_eq!(expired.state, "failed");
+    assert_eq!(expired.error_code, Some("expired"));
+    assert_eq!(
+        expired.error.as_deref(),
+        Some("profile job expired; start onboarding again")
+    );
+    assert_eq!(
+        serde_json::to_value(&expired).unwrap()["errorCode"],
+        "expired"
+    );
 }

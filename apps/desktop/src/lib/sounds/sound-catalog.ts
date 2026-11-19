@@ -36,7 +36,7 @@ export type SoundEventId = (typeof SOUND_EVENT_IDS)[number];
  */
 export type SoundClass = "notification" | "feedback" | "reward" | "call";
 
-export type SoundGroup = "Activity" | "Agents" | "Calls" | "Rewards";
+export type SoundGroup = "Activity" | "Agents" | "Voice calls" | "Rewards";
 
 /** Higher wins when cues overlap. */
 export type SoundPriority = 1 | 2 | 3;
@@ -151,7 +151,7 @@ export const SOUND_SETTING_ROWS: readonly SoundSettingRow[] = [
 		id: "calling",
 		label: "Calling",
 		description: "Rings while a voice call connects.",
-		group: "Calls",
+		group: "Voice calls",
 		ids: ["call-ring"],
 		defaultEnabled: true,
 	},
@@ -159,7 +159,7 @@ export const SOUND_SETTING_ROWS: readonly SoundSettingRow[] = [
 		id: "join-leave",
 		label: "Join and leave",
 		description: "A voice call connects, ends or fails to connect.",
-		group: "Calls",
+		group: "Voice calls",
 		ids: ["call-join", "call-leave", "call-error"],
 		defaultEnabled: true,
 	},
@@ -167,7 +167,7 @@ export const SOUND_SETTING_ROWS: readonly SoundSettingRow[] = [
 		id: "mute-unmute",
 		label: "Mute and unmute",
 		description: "You mute or unmute your microphone in a call.",
-		group: "Calls",
+		group: "Voice calls",
 		ids: ["mute", "unmute"],
 		defaultEnabled: true,
 	},

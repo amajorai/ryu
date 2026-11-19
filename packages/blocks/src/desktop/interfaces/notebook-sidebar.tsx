@@ -69,7 +69,9 @@ function NavRow({
 		<button
 			aria-current={active ? "page" : undefined}
 			aria-label={
-				badge ? tl("{label}, {badge} need you", { badge, label }) : undefined
+				badge
+					? tl("{label}, {badge} need you", { badge, label: tl(label) })
+					: undefined
 			}
 			className={cn(
 				"flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-start font-medium text-sm outline-none transition-colors duration-100 focus-visible:ring-2 focus-visible:ring-ring/50",

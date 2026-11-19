@@ -120,7 +120,7 @@ export function DoctorSection({
 							runCatalogScan(requestTarget, {
 								kind: "gateway",
 								id: "gateway",
-								name: "Gateway health doctor",
+								name: tl("Gateway health doctor"),
 								metadata: { doctor },
 								scorecard: null,
 							})

@@ -1,4 +1,5 @@
 /* eslint-disable react/no-unknown-property */
+import { translate as tr } from "@ryu/i18n/lite";
 import type {
 	ClockOptions,
 	InterfaceAgentAct,
@@ -62,10 +63,14 @@ export const MARKET_ACT_SKIN = SKIN;
  * adds "Likely ").
  */
 export const chalkedLimit: LimitText = (act, clearsAt) => {
-	const words = clearsAt ? `back ${clearsAt}` : "closed for now";
-	return limitIsLikely(act)
-		? words
-		: `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+	if (limitIsLikely(act)) {
+		return clearsAt
+			? tr("back {time}", { time: clearsAt })
+			: tr("closed for now");
+	}
+	return clearsAt
+		? tr("Back {time}", { time: clearsAt })
+		: tr("Closed for now");
 };
 
 /** The crate's goods as progress pips: sold, still on the shelf, a guess. */

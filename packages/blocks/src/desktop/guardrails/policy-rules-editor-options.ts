@@ -47,13 +47,28 @@ export const ZDR_OPTIONS = [
 	{ value: "require", label: "Require" },
 ];
 
-export const BUDGET_OPTIONS = [
-	{ value: "none", label: "No cap" },
-	...POLICY_BUDGET_WINDOWS.map((window) => ({
-		value: window,
-		label: POLICY_BUDGET_WINDOW_LABELS[window],
-	})),
-];
+/** A keyed word sense (`en-messages-senses*.ts`) with its English fallback. */
+export type SenseMessage = (id: string, fallback: string) => string;
+
+const englishSense: SenseMessage = (_id, fallback) => fallback;
+
+/**
+ * The spend-cap window picker's options. "Lifetime" is an all-time total read
+ * through the keyed `usage.lifetime` (ja 累計); the bare catalog "Lifetime" is
+ * a one-time purchase (ja 買い切り).
+ */
+export function budgetOptions(sense: SenseMessage = englishSense) {
+	return [
+		{ value: "none", label: "No cap" },
+		...POLICY_BUDGET_WINDOWS.map((window) => ({
+			value: window,
+			label:
+				window === "lifetime"
+					? sense("usage.lifetime", POLICY_BUDGET_WINDOW_LABELS.lifetime)
+					: POLICY_BUDGET_WINDOW_LABELS[window],
+		})),
+	];
+}
 
 export const PERMISSION_ACTION_OPTIONS = POLICY_PERMISSION_ACTIONS.map(
 	(action) => ({

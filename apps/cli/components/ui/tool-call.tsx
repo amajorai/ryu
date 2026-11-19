@@ -42,7 +42,26 @@ export interface ToolCallProps {
 	pendingLabel?: string;
 	/** Ryu host extension: a permission prompt is waiting on this call. */
 	awaitingPermission?: boolean;
+	/** Ryu host extension: copy rendered in the CLI locale by the host. */
+	labels?: ToolCallLabels;
 }
+
+/** Ryu host extension: the row's copy, translated by the host (`src/`). */
+export interface ToolCallLabels {
+	args: string;
+	awaitingPermission: string;
+	denied: string;
+	interrupted: string;
+	result: string;
+}
+
+const DEFAULT_LABELS: ToolCallLabels = {
+	args: "Args:",
+	awaitingPermission: "awaiting permission",
+	denied: "denied",
+	interrupted: "interrupted",
+	result: "Result:",
+};
 
 const UNICODE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const ASCII_SPINNER = ["-", "\\", "|", "/"];
@@ -59,6 +78,7 @@ export const ToolCall = ({
 	diffStat,
 	pendingLabel,
 	awaitingPermission = false,
+	labels = DEFAULT_LABELS,
 }: ToolCallProps) => {
 	const theme = useTheme();
 	const unicode = useUnicode();
@@ -174,11 +194,11 @@ export const ToolCall = ({
 	// short muted suffix says why the call never finished.
 	let outcomeLabel: string | null = null;
 	if (awaitingPermission) {
-		outcomeLabel = "awaiting permission";
+		outcomeLabel = labels.awaitingPermission;
 	} else if (status === "interrupted") {
-		outcomeLabel = "interrupted";
+		outcomeLabel = labels.interrupted;
 	} else if (status === "denied") {
-		outcomeLabel = "denied";
+		outcomeLabel = labels.denied;
 	}
 	let nameNode = label;
 	if (status === "denied") {
@@ -251,7 +271,7 @@ export const ToolCall = ({
 					{diffLines ? <Diff lines={diffLines} /> : null}
 					{args && Object.keys(args).length > 0 && (
 						<box flexDirection="column">
-							<text fg="#666">Args:</text>
+							<text fg="#666">{labels.args}</text>
 							{...Object.entries(args).map(([k, v]) => (
 								<box key={k} gap={1}>
 									<text fg={theme.colors.accent}>{`${k}:`}</text>
@@ -262,7 +282,7 @@ export const ToolCall = ({
 					)}
 					{result !== undefined && (
 						<box flexDirection="column">
-							<text fg="#666">Result:</text>
+							<text fg="#666">{labels.result}</text>
 							<text fg="#666">
 								{textResult.success
 									? textResult.data

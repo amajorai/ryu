@@ -129,16 +129,14 @@ pub(super) async fn ensure_profile_conversation(
     conversation_id: &str,
 ) -> anyhow::Result<()> {
     let team_knowledge = inputs.onboarding.setup_kind == NodeSetupKind::Team;
+    let locale = crate::i18n::locale::node_locale().await;
+    let title = profile_conversation_title(team_knowledge, locale);
     state
         .conversations
         .ensure_conversation(
             conversation_id,
             Some("ryu"),
-            Some(if team_knowledge {
-                "Your initial company knowledge"
-            } else {
-                "Your private Ryu profile"
-            }),
+            Some(&title),
             Tenancy::owned_by(Some(&inputs.owner_user_id), Some(&inputs.org_id)),
         )
         .await
@@ -244,12 +242,13 @@ pub(super) async fn draft_profile(
     )
     .await?;
     if reply.trim().is_empty() {
-        anyhow::bail!("the profile agent returned no profile draft");
+        anyhow::bail!(ProfileBuildError::EmptyDraft);
     }
 
-    let (profile, agent_suggestions) = parse_profile_reply(&reply);
+    let locale = crate::i18n::locale::node_locale().await;
+    let (profile, agent_suggestions) = parse_profile_reply(&reply, locale);
     if profile.trim().is_empty() {
-        anyhow::bail!("the profile agent returned no profile draft");
+        anyhow::bail!(ProfileBuildError::EmptyDraft);
     }
     Ok(ProfileDraft {
         agent_id,
@@ -294,12 +293,15 @@ pub(super) async fn materialize_profile(
     let metadata = profile_memory_metadata(conversation_id, &messages);
 
     let tags = vec!["onboarding".to_owned(), "profile-bootstrap".to_owned()];
+    let content = profile_memory_content(
+        team_knowledge,
+        &profile,
+        crate::i18n::locale::node_locale().await,
+    );
     verify_profile_onboarding_snapshot(state, onboarding).await?;
     if team_knowledge {
         let org_memory = crate::server::memory::NewMemory {
-            content: format!(
-                "Shared company knowledge draft (verify before relying on it):\n{profile}"
-            ),
+            content,
             scope: crate::server::memory::MemoryScope::Org,
             scope_id: Some(org_id.to_owned()),
             category: crate::server::memory::MemoryCategory::Organization,
@@ -319,7 +321,7 @@ pub(super) async fn materialize_profile(
         .await?;
     } else {
         let user_memory = crate::server::memory::NewMemory {
-            content: format!("Private profile draft (verify before relying on it):\n{profile}"),
+            content,
             scope: crate::server::memory::MemoryScope::User,
             scope_id: None,
             category: crate::server::memory::MemoryCategory::UserFact,

@@ -7,20 +7,22 @@ import {
 	type RateLimitResult,
 } from "@ryu/email";
 import { z } from "zod";
+import { claimEmailCooldown } from "../lib/email-cooldown.ts";
+import {
+	currentEmailBudget,
+	takePrepaidSend,
+} from "../lib/email-send-budget.ts";
 import { checkNotificationEmailRateLimit } from "../lib/notification-email-rate.ts";
 import { recordSentEmail } from "../lib/sent-email-archive.ts";
 
-// Per-address email cooldown and daily limits, plus the hooks the email
-// package calls to save contact ids and archive sent mail.
+// The email package's per-address cooldown check and delivery stats, plus the
+// hooks it calls to save contact ids and archive sent mail.
 
 export const retryAfterSeconds = z
 	.object({ retryAfter: z.number().optional() })
 	.optional()
 	.transform((error) => error?.retryAfter)
 	.catch(undefined).parse;
-
-const EMAIL_COOLDOWN_MS = 60 * 1000;
-const EMAIL_DAILY_LIMIT = 20;
 
 /**
  * Start a fresh daily email count when the stored one belongs to an earlier
@@ -41,88 +43,28 @@ async function rollEmailDayOver(userId: unknown, today: Date): Promise<void> {
 }
 
 /**
- * Undo one cooldown claim whose email was never delivered, restoring the
- * stamp it replaced. Only while the claim is still the latest stamp: a later
- * claim or a counted delivery has moved `lastEmailSentAt` and is kept.
+ * The cooldown `sendEmail` applies to authentication mail
+ * (lib/email-cooldown.ts, keyed by the hashed address, never by the user).
+ * The one send the request in scope already paid for goes through; any other
+ * claims from the budget in scope (lib/email-send-budget.ts) and is given
+ * back if the delivery fails.
  */
-async function releaseEmailCooldownClaim(
-	userId: unknown,
-	claimedAt: Date,
-	previous: Date | null
-): Promise<void> {
-	await User.updateOne(
-		{ _id: userId, lastEmailSentAt: claimedAt },
-		previous
-			? { $set: { lastEmailSentAt: previous } }
-			: { $unset: { lastEmailSentAt: 1 } }
-	);
-}
-
 const checkEmailRateLimit = async (email: string): Promise<RateLimitResult> => {
 	try {
-		const user = await User.findOne({ email: email.toLowerCase() });
-
-		if (!user) {
+		if (takePrepaidSend(email)) {
 			return { allowed: true };
 		}
-
-		const now = new Date();
-		const today = new Date();
-		today.setHours(0, 0, 0, 0);
-
-		// Roll the daily counter over first, as its own conditional write, so the
-		// claim below sees today's count rather than yesterday's in-memory value.
-		await rollEmailDayOver(user._id, today);
-
-		// Claim the cooldown slot atomically. A read-then-check let concurrent
-		// requests (parallel resets, sign-up retries) all pass before the first
-		// send stamped `lastEmailSentAt`, defeating the per-recipient cooldown.
-		// `updateEmailStats` still counts the delivery after a successful send,
-		// and a send that never delivers releases the claim, so a provider outage
-		// does not start a cooldown for an email nobody received.
-		const claimed = await User.findOneAndUpdate(
-			{
-				_id: user._id,
-				dailyEmailCount: { $not: { $gte: EMAIL_DAILY_LIMIT } },
-				lastEmailSentAt: {
-					$not: { $gt: new Date(now.getTime() - EMAIL_COOLDOWN_MS) },
-				},
-			},
-			{ $set: { lastEmailSentAt: now } },
-			// The document as it was, so a release can restore the prior stamp.
-			{ new: false }
-		);
-		if (claimed) {
-			const previous = claimed.lastEmailSentAt ?? null;
-			return {
-				allowed: true,
-				release: () => releaseEmailCooldownClaim(user._id, now, previous),
-			};
+		const claim = await claimEmailCooldown(email, currentEmailBudget());
+		if (claim.allowed) {
+			return claim;
 		}
-
-		const current = await User.findOne({ _id: user._id });
-		if ((current?.dailyEmailCount ?? 0) >= EMAIL_DAILY_LIMIT) {
-			const tomorrow = new Date(today);
-			tomorrow.setDate(tomorrow.getDate() + 1);
-			const retryAfter = Math.ceil((tomorrow.getTime() - now.getTime()) / 1000);
-
-			return {
-				allowed: false,
-				reason:
-					"You have reached the daily email limit. Please try again tomorrow",
-				retryAfter,
-			};
-		}
-
-		const lastSentAt = current?.lastEmailSentAt?.getTime() ?? now.getTime();
-		const retryAfter = Math.max(
-			1,
-			Math.ceil((EMAIL_COOLDOWN_MS - (now.getTime() - lastSentAt)) / 1000)
-		);
 		return {
 			allowed: false,
-			reason: "Please wait before requesting another email",
-			retryAfter,
+			reason:
+				claim.reason === "daily-limit"
+					? "You have reached the daily email limit. Please try again tomorrow"
+					: "Please wait before requesting another email",
+			retryAfter: claim.retryAfter,
 		};
 	} catch (error) {
 		console.error("Error checking email rate limit:", error);
@@ -130,6 +72,11 @@ const checkEmailRateLimit = async (email: string): Promise<RateLimitResult> => {
 	}
 };
 
+/**
+ * Record a delivered authentication email on the recipient's user row, whose
+ * counters the session exposes as user fields. The cooldown itself lives in
+ * lib/email-cooldown.ts and does not read them.
+ */
 const updateEmailStats = async (email: string): Promise<void> => {
 	try {
 		const user = await User.findOne({ email: email.toLowerCase() });

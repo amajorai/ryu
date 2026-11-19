@@ -17,7 +17,7 @@ import {
 	formatNumber,
 	formatPercent,
 	formatScore,
-	promptCacheStatus,
+	promptCacheStatusText,
 } from "./AgentObservabilityView-audit.ts";
 import { SummaryCard, TraceRow } from "./AgentObservabilityView-cards.tsx";
 
@@ -138,7 +138,7 @@ export function ObservabilitySelectedSection({
 									Prompt cache
 								</p>
 								<p className="mt-1 font-medium text-sm">
-									{promptCacheStatus(selected) ?? "Usage not reported"}
+									{promptCacheStatusText(selected, tl) ?? "Usage not reported"}
 								</p>
 							</div>
 							<div>

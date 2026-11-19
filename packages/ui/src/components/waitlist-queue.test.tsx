@@ -1,8 +1,12 @@
 import { expect, test } from "bun:test";
+import type { LiteralMessage } from "@ryu/i18n";
+import { registerLiteralCatalogLoader } from "@ryu/i18n/core";
+import { I18nProvider } from "@ryu/i18n/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WaitlistPass } from "./waitlist-pass.tsx";
 import { WaitlistQueue } from "./waitlist-queue.tsx";
 import {
+	reservedHandleTitle,
 	WaitlistHandleStep,
 	WaitlistShareStep,
 } from "./waitlist-queue-steps.tsx";
@@ -148,4 +152,34 @@ test("the waitlist pass shows its invite QR with no reveal toggle", () => {
 	expect(html).toContain('aria-label="Scan to invite"');
 	expect(html).not.toContain("Invite QR hidden");
 	expect(html).not.toContain("Reveal");
+});
+
+test("the reserved-handle headline is one translatable sentence", () => {
+	const tl: LiteralMessage = (source, values) =>
+		`[${source}]${String((values as Record<string, unknown> | undefined)?.handle ?? "")}`;
+	expect(reservedHandleTitle("alice", tl)).toBe("[@{handle} is reserved]alice");
+
+	registerLiteralCatalogLoader(() => ({
+		"@{handle} is reserved": "@{handle} は予約済みです",
+	}));
+	try {
+		const html = renderToStaticMarkup(
+			<I18nProvider
+				autoLocalizeDom={false}
+				initialLocale="ja"
+				initialPackId={null}
+			>
+				<WaitlistHandleStep
+					handle=""
+					onChangeHandle={() => {}}
+					onReserve={() => {}}
+					reserved="alice"
+					reserving={false}
+				/>
+			</I18nProvider>
+		);
+		expect(html).toContain("@alice は予約済みです");
+	} finally {
+		registerLiteralCatalogLoader(null);
+	}
 });

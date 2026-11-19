@@ -1,5 +1,6 @@
 // Plan, trial and upsell labels for the account menu.
 
+import { translateMessage } from "@ryu/i18n/lite";
 import type { LiteralMessage } from "@ryu/i18n/react";
 
 import { formatDate as formatDateInZone } from "@/src/lib/timezone.ts";
@@ -22,7 +23,9 @@ export function planLabel(
 		return PLAN_LABELS.get(plan) ?? plan;
 	}
 	// Only a running trial is labelled "Trial"; beta (trial rollout off) is Free.
-	return trialing ? "Trial" : "Free";
+	// The plan chip reads through the keyed `plans.trialTier`: the bare catalog
+	// "Trial" is an agent lifecycle stage (de "Test").
+	return trialing ? translateMessage("plans.trialTier", {}, "Trial") : "Free";
 }
 
 export function trialDaysLabel(days: number, tl: LiteralMessage): string {

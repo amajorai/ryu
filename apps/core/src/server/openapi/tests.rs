@@ -156,6 +156,7 @@ fn every_sub_doc_operation_survives_the_merge() {
     let sub_docs = [
         super::node_agents::NodeAgentsPaths::openapi(),
         super::vault::VaultPaths::openapi(),
+        super::vault_compat::VaultCompatPaths::openapi(),
         super::runtime::RuntimePaths::openapi(),
         super::domains::DomainPaths::openapi(),
     ];
@@ -173,4 +174,82 @@ fn every_sub_doc_operation_survives_the_merge() {
             }
         }
     }
+}
+
+/// Every HashiCorp Vault-compatible `/v1` route is in the spec with the
+/// methods its router mounts (`LIST` aside), the Vault tag, and a
+/// `vault_compat_` operation id that no other operation uses.
+#[test]
+fn vault_compat_v1_routes_are_registered() {
+    use utoipa::OpenApi;
+
+    let generated =
+        serde_json::to_value(super::api_doc()).expect("serialize generated Core OpenAPI");
+    let paths = generated["paths"].as_object().expect("paths object");
+    let expected: [(&str, &[&str]); 29] = [
+        ("/v1/sys/health", &["get"]),
+        ("/v1/sys/seal-status", &["get"]),
+        ("/v1/sys/leader", &["get"]),
+        ("/v1/sys/internal/ui/mounts/{path}", &["get"]),
+        ("/v1/sys/tools/random", &["post"]),
+        ("/v1/sys/tools/random/{params}", &["post"]),
+        ("/v1/sys/tools/hash", &["post"]),
+        ("/v1/sys/tools/hash/{algorithm}", &["post"]),
+        ("/v1/auth/approle/login", &["post"]),
+        ("/v1/auth/jwt/login", &["post"]),
+        ("/v1/auth/cert/login", &["post"]),
+        ("/v1/auth/aws/login", &["post"]),
+        ("/v1/auth/kubernetes/login", &["post"]),
+        ("/v1/auth/token/lookup-self", &["get", "post"]),
+        ("/v1/auth/token/revoke-self", &["post"]),
+        ("/v1/auth/token/renew-self", &["post"]),
+        ("/v1/auth/token/create", &["post"]),
+        ("/v1/auth/token/create/{role_name}", &["post"]),
+        ("/v1/secret/data/{path}", &["get", "put", "post", "delete"]),
+        ("/v1/secret/metadata/{path}", &["get", "delete"]),
+        ("/v1/secret/metadata", &["get"]),
+        ("/v1/transit/encrypt/{name}", &["post"]),
+        ("/v1/transit/decrypt/{name}", &["post"]),
+        ("/v1/transit/rewrap/{name}", &["post"]),
+        ("/v1/transit/datakey/{kind}/{name}", &["post"]),
+        ("/v1/transit/sign/{name}", &["post"]),
+        ("/v1/transit/verify/{name}", &["post"]),
+        ("/v1/transit/hmac/{name}", &["post"]),
+        ("/v1/transit/keys/{name}/rotate", &["post"]),
+    ];
+    let mut operations = 0;
+    for (path, methods) in expected {
+        for method in methods {
+            let operation = paths
+                .get(path)
+                .and_then(|item| item.get(*method))
+                .unwrap_or_else(|| panic!("{method} {path} is not registered"));
+            assert_eq!(
+                operation["tags"],
+                serde_json::json!(["Vault"]),
+                "{method} {path}"
+            );
+            let id = operation["operationId"].as_str().unwrap_or_default();
+            assert!(id.starts_with("vault_compat_"), "{method} {path}: `{id}`");
+            let uses = paths
+                .values()
+                .filter_map(Value::as_object)
+                .flat_map(|item| item.values())
+                .filter(|op| op["operationId"].as_str() == Some(id))
+                .count();
+            assert_eq!(uses, 1, "{method} {path}: operationId `{id}` is not unique");
+            operations += 1;
+        }
+    }
+    // The sub-doc registers exactly these operations, no more.
+    let sub_doc = serde_json::to_value(super::vault_compat::VaultCompatPaths::openapi())
+        .expect("serialize the compat sub-doc");
+    let registered: usize = sub_doc["paths"]
+        .as_object()
+        .expect("sub-doc paths")
+        .values()
+        .map(|item| item.as_object().map_or(0, serde_json::Map::len))
+        .sum();
+    assert_eq!(registered, operations);
+    assert_eq!(operations, 34);
 }

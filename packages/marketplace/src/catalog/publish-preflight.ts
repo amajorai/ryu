@@ -166,7 +166,7 @@ function baseChecks(input: MarketplacePublishPreflightInput): ScorecardCheck[] {
 					check(
 						"listing-identity",
 						"safety",
-						"Uses its own listing namespace",
+						tl("Uses its own listing namespace"),
 						4,
 						input.listingIdentity.passed ? "pass" : "fail",
 						input.listingIdentity.detail

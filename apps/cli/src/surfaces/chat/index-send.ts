@@ -7,6 +7,7 @@ import {
 	permissionToolDetail,
 } from "../../core/chatPermission.ts";
 import { parseChatQuestion } from "../../core/chatQuestion.ts";
+import { chatRefusalText } from "../../core/chatRefusalText.ts";
 import {
 	type ChatStreamOptions,
 	type ChatTurn,
@@ -379,7 +380,11 @@ export function useChatSend(deps: UseChatSendDeps) {
 							return;
 						}
 						turnFailed = true;
-						const readable = humanizeError(message, { url: target.url });
+						// A refused turn arrives as `HTTP {status} · {reason}`; its
+						// reason renders in the CLI's language.
+						const readable = chatRefusalText(
+							humanizeError(message, { url: target.url })
+						);
 						setTurnError(herdrErrorMessage(readable));
 						// The error renders inline in the transcript; a toast would
 						// only repeat it.

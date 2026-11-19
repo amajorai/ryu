@@ -73,7 +73,7 @@ function SyncForm({
 			await queryClient.invalidateQueries({
 				queryKey: ["vault", "external"],
 			});
-			sileo.success({ title: "Sync added" });
+			sileo.success({ title: tl("Sync added") });
 			onDone();
 		} catch (caught) {
 			setProblem(vaultErrorMessage(caught, "Could not add the sync.", tl));

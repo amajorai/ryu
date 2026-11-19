@@ -14,6 +14,7 @@ import {
 	parseDayKey,
 	shiftDayKey,
 	shiftMonthKey,
+	weekOf,
 } from "./journal-model-dates.ts";
 
 export {
@@ -21,6 +22,7 @@ export {
 	mediumDateLabel,
 	monthLabel,
 	monthShort,
+	monthWeeks,
 	parseDayKey,
 	shiftDayKey,
 	shiftMonthKey,
@@ -28,6 +30,7 @@ export {
 	weekdayLong,
 	weekdayNarrow,
 	weekdayShort,
+	weekOf,
 } from "./journal-model-dates.ts";
 export {
 	agentNames,
@@ -257,48 +260,6 @@ export function onThisDay(
 	return groups.sort((a, b) => b.key.localeCompare(a.key));
 }
 
-/** The Sunday-first week containing a day. */
-export function weekOf(key: string): Date[] {
-	const date = parseDayKey(key);
-	const start = new Date(
-		date.getFullYear(),
-		date.getMonth(),
-		date.getDate() - date.getDay()
-	);
-	return Array.from(
-		{ length: 7 },
-		(_, index) =>
-			new Date(start.getFullYear(), start.getMonth(), start.getDate() + index)
-	);
-}
-
-/** Whole Sunday-first weeks covering a day's month (four to six rows). */
-export function monthWeeks(key: string): Date[][] {
-	const date = parseDayKey(key);
-	const first = new Date(date.getFullYear(), date.getMonth(), 1);
-	const daysInMonth = new Date(
-		date.getFullYear(),
-		date.getMonth() + 1,
-		0
-	).getDate();
-	const rows = Math.ceil((first.getDay() + daysInMonth) / 7);
-	const weeks: Date[][] = [];
-	for (let row = 0; row < rows; row++) {
-		weeks.push(
-			Array.from(
-				{ length: 7 },
-				(_, column) =>
-					new Date(
-						first.getFullYear(),
-						first.getMonth(),
-						1 - first.getDay() + row * 7 + column
-					)
-			)
-		);
-	}
-	return weeks;
-}
-
 export function sameMonth(a: string, b: string): boolean {
 	return a.slice(0, 7) === b.slice(0, 7);
 }
@@ -354,13 +315,13 @@ function heatMonthLabel(
 	return firstDate.getMonth() === previousMonth ? null : monthShort(firstDate);
 }
 
-/** A year of weeks ending with this one, Sunday at the top of each column. */
+/** A year of weeks ending with this one, the week's first day at the top. */
 export function yearHeatmap(
 	byDay: ReadonlyMap<string, JournalEntry[]>,
 	today: Date
 ): HeatColumn[] {
 	const todayKey = localDayKey(today);
-	const lastSunday = weekOf(todayKey)[0] ?? today;
+	const weekStart = weekOf(todayKey)[0] ?? today;
 	let max = 0;
 	for (const entries of byDay.values()) {
 		max = Math.max(max, entries.length);
@@ -371,9 +332,9 @@ export function yearHeatmap(
 		const cells: HeatCell[] = [];
 		for (let weekday = 0; weekday < 7; weekday++) {
 			const date = new Date(
-				lastSunday.getFullYear(),
-				lastSunday.getMonth(),
-				lastSunday.getDate() - week * 7 + weekday
+				weekStart.getFullYear(),
+				weekStart.getMonth(),
+				weekStart.getDate() - week * 7 + weekday
 			);
 			const key = localDayKey(date);
 			const count = byDay.get(key)?.length ?? 0;

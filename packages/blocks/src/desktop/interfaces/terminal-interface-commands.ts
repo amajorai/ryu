@@ -42,6 +42,51 @@ function slotted(
 	];
 }
 
+/**
+ * One translated sentence as muted segments around several emphasised values,
+ * each standing in for its own marker, so a locale may order them freely.
+ */
+function filledSlots(
+	text: string,
+	slots: readonly (readonly [string, TerminalSegment[]])[]
+): TerminalSegment[] {
+	let pieces: (string | TerminalSegment)[] = [text];
+	for (const [marker, value] of slots) {
+		pieces = pieces.flatMap((piece) => {
+			if (typeof piece !== "string") {
+				return [piece];
+			}
+			const at = piece.indexOf(marker);
+			return at < 0
+				? [piece]
+				: [piece.slice(0, at), ...value, piece.slice(at + marker.length)];
+		});
+	}
+	return pieces.flatMap((piece) => {
+		if (typeof piece !== "string") {
+			return [piece];
+		}
+		return piece ? [{ text: piece, tone: "muted" as const }] : [];
+	});
+}
+
+/** Stands in for the status word in the live status notice. */
+const STATUS_SLOT = "\u{E000}status\u{E000}";
+
+/** The live notice "{title} is now {status}", title and status emphasised. */
+export const statusNoticeSegments = (
+	tl: LiteralMessage,
+	title: TerminalSegment,
+	status: TerminalSegment
+): TerminalSegment[] =>
+	filledSlots(
+		tl("{title} is now {status}", { status: STATUS_SLOT, title: SLOT }),
+		[
+			[SLOT, [title]],
+			[STATUS_SLOT, [status]],
+		]
+	);
+
 /** The line printed when the open thread is closed. */
 export const closedLine = (tl: LiteralMessage, title: string): string =>
 	tl("Closed {title}", { title });
@@ -74,7 +119,10 @@ export const startThread = (
 ) => {
 	const message = prompt.trim();
 	if (!message) {
-		push(error("new: missing message"), muted("usage: new [@agent] <message>"));
+		push(
+			error(tl("new: missing message")),
+			muted(tl("usage: new [@agent] <message>"))
+		);
 		return;
 	}
 	const target = resolveStartTarget(snapshot, handle);
@@ -148,22 +196,32 @@ export const startThread = (
 	}
 };
 
+/** The `ls` filter names, typed as commands, so never translated. */
+const LS_FILTERS = "all, working, your-turn, waiting, attention, quiet";
+
 export const explainUnknown = (push: PushEntries, raw: string) => {
 	const [verb = ""] = raw.split(/\s+/);
 	const lower = verb.toLowerCase();
 	if (lower === "ls" || lower === "list") {
 		push(
-			error(`ls: unknown filter "${raw.slice(verb.length).trim()}"`),
-			muted("filters: all, working, your-turn, waiting, attention, quiet")
+			error(
+				tr('ls: unknown filter "{filter}"', {
+					filter: raw.slice(verb.length).trim(),
+				})
+			),
+			muted(tr("filters: {filters}", { filters: LS_FILTERS }))
 		);
 		return;
 	}
 	if (lower === "open" || lower === "cd") {
 		push(
-			error("open: which thread?"),
-			muted("usage: open <n|id> · ls for numbers")
+			error(tr("open: which thread?")),
+			muted(tr("usage: open <n|id> · ls for numbers"))
 		);
 		return;
 	}
-	push(error(`ryu: command not found: ${verb}`), muted("try help"));
+	push(
+		error(tr("ryu: command not found: {command}", { command: verb })),
+		muted(tr("try {command}", { command: "help" }))
+	);
 };

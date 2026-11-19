@@ -52,6 +52,11 @@ describe("RYU_DB_MASTER_KEY startup validation", () => {
 			});
 			expect(valid.status, valid.output).toBe(0);
 
+			const keyringOnly = loadServerEnv({
+				RYU_DB_MASTER_KEYS: `2:${Buffer.alloc(32, 9).toString("base64")}`,
+			});
+			expect(keyringOnly.status, keyringOnly.output).toBe(0);
+
 			const missing = loadServerEnv({});
 			expect(missing.status).not.toBe(0);
 			expect(missing.output).toContain("RYU_DB_MASTER_KEY is required");

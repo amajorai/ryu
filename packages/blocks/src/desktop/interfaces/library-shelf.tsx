@@ -300,7 +300,7 @@ function ContinueCard({
 										})
 									: age}
 							</span>
-							<span className="flex shrink-0 items-center gap-0.5 font-medium text-foreground transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transition-none">
+							<span className="flex shrink-0 items-center gap-0.5 font-medium text-foreground transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transition-none group-hover:rtl:-translate-x-0.5">
 								Resume
 								<ChevronRight
 									aria-hidden="true"

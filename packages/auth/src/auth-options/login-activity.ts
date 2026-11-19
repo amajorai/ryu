@@ -5,6 +5,7 @@ import {
 	StaleAccountUserEmail,
 	sendEmail,
 } from "@ryu/email";
+import { withEmailBudget } from "../lib/email-send-budget.ts";
 import {
 	boundedLoginDetail,
 	daysSinceLastActive,
@@ -87,20 +88,25 @@ export async function recordLoginAndNotifyStaleAccount(
 		const loginDevice = boundedLoginDetail(session.userAgent);
 		const loginIp = boundedLoginDetail(session.ipAddress);
 		const securityUrl = `${webOrigin()}/settings?tab=account`;
+		const ownerEmail = previous.email;
+		// The owner's own notice spends the account's budget; the admin
+		// notices default to the request budget (lib/email-send-budget.ts).
 		const sends = [
-			sendEmail({
-				to: previous.email,
-				subject: "Your Ryu account was accessed",
-				react: StaleAccountUserEmail({
-					daysSinceLastActive: inactiveDays,
-					loginDevice,
-					loginIp,
-					loginTime,
-					securityUrl,
-					userEmail: previous.email,
-					userName: previous.name || undefined,
-				}),
-			}),
+			withEmailBudget("account", () =>
+				sendEmail({
+					to: ownerEmail,
+					subject: "Your Ryu account was accessed",
+					react: StaleAccountUserEmail({
+						daysSinceLastActive: inactiveDays,
+						loginDevice,
+						loginIp,
+						loginTime,
+						securityUrl,
+						userEmail: ownerEmail,
+						userName: previous.name || undefined,
+					}),
+				})
+			),
 		];
 
 		for (const adminEmail of adminEmails()) {

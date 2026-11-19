@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { DeskAvatarStack } from "./desk-avatar.tsx";
 import type { DeskRow } from "./desk-model.ts";
 import { DeskStatusPill } from "./desk-status.tsx";
+import { formatNameList } from "./interface-renderer.ts";
 import { newConversationLabel } from "./thread-display-title.ts";
 
 export function ConversationHeader({
@@ -39,13 +40,15 @@ export function ConversationHeader({
 		? tl("With {newTargetLabel} · write the first message below", {
 				newTargetLabel,
 			})
-		: "Pick an agent and write the first message below";
+		: tl("Pick an agent and write the first message below");
 	if (row) {
 		const names =
 			row.agents.length > 0
-				? row.agents.map((agent) => agent.name).join(", ")
-				: "No agent";
-		context = row.group ? `${names} · ${row.group.name}` : names;
+				? formatNameList(row.agents.map((agent) => agent.name))
+				: tl("No agent");
+		context = row.group
+			? tl("{names} · {group}", { group: row.group.name, names })
+			: names;
 	}
 	return (
 		<header

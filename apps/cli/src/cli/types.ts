@@ -44,6 +44,9 @@ export interface CliIO {
 export interface GlobalFlags {
 	/** `--agent <id>` — calling agent for a governed Action invocation. */
 	agent: string | null;
+	/** `--ca-cert <file>` — trust this PEM CA bundle for an https node
+	 *  (core/tlsTarget.ts; also `RYU_CA_CERT`). */
+	caCert: string | null;
 	/** `--cascade` — opt into disabling/uninstalling the dependent chain too. */
 	cascade: boolean;
 	/** `--dry-run` — preview a mutating command without applying changes. */
@@ -72,6 +75,9 @@ export interface GlobalFlags {
 	 *  case create-ryu-app picks its own default; the tui deliberately does not
 	 *  mirror that default so the two can never disagree. */
 	template: string | null;
+	/** `--tls-skip-verify` — do not verify an https node's certificate (local
+	 *  testing only; also `RYU_TLS_SKIP_VERIFY`). */
+	tlsSkipVerify: boolean;
 	/** `--token-env` — reference `$RYU_CORE_TOKEN` in a coding agent's config
 	 *  instead of writing the node token inline (`ryu connect`). */
 	tokenEnv: boolean;

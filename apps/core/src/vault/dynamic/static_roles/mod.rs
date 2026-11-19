@@ -21,9 +21,13 @@
 //! * `anthropic`: the Admin API cannot mint keys, so the operator stages a
 //!   replacement key (`replacementApiKey`) created in the Console. Rotation
 //!   confirms it belongs to the organization, writes it, and deactivates the
-//!   previous key.
+//!   previous key;
+//! * `stripe` - Stripe's API keys API rotates the key (same permissions, new
+//!   id) and expires the previous one;
+//! * `cloudflare` - the API token's value is rolled in place.
 //!
-//! Key-minting providers (`aws-iam`, `openai`, `anthropic`) share one flow
+//! Key-minting providers (`aws-iam`, `openai`, `anthropic`, `stripe`,
+//! `cloudflare`) share one flow
 //! ([`rotate`]): the new key is sealed as pending before anything else can
 //! fail, and a replaced key whose retirement fails stays recorded and is
 //! retried by later rotations.
@@ -60,6 +64,10 @@ mod rotate;
 mod store;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[path = "webhook_account_test.rs"]
+mod webhook_account_test;
+mod vendor_keys;
 
 pub use provider::StaticProvider;
 
@@ -143,7 +151,8 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
          );",
     )
     .context("initializing static role schema")?;
-    target_guard::ensure_writer_column(conn, "vault_static_roles")
+    target_guard::ensure_writer_column(conn, "vault_static_roles")?;
+    super::webhook::redact_stored_summaries(conn, "vault_static_roles")
 }
 
 const INFO_COLUMNS: &str = "name, provider, summary, target, rotation_period_secs, password_length,

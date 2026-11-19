@@ -3,6 +3,7 @@
 // Environments, folders, imports: part of the Secret Vault client.
 // `../vault.ts` re-exports these names and documents the wire conventions.
 
+import { z } from "zod";
 import { type ApiTarget, request } from "../client.ts";
 import {
 	vaultHumanAddedImport,
@@ -136,5 +137,110 @@ export function removeVaultImport(
 			method: "DELETE",
 		},
 		vaultHumanRemoved
+	);
+}
+
+export interface VaultFolderMove {
+	environment: string;
+	folders: number;
+	imports: number;
+	path: string;
+	toEnvironment: string;
+	toPath: string;
+	values: number;
+}
+
+/** Move or rename a folder with everything under it (admin on both folders). */
+export function moveVaultFolder(
+	target: ApiTarget,
+	input: {
+		environment: string;
+		path: string;
+		toEnvironment?: string;
+		toPath: string;
+	}
+): Promise<{ move: VaultFolderMove; ok: boolean }> {
+	return request(
+		target,
+		"/api/vault/folders/move",
+		{ method: "POST", body: input },
+		z.object({
+			move: z.object({
+				environment: z.string(),
+				folders: z.number(),
+				imports: z.number(),
+				path: z.string(),
+				toEnvironment: z.string(),
+				toPath: z.string(),
+				values: z.number(),
+			}),
+			ok: z.boolean(),
+		})
+	);
+}
+
+export type VaultLockScope = "user" | "node" | "team" | "org";
+
+export interface VaultNamespaceLock {
+	environment: string | null;
+	id: string;
+	lockedAt: string | number;
+	lockedBy: string | null;
+	path: string | null;
+	reason: string;
+	scope: VaultLockScope | "project";
+	scopeId: string;
+}
+
+const vaultNamespaceLock = z.object({
+	environment: z.string().nullable(),
+	id: z.string(),
+	lockedAt: z.union([z.string(), z.number()]),
+	lockedBy: z.string().nullable(),
+	path: z.string().nullable(),
+	reason: z.string(),
+	scope: z.enum(["user", "node", "team", "org", "project"]),
+	scopeId: z.string(),
+});
+
+export function listVaultNamespaceLocks(
+	target: ApiTarget
+): Promise<{ locks: VaultNamespaceLock[] }> {
+	return request(
+		target,
+		"/api/vault/namespace-locks",
+		{},
+		z.object({ locks: z.array(vaultNamespaceLock) })
+	);
+}
+
+/** Freeze a scope subtree: its values refuse reads, writes and resolution (`423`). */
+export function lockVaultNamespace(
+	target: ApiTarget,
+	input: {
+		environment?: string;
+		path?: string;
+		reason?: string;
+		scope: VaultLockScope;
+		scopeId: string;
+	}
+): Promise<{ lock: VaultNamespaceLock; ok: boolean }> {
+	return request(
+		target,
+		"/api/vault/namespace-locks",
+		{ method: "POST", body: input },
+		z.object({ lock: vaultNamespaceLock, ok: z.boolean() })
+	);
+}
+
+export function unlockVaultNamespace(
+	target: ApiTarget,
+	id: string
+): Promise<{ ok: boolean; removed: boolean }> {
+	return request(
+		target,
+		`/api/vault/namespace-locks/${encodeURIComponent(id)}`,
+		{ method: "DELETE" },
+		z.object({ ok: z.boolean(), removed: z.boolean() })
 	);
 }

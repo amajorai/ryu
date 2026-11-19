@@ -1,5 +1,5 @@
 import { translate as tr } from "@ryu/i18n/lite";
-import { useLiteralMessages } from "@ryu/i18n/react";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils";
 import type {
@@ -80,6 +80,7 @@ function RecipientField({
 	snapshot: InterfaceSnapshot;
 }) {
 	const tl = useLiteralMessages();
+	const i18n = useOptionalI18n();
 	const listId = useId();
 	const inputRef = useRef<HTMLInputElement>(null);
 	const [query, setQuery] = useState("");
@@ -129,7 +130,7 @@ function RecipientField({
 				className="shrink-0 text-muted-foreground"
 				htmlFor={`${listId}-to`}
 			>
-				To
+				{i18n?.t("mail.recipientTo", {}, "To") ?? "To"}
 			</label>
 			{recipient ? (
 				<RecipientChip

@@ -107,6 +107,7 @@ async fn a_session_new_failure_answers_every_queued_turn() {
                 turns_rx,
                 None,
                 crate::agent_access::AccountConfinement::None,
+                String::new(),
             ),
         )
         .await
@@ -146,6 +147,7 @@ async fn a_start_up_failure_before_spawn_answers_the_turn_with_its_code() {
         turns_rx,
         None,
         crate::agent_access::AccountConfinement::None,
+        String::new(),
     )
     .await;
     assert!(result.is_err());
@@ -270,6 +272,7 @@ async fn a_cancelled_turn_keeps_its_trailing_updates_out_of_the_next_turn() {
         turns_rx,
         None,
         crate::agent_access::AccountConfinement::None,
+        String::new(),
     ));
 
     let mut first = Vec::new();
@@ -378,6 +381,7 @@ async fn requests_after_a_cancel_are_answered_not_dropped() {
         turns_rx,
         None,
         crate::agent_access::AccountConfinement::None,
+        String::new(),
     ));
 
     loop {
@@ -459,6 +463,7 @@ async fn an_unserved_agent_request_is_answered_not_left_pending() {
         turns_rx,
         None,
         crate::agent_access::AccountConfinement::None,
+        String::new(),
     ));
     let events = drain(&mut rx).await;
     assert_eq!(texts(&events), ["error:-32601"], "{events:?}");

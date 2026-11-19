@@ -21,9 +21,6 @@ const {
 	trialMonthlyPriceUsd,
 } = ONBOARDING_TEAMS_OFFER;
 
-/** Prices and terms spell the seat count; the offer has always been five. */
-const includedSeatsWord = includedSeats === 5 ? "five" : String(includedSeats);
-
 export function ActivationOfferStep({
 	checkoutOpened = false,
 	dialog,
@@ -50,6 +47,11 @@ export function ActivationOfferStep({
 	subscribed: boolean;
 }) {
 	const tl = useLiteralMessages();
+	// Prices and terms spell the seat count; the offer has always been five.
+	// The ICU select keys on the raw English "five": a translated word (de
+	// "fünf") fell through to every locale's "several seats" arm.
+	const includedSeatsWord =
+		includedSeats === 5 ? "five" : String(includedSeats);
 	const individualCheckoutClosed = !(
 		organizationPlan || individualPlansEnabled
 	);
