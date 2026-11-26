@@ -1,6 +1,6 @@
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
 	BOT_LANES_POLL_MS,
 	BOT_LIVE_VIEW_POLL_MS,
@@ -12,6 +12,16 @@ import {
 	parseBotLiveFrame,
 	pickBotLaneTab,
 } from "./browser-bot-lanes.ts";
+import {
+	BOT_TAKEOVER_POLL_MS,
+	type BotTakeoverAction,
+	botTakeoverFailure,
+	botTakeoverPath,
+} from "./browser-bot-takeover.ts";
+import {
+	BrowserBotTakeoverCard,
+	BrowserBotTakeoverSurface,
+} from "./browser-bot-takeover.tsx";
 
 export type BrowserSidecarCall = (
 	path: string,
@@ -19,25 +29,35 @@ export type BrowserSidecarCall = (
 ) => Promise<Response>;
 
 /**
- * Read-only live view of the agents' hidden Bot lanes in the browser sidecar.
- * Lists every open lane and shows the watched tab's screencast; it never sends
- * input to a lane. Polling stops while the panel is hidden, and the watched
- * tab's screencast is released when the selection changes or the view closes.
+ * Live view of the agents' hidden Bot lanes in the browser sidecar. Lists
+ * every open lane and shows the watched tab's screencast. The view is
+ * read-only, except while its owner has taken over a tab an agent asked them
+ * to act in (`browser-bot-takeover.tsx`): then their input goes to that tab
+ * until they choose Done or the request runs out. Polling stops while the
+ * panel is hidden, and the watched tab's screencast is released when the
+ * selection changes or the view closes.
  */
 export function BrowserBotLiveView({
 	active,
 	base,
 	call,
+	headers,
 }: {
 	active: boolean;
 	base: string;
 	call: BrowserSidecarCall;
+	/** The sidecar call's own headers, repeated on requests that carry a body. */
+	headers?: Record<string, string>;
 }) {
 	const tl = useLiteralMessages();
 	const [lanes, setLanes] = useState<BotLane[]>([]);
 	const [selection, setSelection] = useState<BotLaneSelection | null>(null);
 	const [frame, setFrame] = useState<BotLiveFrame | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [answering, setAnswering] = useState(false);
+	const [takeoverError, setTakeoverError] = useState<string | null>(null);
+	const pollMs = useRef(BOT_LIVE_VIEW_POLL_MS);
+	const doneId = useId();
 
 	const loadLanes = useCallback(async () => {
 		try {
@@ -54,6 +74,10 @@ export function BrowserBotLiveView({
 			);
 		}
 	}, [base, call, tl]);
+
+	const refreshLanes = useCallback(() => {
+		loadLanes().catch(() => undefined);
+	}, [loadLanes]);
 
 	useEffect(() => {
 		if (!active) {
@@ -97,11 +121,15 @@ export function BrowserBotLiveView({
 					inFlight = false;
 				});
 		};
-		tick();
-		const timer = window.setInterval(tick, BOT_LIVE_VIEW_POLL_MS);
+		let timer = 0;
+		const loop = () => {
+			tick();
+			timer = window.setTimeout(loop, pollMs.current);
+		};
+		loop();
 		return () => {
 			cancelled = true;
-			window.clearInterval(timer);
+			window.clearTimeout(timer);
 			call(path, { method: "DELETE" }).catch(() => undefined);
 		};
 	}, [active, base, call, loadLanes, selection]);
@@ -109,6 +137,47 @@ export function BrowserBotLiveView({
 	const watchedLane = lanes.find((lane) => lane.agentId === selection?.agentId);
 	const watchedTab = watchedLane?.tabs.find(
 		(tab) => tab.id === selection?.tabId
+	);
+	const takeover =
+		watchedLane?.takeover?.tabId === selection?.tabId
+			? watchedLane?.takeover
+			: undefined;
+	const controlling = takeover?.status === "active";
+	// The picture follows the owner's input more closely while they have control.
+	pollMs.current = controlling ? BOT_TAKEOVER_POLL_MS : BOT_LIVE_VIEW_POLL_MS;
+
+	const answerTakeover = useCallback(
+		async (action: BotTakeoverAction) => {
+			if (!selection) {
+				return;
+			}
+			setAnswering(true);
+			setTakeoverError(null);
+			try {
+				await call(botTakeoverPath(base, selection), {
+					body: JSON.stringify({ action }),
+					headers: { ...headers, "Content-Type": "application/json" },
+					method: "POST",
+				});
+			} catch (e) {
+				const failure = botTakeoverFailure(e);
+				if (failure === "busy") {
+					setTakeoverError(
+						tl("The agent is still working in this tab. Try again in a moment.")
+					);
+				} else if (failure === "other") {
+					setTakeoverError(
+						tl("The takeover could not be updated ({reason})", {
+							reason: e instanceof Error ? e.message : tl("error"),
+						})
+					);
+				}
+			} finally {
+				setAnswering(false);
+				await loadLanes();
+			}
+		},
+		[base, call, headers, loadLanes, selection, tl]
 	);
 
 	return (
@@ -153,6 +222,11 @@ export function BrowserBotLiveView({
 										title={tab.url}
 										type="button"
 									>
+										{lane.takeover?.tabId === tab.id && (
+											<span className="me-1 rounded bg-primary px-1 text-primary-foreground">
+												Needs you
+											</span>
+										)}
 										{tab.title || tab.url || tab.id}
 									</button>
 								</li>
@@ -161,37 +235,70 @@ export function BrowserBotLiveView({
 					</li>
 				))}
 			</ul>
-			<div className="relative flex min-w-0 flex-1 items-center justify-center bg-muted/30">
-				{error && (
-					<div className="absolute start-2 end-2 top-2 z-10 rounded-lg border border-border bg-popover px-2 py-1 text-center text-status-destructive text-xs shadow-lg">
-						{error}
-					</div>
+			<div className="flex min-w-0 flex-1 flex-col">
+				{takeover && watchedLane && (
+					<BrowserBotTakeoverCard
+						agentId={watchedLane.agentId}
+						busy={answering}
+						doneId={doneId}
+						error={takeoverError}
+						onAnswer={answerTakeover}
+						takeover={takeover}
+					/>
 				)}
-				{frame && watchedTab ? (
-					<figure className="flex h-full w-full flex-col">
-						<img
-							alt={tl("Live view of {page}", {
-								page: watchedTab.title || watchedTab.url,
-							})}
-							className="min-h-0 flex-1 object-contain"
-							height={frame.height || undefined}
-							src={frame.src}
-							width={frame.width || undefined}
-						/>
-						<figcaption className="truncate border-border border-t px-2 py-1 text-muted-foreground text-xs">
-							{tl("Watching {agent} · read-only · {url}", {
-								agent: watchedLane?.agentId ?? "",
-								url: watchedTab.url,
-							})}
-						</figcaption>
-					</figure>
-				) : (
-					<p className="text-muted-foreground text-xs">
-						{selection
-							? "Waiting for the agent's page…"
-							: "Pick an agent tab to watch it live."}
-					</p>
-				)}
+				<div className="relative flex min-h-0 flex-1 items-center justify-center bg-muted/30">
+					{error && (
+						<div className="absolute start-2 end-2 top-2 z-10 rounded-lg border border-border bg-popover px-2 py-1 text-center text-status-destructive text-xs shadow-lg">
+							{error}
+						</div>
+					)}
+					{frame && watchedTab ? (
+						<figure className="flex h-full w-full flex-col">
+							<div className="relative min-h-0 flex-1">
+								<img
+									alt={tl("Live view of {page}", {
+										page: watchedTab.title || watchedTab.url,
+									})}
+									className="h-full w-full object-contain"
+									height={frame.height || undefined}
+									src={frame.src}
+									width={frame.width || undefined}
+								/>
+								{controlling && selection && (
+									<BrowserBotTakeoverSurface
+										base={base}
+										call={call}
+										frame={frame}
+										headers={headers}
+										label={tl("Page of {agent}, under your control", {
+											agent: watchedLane?.agentId ?? "",
+										})}
+										onLeave={() => document.getElementById(doneId)?.focus()}
+										onRefused={refreshLanes}
+										selection={selection}
+									/>
+								)}
+							</div>
+							<figcaption className="truncate border-border border-t px-2 py-1 text-muted-foreground text-xs">
+								{controlling
+									? tl("You control {agent} · {url}", {
+											agent: watchedLane?.agentId ?? "",
+											url: watchedTab.url,
+										})
+									: tl("Watching {agent} · read-only · {url}", {
+											agent: watchedLane?.agentId ?? "",
+											url: watchedTab.url,
+										})}
+							</figcaption>
+						</figure>
+					) : (
+						<p className="text-muted-foreground text-xs">
+							{selection
+								? "Waiting for the agent's page…"
+								: "Pick an agent tab to watch it live."}
+						</p>
+					)}
+				</div>
 			</div>
 		</div>
 	);

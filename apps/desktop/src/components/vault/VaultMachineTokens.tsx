@@ -94,7 +94,7 @@ export function VaultMachineTokens({
 		} catch (caught) {
 			sileo.error({
 				title: tl("That did not work"),
-				description: vaultErrorMessage(caught, "Try again.", tl),
+				description: vaultErrorMessage(caught, tl("Try again."), tl),
 			});
 		}
 		await queryClient.invalidateQueries({ queryKey });

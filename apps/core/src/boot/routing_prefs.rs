@@ -46,6 +46,22 @@ pub(super) async fn seed_agent_routing_prefs(
     {
         workspace_trust::set_from_pref(&value);
     }
+    // Member folders: where a turn on a shared node may work. Nothing is allowed
+    // before this list is loaded, and nothing when it is missing or empty.
+    if let Ok(Some(value)) = preferences
+        .get(crate::server::chat_checkpoints::turn_folders::MEMBER_WORKSPACE_ROOTS_PREF_KEY)
+        .await
+    {
+        crate::server::chat_checkpoints::turn_folders::set_from_pref(&value);
+    }
+    // Credential tools the node's owner allowed by name. A tool that hands
+    // back a stored secret is refused until this list is loaded and names it.
+    if let Ok(Some(value)) = preferences
+        .get(crate::sidecar::mcp::CREDENTIAL_TOOLS_ALLOWED_PREF_KEY)
+        .await
+    {
+        crate::sidecar::mcp::set_credential_tools_allowed_from_pref(&value);
+    }
     // Untrusted-content wrapping toggle: external/tool RESULTS re-entering the
     // model are boundary-wrapped + chat-template-token-stripped. Pre-installed (safe:
     // only untrusted tool output, never user text); seed only to honour an

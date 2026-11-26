@@ -117,6 +117,7 @@ impl ScanItem {
             detail,
             detail_i18n: Vec::new(),
             already_exists: false,
+            mcp: None,
         }
     }
 

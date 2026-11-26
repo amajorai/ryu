@@ -4,6 +4,7 @@ import {
 	SLOW_FIT_WARNING,
 } from "@ryu/blocks/desktop/model-fit.ts";
 import type { LiteralMessage } from "@ryu/i18n/react";
+import { nodeDisplayHost } from "@ryuhq/protocol/node-url";
 import type { MarketplaceDetail } from "@/src/lib/api/marketplace.ts";
 import type {
 	ModelDetail,
@@ -210,7 +211,6 @@ export function bundleBody(
 	};
 }
 
-const HTTP_PREFIX = /^https?:\/\//;
 const TRAILING_SLASH = /\/$/;
 
 /** Compare two node base URLs ignoring a trailing slash. */
@@ -224,8 +224,14 @@ export function nodeBody(
 	alreadyKnown: boolean,
 	run: () => void,
 	tl: LiteralMessage
-): DialogBody {
-	const host = intent.url.replace(HTTP_PREFIX, "");
+): DialogBody | null {
+	// The parsed host, never the raw address: the shared parser already refused
+	// userinfo (`https://trusted@evil.tld`) and unencoded international names.
+	// An address that still cannot be read gets no dialog at all.
+	const host = nodeDisplayHost(intent.url);
+	if (!host) {
+		return null;
+	}
 	if (alreadyKnown) {
 		return {
 			title: tl("Switch to {name}?", { name: intent.name }),

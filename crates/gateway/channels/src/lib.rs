@@ -36,6 +36,7 @@
 //! (`RYU_CHANNEL_ALLOWED_USERS[_<PLATFORM>]`, `RYU_CHANNEL_ALLOW_ALL`) still
 //! configures that policy — see [`policy_from_env`].
 
+pub mod approvals;
 pub mod bluebubbles;
 pub mod commands;
 pub mod discord;

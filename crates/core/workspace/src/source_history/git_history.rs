@@ -367,15 +367,8 @@ pub(super) fn source_history_lock() -> std::io::Result<MutexGuard<'static, ()>> 
 }
 
 pub(super) fn git_command(root: &Path) -> Command {
-    let mut command = Command::new("git");
-    command
-        .arg("-c")
-        .arg(format!(
-            "core.hooksPath={}",
-            if cfg!(windows) { "NUL" } else { "/dev/null" }
-        ))
-        .no_window()
-        .current_dir(root);
+    let mut command = crate::git_command::git_command(&[]);
+    command.no_window().current_dir(root);
     ryu_crypto::scrub_seal_env(&mut command);
     command
 }

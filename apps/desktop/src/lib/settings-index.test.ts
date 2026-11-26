@@ -389,6 +389,7 @@ describe("settings subpage ownership", () => {
 				group: "Motion",
 				id: "motion",
 				label: "Motion",
+				level: "app",
 				section: "appearance",
 			})
 		).toBe("motion");
@@ -398,6 +399,7 @@ describe("settings subpage ownership", () => {
 				group: "constructor",
 				id: "custom",
 				label: "Custom",
+				level: "app",
 				section: "constructor",
 				subpage: "owned-page",
 			})
@@ -419,6 +421,7 @@ describe("settings subpage ownership", () => {
 						group,
 						id: "custom",
 						label: "Custom",
+						level: "app",
 						section,
 					})
 				).toBeNull();

@@ -2,6 +2,7 @@ import {
 	EN_SENSE_MESSAGES_MORE,
 	OFFICIAL_SENSE_MESSAGES_MORE,
 } from "./en-messages-senses-more.ts";
+import { POLISH_SENSE_MESSAGES_BASE } from "./en-messages-senses-pl.ts";
 import {
 	EN_SENSE_MESSAGES_R43,
 	OFFICIAL_SENSE_MESSAGES_R43,
@@ -360,6 +361,7 @@ const OFFICIAL_SENSE_MESSAGES_BASE: Readonly<
 		"view.display": "표시",
 		"wiki.talkTab": "토론",
 	},
+	pl: POLISH_SENSE_MESSAGES_BASE,
 	"pt-BR": {
 		"agentStats.steps": "Etapas",
 		"calendar.weekdayPicker": "Dia da semana",

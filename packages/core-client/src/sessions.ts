@@ -15,6 +15,7 @@ import {
 	makeHeaders,
 } from "./client.ts";
 import type { ExecutionProfile } from "./harness.ts";
+import { encodePathId } from "./path-id.ts";
 
 export type SessionStatus = "idle" | "running" | "completed" | "failed";
 
@@ -104,7 +105,10 @@ export async function listSessionsForConversation(
 	conversationId: string
 ): Promise<Session[]> {
 	const resp = await fetchForTarget(target)(
-		apiUrl(target, `/api/conversations/${conversationId}/sessions`),
+		apiUrl(
+			target,
+			`/api/conversations/${encodePathId(conversationId)}/sessions`
+		),
 		{ headers: makeHeaders(target.token, target.userJwt) }
 	);
 	if (!resp.ok) {

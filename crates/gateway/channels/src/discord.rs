@@ -31,6 +31,7 @@ use crate::{
     InboundMessage,
 };
 
+mod approvals;
 mod channel;
 mod events;
 mod wire;

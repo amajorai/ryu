@@ -42,6 +42,51 @@ impl RyuMcpHandler {
         )
     }
 
+    /// Run the registry call `name` under the private-read scope the
+    /// exfiltration guard reads: this turn's own after a device read in it,
+    /// else one marked with the read the conversation already holds (another
+    /// instance's live turn, an ended turn, the stored history; an unreadable
+    /// history holds too). The meta-tools and device tools carry nothing out,
+    /// so they skip the history read.
+    pub(super) async fn with_private_read_scope<F: std::future::Future>(
+        &self,
+        name: &str,
+        offer: Option<&Arc<crate::device_tools::DeviceOffer>>,
+        future: F,
+    ) -> F::Output {
+        let conversation = self
+            .permission_scope_id
+            .as_deref()
+            .filter(|_| {
+                !matches!(name, "tool_search" | "describe")
+                    && !crate::device_tools::catalog::is_device_tool_name(name)
+            })
+            .map(|conversation| (self.mcp.conversations.as_ref(), conversation));
+        crate::device_tools::taint::with_device_read_scope(offer, conversation, future).await
+    }
+
+    /// [`Self::dispatch_tool`] behind the device-read guards, for every
+    /// transport of the in-process bridge (rmcp and the managed Pi's JSON-RPC
+    /// route): after a device read in this turn or earlier in the
+    /// conversation, later egress is held by the exfiltration guard; any other
+    /// tool result is untrusted input, so later device calls in the turn ask.
+    pub(super) async fn dispatch_guarded(
+        &self,
+        name: &str,
+        args: Value,
+    ) -> Result<String, McpError> {
+        let device_offer = self.device_turn_offer();
+        let text = self
+            .with_private_read_scope(name, device_offer.as_ref(), self.dispatch_tool(name, args))
+            .await?;
+        if let Some(offer) = device_offer.as_ref() {
+            if !crate::device_tools::catalog::is_device_tool_name(name) {
+                offer.mark_tainted_input();
+            }
+        }
+        Ok(text)
+    }
+
     pub(super) async fn dispatch_device_tool(
         &self,
         tool_id: &str,
@@ -114,6 +159,94 @@ mod tests {
             permission_tx,
             permission_scope_id: Some(conversation.to_owned()),
         }
+    }
+
+    /// The managed Pi reaches the bridge over JSON-RPC: its calls pass the
+    /// same device guards as the rmcp transport.
+    #[tokio::test]
+    async fn the_managed_pi_transport_is_guarded_like_the_rmcp_one() {
+        let decl = serde_json::from_value(json!({
+            "device_id": uuid::Uuid::new_v4().to_string(), "app": "ryu-bot", "platform": "ios",
+            "foreground": true, "catalog_version": 1, "tools": [{ "app": "alarms", "permission": "granted" }],
+        }))
+        .unwrap();
+        let conversation = format!("conv-{}", uuid::Uuid::new_v4().simple());
+        let offer = Arc::new(crate::device_tools::DeviceOffer::new(
+            conversation.clone(),
+            DevicePrincipal::LocalOwner,
+            decl,
+            crate::approvals::policy::ApprovalMode::Smart,
+        ));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let _turn =
+            crate::device_tools::offer::register_turn_context(Arc::clone(&offer), &tx, "ryu");
+        let scope = AcpSessionMcpScope {
+            agent_id: "ryu".to_owned(),
+            conversation_id: conversation,
+            allowlist: None,
+            composio_actions: Vec::new(),
+            identity_profile_ids: Vec::new(),
+            composio_connection_scope: None,
+            conversation_scope: None,
+            events: Some(tx),
+        };
+        let call = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": "tool_search", "arguments": { "query": "x" } }
+        });
+        assert!(!offer.tainted_input());
+        serve_acp_session_jsonrpc(Arc::new(McpRegistry::empty()), scope, &call)
+            .await
+            .expect("answered");
+        // A non-device tool result is untrusted input: later device calls ask.
+        assert!(offer.tainted_input());
+    }
+
+    #[tokio::test]
+    async fn a_device_read_in_the_history_scopes_a_later_turns_registry_calls() {
+        use crate::server::conversations::{ConversationStore, Tenancy};
+        let conversation = format!("conv-{}", uuid::Uuid::new_v4().simple());
+        let store = ConversationStore::open_in_memory().unwrap();
+        let read = json!([{
+            "type": "tool-device_location_current", "toolCallId": "t",
+            "state": "output-available", "output": { "lat": 37.33, "lon": -122.03 }
+        }]);
+        store
+            .append_message_as_with_render_data(
+                &conversation,
+                "assistant",
+                "",
+                None,
+                None,
+                None,
+                Tenancy::Unattributed,
+                None,
+                None,
+                Some(&read),
+                None,
+            )
+            .await
+            .unwrap();
+        let mut registry = McpRegistry::empty();
+        registry.conversations = Some(store);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut later = bridge(Some(tx), &conversation);
+        later.mcp = Arc::new(registry);
+        // No device turn is live: the stored read still scopes the call.
+        assert!(later.device_turn_offer().is_none());
+        let source = || async {
+            crate::approvals::exfiltration_guard::current_sandbox_run()
+                .and_then(|run| run.private_read_source().map(str::to_owned))
+        };
+        let scoped = later
+            .with_private_read_scope("delegate.fanout", None, source())
+            .await;
+        assert_eq!(scoped.as_deref(), Some("device.location.current"));
+        // The meta-tools carry nothing out and skip the history read.
+        let meta = later
+            .with_private_read_scope("tool_search", None, source())
+            .await;
+        assert_eq!(meta, None);
     }
 
     #[tokio::test]
@@ -233,3 +366,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "device_read_runtime_test.rs"]
+mod runtime_test;

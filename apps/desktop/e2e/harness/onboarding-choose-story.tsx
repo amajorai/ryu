@@ -13,9 +13,21 @@
 // The local card is also the one that carries live install progress, so the
 // progress columns pin the component milestones emitted by the public installer
 // after the "Run AI locally" pick.
+//
+// `?language` is the step as the onboarding page shows it: one full window
+// with the language control the page keeps on this phase, under the real
+// language provider, so a choice re-renders the step. `&theme=dark` and
+// `&surface=web` (a browser, which has no native window controls) vary it.
 
 import { OnboardingView } from "@ryu/blocks/desktop/onboarding.tsx";
 import { createRoot } from "react-dom/client";
+import { LanguagePackBridge } from "../../src/components/LanguagePackBridge.tsx";
+import {
+	OnboardingLanguageControl,
+	onboardingPhaseKeepsLanguage,
+} from "../../src/components/onboarding/OnboardingLanguageControl.tsx";
+import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
+import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import "../../src/index.css";
 
 const HEADER = {
@@ -92,12 +104,66 @@ function Progress({
 	);
 }
 
+/** The `choose` phase inside the onboarding page's frame, with the language
+ *  control the page keeps on it. */
+function ChooseWithLanguage({ surface }: { surface: "desktop" | "web" }) {
+	return (
+		<AppSurfaceProvider surface={surface}>
+			<LanguagePackBridge>
+				<div
+					className="relative h-screen bg-background text-foreground"
+					data-testid="choose-with-language"
+				>
+					<OnboardingView
+						isDesktop
+						localChecking={false}
+						localError={null}
+						localUnreachable={false}
+						managedEntitled={false}
+						step="choose"
+						subtitle={HEADER.subtitle}
+						title={HEADER.title}
+					/>
+					{onboardingPhaseKeepsLanguage("choose") ? (
+						<OnboardingLanguageControl />
+					) : null}
+				</div>
+			</LanguagePackBridge>
+		</AppSurfaceProvider>
+	);
+}
+
 const storyParams = new URLSearchParams(window.location.search);
 const chooseOnly = storyParams.has("choose-only");
 const singleTheme = storyParams.has("single");
+const withLanguage = storyParams.has("language");
+if (withLanguage) {
+	// The menu opens in a portal on the body, so the theme goes on the root.
+	document.documentElement.classList.toggle(
+		"dark",
+		storyParams.get("theme") === "dark"
+	);
+	// The language provider reads installed packs from the active node. This
+	// page's own origin has none, so only the built-in languages are listed.
+	useNodeStore.setState({
+		autoSelect: false,
+		defaultNode: "choose-proof",
+		nodes: [
+			{
+				name: "choose-proof",
+				url: window.location.origin,
+				token: "choose-proof-node",
+			},
+		],
+	});
+}
 
 createRoot(document.getElementById("root")!).render(
-	chooseOnly ? (
+	withLanguage ? (
+		<ChooseWithLanguage
+			surface={storyParams.get("surface") === "web" ? "web" : "desktop"}
+		/>
+	) : chooseOnly ? (
 		singleTheme ? (
 			<div className="flex min-h-screen">
 				<Column dark label="Dark" />

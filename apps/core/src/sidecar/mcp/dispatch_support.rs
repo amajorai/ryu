@@ -2,6 +2,20 @@
 
 use super::*;
 
+// The two rules of `dispatch/` that other parts of Core reach: the setting
+// that names the allowed credential tools, and the recorder's check.
+#[cfg(test)]
+pub(crate) use super::dispatch::credential_tools::with_test_credential_tools_allowed;
+pub(crate) use super::dispatch::credential_tools::{
+    set_credential_tools_allowed_from_pref, CREDENTIAL_TOOLS_ALLOWED_PREF_KEY,
+    CREDENTIAL_TOOL_REFUSAL,
+};
+pub(crate) use super::dispatch::node_user::{
+    enforce_node_user_recorder_access, NODE_USER_TOOL_REFUSAL,
+};
+#[cfg(test)]
+pub(crate) use super::dispatch::node_user::{fixtures as node_user_fixtures, with_test_people};
+
 const GHOST_CURSOR_ACTIONS: &[&str] = &[
     "ghost_click",
     "ghost_type",
@@ -96,6 +110,30 @@ pub(super) fn cursor_identity_text(value: Option<&str>, limit: usize) -> Option<
         return None;
     }
     Some(value.chars().take(limit).collect())
+}
+
+/// The manifest `permissions` an app tool may run with. The `run` list names host
+/// programs that `childProcess.run` starts outside any OS sandbox, so a manifest
+/// cannot open it by declaring it. Each name stays only when the manifest is
+/// first-party (Core tier - exact compiled bytes or a verified official package)
+/// or the plugin holds the approved `tool:command:<name>` grant for that exact
+/// name, the same grant a `command` tool needs. The rest of the block is passed
+/// through unchanged.
+pub(super) fn gate_manifest_run_names(
+    manifest: &PluginManifest,
+    grants: &std::collections::HashSet<String>,
+) -> Option<crate::plugin_manifest::PermissionSet> {
+    let mut permissions = manifest.permissions.clone()?;
+    if matches!(
+        crate::plugins::builtins::tier_for_manifest(manifest),
+        crate::plugin_manifest::PluginTier::Core
+    ) {
+        return Some(permissions);
+    }
+    permissions.run.retain(|name| {
+        grants.contains(&format!("{}{name}", crate::tool_exec::GRANT_COMMAND_PREFIX))
+    });
+    Some(permissions)
 }
 
 /// Build the [`ryu_tool_exec::SandboxAugment`] for a `child_process`-capable

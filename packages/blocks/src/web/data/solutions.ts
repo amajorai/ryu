@@ -64,11 +64,6 @@ import sol_translation from "./solutions/translation.json" with {
 
 /* Shared CTAs (mirror comparisons.ts / products.tsx) --------------- */
 
-export const EARLY_ACCESS = {
-	label: "Get early access",
-	href: "https://j14.notion.site/2940023f0e838023810ce36edf2e3893?pvs=105" as const,
-	external: true,
-} satisfies CtaLink;
 export const BOOK_DEMO = {
 	label: "Book a demo",
 	href: "https://cal.com/amajor/ryu-demo",

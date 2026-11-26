@@ -23,7 +23,6 @@ export type SettingsSectionValue =
 	| "keyboard"
 	| "sync"
 	| "updates"
-	| "integrations"
 	| "sessions"
 	| "ryu-apps"
 	| "authorized-apps"
@@ -34,8 +33,6 @@ export type SettingsSectionValue =
 	| "usage"
 	| "voice"
 	| "sounds"
-	| "goals"
-	| "double-check"
 	| "developer";
 
 interface SettingsDialogState {

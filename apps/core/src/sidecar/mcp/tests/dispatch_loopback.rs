@@ -259,3 +259,69 @@ async fn derived_tool_dispatch_enforces_the_allowlist() {
         "allowlisting the server must let dispatch reach owner resolution: {passed}"
     );
 }
+
+/// The diagnostics arm enforces the allowlist on the fully-qualified id, as the
+/// self-API arm does, and refuses any argument before a single route is read:
+/// a model that passes another chat's id must not believe it read that chat.
+#[tokio::test]
+async fn diagnostics_dispatch_enforces_the_allowlist_and_takes_no_arguments() {
+    let reg = McpRegistry::empty();
+    let denied = reg
+        .call_tool(
+            "diagnostics.snapshot",
+            json!({}),
+            Some(&["something_else".to_owned()]),
+        )
+        .await
+        .expect_err("absent from the allowlist");
+    assert!(
+        denied.to_string().contains("not in this agent's allowlist"),
+        "got: {denied}"
+    );
+
+    // Allowlisting the server segment passes the gate; the call is then refused
+    // for its argument, which is what proves the gate was passed.
+    for tool in ["diagnostics.snapshot", "diagnostics.recent_errors"] {
+        let refused = reg
+            .call_tool(
+                tool,
+                json!({ "conversation_id": "conv-of-someone-else" }),
+                Some(&["diagnostics".to_owned()]),
+            )
+            .await
+            .expect_err("an argument must be refused");
+        assert!(
+            refused.to_string().contains("takes no arguments"),
+            "{tool}: {refused}"
+        );
+    }
+
+    let unknown = reg
+        .call_tool("diagnostics.read_logs", json!({}), None)
+        .await
+        .expect_err("no such diagnostics tool");
+    assert!(
+        unknown.to_string().contains("unknown diagnostics tool"),
+        "got: {unknown}"
+    );
+}
+
+/// A call that did not come from a chat reads no conversation at all: the
+/// report says so under `notChecked` instead of guessing a chat to read.
+#[tokio::test]
+async fn diagnostics_recent_errors_without_a_chat_reads_nothing() {
+    let reg = McpRegistry::empty();
+    let report = reg
+        .call_tool("diagnostics.recent_errors", json!({}), None)
+        .await
+        .expect("a call without a chat still answers");
+    assert_eq!(report["scope"], "conversation", "{report}");
+    assert_eq!(report["checks"], json!([]), "{report}");
+    let skipped: Vec<&str> = report["notChecked"]
+        .as_array()
+        .expect("notChecked is a list")
+        .iter()
+        .filter_map(|entry| entry["id"].as_str())
+        .collect();
+    assert_eq!(skipped, ["conversation"], "{report}");
+}

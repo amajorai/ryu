@@ -32,11 +32,38 @@ export interface QuotaSpec {
 }
 
 /**
+ * Accounts (sign-ins or keys) one provider may hold on any paid plan or the
+ * one-time desktop license. Finite on purpose: a ceiling, not "unlimited".
+ */
+const LICENSED_ACCOUNTS_PER_PROVIDER = 50;
+
+/**
  * Quotas owned by the desktop shell or Core runtime. Marketplace apps, plugins,
  * skills, MCP servers, and workflows are intentionally absent: their catalog
  * price is commerce metadata and must not become a plan-based runtime limit.
  */
 export const KERNEL_QUOTAS = {
+	maxAccountsPerProvider: {
+		// Core enforces this on each node. It cannot import this file, so it
+		// mirrors the free number in `apps/core/src/server/access_gate/plan_limits.rs`
+		// (`plan-quotas.core-drift.test.ts` fails when the two differ) and reads
+		// the paid number from the signed `ryu_limits` claim. EVERY plan id needs
+		// a row: an absent plan resolves to Infinity in `planLimit`.
+		free: 10,
+		label: "Accounts per provider",
+		owner: null,
+		paid: {
+			"desktop-license": LICENSED_ACCOUNTS_PER_PROVIDER,
+			"marketplace-membership": LICENSED_ACCOUNTS_PER_PROVIDER,
+			pro: LICENSED_ACCOUNTS_PER_PROVIDER,
+			plus: LICENSED_ACCOUNTS_PER_PROVIDER,
+			max: LICENSED_ACCOUNTS_PER_PROVIDER,
+			teams: LICENSED_ACCOUNTS_PER_PROVIDER,
+			"teams-lite": LICENSED_ACCOUNTS_PER_PROVIDER,
+			business: LICENSED_ACCOUNTS_PER_PROVIDER,
+		},
+		unit: "count",
+	},
 	maxAgents: {
 		free: Number.POSITIVE_INFINITY,
 		label: "Agents",
@@ -56,9 +83,57 @@ export const KERNEL_QUOTAS = {
 		owner: null,
 		unit: "count",
 	},
-	maxOpenTabs: { free: 3, label: "Open tabs", owner: null, unit: "count" },
+	maxHostedNodes: {
+		// An abuse ceiling on live hosted cloud nodes per organization, not a paid
+		// limit: the same number on EVERY plan. Each plan id repeats it because an
+		// absent plan resolves to Infinity in `planLimit`. Enforced on the server
+		// in `packages/api/src/lib/node-ceiling.ts`.
+		free: 50,
+		label: "Hosted nodes",
+		owner: null,
+		paid: {
+			"desktop-license": 50,
+			"marketplace-membership": 50,
+			pro: 50,
+			plus: 50,
+			max: 50,
+			teams: 50,
+			"teams-lite": 50,
+			business: 50,
+		},
+		unit: "count",
+	},
+	// Tabs and remote nodes are the user's own computer and machines, so they
+	// carry no plan cap. The keys stay so one abuse ceiling can be set later.
+	maxOpenTabs: {
+		free: Number.POSITIVE_INFINITY,
+		label: "Open tabs",
+		owner: null,
+		unit: "count",
+	},
+	maxRateLimitedWrites: {
+		// An abuse limit, not a paid limit: how many requests one account may send
+		// to one group of rate limited write routes in a 10 minute window. The
+		// same number on EVERY plan; each plan id repeats it because an absent
+		// plan resolves to Infinity in `planLimit`. Enforced on the server in
+		// `packages/api/src/lib/guarded-write-rate-limit.ts`.
+		free: 30,
+		label: "Writes per 10 minutes on rate limited routes",
+		owner: null,
+		paid: {
+			"desktop-license": 30,
+			"marketplace-membership": 30,
+			pro: 30,
+			plus: 30,
+			max: 30,
+			teams: 30,
+			"teams-lite": 30,
+			business: 30,
+		},
+		unit: "count",
+	},
 	maxRemoteNodes: {
-		free: 1,
+		free: Number.POSITIVE_INFINITY,
 		label: "Remote nodes",
 		owner: null,
 		unit: "count",

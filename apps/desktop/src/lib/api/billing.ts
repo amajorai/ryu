@@ -28,7 +28,6 @@ import {
 	checkoutReplySchema,
 	licenseValidateSchema,
 	subscriptionStatusSchema,
-	trialAnchorSchema,
 } from "./billing-wire-contracts.ts";
 
 /** True when the user has a session token; the gate requires sign-in. */
@@ -252,37 +251,6 @@ export async function createCheckout(slug: string): Promise<string> {
 		throw new CheckoutError("unknown", "Checkout did not return a URL.");
 	}
 	return json.url;
-}
-
-/** The server-authoritative trial anchor. */
-export interface TrialAnchor {
-	firstLaunchAt: string | null;
-}
-
-/**
- * Ensure + read the server-side first-launch anchor (idempotent: written once,
- * never moved forward, so a reinstall cannot reset the trial). Returns the
- * epoch-ms first-launch time, or null when the check failed (the gate then
- * falls back to the local Tauri-store mirror).
- */
-export async function ensureTrialAnchorMs(): Promise<number | null> {
-	if (!hasBillingAuth()) {
-		return null;
-	}
-	try {
-		const resp = await fetch(`${BASE}/trial`, {
-			method: "POST",
-			headers: authHeaders(),
-		});
-		if (!resp.ok) {
-			return null;
-		}
-		const json = trialAnchorSchema.parse(await resp.json());
-		const ms = json.firstLaunchAt ? Date.parse(json.firstLaunchAt) : Number.NaN;
-		return Number.isFinite(ms) ? ms : null;
-	} catch {
-		return null;
-	}
 }
 
 /** The normalized result of validating a desktop license key. */

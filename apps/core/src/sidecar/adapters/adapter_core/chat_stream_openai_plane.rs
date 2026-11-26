@@ -182,6 +182,11 @@ where
     ) {
         return error_stream(DIRECT_PROVIDER_REFUSAL.to_owned());
     }
+    // No provider credential goes around the Gateway (CE-37): a keyed direct
+    // hop is refused, a keyless endpoint the user named still gets the turn.
+    if let Some(refusal) = keyed_direct_hop_refusal(&base_url, api_key.as_deref()) {
+        return turn_rejection.reject(refusal.to_owned()).await;
+    }
     // Guard the unconfigured default: public OpenAI endpoint with no key
     // would just 401. Give the operator an actionable message instead.
     // Compare against the registry's last-resort literal so a file- or

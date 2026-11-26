@@ -102,26 +102,11 @@
       {
         "id": "@ryu/recipes#recording.ended",
         "title": "Desktop recording finished",
-        "description": "Fires when a recording session is stopped (POST /api/recipes/record/stop) and the captured action sequence has been turned into an editable recipe draft. The draft is NOT persisted anywhere — `save` is a separate, later call — so it travels in the payload: a consumer that wants to refine or install it must take it from here. Fires once per session; a session that is never stopped never fires. If the draft would push the payload past Core's event-size cap, it is omitted and `draft_omitted: true` is set — the event still fires, so a subscriber learns the recording ended and can tell the draft was shed rather than empty.",
+        "description": "Fires when a recording session is stopped (POST /api/recipes/record/stop) and the captured action sequence has been turned into an editable recipe draft. The payload says only that a recording ended: the task, the start time and the number of captured actions. The draft and the captured actions are NOT in the payload, because they hold what was on screen and what was pressed while recording. They are returned once, in the response to the stop call, to a caller that holds the `recipes.record` permission. Fires once per session; a session that is never stopped never fires.",
         "payload_example": {
           "task": "file a bug in Linear",
           "started_at": "2026-08-01T10:04:11Z",
-          "event_count": 12,
-          "draft": {
-            "schema_version": 2,
-            "name": "file-a-bug-in-linear",
-            "description": "file a bug in Linear",
-            "app": "Linear",
-            "params": {},
-            "steps": [
-              {
-                "id": 1,
-                "action": "click",
-                "note": "New issue"
-              }
-            ],
-            "on_failure": "abort"
-          }
+          "event_count": 12
         }
       },
       {

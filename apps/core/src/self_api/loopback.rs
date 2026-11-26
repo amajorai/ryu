@@ -59,6 +59,18 @@ pub fn self_call_identity(headers: &axum::http::HeaderMap) -> SelfCallIdentity {
     }
 }
 
+/// Header on every self-API loopback: an agent's tool call made this request,
+/// not the person's own client. A handler that would approve something for
+/// the person reads it with [`is_self_api_call`]. It only ever narrows what a
+/// request may do, so it needs no proof: a client that leaves it out gets
+/// exactly what the node token already gives it.
+pub const SELF_API_CALL_HEADER: &str = "x-ryu-self-api-call";
+
+/// Whether an agent's self-API tool call made this request.
+pub fn is_self_api_call(headers: &axum::http::HeaderMap) -> bool {
+    headers.contains_key(SELF_API_CALL_HEADER)
+}
+
 /// Execute a CoreApi tool by id: resolve the route, then loop back over HTTP to
 /// this Core with its own token. The tenancy and role checks are enforced by the
 /// caller (`sidecar/mcp/mod.rs`) *before* this runs. `acting_user` is set on an
@@ -163,6 +175,7 @@ pub async fn send_request_as(
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
+    req = req.header(SELF_API_CALL_HEADER, "1");
     if let Some(user) = acting_user {
         req = req
             .header(SELF_CALL_PROOF_HEADER, self_call_proof())
@@ -209,3 +222,6 @@ pub(super) fn is_safe_path_segment(v: &str) -> bool {
         && !v.contains('%')
         && !v.chars().any(|c| c.is_control())
 }
+
+#[cfg(test)]
+mod agent_call_tests;

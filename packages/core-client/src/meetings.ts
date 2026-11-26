@@ -19,6 +19,23 @@ import {
 	makeHeaders,
 	request,
 } from "./client.ts";
+import { encodeMountPathId } from "./path-id.ts";
+
+/**
+ * The one-segment static paths of `apps-store/meetings/manifest.json`. A
+ * meeting ID equal to one of them is refused: Core would serve the static
+ * route instead of the meeting (`DELETE /recaps` deletes every recap).
+ * `mount-path-id.test.ts` fails when the manifest and this list differ.
+ */
+export const MEETING_ROUTE_NAMES = [
+	"recaps",
+	"stream",
+	"detect",
+	"detection-config",
+	"templates",
+	"import",
+	"resolve",
+] as const;
 
 export type MeetingStatus = "detected" | "recording" | "processing" | "done";
 export type MeetingSource = "manual" | "auto";
@@ -96,7 +113,7 @@ export async function getMeeting(
 ): Promise<Meeting> {
 	const json = await request(
 		target,
-		`/api/meetings/${id}`,
+		`/api/meetings/${encodeMountPathId(id, MEETING_ROUTE_NAMES)}`,
 		{},
 		meetingEnvelopeResponseSchema
 	);
@@ -128,7 +145,7 @@ export async function finalizeMeeting(
 ): Promise<Meeting> {
 	const json = await request(
 		target,
-		`/api/meetings/${id}/finalize`,
+		`/api/meetings/${encodeMountPathId(id, MEETING_ROUTE_NAMES)}/finalize`,
 		{ method: "POST" },
 		meetingEnvelopeResponseSchema
 	);
@@ -144,7 +161,7 @@ export async function deleteMeeting(
 ): Promise<void> {
 	await request(
 		target,
-		`/api/meetings/${id}`,
+		`/api/meetings/${encodeMountPathId(id, MEETING_ROUTE_NAMES)}`,
 		{ method: "DELETE" },
 		meetingDeleteResponseSchema
 	);
@@ -158,7 +175,7 @@ export async function renameMeeting(
 ): Promise<Meeting> {
 	const json = await request(
 		target,
-		`/api/meetings/${id}/title`,
+		`/api/meetings/${encodeMountPathId(id, MEETING_ROUTE_NAMES)}/title`,
 		{ method: "POST", body: { title } },
 		meetingEnvelopeResponseSchema
 	);
@@ -176,7 +193,7 @@ export async function setMeetingIcon(
 ): Promise<Meeting> {
 	const json = await request(
 		target,
-		`/api/meetings/${id}/icon`,
+		`/api/meetings/${encodeMountPathId(id, MEETING_ROUTE_NAMES)}/icon`,
 		{ method: "POST", body: { icon } },
 		meetingEnvelopeResponseSchema
 	);
@@ -197,7 +214,7 @@ export async function getTranscript(
 ): Promise<Transcript> {
 	const json = await request(
 		target,
-		`/api/meetings/${id}/transcript`,
+		`/api/meetings/${encodeMountPathId(id, MEETING_ROUTE_NAMES)}/transcript`,
 		{},
 		meetingTranscriptResponseSchema
 	);

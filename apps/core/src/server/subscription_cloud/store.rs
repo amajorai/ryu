@@ -4,6 +4,7 @@
 
 use super::accounts::{self, PlanAccount, ProviderId};
 use super::{routing, CloudTaskBackend};
+use crate::server::plan_limits::AccountLimitReached;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
@@ -300,18 +301,17 @@ pub(crate) fn account(owner: &str, provider: ProviderId, id: &str) -> Option<Pla
         .find(|account| account.provider == provider && account.id == id)
 }
 
-/// Add a linked account. `Err` when the owner already has the most accounts allowed
-/// for that provider.
-pub(crate) fn add_account(owner: &str, account: PlanAccount) -> Result<(), ()> {
+/// Add a linked account. `Err` when the owner already has the most accounts the
+/// plan allows for that provider ([`crate::server::plan_limits`]). Only this add is
+/// refused: accounts linked before stay, even above the limit.
+pub(crate) fn add_account(owner: &str, account: PlanAccount) -> Result<(), AccountLimitReached> {
     with_state(true, |state| {
         let list = state.accounts.entry(owner.to_owned()).or_default();
         let same = list
             .iter()
             .filter(|other| other.provider == account.provider)
             .count();
-        if same >= accounts::MAX_ACCOUNTS_PER_PROVIDER {
-            return Err(());
-        }
+        AccountLimitReached::check(account.provider.wire(), same)?;
         list.push(account);
         Ok(())
     })

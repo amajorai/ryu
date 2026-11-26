@@ -3,6 +3,8 @@
 
 use crate::server::*;
 
+mod auth_placeholder;
+
 /// SSRF-guarded HTTP GET that keeps the response body open for a streaming
 /// consumer. This is the egress seam for the legacy MCP HTTP+SSE transport:
 /// the initial GET carries an `endpoint` event and then remains open for the
@@ -283,6 +285,19 @@ pub(in crate::server) async fn catalog_sources_add(
                 );
             }
         }
+    }
+    // A credential may name the operator's own environment variables, never
+    // one of Ryu's: Core keeps its node token and other secrets there, and
+    // the resolved value is sent to the source's URL.
+    if let Some(reason) = body
+        .auth
+        .as_ref()
+        .and_then(auth_placeholder::source_auth_refusal)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": reason })),
+        );
     }
     let spec = crate::catalog_source::CustomSourceSpec {
         kind: body.kind,

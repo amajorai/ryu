@@ -10,7 +10,7 @@
 // as `crate::firewall::cmdscan`.
 //
 // The wiring is split by responsibility: `scanner` (construction and detection
-// scans), `redaction` (config-gated `sanitize` and the unconditional outbound
+// scans), `inbound` (the inbound and locked-guardrail scans), `redaction` (config-gated `sanitize` and the unconditional outbound
 // scrubber), `companion` (companion egress), `curated` (the shared curated
 // pattern sets) and `backend` (the swappable backend trait and its registry).
 // Everything is re-exported below, so `crate::firewall::…` paths are unchanged.
@@ -20,6 +20,7 @@ pub use ryu_gw_firewall::{DetectionKind, FirewallMatch};
 mod backend;
 mod companion;
 mod curated;
+mod inbound;
 pub mod inspector;
 mod redaction;
 pub mod resolve;

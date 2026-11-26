@@ -3,10 +3,8 @@ import { createContext, type ReactNode, useContext, useMemo } from "react";
 import { navUserProofState } from "./navuser-interactions-proof.runtime.ts";
 
 const verdict: DesktopGateVerdict = {
-	daysLeftInTrial: 0,
 	managedInference: true,
 	marketplaceApps: true,
-	paywalled: false,
 	plan: "pro",
 	proUnlocked: true,
 	reason: "subscription",

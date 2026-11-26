@@ -12,7 +12,6 @@ import {
 	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_ANTHROPIC_FLAG,
 	CLOUD_TASKS_SUBSCRIPTION_BACKENDS_HOSTED_OPENAI_FLAG,
 	COMPUTE_SHARE_FLAG,
-	DESKTOP_TRIAL_FLAG,
 	FAMILY_HUB_FLAG,
 	FAMILY_SHARING_FLAG,
 	INDIVIDUAL_PLANS_FLAG,
@@ -59,17 +58,6 @@ export const FEATURE_FLAGS: FeatureFlagDef[] = [
 		defaultValue: true,
 		exposure: "public",
 		failMode: "open",
-	},
-	{
-		key: DESKTOP_TRIAL_FLAG,
-		description:
-			"Run the desktop Lifetime Desktop trial, its free-tier caps (open tabs, remote nodes, agents) and the paywall/upsell. Off keeps every desktop free and uncapped during beta.",
-		defaultValue: false,
-		exposure: "client",
-		// Closed = an install that never read the map shows no trial and no caps.
-		// Managed inference, credits and cloud nodes stay server-gated either way,
-		// so turning this off gives away no spend.
-		failMode: "closed",
 	},
 	{
 		key: "ui.managed_inference_card",
@@ -173,7 +161,7 @@ export const FEATURE_FLAGS: FeatureFlagDef[] = [
 	{
 		key: STARTUP_PROGRAM_FLAG,
 		description:
-			"Show /startups and accept startup applications for a free 3–6 month desktop licence (BYOK, no Ryu Cloud).",
+			"Show /startups and accept startup applications for a free desktop licence, 6 months after review or 12 months with a partner code (BYOK, no Ryu Cloud).",
 		defaultValue: false,
 		exposure: "public",
 		failMode: "closed",

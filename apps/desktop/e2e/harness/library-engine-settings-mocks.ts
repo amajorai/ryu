@@ -78,10 +78,8 @@ export function useEntitlementContext() {
 		refresh: empty,
 		requestUpgrade: () => undefined,
 		verdict: {
-			daysLeftInTrial: 0,
 			managedInference: false,
 			marketplaceApps: true,
-			paywalled: false,
 			plan: "pro",
 			proUnlocked: true,
 			reason: "subscription",

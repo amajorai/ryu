@@ -88,6 +88,9 @@ export function printsSecretValues(args: SecretsArgs): boolean {
 			return action === "issue";
 		case "rekey":
 			return action === "update";
+		case "ssh":
+			// A one-time SSH password; certificates and KRLs are public.
+			return action === "otp";
 		case "machine":
 		case "machines":
 			return action === "secret-id";

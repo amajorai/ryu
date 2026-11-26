@@ -187,6 +187,7 @@ pub(in crate::server) async fn pi_provider_account_rename(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub(in crate::server) async fn pi_provider_account_remove(
+    State(state): State<ServerState>,
     Path(provider_id): Path<String>,
     Json(body): Json<AccountAction>,
 ) -> axum::response::Response {
@@ -223,6 +224,13 @@ pub(in crate::server) async fn pi_provider_account_remove(
     };
     match crate::pi_config::remove_provider_account(&provider_id, &body.account_id) {
         Ok(mut catalog) => {
+            // A removed account leaves every custom account pool.
+            oauth_pool_policy::agent_account_pools::forget_account(
+                &state.preferences,
+                &provider_id,
+                &body.account_id,
+            )
+            .await;
             if let Some(revocation) = revocation {
                 catalog["sessionRevocationStatus"] = json!(revocation);
             }

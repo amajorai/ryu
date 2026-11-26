@@ -1,7 +1,7 @@
 // apps/desktop/src/hooks/useSystemAnnouncements.ts
 //
 // Derives locally-generated "system" announcements from live connectivity signals
-// (Core / gateway reachability, node version floor) so they surface inside the
+// (Core / gateway reachability, the node protocol range) so they surface inside the
 // sidebar Announcements section using the same card design as admin-authored
 // announcements — instead of as floating page banners / persistent toasts. These
 // are read-only status items: they appear while the condition holds and clear
@@ -11,8 +11,8 @@ import { AlertCircleIcon } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { useSystemStatusContext } from "@/src/contexts/SystemStatusContext.tsx";
+import { nodeProtocolAnnouncement } from "@/src/hooks/node-protocol-announcement.ts";
 import { useNodeHealth } from "@/src/hooks/useNodeHealth.ts";
-import { MIN_CORE_VERSION } from "@/src/lib/node-compat.ts";
 
 /** A locally-generated status card rendered alongside admin announcements. */
 export interface SystemAnnouncement {
@@ -31,7 +31,8 @@ export interface SystemAnnouncement {
  * The live connectivity issues worth surfacing, highest-severity first. Empty
  * when everything is healthy (or still on the first probe). Mirrors the copy of
  * the banners/toasts these replace: Core unreachable (was CoreStatusToast + the
- * chat composer overlay) and node-below-floor (was NodeCompatBanner), plus the
+ * chat composer overlay) and no shared protocol with the node (was the advisory
+ * version floor of NodeCompatBanner; now names the side to update), plus the
  * gateway signal the chat composer previously showed inline.
  */
 export function useSystemAnnouncements(): SystemAnnouncement[] {
@@ -71,17 +72,13 @@ export function useSystemAnnouncements(): SystemAnnouncement[] {
 		});
 	}
 
-	if (nodeHealth && !nodeHealth.compatible) {
-		items.push({
-			id: "system:node-outdated",
-			title: "Node needs updating",
-			body: tl(
-				"This node runs Core v{version} · the app expects v{minVersion}+. Some features may be unavailable until it's updated.",
-				{ version: nodeHealth.version ?? "?", minVersion: MIN_CORE_VERSION }
-			),
-			icon: AlertCircleIcon,
-			accent: "var(--warning)",
-		});
+	// No shared protocol between this app and the node. The card names the
+	// side to update. Null while the two share a protocol.
+	const protocolCard = nodeHealth
+		? nodeProtocolAnnouncement(nodeHealth.protocolVerdict, tl)
+		: null;
+	if (protocolCard) {
+		items.push(protocolCard);
 	}
 
 	return items;

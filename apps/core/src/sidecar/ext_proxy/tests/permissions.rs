@@ -221,3 +221,163 @@ fn an_app_declared_level_denies_a_member_until_it_is_granted_on_the_resource() {
         Decision::Allowed
     );
 }
+
+// ── A record id the app would decode a second time (SA-33) ──────────────────
+
+fn record_manifest() -> crate::plugin_manifest::PluginManifest {
+    let mut manifest = provider_manifest(9099, None);
+    manifest.sidecars[0].http.as_mut().expect("http").routes = vec![
+        route("/:room_id", Some("rooms.view"), Some("room_id")),
+        route("/:room_id/turn", Some("rooms.run"), Some("room_id")),
+        route("/files/:name", Some("files.read"), None),
+        route("/raw/:id", None, None),
+    ];
+    manifest
+}
+
+/// The apps decode the record id once more than Core does (axum's `Path`,
+/// `decodeURIComponent`). An id that still changes under one more decode would be
+/// checked on text no per-record rule names and served as another record, so it
+/// resolves no route, with the method of either lane (the WebSocket lane resolves
+/// as GET).
+#[test]
+fn a_record_id_that_decodes_again_resolves_no_route() {
+    let manifest = record_manifest();
+    for sub_path in [
+        "/%72oom_1",
+        "/%72oom_1/turn",
+        "/room_%31",
+        "/%2572oom_1",
+        "/room%3A1",
+    ] {
+        for method in ["GET", "POST"] {
+            assert!(
+                resolve_route(&manifest, sub_path, method).is_none(),
+                "{method} {sub_path} must not resolve"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_plain_record_id_and_routes_without_a_record_resolve_as_before() {
+    let manifest = record_manifest();
+    for (sub_path, permission, id) in [
+        ("/room_1", "rooms.view", "room_1"),
+        ("/room:1", "rooms.view", "room:1"),
+        ("/room_1/turn", "rooms.run", "room_1"),
+    ] {
+        for method in ["GET", "POST"] {
+            let (_, _, matched) = resolve_route(&manifest, sub_path, method)
+                .unwrap_or_else(|| panic!("{method} {sub_path} must resolve"));
+            assert_eq!(
+                required_permission_for(matched, sub_path, &manifest.id),
+                Some((permission.to_owned(), id.to_owned()))
+            );
+        }
+    }
+    // No `resource_param`, so an escape in the path changes nothing here.
+    let (_, _, files) = resolve_route(&manifest, "/files/%72eport", "GET").expect("files");
+    assert_eq!(
+        required_permission_for(files, "/files/%72eport", &manifest.id),
+        Some(("files.read".to_owned(), manifest.id.clone()))
+    );
+    let (_, _, raw) = resolve_route(&manifest, "/raw/%72", "GET").expect("raw");
+    assert_eq!(required_permission_for(raw, "/raw/%72", &manifest.id), None);
+}
+
+/// An id that is not text once decoded (`%ff`) resolves no route either: no app
+/// could read it as the text Core checked. The dot segment guard at the top of
+/// `resolve_route` already refuses such a path on every route, because its own
+/// decode fails, so this holds with and without the record id check. It pins the
+/// answer for a route that names a record.
+#[test]
+fn a_record_id_that_is_not_text_once_decoded_resolves_no_route() {
+    let manifest = record_manifest();
+    for sub_path in ["/%ff", "/%ff/turn", "/room_%c3"] {
+        for method in ["GET", "POST"] {
+            assert!(
+                resolve_route(&manifest, sub_path, method).is_none(),
+                "{method} {sub_path} must not resolve"
+            );
+        }
+    }
+    // The same without a `resource_param`, which is why this needs no record check.
+    assert!(resolve_route(&manifest, "/raw/%ff", "GET").is_none());
+}
+
+/// A `%` that is not followed by two hex digits is no escape: one more decode
+/// leaves the id as it is, so the app reads the same text Core checked. Such an id
+/// resolves as before, and the permission is checked on the id as given.
+#[test]
+fn a_record_id_with_a_percent_that_is_no_escape_resolves_as_before() {
+    let manifest = record_manifest();
+    for (sub_path, permission, id) in [
+        ("/100%", "rooms.view", "100%"),
+        ("/room%zz", "rooms.view", "room%zz"),
+        ("/room%4", "rooms.view", "room%4"),
+        ("/room%4z", "rooms.view", "room%4z"),
+        ("/%", "rooms.view", "%"),
+        ("/room%/turn", "rooms.run", "room%"),
+    ] {
+        for method in ["GET", "POST"] {
+            let (_, _, matched) = resolve_route(&manifest, sub_path, method)
+                .unwrap_or_else(|| panic!("{method} {sub_path} must resolve"));
+            assert_eq!(
+                required_permission_for(matched, sub_path, &manifest.id),
+                Some((permission.to_owned(), id.to_owned()))
+            );
+        }
+    }
+}
+
+/// End to end through the real `/api/ext` router, so axum's own decode is part of
+/// the test: on the HTTP lane and on the WebSocket lane, an id escaped twice is a
+/// 404 before any permission check, and a plain id still gets past the route gate.
+#[tokio::test]
+async fn both_lanes_refuse_a_record_id_escaped_twice() {
+    use tower::ServiceExt as _;
+
+    const APP: &str = "@acme/records";
+    let directory = tempfile::tempdir().unwrap();
+    let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+    state.app_store.insert(APP, "1.0.0").await.unwrap();
+    state.app_store.set_enabled(APP, &[]).await.unwrap();
+    let mut manifest = web_app(APP, None, false, &[]);
+    let mut room = route("/:room_id", Some("rooms.view"), Some("room_id"));
+    room.auth = RouteAuth::Public;
+    manifest.sidecars[0].http.as_mut().expect("http").routes = vec![room];
+    state.app_manifests.write().await.push(manifest);
+    let router = ext_routes(None).with_state(state);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let served = router.clone();
+    let server = tokio::spawn(async move { axum::serve(listener, served).await.unwrap() });
+    let ws_status = |id: &'static str| async move {
+        let url = format!("ws://127.0.0.1:{port}/api/ext/ws/{APP}/{id}");
+        match tokio_tungstenite::connect_async(url).await {
+            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+                Some(response.status().as_u16())
+            }
+            _ => None,
+        }
+    };
+
+    for (id, refused) in [("%2572oom_1", true), ("room_1", false)] {
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/api/ext/{APP}/{id}"))
+            .body(Body::empty())
+            .unwrap();
+        let http = router.clone().oneshot(request).await.unwrap().status();
+        assert_eq!(
+            http == StatusCode::NOT_FOUND,
+            refused,
+            "HTTP {id} gave {http}"
+        );
+        let ws = ws_status(id).await;
+        assert_eq!(ws == Some(404), refused, "WebSocket {id} gave {ws:?}");
+    }
+    server.abort();
+}

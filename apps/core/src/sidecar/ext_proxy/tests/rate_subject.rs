@@ -217,12 +217,15 @@ async fn forward_stamps_cores_rate_subject_over_a_forged_copy() {
     server.abort();
 }
 
-/// The rate subject is an explicit per-app opt-in, declared only by the public
-/// feedback board to bound anonymous vote identities per client.
+/// The rate subject is an explicit per-app opt-in. Only the apps listed here
+/// declare it: Bot Flows keys its per-visitor limits on it, and the feedback
+/// board (vote identities) and Forms (form responses) bound an anonymous public
+/// write per client. Another app that sets the flag receives a per-client
+/// pseudonym, so it is added here on purpose.
 #[test]
-fn only_the_feedback_board_opts_into_the_rate_subject() {
+fn only_the_listed_apps_opt_into_the_rate_subject() {
     let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
-    let opted_in: Vec<&str> = manifests
+    let mut opted_in: Vec<&str> = manifests
         .iter()
         .filter(|manifest| {
             manifest
@@ -233,5 +236,9 @@ fn only_the_feedback_board_opts_into_the_rate_subject() {
         })
         .map(|manifest| manifest.id.as_str())
         .collect();
-    assert_eq!(opted_in, vec!["@ryu/feedback-board"]);
+    opted_in.sort_unstable();
+    assert_eq!(
+        opted_in,
+        vec!["@ryu/bot-flows", "@ryu/feedback-board", "@ryu/forms"]
+    );
 }

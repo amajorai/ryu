@@ -32,10 +32,13 @@
 //!   session) is marked by its dispatch, since only the dispatch knows a
 //!   credential was attached; an anonymous fetch is not a source.
 //!
-//! Only PTC program runs set the scope, so the chat tool loop and every other
-//! ingress behave exactly as before. The hold applies in every approval mode,
-//! including an explicit `off`, like the other forced gates (see
-//! `docs/threat-model.md`).
+//! Two things set the scope: a PTC program run, and a chat turn of the ACP
+//! bridge once it has read phone device data (`device_tools::taint`). A program
+//! started or resumed inside such a turn inherits the turn's mark
+//! ([`scope_sandbox_run`]), so it cannot send out what the turn read. A chat
+//! turn with no device read and every other ingress set no scope and behave
+//! exactly as before. The hold applies in every approval mode, including an
+//! explicit `off`, like the other forced gates (see `docs/threat-model.md`).
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -48,16 +51,29 @@ use crate::sidecar::mcp::web_search_access::is_web_access_tool_id;
 use crate::tool_exec::RunDataFlow;
 
 tokio::task_local! {
-    /// The PTC program run a tool call belongs to. Unset on every other ingress.
+    /// The PTC program run, or the device-read chat turn, a tool call belongs
+    /// to. Unset on every other ingress.
     static SANDBOX_RUN: Arc<RunDataFlow>;
 }
 
 /// Run `future` as part of the program run `run` (see [`current_sandbox_run`]).
+///
+/// A run that starts inside a scope which already read private data (a program
+/// the model wrote after a device read in the same chat turn) can carry that
+/// data in its own text, so it takes over the enclosing mark instead of
+/// starting clean. An enclosing scope with no mark changes nothing, and the
+/// run's own reads never mark the enclosing scope.
 pub(crate) async fn scope_sandbox_run<F: Future>(run: Arc<RunDataFlow>, future: F) -> F::Output {
+    if let Some(enclosing) = current_sandbox_run() {
+        if let Some(source) = enclosing.private_read_source() {
+            run.mark_private_read(source);
+        }
+    }
     SANDBOX_RUN.scope(run, future).await
 }
 
-/// The program run the current tool call belongs to, or `None` outside a run.
+/// The run or device-read turn the current tool call belongs to, or `None`
+/// outside both.
 pub(crate) fn current_sandbox_run() -> Option<Arc<RunDataFlow>> {
     SANDBOX_RUN.try_with(Arc::clone).ok()
 }

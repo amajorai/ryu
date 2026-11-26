@@ -175,6 +175,8 @@ export interface VaultLease {
 	id: string;
 	issuedTo: string | null;
 	maxExpiresAt: VaultTimestamp;
+	/** A retry lease: a credential never handed out, waiting for its revoke. */
+	pendingRevoke?: boolean;
 	provider: string;
 	renewable: boolean;
 	revokedAt: VaultTimestamp | null;
@@ -269,6 +271,26 @@ export function listVaultLeases(
 		`/api/vault/leases${query({ role: filter.role, includeRevoked: filter.includeRevoked })}`,
 		{},
 		vaultHumanLeases
+	);
+}
+
+/**
+ * Mark a retry lease (a credential that was never handed out and whose revoke
+ * keeps failing) revoked without calling its provider. Nothing is revoked at
+ * the provider, so the credential may still be live: revoke it there first.
+ * Core refuses it without the acknowledgement, for a lease that was handed
+ * out, and for anyone but a configuration manager.
+ */
+export function forceRevokeVaultRetryLease(
+	target: ApiTarget,
+	id: string,
+	input: { acknowledgeCredentialMayBeLive: true }
+): Promise<{ lease: VaultLease }> {
+	return request(
+		target,
+		`/api/vault/sys/leases/force-revoke/${encodeURIComponent(id)}`,
+		{ method: "POST", body: input },
+		vaultMachineLeaseResponse
 	);
 }
 

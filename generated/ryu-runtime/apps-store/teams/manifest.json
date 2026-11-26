@@ -75,6 +75,31 @@
             "path": "/:id/members/:agent_id",
             "method": "DELETE",
             "permission": "teams.manage"
+          },
+          {
+            "path": "/threads/open",
+            "method": "POST",
+            "permission": "teams.view"
+          },
+          {
+            "path": "/:id/threads",
+            "method": "GET",
+            "permission": "teams.view"
+          },
+          {
+            "path": "/:id/threads/:conversation_id/owner",
+            "method": "POST",
+            "permission": "teams.manage"
+          },
+          {
+            "path": "/:id/threads/:conversation_id/stop",
+            "method": "POST",
+            "permission": "teams.manage"
+          },
+          {
+            "path": "/:id/threads/:conversation_id/resume",
+            "method": "POST",
+            "permission": "teams.manage"
           }
         ]
       }
@@ -96,6 +121,14 @@
       "sidecar": "ryu-teams",
       "route": "/",
       "grant": "teams:manage"
+    },
+    {
+      "capability": "teams.thread",
+      "version": "1.0.0",
+      "title": "Group thread owner and state",
+      "sidecar": "ryu-teams",
+      "route": "/threads/open",
+      "grant": "teams:view"
     }
   ],
   "permission_grants": [

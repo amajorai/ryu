@@ -92,6 +92,29 @@ impl BrokeredHandler {
         })
     }
 
+    /// Why `name` may not run outside this bridge's live device turn: a
+    /// private device read the conversation already holds (a read recorded
+    /// when an earlier turn ended, or one in its stored history), or a history
+    /// that cannot be read ([`crate::device_tools::conversation_taint`]).
+    async fn history_refusal(&self, name: &str) -> Option<String> {
+        let conversation_id = self.inner.permission_scope_id.as_deref()?;
+        let store = self.inner.mcp.conversations.as_ref();
+        match crate::device_tools::conversation_taint::conversation_private_read(
+            store,
+            conversation_id,
+        )
+        .await
+        {
+            Ok(None) => None,
+            Ok(Some(source)) => Some(format!(
+                "{name} was not run: this conversation already read private data from the phone with `{source}`, so a proposal message could carry it out."
+            )),
+            Err(_) => Some(format!(
+                "{name} was not run: this conversation's history could not be checked for private data read from the phone."
+            )),
+        }
+    }
+
     /// `describe` for an offered broker tool, as the hosted plane answers it;
     /// `None` for any other id, which the inner handler answers.
     pub(super) async fn describe(&self, arguments: &Value) -> Option<String> {
@@ -117,7 +140,10 @@ impl BrokeredHandler {
     /// call then goes to the inner handler as usual).
     ///
     /// After a device read in this turn, `propose` is refused: its message
-    /// reaches a person, so it could carry the device data out.
+    /// reaches a person, so it could carry the device data out. With no live
+    /// device turn, an earlier read of the conversation is checked instead (the
+    /// agent may still hold its raw result), failing closed when the history
+    /// cannot be read.
     pub(super) async fn broker_call(
         &self,
         name: &str,
@@ -127,7 +153,14 @@ impl BrokeredHandler {
         if !hosted_mcp::is_tool(name) {
             return None;
         }
-        let private_source = device.and_then(crate::device_tools::taint::private_read_source);
+        let turn_source = device.and_then(crate::device_tools::taint::private_read_source);
+        let refusal = match turn_source {
+            Some(source) => Some(format!(
+                "{name} was not run: this turn already read private data from the phone with `{source}`, so a proposal message could carry it out."
+            )),
+            None if name == hosted_mcp::PROPOSE => self.history_refusal(name).await,
+            None => None,
+        };
         // `offered` turns the session header into the agent route's own
         // credential headers ([`hosted_mcp::agent_headers`]).
         let (tools, route_credentials) = super::hosted_broker::offered(
@@ -137,10 +170,8 @@ impl BrokeredHandler {
             &self.credentials,
         )
         .await;
-        let outcome = match (route_credentials, private_source) {
-            (Some(_), Some(source)) if name == hosted_mcp::PROPOSE => Err(format!(
-                "{name} was not run: this turn already read private data from the phone with `{source}`, so a proposal message could carry it out."
-            )),
+        let outcome = match (route_credentials, refusal) {
+            (Some(_), Some(refusal)) if name == hosted_mcp::PROPOSE => Err(refusal),
             (Some(route_credentials), _) if tools.iter().any(|tool| tool.name == name) => {
                 let arguments = if arguments.is_null() {
                     json!({})
@@ -209,6 +240,9 @@ impl rmcp::ServerHandler for BrokeredHandler {
     }
 }
 
+#[cfg(test)]
+#[path = "session_broker_history_test.rs"]
+mod history_test;
 #[cfg(test)]
 #[path = "session_broker_tests.rs"]
 mod tests;

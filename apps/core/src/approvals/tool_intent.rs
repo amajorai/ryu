@@ -69,6 +69,13 @@ fn agent_inbox_action(tool_id: &str) -> Option<String> {
     (segments.next()? == "agent_inbox").then(|| action.to_ascii_lowercase())
 }
 
+/// Whether the approval card of `tool_id` is written from the call's
+/// arguments (who a message goes to, what it says). Such a call can only be
+/// judged where the whole card is shown.
+pub(super) fn has_argument_card(tool_id: &str) -> bool {
+    agent_inbox_action(tool_id).is_some()
+}
+
 fn is_claim(action: &str) -> bool {
     matches!(action, "claim_email_alias" | "create")
 }

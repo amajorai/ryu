@@ -142,6 +142,22 @@ export const identityServerEnv = {
 	// forces it OFF even with admins. Unset (the default) keeps the historical
 	// behaviour of deriving the state from whether ADMIN_EMAILS is empty.
 	WAITLIST_ENABLED: z.string().optional(),
+	// Who operates this control plane. "cloud" (the default, and the value for
+	// Ryu's hosted service) keeps every behaviour as it is. "self-hosted" is an
+	// explicit statement by a customer-operated install and is the only signal
+	// a self-hosted rule may read; a missing Polar subscription or an empty
+	// ADMIN_EMAILS never implies it. Trimmed and case-insensitive; any other
+	// value fails startup.
+	RYU_DEPLOYMENT_MODE: z
+		.string()
+		.trim()
+		.toLowerCase()
+		.pipe(
+			z.enum(["cloud", "self-hosted"], {
+				error: "RYU_DEPLOYMENT_MODE must be cloud or self-hosted",
+			})
+		)
+		.default("cloud"),
 	// Vendor-signed RS256 Enterprise license for self-hosted deployments.
 	// The public key is verification-only and should be distributed with the
 	// deployment; neither value is exposed to browser bundles.

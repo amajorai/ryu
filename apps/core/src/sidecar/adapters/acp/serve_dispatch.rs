@@ -41,6 +41,11 @@ pub(super) async fn dispatch_session_message(
     // Per-message copies for the managed-Pi widget synthesis
     // in the `ToolCallUpdate` arm (the closure is `move`).
     let widget_mcp = widget_mcp.clone();
+    // The conversation store the agent's own egress hold reads its device
+    // reads from when no device turn is live (`taint::agent_egress_hold`).
+    let perm_store = widget_mcp
+        .as_ref()
+        .and_then(|mcp| mcp.conversations.clone());
     let widget_agent_id = widget_agent_id.clone();
     let widget_conversation = instance_conversation.clone();
     let interactive = turn.interactive;
@@ -106,6 +111,7 @@ pub(super) async fn dispatch_session_message(
                 workspace_trusted,
                 tx_perm,
                 perm_conversation,
+                perm_store,
             )
             .await
         })

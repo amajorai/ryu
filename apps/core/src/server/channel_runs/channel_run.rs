@@ -273,7 +273,17 @@ pub(in crate::server) async fn channel_run(
             }
             let agent_reactions =
                 channel_turn_agent_reactions(&state.conversations, &req.conversation_id).await;
+            // Approvals this turn left waiting, when the channel connection
+            // (the channel config id) lets a chat button decide them. A
+            // replayed turn lists none: its prompts were issued the first time.
+            let approval_prompts = channel_turn_approval_prompts(
+                &state,
+                req.channel_id.as_deref(),
+                &req.conversation_id,
+            )
+            .await;
             Json(json!({
+                "approvalPrompts": approval_prompts,
                 "reply": result.reply,
                 "assistantMessageId": result.assistant_message_id,
                 "assistantMessageIds": result.assistant_message_ids,

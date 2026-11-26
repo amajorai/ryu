@@ -25,6 +25,7 @@ const PUBLIC_KEYS = [
 	"NEXT_PUBLIC_POSTHOG_KEY",
 	"NEXT_PUBLIC_POSTHOG_HOST",
 	"NEXT_PUBLIC_SENTRY_DSN",
+	"NEXT_PUBLIC_RYU_DEPLOYMENT_MODE",
 ] as const;
 
 type Snapshot = Record<string, string | null>;

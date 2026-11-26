@@ -15,6 +15,7 @@
 
 import { z } from "zod";
 import { appResponseValueSchema } from "./app-request-json.ts";
+import { assertNoDotSegment } from "./path-id.ts";
 
 /** The subset of a node the api layer needs: base URL + scoped credentials. */
 export type RyuFetch = (
@@ -107,8 +108,13 @@ export function makeHeaders(
 	return headers;
 }
 
-/** Join a node base URL and an api path without doubling slashes. */
+/**
+ * Join a node base URL and an api path without doubling slashes. A path with a
+ * dot segment is refused, so no value a caller put into it can move the request
+ * to another Core route.
+ */
 export function apiUrl(target: ApiTarget, path: string): string {
+	assertNoDotSegment(path);
 	const base = target.url.replace(/\/$/, "");
 	const suffix = path.startsWith("/") ? path : `/${path}`;
 	return `${base}${suffix}`;

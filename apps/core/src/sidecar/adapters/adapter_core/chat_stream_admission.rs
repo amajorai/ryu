@@ -37,6 +37,12 @@ pub(super) async fn admit_chat_turn(
         req.browser_context_consent = false;
         req.device.device_tools_offer = None;
     }
+    // On a shared node every folder of the turn must lie in the node's member
+    // folders. Every turn passes here, with or without a caller, before its
+    // folder is stored, snapshotted or handed to an engine.
+    if let Err(message) = crate::server::chat_checkpoints::turn_folders::bound_request(req) {
+        return Err(error_stream(message.to_owned()));
+    }
     if req
         .project_environment
         .as_ref()

@@ -186,6 +186,8 @@ async fn an_unrestricted_agent_in_a_trusted_folder_is_not_wrapped() {
         AccountConfinement::None,
         Path::new("/work"),
         &[],
+        false,
+        || panic!("no sandbox probe for an unrestricted agent in a trusted folder"),
     )
     .await
     .expect("no confinement");

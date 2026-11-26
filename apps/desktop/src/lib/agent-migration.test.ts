@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import {
+	hermesHomeName,
+	joinHome,
 	MIGRATION_SOURCES,
 	migrationSourceLabel,
 	newMigrationItems,
@@ -58,4 +60,15 @@ test("labels Core sources and keeps home folders only for installed agents", () 
 		"openclaw",
 		"hermes",
 	]);
+});
+
+test("finds the Hermes home on Windows as well as on macOS and Linux", () => {
+	const hermes = MIGRATION_SOURCES.find((source) => source.id === "hermes");
+	expect(hermes?.homes).toEqual([".hermes", "AppData/Local/hermes"]);
+	expect(joinHome("C:\\Users\\ada", "AppData/Local/hermes")).toBe(
+		"C:\\Users\\ada\\AppData\\Local\\hermes"
+	);
+	expect(joinHome("/home/ada/", ".hermes")).toBe("/home/ada/.hermes");
+	expect(hermesHomeName("C:\\Users\\ada")).toBe("AppData/Local/hermes");
+	expect(hermesHomeName("/Users/ada")).toBe(".hermes");
 });

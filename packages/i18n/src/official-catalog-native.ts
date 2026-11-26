@@ -1,14 +1,15 @@
-import arCatalog from "../locales/native/ar.json";
-import deCatalog from "../locales/native/de.json";
-import esCatalog from "../locales/native/es.json";
-import frCatalog from "../locales/native/fr.json";
-import hiCatalog from "../locales/native/hi.json";
-import itCatalog from "../locales/native/it.json";
-import jaCatalog from "../locales/native/ja.json";
-import koCatalog from "../locales/native/ko.json";
-import ptBRCatalog from "../locales/native/pt-BR.json";
-import ruCatalog from "../locales/native/ru.json";
-import zhCNCatalog from "../locales/native/zh-CN.json";
+import arCatalog from "../locales/native/ar.json" with { type: "json" };
+import deCatalog from "../locales/native/de.json" with { type: "json" };
+import esCatalog from "../locales/native/es.json" with { type: "json" };
+import frCatalog from "../locales/native/fr.json" with { type: "json" };
+import hiCatalog from "../locales/native/hi.json" with { type: "json" };
+import itCatalog from "../locales/native/it.json" with { type: "json" };
+import jaCatalog from "../locales/native/ja.json" with { type: "json" };
+import koCatalog from "../locales/native/ko.json" with { type: "json" };
+import plCatalog from "../locales/native/pl.json" with { type: "json" };
+import ptBRCatalog from "../locales/native/pt-BR.json" with { type: "json" };
+import ruCatalog from "../locales/native/ru.json" with { type: "json" };
+import zhCNCatalog from "../locales/native/zh-CN.json" with { type: "json" };
 import { officialCatalogLocale } from "./catalog-locale.ts";
 import {
 	type LiteralCatalog,
@@ -29,6 +30,7 @@ const OFFICIAL_NATIVE_CATALOGS: Readonly<Record<string, LiteralCatalog>> = {
 	it: itCatalog,
 	ja: jaCatalog,
 	ko: koCatalog,
+	pl: plCatalog,
 	"pt-BR": ptBRCatalog,
 	ru: ruCatalog,
 	"zh-CN": zhCNCatalog,

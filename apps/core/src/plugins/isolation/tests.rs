@@ -399,3 +399,34 @@ fn an_untrusted_external_runtime_is_refused_only_when_required() {
         None
     );
 }
+
+/// KNOWN GAP, security finding CE-17 (open follow-up). The app record of an MCP
+/// server installed from a registry declares no lane: its command lives in
+/// `mcp.json`, not in `mcp_servers`, and the install records no provenance. So
+/// the "require trust for host access" setting does not see it, although Core
+/// starts the package with full host access once the record and its `mcp.json`
+/// entry are switched on. This pins today's behaviour so the gap stays visible;
+/// change it together with the fix.
+#[test]
+fn known_gap_a_registry_mcp_server_record_is_not_seen_by_the_trust_requirement() {
+    // The shape `synthesize_mcp_manifest` writes (server/mcp_tools/mcp_entry.rs).
+    let manifest = PluginManifest {
+        id: "some-registry-server".to_owned(),
+        name: "some-registry-server".to_owned(),
+        version: "0.0.0".to_owned(),
+        permission_grants: vec![crate::sidecar::mcp::WIDGET_RENDER_GRANT.to_owned()],
+        category: Some(crate::sidecar::mcp::MCP_SERVER_CATEGORY.to_owned()),
+        ..Default::default()
+    };
+    assert!(lanes_of(&manifest).is_empty());
+
+    let require_trust = policy_with(&[], true);
+    let report = resolve(&manifest, None, &require_trust);
+    assert_eq!(report.trust, TrustBasis::Untrusted);
+    assert!(report.fully_sandboxed);
+    assert_eq!(report.host_access, HostAccess::NotRequested);
+    assert_eq!(
+        require_trust.host_access_refusal(&manifest, "0.0.0", None),
+        None
+    );
+}

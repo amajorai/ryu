@@ -131,7 +131,10 @@ export function useVaultPageState() {
 			setValueType(DEFAULT_VALUE_TYPE);
 			await invalidateVault();
 			sileo.success({
-				title: kind === "pending" ? "Sent for approval" : "Vault secret saved",
+				title:
+					kind === "pending"
+						? tl("Sent for approval")
+						: tl("Vault secret saved"),
 			});
 		},
 	});
@@ -152,7 +155,9 @@ export function useVaultPageState() {
 			await invalidateVault();
 			sileo.success({
 				title:
-					kind === "pending" ? "Sent for approval" : "Vault secret deleted",
+					kind === "pending"
+						? tl("Sent for approval")
+						: tl("Vault secret deleted"),
 			});
 		},
 	});
@@ -161,12 +166,12 @@ export function useVaultPageState() {
 			restoreVaultSecret(target, secret.name, vaultCoordsOf(secret)),
 		onSuccess: async () => {
 			await invalidateVault();
-			sileo.success({ title: "Vault secret restored" });
+			sileo.success({ title: tl("Vault secret restored") });
 		},
 		onError: (error) => {
 			sileo.error({
-				title: "Could not restore",
-				description: vaultErrorMessage(error, "Try again.", tl),
+				title: tl("Could not restore"),
+				description: vaultErrorMessage(error, tl("Try again."), tl),
 			});
 		},
 	});

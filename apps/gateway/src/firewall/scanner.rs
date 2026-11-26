@@ -1,6 +1,6 @@
 //! The built-in regex [`FirewallScanner`]: construction (curated + custom
-//! patterns) and the detection scans. Redaction lives in `redaction` and
-//! `companion`.
+//! patterns) and the detection scans. The inbound scans live in `inbound`,
+//! redaction in `redaction` and `companion`.
 
 use std::borrow::Cow;
 
@@ -46,7 +46,7 @@ pub struct FirewallScanner {
     pub(super) config: FirewallConfig,
     pub(super) pii_patterns: Vec<(String, Regex)>,
     pub(super) secret_patterns: Vec<(String, Regex)>,
-    injection_patterns: Vec<(String, Regex)>,
+    pub(super) injection_patterns: Vec<(String, Regex)>,
     pub(super) outbound_patterns: Vec<(&'static str, Regex)>,
     /// `[REDACTED:<NAME>]` for each `pii_patterns` entry, in the same order.
     /// The pattern vectors never change after [`Self::build`], so these are
@@ -66,13 +66,16 @@ pub struct FirewallScanner {
     pub(super) scan_set: Option<&'static RegexSet>,
     pub(super) secret_set: Option<&'static RegexSet>,
     pub(super) outbound_agree: Option<&'static RegexSet>,
+    /// The curated injection patterns as one set, when `injection_patterns`
+    /// is exactly the curated list (see `CuratedPatterns::injection_set`).
+    pub(super) injection_set: Option<&'static RegexSet>,
     /// Code-injection payload patterns (unified-evaluator `code_injection`).
-    code_injection_patterns: Vec<(String, Regex)>,
+    pub(super) code_injection_patterns: Vec<(String, Regex)>,
     /// Lexical toxicity seed (unified-evaluator `toxicity`; the real judgment is
     /// the LLM-judge path, this catches obvious cases deterministically).
-    toxicity_patterns: Vec<(String, Regex)>,
+    pub(super) toxicity_patterns: Vec<(String, Regex)>,
     /// Lexical bias / identity-attack seed (unified-evaluator `bias_fairness`).
-    bias_patterns: Vec<(String, Regex)>,
+    pub(super) bias_patterns: Vec<(String, Regex)>,
 }
 
 impl FirewallScanner {
@@ -163,6 +166,7 @@ impl FirewallScanner {
         debug_assert_eq!(curated.pii_twins.len(), curated.pii.len());
         debug_assert_eq!(outbound_twins.len(), outbound_patterns.len());
         let (scan_set, secret_set) = curated.sets(secret_patterns.len(), pii_patterns.len());
+        let injection_set = curated.injection_set(injection_patterns.len());
 
         Self {
             config,
@@ -181,106 +185,13 @@ impl FirewallScanner {
             scan_set,
             secret_set,
             outbound_agree: curated.outbound_agree.as_ref(),
+            injection_set,
         }
     }
 
     /// Return the current firewall config (used by GET /v1/config to report live state).
     pub fn config(&self) -> &FirewallConfig {
         &self.config
-    }
-
-    /// Scan inbound prompt text. Returns the first violation found (if any).
-    pub fn scan_inbound(&self, text: &str) -> Option<FirewallMatch> {
-        if !self.config.enabled || !self.config.scan_inbound {
-            return None;
-        }
-
-        // Check injection first (highest priority)
-        if let Some(m) = self.find_match(
-            text,
-            &self.injection_patterns,
-            DetectionKind::PromptInjection,
-        ) {
-            if self.config.log_detections {
-                warn!(kind = "prompt_injection", pattern = %m.pattern_name, "Firewall: prompt injection detected in inbound request");
-            }
-            return Some(m);
-        }
-
-        // Then secrets (credentials/keys). Scanned inbound so a request carrying a
-        // bare secret is caught by the policy: under the default `Block` it is a
-        // 403, under `Sanitize` it is redacted before egress (leak closed).
-        // Higher severity than PII, so checked first.
-        if let Some(m) = self.find_match(text, &self.secret_patterns, DetectionKind::Secret) {
-            if self.config.log_detections {
-                warn!(kind = "secret", pattern = %m.pattern_name, "Firewall: secret/credential detected in inbound request");
-            }
-            return Some(m);
-        }
-
-        // Then PII
-        if let Some(m) = self.find_match(text, &self.pii_patterns, DetectionKind::Pii) {
-            if self.config.log_detections {
-                warn!(kind = "pii", pattern = %m.pattern_name, "Firewall: PII detected in inbound request");
-            }
-            return Some(m);
-        }
-
-        None
-    }
-
-    /// Scan inbound text for a specific set of locked guardrails, ignoring the
-    /// local `enabled`/`scan_inbound` config. Used to honour control-plane
-    /// locked guardrails (U28): the org can require "pii"/"secrets"/
-    /// "prompt_injection" scanning even when local config disabled the firewall,
-    /// so a lower level cannot bypass an admin-locked guardrail.
-    pub fn scan_locked_guardrails(
-        &self,
-        text: &str,
-        guardrails: &[String],
-    ) -> Option<FirewallMatch> {
-        let wants = |name: &str| guardrails.iter().any(|g| g.eq_ignore_ascii_case(name));
-
-        if wants("prompt_injection") || wants("injection") {
-            if let Some(m) = self.find_match(
-                text,
-                &self.injection_patterns,
-                DetectionKind::PromptInjection,
-            ) {
-                return Some(m);
-            }
-        }
-        if wants("pii") {
-            if let Some(m) = self.find_match(text, &self.pii_patterns, DetectionKind::Pii) {
-                return Some(m);
-            }
-        }
-        if wants("secret") || wants("secrets") {
-            if let Some(m) = self.find_match(text, &self.secret_patterns, DetectionKind::Secret) {
-                return Some(m);
-            }
-        }
-        if wants("toxicity") || wants("moderation") {
-            if let Some(m) = self.find_match(text, &self.toxicity_patterns, DetectionKind::Toxicity)
-            {
-                return Some(m);
-            }
-        }
-        if wants("bias") || wants("bias_fairness") {
-            if let Some(m) = self.find_match(text, &self.bias_patterns, DetectionKind::Bias) {
-                return Some(m);
-            }
-        }
-        if wants("code_injection") {
-            if let Some(m) = self.find_match(
-                text,
-                &self.code_injection_patterns,
-                DetectionKind::CodeInjection,
-            ) {
-                return Some(m);
-            }
-        }
-        None
     }
 
     /// Scan outbound response text. Returns the first violation found (if any).
@@ -360,7 +271,7 @@ impl FirewallScanner {
     }
 
     /// [`Self::find_match`] over the hays [`hays_of`] gives.
-    fn find_match_in(
+    pub(super) fn find_match_in(
         &self,
         hays: &[&str],
         patterns: &[(String, Regex)],
@@ -421,7 +332,7 @@ impl FirewallScanner {
 /// shows (a homoglyph before a number gives it a word boundary that folding
 /// removes) is detected too. `normalize_for_scan` borrows exactly when folding
 /// changes nothing, so such text is matched once.
-fn hays_of<'a>(text: &'a str, normalized: &'a Cow<'a, str>) -> ([&'a str; 2], usize) {
+pub(super) fn hays_of<'a>(text: &'a str, normalized: &'a Cow<'a, str>) -> ([&'a str; 2], usize) {
     debug_assert_eq!(matches!(normalized, Cow::Borrowed(_)), normalized == text);
     match normalized {
         Cow::Borrowed(_) => ([text, text], 1),

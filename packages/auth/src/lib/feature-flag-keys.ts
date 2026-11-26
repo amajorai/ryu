@@ -19,14 +19,6 @@ export const INDIVIDUAL_PLANS_FLAG = "billing.individual_plans" as const;
 export const STANDALONE_PAYG_FLAG = "billing.standalone_payg" as const;
 export const BILLING_PERIODS_FLAG = "billing.payment_periods" as const;
 
-/**
- * Stable key for the desktop Lifetime Desktop trial + free-tier caps. Off (the
- * waitlist phase default) every desktop runs as "free during beta": no trial
- * clock, no paywall or upsell, and no numeric caps (tabs, remote nodes,
- * agents). Paid subscriptions and licences resolve exactly as before.
- */
-export const DESKTOP_TRIAL_FLAG = "billing.desktop_trial" as const;
-
 /** Stable key for the A Major Pass (`marketplace-membership`) rollout. */
 export const A_MAJOR_PASS_FLAG = "billing.a_major_pass" as const;
 

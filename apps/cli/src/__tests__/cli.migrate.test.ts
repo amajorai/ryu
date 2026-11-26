@@ -287,10 +287,12 @@ test("migrate reports a missing source folder", async () => {
 	const cap = makeIo();
 	const code = await runCli(["migrate", "hermes"], {
 		io: cap.io,
-		api: fakeNode([], ["~/.hermes"]),
+		api: fakeNode([], ["~/.hermes", "~/AppData/Local/hermes"]),
 	});
 	expect(code).toBe(1);
-	expect(cap.err()).toContain("No Hermes folder found at ~/.hermes");
+	expect(cap.err()).toContain(
+		"No Hermes folder found at ~/.hermes, ~/AppData/Local/hermes"
+	);
 });
 
 test("credentialDotenv keeps only credential-looking keys", () => {

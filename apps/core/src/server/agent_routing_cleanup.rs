@@ -24,6 +24,8 @@ const CLEAR_ATTEMPTS: usize = 3;
 pub(crate) async fn clear_deleted_agent_routing(client: &reqwest::Client, agent_id: &str) {
     // Local and synchronous, so it runs first and does not wait on the gateway.
     crate::sidecar::ext_proxy::egress_policy::forget_deleted_agent(agent_id);
+    // The agent's custom account pool is keyed by agent id as well.
+    super::oauth_pool_policy::agent_account_pools::forget_deleted_agent(agent_id).await;
     let result = clear_agent_routing_with(
         agent_id,
         || crate::sidecar::gateway::fetch_config(client),

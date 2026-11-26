@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+	type BotLaneTakeover,
+	botLaneTakeover,
+	botLaneTakeoverSchema,
+} from "./browser-bot-takeover.ts";
 
 // Wire contract of the @ryu/browser sidecar's read-only Bot-lane live view
 // (`apps-store/browser/sidecar/src/main/control-live-view.ts`).
@@ -19,6 +24,7 @@ const botLanesReplySchema = z.object({
 		z.object({
 			agent_id: z.string().min(1),
 			tabs: z.array(laneTabSchema),
+			takeover: botLaneTakeoverSchema.optional(),
 		})
 	),
 });
@@ -45,6 +51,8 @@ export interface BotLaneTab {
 export interface BotLane {
 	agentId: string;
 	tabs: BotLaneTab[];
+	/** The agent's open request for its owner to act in one of these tabs. */
+	takeover?: BotLaneTakeover;
 }
 
 export interface BotLaneSelection {
@@ -69,6 +77,7 @@ export function parseBotLanes(value: unknown): BotLane[] {
 	return parsed.data.lanes.map((lane) => ({
 		agentId: lane.agent_id,
 		tabs: lane.tabs,
+		...(lane.takeover ? { takeover: botLaneTakeover(lane.takeover) } : {}),
 	}));
 }
 

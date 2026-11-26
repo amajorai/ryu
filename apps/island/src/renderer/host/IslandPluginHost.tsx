@@ -254,6 +254,7 @@ export function IslandPluginHost({
 				const result = await window.island.plugins.coreHttp({
 					coreGeneration,
 					method: "GET",
+					owner: { kind: "host" },
 					path: "/api/agents",
 				});
 				if (!result.ok) {

@@ -57,6 +57,15 @@ fn owner_only() -> ApiError {
     )
 }
 
+/// 409 `provider_account_limit` for a provider that already holds the most
+/// accounts the plan allows, with `provider`, `limit` and `count` beside the
+/// message.
+pub(super) fn account_limit_error(
+    refusal: &crate::server::plan_limits::AccountLimitReached,
+) -> ApiError {
+    refusal.nested_response()
+}
+
 pub(super) fn bad_request(message: &str) -> ApiError {
     api_error(StatusCode::BAD_REQUEST, "invalid_request", message)
 }

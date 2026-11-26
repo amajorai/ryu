@@ -3,6 +3,10 @@
 
 use crate::server::*;
 
+// Access checks for the read-only git routes. Mounted here, not in
+// `server/mod.rs`, so the gate's test filter stays narrow.
+mod git_read_access;
+
 /// Part 5 of 6 of the protected route table (from
 /// `/api/media/upload` on). [`create_router`] merges every part in order and
 /// then wraps them in the auth layer stack, so a route added here inherits
@@ -48,7 +52,10 @@ pub(in crate::server) fn protected_routes_5(state: &ServerState) -> Router<Serve
         // the `ryu-research` sidecar via the manifest `public_mount` — no in-process
         // route (see `@ryu/research`).
         // ── Git workspace status (read-only, Unit U009) ─────────────────────
-        .route("/api/git/status", get(git::git_status))
+        .route(
+            "/api/git/status",
+            get(git_read_access::git_status_authorized),
+        )
         .route("/api/git/history", get(conversation_history::list))
         .route(
             "/api/git/history/import",
@@ -67,7 +74,10 @@ pub(in crate::server) fn protected_routes_5(state: &ServerState) -> Router<Serve
         // ── Git local repository initialization (Ryu Work entry point) ─────
         .route("/api/git/init", post(git::git_init_authorized))
         // ── Git branch list + switch (composer branch selector) ─────────────
-        .route("/api/git/branches", get(git::git_branches))
+        .route(
+            "/api/git/branches",
+            get(git_read_access::git_branches_authorized),
+        )
         .route("/api/git/checkout", post(git::git_checkout_authorized))
         .route(
             "/api/git/create-branch",
@@ -95,7 +105,10 @@ pub(in crate::server) fn protected_routes_5(state: &ServerState) -> Router<Serve
             "/api/workspace/clone",
             post(git::clone_project_folder_authorized),
         )
-        .route("/api/workspace/list", get(git::list_directory))
+        .route(
+            "/api/workspace/list",
+            get(workspace_list_access::list_directory_checked),
+        )
         // ── Worktree diff (read-only, Unit U011) ────────────────────────────
         .route("/api/worktree/:run_id/diff", get(worktree_diff_handler))
         // ── Worktree status (persistent-session: is a worktree live?) ───────
@@ -256,3 +269,7 @@ pub(in crate::server) fn protected_routes_5(state: &ServerState) -> Router<Serve
         // desktop stays within the browser's 6-per-host HTTP/1.1 budget.
         .route("/api/events/all", get(all_events_stream))
 }
+
+// Path check in front of the folder listing. Mounted here, not in
+// `server/mod.rs`, so the gate's test filter stays narrow.
+mod workspace_list_access;

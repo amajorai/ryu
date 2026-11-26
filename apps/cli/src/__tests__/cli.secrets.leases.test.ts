@@ -224,6 +224,37 @@ test("lease list, renew, and revoke", async () => {
 	expect(revoke.out).toBe("Revoked lease vl_4.\n");
 });
 
+test("lease force-revoke needs the acknowledgement flag and says nothing was revoked at the provider", async () => {
+	const retry = { ...lease("vl_6", "db", true), pendingRevoke: true };
+	const node = fakeNode({
+		"GET /api/vault/leases": json({
+			leases: [{ ...lease("vl_6"), pendingRevoke: true }],
+		}),
+		"POST /api/vault/sys/leases/force-revoke/vl_6": json({ lease: retry }),
+	});
+	const list = await runSecrets(["lease", "list"], node);
+	expect(list.out).toContain("retry lease");
+	const refused = await runSecrets(["lease", "force-revoke", "vl_6"], node);
+	expect(refused.code).toBe(2);
+	expect(refused.err).toContain("revokes nothing at the provider");
+	expect(refused.err).toContain("--acknowledge-credential-may-be-live");
+	expect(node.calls).toHaveLength(1);
+	const forced = await runSecrets(
+		["lease", "force-revoke", "vl_6", "--acknowledge-credential-may-be-live"],
+		node
+	);
+	expect(forced.code).toBe(0);
+	expect(node.calls.at(-1)?.route).toBe(
+		"POST /api/vault/sys/leases/force-revoke/vl_6"
+	);
+	expect(JSON.parse(node.calls.at(-1)?.body ?? "{}")).toEqual({
+		acknowledgeCredentialMayBeLive: true,
+	});
+	expect(forced.out).toBe(
+		"Marked retry lease vl_6 of db revoked. Nothing was revoked at the provider: revoke the credential there if you have not.\n"
+	);
+});
+
 test("runWithSecrets refuses --lease with --broker before touching the node", async () => {
 	const untouched: Partial<CliContext> = {};
 	await expect(

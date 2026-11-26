@@ -8,7 +8,10 @@
 //! otherwise `release_signing.pub` beside this file.
 //!
 //! An empty key keeps the check off and the updater on GitHub's per-asset digest
-//! alone (unchanged behaviour). Once a key is present it is mandatory: a missing,
+//! alone, and every apply logs [`SIGNATURE_CHECK_OFF`] so a dev build says so.
+//! Release builds cannot ship without a key: release-binaries.yml and
+//! release-desktop.yml run `scripts/release/ci/release-signing-key-gate.mjs`
+//! before they build. Once a key is present it is mandatory: a missing,
 //! unverifiable or foreign manifest refuses the update, as does an asset the
 //! manifest does not list. A malformed compiled-in key refuses too, rather than
 //! quietly switching the check off.
@@ -31,6 +34,11 @@ const ED25519_SPKI_PREFIX: [u8; 12] = [
 
 /// A manifest or signature larger than this is refused rather than buffered.
 pub(super) const MANIFEST_LIMIT: usize = 1024 * 1024;
+
+/// Logged on every apply by a build with no key (a dev or local build).
+pub(super) const SIGNATURE_CHECK_OFF: &str = "update: the signed SHA256SUMS check is OFF in \
+     this build (no release signing key compiled in); the update is pinned by GitHub's \
+     digest alone. Release builds set RYU_RELEASE_SIGNING_PUBKEY.";
 
 /// The compiled-in release signing key, or `None` while none is provisioned.
 pub(super) fn release_signing_key() -> Result<Option<VerifyingKey>> {
@@ -134,8 +142,21 @@ impl SignedSums {
 /// Fetch `SHA256SUMS` and `SHA256SUMS.sig` from release `tag` and verify them.
 pub(super) async fn fetch_signed_sums(key: &VerifyingKey, tag: &str) -> Result<SignedSums> {
     let manifest = fetch_release_file(tag, "SHA256SUMS").await?;
-    let signature = fetch_release_file(tag, "SHA256SUMS.sig").await?;
-    SignedSums::verify(key, &manifest, &signature, tag)
+    let signature = fetch_release_file(tag, "SHA256SUMS.sig").await;
+    verify_fetched(key, tag, &manifest, signature)
+}
+
+/// A signature that could not be fetched refuses the update like a wrong one;
+/// with a key there is no unsigned path.
+pub(super) fn verify_fetched(
+    key: &VerifyingKey,
+    tag: &str,
+    manifest: &[u8],
+    signature: Result<Vec<u8>>,
+) -> Result<SignedSums> {
+    let signature =
+        signature.context("release has no SHA256SUMS.sig; refusing an unsigned update")?;
+    SignedSums::verify(key, manifest, &signature, tag)
 }
 
 /// Follow only HTTPS redirects (a release download hops to GitHub's object

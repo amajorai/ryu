@@ -339,12 +339,21 @@ pub async fn capture_for_turn(
         Some(state) => state.preferences.clone(),
         None => crate::server::preferences::PreferencesStore::open_default()?,
     };
-    let policy = crate::server::oauth_pool_policy::load(&preferences, provider_id).await;
+    let mut policy = crate::server::oauth_pool_policy::load(&preferences, provider_id).await;
     if super::sdk_account_routing::quota_observations_supported(provider_id) {
         if let Some(meta) = super::provider_meta(provider_id) {
             crate::server::oauth_pool_usage::warm_in_background(meta.id, &policy);
         }
     }
+    // An agent with a custom account pool chooses, and keeps, only accounts
+    // of that pool.
+    crate::server::oauth_pool_policy::agent_account_pools::scope::restrict(
+        &preferences,
+        &mut policy,
+        provider_id,
+        agent_id,
+    )
+    .await;
     let auth_key = account_auth_key(provider_id).context("Pi provider has no SDK account scope")?;
     let vault = super::accounts::global().context("Pi account vault is unavailable")?;
     static CHOOSER: OnceLock<std::sync::Mutex<AccountChooser>> = OnceLock::new();
@@ -410,6 +419,9 @@ mod peek_tests;
 
 #[cfg(test)]
 mod policy_tests;
+
+#[cfg(test)]
+mod pool_tests;
 
 #[cfg(test)]
 mod projection_tests;

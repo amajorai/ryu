@@ -7,8 +7,8 @@ import {
 } from "./en-messages-senses.ts";
 import { placeholderNames } from "./icu-syntax.ts";
 import { messageIdForLiteral } from "./literal-catalog.ts";
-import { OFFICIAL_LANGUAGE_PACKS } from "./locales.ts";
 import { BUILT_IN_LANGUAGE_PACKS } from "./messages.ts";
+import { ALL_OFFICIAL_LANGUAGE_PACKS } from "./official-language-packs.ts";
 import type { LanguagePack } from "./pack.ts";
 
 const ids = Object.keys(EN_SENSE_MESSAGES).sort();
@@ -23,7 +23,7 @@ function builtIn(locale: string): LanguagePack {
 
 describe("sense-keyed messages", () => {
 	test("every official pack carries every sense id", () => {
-		for (const pack of OFFICIAL_LANGUAGE_PACKS) {
+		for (const pack of ALL_OFFICIAL_LANGUAGE_PACKS) {
 			const senses = OFFICIAL_SENSE_MESSAGES[pack.locale];
 			expect(senses && Object.keys(senses).sort()).toEqual(ids);
 			for (const id of ids) {

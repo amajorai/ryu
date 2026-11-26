@@ -50,13 +50,14 @@ pub(super) fn collect_openclaw_notes(root: &Path, c: &mut Collector) {
 
 pub(super) fn collect_hermes_notes(root: &Path, c: &mut Collector) {
     note_persona_leftovers(root, c);
-    if root.join("cron").is_dir() {
+    // A bot (`profiles/<name>/`) has its own routines, sign-ins and chats.
+    if hermes_home_or_profile_has(root, "cron") {
         c.warn(Message::new(messages::IMPORT_HERMES_CRON_WARNING_MESSAGE));
     }
-    if root.join("auth.json").is_file() {
+    if hermes_home_or_profile_has(root, "auth.json") {
         c.warn(Message::new(messages::IMPORT_HERMES_AUTH_WARNING_MESSAGE));
     }
-    if root.join("sessions").is_dir() {
+    if hermes_home_or_profile_has(root, "sessions") {
         c.warn(Message::new(
             messages::IMPORT_HERMES_SESSIONS_WARNING_MESSAGE,
         ));

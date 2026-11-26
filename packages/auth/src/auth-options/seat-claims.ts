@@ -10,7 +10,9 @@ import {
 	pendingInvitationClaimId,
 	requireActiveOrganizationSeatCapacity,
 	SEAT_CLAIM_TTL_MS,
+	seatRefusal,
 } from "./seat-capacity.ts";
+import { requireSelfHostedInstallSeat } from "./self-hosted-seats.ts";
 
 // Atomic seat claims for pending invitations and direct members.
 
@@ -22,14 +24,29 @@ import {
  */
 async function reserveSeatClaim(input: {
 	allowExisting?: boolean;
+	/**
+	 * Who is joining, for the member limit of a self-hosted install. Omitted by
+	 * a caller that already ran that check for this join. Unused on the hosted
+	 * cloud.
+	 */
+	candidate?: { email?: string; userId?: string };
 	claimId: string;
 	expiresAt?: Date;
 	kind: "pending_invitation" | "accepting_invitation" | "direct_member";
 	organizationId: string;
 }): Promise<void> {
-	const { copy, seatCapacity } = await requireActiveOrganizationSeatCapacity(
-		input.organizationId
-	);
+	const { copy, seatCapacity, selfHosted } =
+		await requireActiveOrganizationSeatCapacity(input.organizationId);
+	if (selfHosted && input.candidate) {
+		// Self-hosted only: the limit is per install, so check the people across
+		// every shared organization before this organization's own seat claim.
+		await requireSelfHostedInstallSeat({
+			...input.candidate,
+			allowance: selfHosted,
+			ownClaimIds: [input.claimId],
+			refusal: copy.full,
+		});
+	}
 	const now = new Date();
 	const existing = await OrganizationSeatReservation.findOne({
 		organizationId: input.organizationId,
@@ -77,7 +94,7 @@ async function reserveSeatClaim(input: {
 		reservedSeatCount: reservations.length,
 	});
 	if (!decision.allowed) {
-		throw new APIError("FORBIDDEN", { message: copy.full });
+		throw new APIError("FORBIDDEN", seatRefusal(copy, copy.full));
 	}
 
 	const used = new Set(reservations.map((row) => row.seatIndex));
@@ -120,7 +137,10 @@ async function reserveSeatClaim(input: {
 				if (claimed.seatIndex < seatCapacity) {
 					return;
 				}
-				throw new APIError("FORBIDDEN", { message: copy.capacityChanged });
+				throw new APIError(
+					"FORBIDDEN",
+					seatRefusal(copy, copy.capacityChanged)
+				);
 			}
 			// Mongo's TTL monitor is eventually consistent. Remove a stale row that
 			// still owns the unique seat index, then retry this same index.
@@ -141,7 +161,7 @@ async function reserveSeatClaim(input: {
 			used.add(seatIndex);
 		}
 	}
-	throw new APIError("FORBIDDEN", { message: copy.full });
+	throw new APIError("FORBIDDEN", seatRefusal(copy, copy.full));
 }
 
 /**
@@ -177,6 +197,7 @@ export async function reservePendingInvitationSeat(input: {
 	}
 	await reserveSeatClaim({
 		allowExisting: false,
+		candidate: { email: input.email },
 		claimId,
 		expiresAt: new Date(Date.now() + SEAT_CLAIM_TTL_MS),
 		kind: "pending_invitation",
@@ -200,14 +221,23 @@ export async function reserveInvitationSeat(input: {
 		return;
 	}
 
-	const { seatCapacity } = await requireActiveOrganizationSeatCapacity(
-		input.organizationId
-	);
+	const { copy, seatCapacity, selfHosted } =
+		await requireActiveOrganizationSeatCapacity(input.organizationId);
 	const now = new Date();
 	const pendingClaimId = pendingInvitationClaimId(
 		input.organizationId,
 		input.email
 	);
+	if (selfHosted) {
+		// Self-hosted only. The invitation's own pending claim already holds this
+		// person's place, so it is left out of the count.
+		await requireSelfHostedInstallSeat({
+			allowance: selfHosted,
+			ownClaimIds: [pendingClaimId, input.invitationId],
+			refusal: copy.full,
+			userId: input.userId,
+		});
+	}
 	const pending = await OrganizationSeatReservation.findOne({
 		organizationId: input.organizationId,
 		invitationId: pendingClaimId,
@@ -262,6 +292,7 @@ export async function reserveDirectMemberSeat(input: {
 	userId: string;
 }): Promise<void> {
 	await reserveSeatClaim({
+		candidate: { userId: input.userId },
 		claimId: directMemberClaimId(input.userId),
 		kind: "direct_member",
 		organizationId: input.organizationId,

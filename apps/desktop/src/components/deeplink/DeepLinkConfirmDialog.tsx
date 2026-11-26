@@ -34,6 +34,7 @@ import {
 } from "@/src/lib/api/plugins.ts";
 import { fetchSkillDetail } from "@/src/lib/api/skills.ts";
 import { pickRecommendedQuant } from "@/src/lib/deep-link.ts";
+import { saveLinkAddedNode } from "@/src/lib/link-added-nodes.ts";
 import { useDeepLinkStore } from "@/src/store/useDeepLinkStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import {
@@ -319,7 +320,13 @@ export function DeepLinkConfirmDialog() {
 				for (let i = 2; taken.has(name); i++) {
 					name = `${intent.name}-${i}`;
 				}
-				await addNode(name, intent.url, intent.token ?? undefined);
+				// A link supplies address and token together, so this node never
+				// receives the signed-in account's JWT.
+				await saveLinkAddedNode(
+					intent.url,
+					nodes.map((n) => n.url),
+					() => addNode(name, intent.url, intent.token ?? undefined)
+				);
 				await setDefaultNode(name);
 				sileo.success({ title: tl("Connected to {name}", { name }) });
 			}

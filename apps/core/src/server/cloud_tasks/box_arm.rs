@@ -56,8 +56,11 @@ const RECOVERY_NAME_PREFIX: &str = "ryu-ct-";
 const BASE_REVISION_SCRIPT: &str = "set -eu; git -C \"$RYU_REPO_DIR\" rev-parse HEAD; git -C \"$RYU_REPO_DIR\" rev-parse --abbrev-ref HEAD";
 /// Box user. Env: RYU_REPO_DIR, RYU_BASE_SHA.
 const DIFF_SCRIPT: &str = "set -eu; cd \"$RYU_REPO_DIR\"; git add -A -N >/dev/null 2>&1 || true; git diff --numstat \"$RYU_BASE_SHA\" | head -n 1000; printf '\\n--RYU-PATCH--\\n'; git diff --binary \"$RYU_BASE_SHA\" | head -c 786433";
-/// Box user. Env: RYU_REPO_DIR, RYU_BASE_SHA, RYU_COMMIT_MESSAGE.
-const COMMIT_SCRIPT: &str = "set -eu; cd \"$RYU_REPO_DIR\"; git add -A; if ! git diff --cached --quiet; then git -c user.name=Ryu -c user.email=cloud-task@ryu.invalid -c core.hooksPath=/dev/null commit -q -m \"$RYU_COMMIT_MESSAGE\"; fi; git rev-parse HEAD; git diff --numstat \"$RYU_BASE_SHA\" HEAD | head -n 1000";
+/// Box user. Env: RYU_REPO_DIR, RYU_BASE_SHA, RYU_COMMIT_MESSAGE,
+/// RYU_COMMIT_TRAILER. The trailer is the "Credit Ryu in git commits" line, or
+/// empty when the setting is off. A Git in the Box that has no
+/// `commit --trailer` (before 2.32) commits without it instead of failing.
+const COMMIT_SCRIPT: &str = "set -eu; cd \"$RYU_REPO_DIR\"; git add -A; if ! git diff --cached --quiet; then set --; if [ -n \"${RYU_COMMIT_TRAILER:-}\" ] && git commit -h 2>&1 | grep -q -e --trailer; then set -- --trailer \"$RYU_COMMIT_TRAILER\"; fi; git -c user.name=Ryu -c user.email=cloud-task@ryu.invalid -c core.hooksPath=/dev/null -c trailer.ifexists=addIfDifferent commit -q -m \"$RYU_COMMIT_MESSAGE\" \"$@\"; fi; git rev-parse HEAD; git diff --numstat \"$RYU_BASE_SHA\" HEAD | head -n 1000";
 /// Root, no token. Env: RYU_REPO_DIR, RYU_BRANCH, RYU_PUSH_DIR. The repo is
 /// owned by the box user, and file:// transport drops `-c` overrides before it
 /// spawns upload-pack, so the safe.directory exception rides on upload-pack.

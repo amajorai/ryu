@@ -181,16 +181,25 @@ pub(in crate::server) fn chrono_now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Write a single **enabled** MCP server entry into `~/.ryu/mcp.json` —
-/// read-modify-write with an atomic tmp + rename, preserving unknown top-level
-/// keys. Imported servers are the user's own config, so they land enabled
-/// (unlike catalog installs, which force disabled). Conflicts refuse rather
-/// than clobber.
+/// Write a single imported MCP server entry into `~/.ryu/mcp.json`, as a
+/// read-modify-write with an atomic tmp + rename that preserves unknown
+/// top-level keys. Conflicts refuse rather than clobber.
+///
+/// Every entry lands **disabled**, whatever the source file says. The folder
+/// it came from may hold files the user never wrote (a cloned repository, a
+/// synced folder). An enabled stdio entry (a `command`) is spawned as the user
+/// on the next tool discovery. An enabled remote entry (a `url`) is called on
+/// the next tool discovery with its headers resolved, so a header such as
+/// `Bearer secret:NAME` would send the user's saved key `NAME` to a host the
+/// file chose, and discovery has no saved-key check of its own. The user
+/// enables the server in Settings after checking it: the server listing
+/// carries the command or URL, the header and env names, and whether the
+/// entry uses a saved key.
 pub(in crate::server) async fn write_imported_mcp_entry(
     name: &str,
     mut cfg: crate::sidecar::mcp::McpServerConfig,
 ) -> Result<(), (StatusCode, String)> {
-    cfg.enabled = true;
+    cfg.enabled = false;
     let name = name.to_string();
     crate::sidecar::mcp::McpConfigStore::mutate(
         crate::sidecar::mcp::McpRegistry::config_path(),

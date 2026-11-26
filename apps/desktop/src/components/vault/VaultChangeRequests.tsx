@@ -77,7 +77,7 @@ export function VaultChangeRequests({
 		onError: (error) => {
 			sileo.error({
 				title: tl("Could not update the request"),
-				description: vaultErrorMessage(error, "Try again.", tl),
+				description: vaultErrorMessage(error, tl("Try again."), tl),
 			});
 		},
 	});

@@ -23,6 +23,10 @@ use serde::{Deserialize, Serialize};
 
 use super::ReleaseAsset;
 
+/// Holds the restart after an installed update until no agent run is active.
+#[path = "restart_gate.rs"]
+pub mod restart_gate;
+
 /// The hour a deferred update targets, in the node's own local zone.
 const QUIET_HOUR: u32 = 3;
 

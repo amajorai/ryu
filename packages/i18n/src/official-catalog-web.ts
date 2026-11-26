@@ -23,6 +23,7 @@ const OFFICIAL_WEB_CATALOGS: Readonly<Record<string, () => CatalogModule>> = {
 	it: () => import("../locales/web/it.json"),
 	ja: () => import("../locales/web/ja.json"),
 	ko: () => import("../locales/web/ko.json"),
+	pl: () => import("../locales/web/pl.json"),
 	"pt-BR": () => import("../locales/web/pt-BR.json"),
 	ru: () => import("../locales/web/ru.json"),
 	"zh-CN": () => import("../locales/web/zh-CN.json"),

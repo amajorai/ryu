@@ -103,12 +103,23 @@ pub(super) fn collect_mcp_config(root: &Path, token: &str, rel: &str, c: &mut Co
             return;
         }
     };
-    for (name, _cfg) in servers {
+    for (name, cfg) in servers {
         if c.mcp.len() >= MAX_MCP_SERVERS {
             break;
         }
+        // Read before the maps are taken apart below.
+        let names_saved_key = cfg.names_saved_key();
         c.mcp.push(ScanItem {
             already_exists: c.mcp_names_present.contains(&name),
+            mcp: Some(McpScanPreview {
+                command: cfg.command,
+                args: cfg.args,
+                // Names only: a value can be a key the user typed into the file.
+                env_names: cfg.env.into_keys().collect(),
+                url: cfg.url,
+                header_names: cfg.headers.into_keys().collect(),
+                names_saved_key,
+            }),
             ..ScanItem::titled(
                 kind::MCP_SERVER,
                 format!("{}/mcp/{}/{}", kind::MCP_SERVER, token, name),
@@ -154,14 +165,16 @@ pub(super) fn walk(root: &Path, dir: &Path, depth: usize, c: &mut Collector) {
     // A skill: a directory that directly contains a SKILL.md. Record it and
     // don't descend (bundled resources live inside the skill dir).
     if has_skill_md(dir) {
-        if c.skills.len() < MAX_SKILLS {
+        let rel = rel_path(&c.root, dir);
+        let id = format!("{}/{rel}", kind::SKILL);
+        // A sub-root walk (Hermes bots) can reach a skill the main walk found.
+        if c.skills.len() < MAX_SKILLS && !c.skills.iter().any(|skill| skill.id == id) {
             let name = skill_install_name(dir);
-            let rel = rel_path(&c.root, dir);
             c.skills.push(ScanItem {
                 already_exists: ryu_skills::SkillRegistry::skills_dir().join(&name).is_dir(),
                 ..ScanItem::titled(
                     kind::SKILL,
-                    format!("{}/{rel}", kind::SKILL),
+                    id,
                     Message::new(messages::IMPORT_SKILL_TITLE_MESSAGE).text("name", &name),
                     Some(dir.to_string_lossy().to_string()),
                 )

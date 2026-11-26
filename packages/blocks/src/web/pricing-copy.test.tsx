@@ -31,6 +31,7 @@ const SERVER_SPEC = /\d+\s*(?:vCPU|GB RAM|GB SSD|GiB RAM)/i;
 const { StandaloneProductPricingCatalog } = await import(
 	"./standalone-product-pricing.tsx"
 );
+const { PricingFeesSection } = await import("./pricing-fees-section.tsx");
 
 test("pricing cloud instances use server terminology", () => {
 	const html = renderToStaticMarkup(
@@ -379,12 +380,16 @@ test("the no-plan Gateway PAYG card uses the supplied logo gradient", () => {
 	);
 });
 
-test("the public marketplace and credit fee note names only public plans", () => {
-	const html = renderToStaticMarkup(<StandaloneProductPricingCatalog />);
+test("the public marketplace and credit fee section names only public plans", () => {
+	const html = renderToStaticMarkup(<PricingFeesSection />);
 
-	expect(html).toContain("on Pro and");
-	expect(html).toContain("on Max, Teams, and Business");
+	expect(html).toContain(">Pro</th>");
+	expect(html).toContain(">Max, Teams, and Business</th>");
 	expect(html).not.toMatch(/\bPlus\b|Teams Lite/u);
+	// The fees left the product catalog for their own section.
+	expect(
+		renderToStaticMarkup(<StandaloneProductPricingCatalog />)
+	).not.toContain("Marketplace and credit fees");
 });
 
 test("subscription pricing borders retain their own badge palettes", () => {

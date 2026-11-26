@@ -31,8 +31,9 @@ import {
 } from "../../shared/host-json.ts";
 
 /**
- * POST a governed widget route through main. `pluginCoreHttp` re-validates the
- * path shape and method before attaching the node token, and its failure codes
+ * POST a governed widget route through main. `pluginCoreHttp` accepts a host call
+ * only for its fixed list of routes, checked before it attaches the node token
+ * (the three paths below are on that list), and its failure codes
  * are the same closed enum the widget RPC gate speaks, so a failure maps straight
  * onto {@link CodedRpcError} with no status guessing.
  */
@@ -43,6 +44,7 @@ async function postWidget(
 	const result = await window.island.plugins.coreHttp({
 		body: parseHostArguments(body),
 		method: "POST",
+		owner: { kind: "host" },
 		path,
 	});
 	if (!result.ok) {

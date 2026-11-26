@@ -7,6 +7,8 @@ use tauri::Manager;
 
 #[path = "core_lifecycle_error.rs"]
 mod core_lifecycle_error;
+#[path = "core_protocol_gate.rs"]
+mod core_protocol_gate;
 
 use crate::core::process::RyuCoreProcess;
 use crate::profile;
@@ -44,6 +46,17 @@ pub(crate) fn stop_managed_core<R: tauri::Runtime, M: Manager<R>>(app: &M) {
 }
 
 pub(crate) struct HttpClient(pub reqwest::Client);
+
+/// Start Core for this profile, checking a Core that is already running first.
+///
+/// `RyuCoreProcess::start` adopts whatever answers `/api/health`. The check in
+/// `core_protocol_gate` runs before it: a running Core that shares no protocol
+/// with this app, is the outdated side and was started by this app is stopped,
+/// so `start` spawns the bundled one instead of adopting it.
+pub(crate) async fn start_core_checked(process: &mut RyuCoreProcess) -> anyhow::Result<()> {
+    core_protocol_gate::admit_running_core(process).await;
+    process.start().await
+}
 
 pub(crate) fn resolve_core_binary() -> Option<std::path::PathBuf> {
     let bin_name = if cfg!(windows) {
@@ -154,8 +167,9 @@ pub(crate) async fn start_ryu_core(
     // Create new process manager
     let mut process = RyuCoreProcess::new_for_app(&app, binary);
 
-    // Start the process (will connect to existing instance if already running)
-    match process.start().await {
+    // Start the process (connects to an existing instance when it is already
+    // running and shares a protocol with this app)
+    match start_core_checked(&mut process).await {
         Ok(()) => {
             // Check if we connected to an existing instance
             let message = if process.has_child() {

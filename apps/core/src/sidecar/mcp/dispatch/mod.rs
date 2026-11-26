@@ -6,8 +6,10 @@ mod builtins;
 mod capability;
 mod composio;
 mod conversation;
+pub(in crate::sidecar::mcp) mod credential_tools;
 mod external;
 mod loopback;
+pub(in crate::sidecar::mcp) mod node_user;
 mod router;
 
 use crate::sidecar::mcp::*;
@@ -107,6 +109,13 @@ impl McpRegistry {
         // (cached per caller for a short TTL).
         self.enforce_org_tool_policy(tool_id, host_conversation_id)
             .await?;
+        // Any tool that acts as the node's own user runs on a shared node only
+        // for people who may use such tools, and a tool that hands back a
+        // stored credential only when the node's owner allowed it by name.
+        // Both are decided here, where every plane ends: an approved replay,
+        // a workflow, a facade's provider and an alias's target included.
+        Box::pin(self.enforce_node_user_tool_access(tool_id, host_conversation_id)).await?;
+        Box::pin(self.enforce_credential_tool_allowed(tool_id)).await?;
         let normalized_allowlist = allowlist.map(|list| {
             list.iter()
                 .map(|entry| self.canonical_tool_id_for_registry(entry))

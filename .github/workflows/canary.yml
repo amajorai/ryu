@@ -136,7 +136,7 @@ jobs:
         run: scripts/release/bump-version.sh "$VERSION"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.4
+          bun-version: 1.4.5
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -217,7 +217,7 @@ jobs:
         run: scripts/release/bump-version.sh "$VERSION"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.4
+          bun-version: 1.4.5
       # uiohook-napi compiles libuiohook from source on Linux and needs the X11
       # headers; how the set was derived is in .github/scripts/README.md.
       - name: Linux build deps
@@ -252,7 +252,8 @@ jobs:
   build:
     needs: prepare
     name: ${{ matrix.target.asset }} (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    # Only the macOS ryu-core leg uses macos-latest-xlarge (37 to 71 min on the standard one).
+    runs-on: ${{ matrix.os == 'macos-latest' && matrix.target.asset == 'ryu-core' && 'macos-latest-xlarge' || matrix.os }}
     # Guard for vendored CMake builds, as in .cargo/config.toml: CMake >= 4.0
     # (current runner images) refuses a project whose cmake_minimum_required is
     # below 3.5 unless this is set. Opus no longer needs it: opus 0.4 builds its

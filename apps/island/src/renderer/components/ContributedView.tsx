@@ -22,7 +22,8 @@ import type {
 	ViewActionContext,
 } from "@ryu/app-host/views";
 import {
-	renderActionHttp,
+	contributionSourceRequest,
+	renderContributionActionHttp,
 	sourceItemsFromResponse,
 	viewSpecSchema,
 } from "@ryu/app-host/views";
@@ -47,17 +48,39 @@ export function ContributedView({ view }: { view: PluginView }) {
 			? parsedSpec.data.source
 			: undefined;
 
+	// The shared gate, with the owner and policy Core stamped on the view. `null`
+	// when the view has no source or the gate refuses its path. Main repeats the
+	// test before it attaches the node token.
+	const sourceRequest = useMemo(
+		() =>
+			contributionSourceRequest(
+				{ plugin: view.plugin, http_policy: view.http_policy },
+				source
+			),
+		[view.plugin, view.http_policy, source]
+	);
+
 	useEffect(() => {
 		if (!source) {
 			setSourceItems(null);
+			return;
+		}
+		if (!sourceRequest) {
+			// A refused source degrades to the empty state, like a failed read.
+			setSourceItems([]);
 			return;
 		}
 		let cancelled = false;
 		window.island.plugins
 			.coreHttp({
 				coreGeneration: view.coreGeneration,
-				method: source.http.method ?? "GET",
-				path: source.http.path,
+				method: sourceRequest.method,
+				owner: {
+					kind: "contribution",
+					plugin: view.plugin,
+					http_policy: view.http_policy,
+				},
+				path: sourceRequest.path,
 			})
 			.then((res) => {
 				if (!cancelled) {
@@ -74,7 +97,14 @@ export function ContributedView({ view }: { view: PluginView }) {
 		return () => {
 			cancelled = true;
 		};
-	}, [source, reloadToken, view.coreGeneration]);
+	}, [
+		source,
+		sourceRequest,
+		reloadToken,
+		view.coreGeneration,
+		view.plugin,
+		view.http_policy,
+	]);
 
 	const runAction = useCallback(
 		async (action: ViewAction, ctx: ViewActionContext) => {
@@ -85,11 +115,17 @@ export function ContributedView({ view }: { view: PluginView }) {
 			try {
 				if (action.http) {
 					// Declarative CRUD tier: template + execute via the main process's
-					// authenticated Core client (renderActionHttp refuses non-/api/ paths).
-					const rendered = renderActionHttp(action.http, ctx);
+					// authenticated Core client (renderContributionActionHttp refuses a
+					// path outside the routes the owning app may address).
+					const rendered = renderContributionActionHttp(view, action.http, ctx);
 					const res = await window.island.plugins.coreHttp({
 						coreGeneration: view.coreGeneration,
 						method: rendered.method,
+						owner: {
+							kind: "contribution",
+							plugin: view.plugin,
+							http_policy: view.http_policy,
+						},
 						path: rendered.path,
 						body: rendered.body,
 					});

@@ -159,9 +159,21 @@ pub(super) async fn assemble_turn_system(
     // user-configured instruction. Only the compaction/handoff summary goes
     // after it (`append_system_suffix`): it changes as the history is
     // re-summarized, so it must not sit in front of the cacheable prefix.
-    let docs_hint = ryu_docs_hint();
-    breakdown.add_text("system", "Ryu docs", docs_hint.as_deref());
-    let long_term_system = merge_system_prompt(docs_hint, long_term_system);
+    //
+    // The self-check hint (see `RYU_SELF_CHECK_HINT`) rides with the docs
+    // pointer: both are Ryu's own standing guidance and both follow the Safe
+    // Mode rule. They are counted as one "Ryu docs" row, so the context
+    // breakdown gets no label the clients cannot translate yet. The docs
+    // pointer comes first, the self-check hint after it.
+    let standing_hints = merge_system_prompt(ryu_self_check_hint(), ryu_docs_hint());
+    breakdown.add_text("system", "Ryu docs", standing_hints.as_deref());
+    let long_term_system = merge_system_prompt(standing_hints, long_term_system);
+    // The commit credit instruction (see `RYU_COMMIT_CREDIT_HINT`). Same seam
+    // and same argument order as the docs hint, so it also lands at the tail,
+    // behind the docs pointer and the self-check hint.
+    let commit_credit_hint = ryu_commit_credit_hint(req.cwd.as_deref()).await;
+    breakdown.add_text("system", "Commit credit", commit_credit_hint.as_deref());
+    let long_term_system = merge_system_prompt(commit_credit_hint, long_term_system);
     // Single-screen generative UI guidance (the Island opts in per turn). Merged
     // as the first argument, like the docs hint, so it sits at the block's tail.
     let generative_ui = generative_ui::generative_ui_hint(&req.plugin_flags);

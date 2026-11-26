@@ -388,6 +388,13 @@ window.fetch = async (input, init) => {
 		recordGovernanceCall(null, 200);
 		return jsonResponse(cloneSnapshot(governanceState));
 	}
+	if (parsedUrl.pathname.endsWith("/api/preferences/git-credit-ryu")) {
+		// The Git section's commit credit switch. Never saved here, so it reads
+		// as on.
+		return method === "PUT"
+			? jsonResponse({ ok: true })
+			: jsonResponse({ error: "preference not set" }, 404);
+	}
 	if (url.endsWith("/api/connections")) {
 		if (connectionsMode === "error") {
 			return jsonResponse({ message: "presence unavailable" }, 503);

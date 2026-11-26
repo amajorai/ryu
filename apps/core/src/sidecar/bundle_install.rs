@@ -14,7 +14,9 @@
 //!   - the archive's SHA-256 is checked against the expected digest before a single
 //!     byte is extracted (the `DownloadCenter` already verified it on download; this
 //!     re-check makes the installer self-contained against a swapped file at rest);
-//!   - every entry path is relative and free of `..`; anything else aborts the install;
+//!   - every entry path is relative, free of `..`, and made only of names that pass
+//!     the shared rule of `extract_guard` (no `:`, which on Windows turns a later
+//!     component into a drive-relative path); anything else aborts the install;
 //!   - nothing is ever written *through* a symlink (each parent component is checked
 //!     with `symlink_metadata`, and files are created with `create_new`);
 //!   - a symlink entry must be relative and lexically stay inside the root, and after
@@ -34,6 +36,8 @@ use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{bail, Context};
+
+use super::extract_guard::{append_confined, check_destination, join_confined};
 
 /// Version marker written inside an installed bundle directory. The resolver reuses
 /// an installed bundle only when this matches the running Core version (the single
@@ -57,18 +61,11 @@ pub(crate) fn sha256_file(path: &Path) -> anyhow::Result<String> {
 }
 
 /// Normalize an archive entry path to plain `Normal` components, refusing anything
-/// absolute, drive-prefixed, or containing `..`. `.` components are dropped.
+/// absolute, drive-prefixed, containing `..`, or holding a name the shared rule
+/// refuses (`repo/C:x`). `.` components are dropped.
 fn safe_relative(path: &Path) -> anyhow::Result<PathBuf> {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(part) => out.push(part),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                bail!("unsafe archive entry path '{}'", path.display())
-            }
-        }
-    }
+    let out = join_confined(Path::new(""), path)
+        .with_context(|| format!("unsafe archive entry path '{}'", path.display()))?;
     if out.as_os_str().is_empty() {
         bail!("empty archive entry path");
     }
@@ -81,7 +78,7 @@ fn ensure_no_symlink_ancestors(root: &Path, rel: &Path) -> anyhow::Result<()> {
     let mut cursor = root.to_path_buf();
     let components: Vec<_> = rel.components().collect();
     for component in components.iter().take(components.len().saturating_sub(1)) {
-        cursor.push(component);
+        cursor = append_confined(&cursor, component)?;
         match fs::symlink_metadata(&cursor) {
             Ok(meta) if meta.file_type().is_symlink() => bail!(
                 "archive entry '{}' would be written through a symlink",
@@ -191,7 +188,7 @@ pub(crate) fn extract_bundle_tar_gz(
         let raw_path = entry.path().context("reading tar entry path")?.into_owned();
         let rel = safe_relative(&raw_path)?;
         ensure_no_symlink_ancestors(dest, &rel)?;
-        let out = dest.join(&rel);
+        let out = join_confined(dest, &rel)?;
 
         match entry_type {
             EntryType::Directory => {
@@ -266,7 +263,7 @@ pub(crate) fn extract_bundle_tar_gz(
                     .into_owned();
                 let source_rel = safe_relative(&target)?;
                 ensure_no_symlink_ancestors(dest, &source_rel)?;
-                let source = dest.join(&source_rel);
+                let source = join_confined(dest, &source_rel)?;
                 let meta = fs::symlink_metadata(&source).with_context(|| {
                     format!("hard link '{}' targets a missing entry", rel.display())
                 })?;
@@ -330,6 +327,7 @@ pub(crate) fn install_bundle(
     entrypoint: &str,
     version: &str,
 ) -> anyhow::Result<PathBuf> {
+    check_destination(dest_dir)?;
     let expected = expected_sha256.trim().to_ascii_lowercase();
     let actual = sha256_file(archive)?;
     if actual != expected {
@@ -353,7 +351,7 @@ pub(crate) fn install_bundle(
 
     let staged = (|| -> anyhow::Result<()> {
         extract_bundle_tar_gz(archive, &staging, BUNDLE_EXTRACT_CAP_BYTES)?;
-        let exe = staging.join(&entry_rel);
+        let exe = join_confined(&staging, &entry_rel)?;
         let resolved = exe.canonicalize().map_err(|_| {
             anyhow::anyhow!("bundle does not contain the declared entrypoint '{entrypoint}'")
         })?;
@@ -395,7 +393,7 @@ pub(crate) fn install_bundle(
     if had_previous {
         let _ = fs::remove_dir_all(&old);
     }
-    Ok(dest_dir.join(entry_rel))
+    join_confined(dest_dir, &entry_rel)
 }
 
 /// The installed entrypoint, when `dest_dir` holds a complete bundle stamped with
@@ -409,7 +407,7 @@ pub(crate) fn installed_entrypoint(
     if marker.trim() != version {
         return None;
     }
-    let exe = dest_dir.join(safe_relative(Path::new(entrypoint)).ok()?);
+    let exe = join_confined(dest_dir, &safe_relative(Path::new(entrypoint)).ok()?).ok()?;
     exe.is_file().then_some(exe)
 }
 

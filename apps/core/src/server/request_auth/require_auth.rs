@@ -240,8 +240,12 @@ pub(in crate::server) async fn require_auth_with_token(
         let token = provided.as_deref().ok_or(StatusCode::UNAUTHORIZED)?;
         // The managed Pi's provider bearer stands in for the node token on its
         // provider proxies only; everywhere else it is an unknown token.
-        let pi_provider_bearer =
-            pi_provider_route && ct_eq(token, crate::pi_config::secret_env::provider_token());
+        // An agent's own provider bearer (`agent_account_pools::engine_token`)
+        // is admitted on the same routes and nowhere else.
+        use crate::server::oauth_pool_policy::agent_account_pools::engine_token;
+        let pi_provider_bearer = pi_provider_route
+            && (ct_eq(token, crate::pi_config::secret_env::provider_token())
+                || engine_token::agent_for_token(token).is_some());
         if ct_eq(token, &expected) || pi_provider_bearer {
             let (caller, verified_user_jwt) =
                 match crate::self_api::self_call_identity(req.headers()) {

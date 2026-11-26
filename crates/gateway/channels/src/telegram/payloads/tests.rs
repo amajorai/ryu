@@ -22,7 +22,7 @@ fn every_catalog_language_gets_its_own_menu() {
     let codes: Vec<&str> = payloads.iter().map(|(code, _)| code.as_str()).collect();
     assert_eq!(
         codes,
-        ["ar", "de", "es", "fr", "hi", "it", "ja", "ko", "pt", "ru", "zh"]
+        ["ar", "de", "es", "fr", "hi", "it", "ja", "ko", "pl", "pt", "ru", "zh"]
     );
     let (_, japanese) = payloads.iter().find(|(code, _)| code == "ja").unwrap();
     assert_eq!(japanese["language_code"], "ja");

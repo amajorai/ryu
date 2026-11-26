@@ -6,6 +6,7 @@ import {
 	shouldRejectGuestSignIn,
 } from "../lib/guest-mode.ts";
 import { assertPendingEmailMatches } from "../lib/login-assurance.ts";
+import { rejectNativeSessionListOverHttp } from "../lib/native-session-list-guard.ts";
 import { authorizeScopeDefaultsFromStore } from "../lib/oauth-authorize-scope.ts";
 import { passwordPolicyRefusal } from "../lib/password-endpoints.ts";
 import {
@@ -65,6 +66,9 @@ export const beforeAuthHook = createAuthMiddleware(async (ctx) => {
 			message: GUEST_MODE_DISABLED_MESSAGE,
 		});
 	}
+	// The native session listing answers session rows with their token column;
+	// clients list sessions through the API's `/api/sessions` instead.
+	rejectNativeSessionListOverHttp(ctx);
 	// API-key metadata is server-only: a key's class and organization come
 	// from its stored configId/referenceId, never from client-written metadata.
 	rejectClientApiKeyMetadata(ctx);

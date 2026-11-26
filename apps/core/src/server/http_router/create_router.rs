@@ -16,6 +16,10 @@ pub fn create_router(
     cloud_environments::start_vpn_recovery();
     cloud_tasks::start_recovery();
     session_box::start_idle_sweep();
+    // Operations a restart left queued or running continue or become
+    // interrupted. Runners are registered above this line.
+    register_import_operation_runner(&state);
+    crate::background_processes::operations::start_recovery();
     // Fail-closed under an external tunnel or remote bind: a node reachable beyond
     // loopback MUST have an auth token, or every protected route is open to the
     // tailnet/LAN. Refuse to build the router (which stops startup) otherwise.

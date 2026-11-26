@@ -17,6 +17,32 @@ impl RyuMcpHandler {
             &self.agent_id,
         )
     }
+
+    /// Everyone this bridge's instance has served since it was built
+    /// (`acp::turn_sender`). A bridge with no record of its own (the network
+    /// transport, an instance that keeps none) gets the closed answer: a
+    /// turn with no known sender was served.
+    pub(super) fn instance_senders(
+        &self,
+    ) -> crate::sidecar::mcp::search_conversations::InstanceSenders {
+        let remembered = match (
+            self.permission_scope_id.as_deref(),
+            self.permission_tx.as_ref(),
+        ) {
+            (Some(conversation), Some(instance)) => {
+                crate::sidecar::adapters::acp::turn_sender::remembered_senders_for(
+                    conversation,
+                    instance,
+                    &self.agent_id,
+                )
+            }
+            _ => None,
+        };
+        remembered.unwrap_or(crate::sidecar::mcp::search_conversations::InstanceSenders {
+            senders: Vec::new(),
+            served_without_sender: true,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -31,9 +31,12 @@ pub(super) const REMOTE_GIT_TIMEOUT: Duration = Duration::from_secs(120);
 /// HTTP client disconnects, so remote actions use a supervised child with a
 /// bounded lifetime and kill it on timeout.
 pub(crate) fn run_remote_git_command(cwd: &str, args: &[&str]) -> Result<Output, String> {
-    let ssh_command = std::env::var("GIT_SSH_COMMAND")
-        .map(|value| format!("{value} -o BatchMode=yes"))
-        .unwrap_or_else(|_| "ssh -o BatchMode=yes".to_string());
+    // The ssh program comes from the environment or the user's own
+    // configuration, never from the repository being pulled or pushed.
+    let ssh_command = format!(
+        "{} -o BatchMode=yes",
+        crate::git_command::trusted_ssh_command()
+    );
     let mut child = git_without_hooks(args)
         .current_dir(cwd)
         .no_window()
@@ -188,11 +191,7 @@ pub(super) const GIT_CURLOPT_RESOLVE_MIN: (u32, u32) = (2, 37);
 /// `(major, minor)` of the `git` on `PATH`, or `None` when it cannot be run or
 /// its version string is not recognised.
 pub(super) fn installed_git_version() -> Option<(u32, u32)> {
-    let output = Command::new("git")
-        .arg("--version")
-        .no_window()
-        .output()
-        .ok()?;
+    let output = git_command(&["--version"]).no_window().output().ok()?;
     if !output.status.success() {
         return None;
     }

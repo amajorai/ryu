@@ -2,6 +2,7 @@ import {
 	finetuneServicesViaAppRequest,
 	finetuneStreamPath,
 } from "@ryu/app-host/finetune-compat";
+import { gateGhostRecording } from "@ryu/app-host/ghost-record-gate";
 import { ghostRecipesViaAppMount } from "@ryu/app-host/recipes-compat";
 import {
 	type HostServices,
@@ -104,6 +105,7 @@ import { gateWorkflowAuthoring } from "./workflow-authoring-guard.ts";
 
 export function buildPluginHostMediaWorkflowServices({
 	companion,
+	currentTabId,
 	mediaPermission,
 	node,
 	tl,
@@ -388,9 +390,22 @@ export function buildPluginHostMediaWorkflowServices({
 				rpcJsonResponseSchema.parse
 			)
 		),
-		ghostRecordStart: ({ task }) => startRecording(toTarget(node), task),
-		ghostRecordStatus: () => getRecordingStatus(toTarget(node)),
-		ghostRecordStop: () => stopRecording(toTarget(node)),
+		// Recording observes input across the whole desktop, so only the compiled
+		// reviewed owners reach the node, and only the frame that started a
+		// recording reads its task, counters and captured events.
+		...gateGhostRecording(
+			{
+				compiledManifest: companion.firstParty === true,
+				frame: `${companion.id}:${currentTabId ?? ""}`,
+				node: node.url,
+				pluginId: companion.pluginId,
+			},
+			{
+				ghostRecordStart: ({ task }) => startRecording(toTarget(node), task),
+				ghostRecordStatus: () => getRecordingStatus(toTarget(node)),
+				ghostRecordStop: () => stopRecording(toTarget(node)),
+			}
+		),
 		// Inbound webhook registry + protected secret management — the
 		// @ryu/webhooks companion uses explicit secret reads/writes while the host
 		// keeps the node token out of the sandboxed frame (webhooks:crud).

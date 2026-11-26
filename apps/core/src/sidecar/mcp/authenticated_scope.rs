@@ -19,6 +19,21 @@ tokio::task_local! {
     /// or the vault's secret owner; it only feeds a principal-matched read
     /// filter (`search_conversations` team visibility).
     static TURN_SENDER: VerifiedCaller;
+    /// Everyone the calling ACP instance has served a turn for. Bound only
+    /// by that instance's in-process bridge. Like the sender, it changes
+    /// neither the principal nor the vault's secret owner.
+    static INSTANCE_SENDERS: InstanceSenders;
+}
+
+/// Everyone an ACP instance has served a turn for, as its bridge remembers
+/// it (`acp::turn_sender`). The bridge outlives a turn, so a tool call may
+/// belong to an earlier turn than the live one.
+#[derive(Clone, Default)]
+pub(crate) struct InstanceSenders {
+    /// The verified sender of every turn the instance served.
+    pub(crate) senders: Vec<VerifiedCaller>,
+    /// Whether it served a turn whose sender is not known.
+    pub(crate) served_without_sender: bool,
 }
 
 /// Run `future` knowing who sent the turn it serves. Callers bind the sender
@@ -33,6 +48,19 @@ pub(crate) async fn with_turn_sender<T>(
 /// The live turn's verified sender, if one was bound for this dispatch.
 pub(super) fn current_turn_sender() -> Option<VerifiedCaller> {
     TURN_SENDER.try_with(Clone::clone).ok()
+}
+
+/// Run `future` knowing everyone the calling ACP instance has served.
+pub(crate) async fn with_instance_senders<T>(
+    served: InstanceSenders,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    INSTANCE_SENDERS.scope(served, future).await
+}
+
+/// Everyone the calling ACP instance has served, if its bridge bound it.
+pub(super) fn current_instance_senders() -> Option<InstanceSenders> {
+    INSTANCE_SENDERS.try_with(Clone::clone).ok()
 }
 
 pub(super) fn current_principal() -> Option<ToolPrincipal> {
@@ -233,6 +261,29 @@ mod tests {
         })
         .await;
         assert!(current_turn_sender().is_none());
+    }
+
+    #[tokio::test]
+    async fn instance_senders_are_scoped_to_their_dispatch() {
+        assert!(current_instance_senders().is_none());
+        let served = InstanceSenders {
+            senders: vec![caller("alice")],
+            served_without_sender: true,
+        };
+        with_instance_senders(served, async {
+            let seen = current_instance_senders().expect("bound for this dispatch");
+            assert_eq!(seen.senders.len(), 1);
+            assert_eq!(seen.senders[0].user_id, "alice");
+            assert!(seen.served_without_sender);
+            // Neither the principal nor the sender comes from it.
+            assert!(current_principal().is_none());
+            assert!(current_turn_sender().is_none());
+            assert!(tokio::spawn(async { current_instance_senders().is_none() })
+                .await
+                .unwrap());
+        })
+        .await;
+        assert!(current_instance_senders().is_none());
     }
 
     #[tokio::test]

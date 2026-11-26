@@ -10488,7 +10488,7 @@ Author: Steven Fackler <sfackler@gmail.com>
 Repository: https://github.com/sfackler/foreign-types
 Notice text: notice-0750
 
-form_urlencoded (1.2.2)
+form_urlencoded (1.2.3)
 License: MIT OR Apache-2.0
 Author: The rust-url developers
 Repository: https://github.com/servo/rust-url
@@ -12707,7 +12707,7 @@ Author: Brian Smith <brian@briansmith.org>
 Repository: https://github.com/briansmith/untrusted
 Notice text: notice-0906
 
-url (2.5.8)
+url (2.5.9)
 License: MIT OR Apache-2.0
 Author: The rust-url developers
 Repository: https://github.com/servo/rust-url
@@ -57975,7 +57975,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 notice-0751
-Used by: form_urlencoded@1.2.2
+Used by: form_urlencoded@1.2.3
 
 --- LICENSE-APACHE ---
 Apache License
@@ -61886,7 +61886,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 notice-0774
-Used by: idna@1.1.0, percent-encoding@2.3.2, url@2.5.8
+Used by: idna@1.1.0, percent-encoding@2.3.2, url@2.5.9
 
 --- LICENSE-APACHE ---
 Apache License

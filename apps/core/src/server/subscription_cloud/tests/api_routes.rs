@@ -14,6 +14,11 @@ use serde_json::{json, Value};
 #[path = "hosted_anthropic.rs"]
 mod hosted_anthropic;
 
+/// The per-provider account limit on linked plan accounts. Declared here for the
+/// same reason.
+#[path = "account_limit.rs"]
+mod account_limit;
+
 async fn reply(response: Response) -> (StatusCode, Value) {
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)

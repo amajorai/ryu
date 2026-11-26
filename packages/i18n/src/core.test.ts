@@ -144,6 +144,7 @@ describe("language-pack contract", () => {
 			"hi",
 			"ru",
 			"ar",
+			"pl",
 		]);
 		for (const pack of official) {
 			expect(

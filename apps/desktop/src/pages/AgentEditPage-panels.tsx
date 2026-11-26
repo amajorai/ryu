@@ -2,6 +2,7 @@ import { AcpAgentSettingsPanel } from "@/src/components/agents/AcpAgentSettingsP
 import { AcpSessionControls } from "@/src/components/agents/AcpSessionControls.tsx";
 import { AgentAccountAccessPanel } from "@/src/components/agents/AgentAccountAccessPanel.tsx";
 import { AgentAccountLoginUrlsPanel } from "@/src/components/agents/AgentAccountLoginUrlsPanel.tsx";
+import { AgentAccountPoolPanel } from "@/src/components/agents/AgentAccountPoolPanel.tsx";
 import { AgentBudgetPanel } from "@/src/components/agents/AgentBudgetPanel.tsx";
 import { AgentCalendarView } from "@/src/components/agents/AgentCalendarView.tsx";
 import { AgentCapabilitiesPanel } from "@/src/components/agents/AgentCapabilitiesPanel.tsx";
@@ -250,6 +251,7 @@ export function buildAgentEditPanels(ctx: AgentEditContext) {
 					) : null}
 					<AgentSmartRouteOverride agentId={agentId} />
 					<AgentRoutePoolEditor agentId={agentId} />
+					<AgentAccountPoolPanel agentId={agentId} disabled={isLocked} />
 				</div>
 			) : null,
 		goalPanel:

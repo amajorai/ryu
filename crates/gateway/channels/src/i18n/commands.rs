@@ -108,6 +108,7 @@ fn discord_locales(locale: &str) -> &'static [&'static str] {
         "it" => &["it"],
         "ja" => &["ja"],
         "ko" => &["ko"],
+        "pl" => &["pl"],
         "pt-BR" => &["pt-BR"],
         "ru" => &["ru"],
         "zh-CN" => &["zh-CN"],
@@ -188,7 +189,7 @@ mod tests {
         let codes: Vec<&str> = menus.iter().map(|(code, _)| code.as_str()).collect();
         assert_eq!(
             codes,
-            ["ar", "de", "es", "fr", "hi", "it", "ja", "ko", "pt", "ru", "zh"]
+            ["ar", "de", "es", "fr", "hi", "it", "ja", "ko", "pl", "pt", "ru", "zh"]
         );
         let (_, japanese) = menus.iter().find(|(code, _)| code == "ja").unwrap();
         assert_eq!(japanese.len(), 2);

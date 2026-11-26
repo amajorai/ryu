@@ -25,11 +25,20 @@ pub(super) fn source_references_user_secret(value: &str) -> bool {
 /// Checked on the stored config, before
 /// [`McpRegistry::resolve_mcp_secret_config`] replaces the references.
 pub(super) fn config_references_user_secret(cfg: &McpServerConfig) -> bool {
-    cfg.headers
-        .values()
-        .chain(cfg.env.values())
-        .any(|value| source_references_user_secret(value))
-        || (cfg.owner_plugin_id.is_none() && user_added_config_may_carry_key(cfg))
+    cfg.names_saved_key() || (cfg.owner_plugin_id.is_none() && user_added_config_may_carry_key(cfg))
+}
+
+impl McpServerConfig {
+    /// Whether a header or env value of this entry names one of the user's
+    /// saved keys ([`source_references_user_secret`]). A reference only, never
+    /// a literal value, so the import scan can flag an entry found in a folder
+    /// without reporting what its values hold.
+    pub(crate) fn names_saved_key(&self) -> bool {
+        self.headers
+            .values()
+            .chain(self.env.values())
+            .any(|value| source_references_user_secret(value))
+    }
 }
 
 /// Whether a server the user added may carry a key they typed into it. A key

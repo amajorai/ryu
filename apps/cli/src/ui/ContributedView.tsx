@@ -5,8 +5,10 @@
 //   - **source fetch**: a `list-detail` spec with a declarative `source` is fetched
 //     at mount (and after every successful action) through the active Core node,
 //     then mapped to items with the shared vocabulary helper. The spec never sees a
-//     token, and `isCoreApiPath` refuses anything that is not a Core-relative
-//     `/api/` path, so a manifest can never point these credentials elsewhere.
+//     token. Every request is built by src/core/contribution-http.ts, which applies
+//     the shared gate of `@ryu/app-host/views` with the owner and policy Core
+//     stamped on the view, so a manifest can never point these credentials at a
+//     route outside its own app mount.
 //   - **actions**: `action.http` runs the declarative CRUD tier (templated path +
 //     body); anything else is relayed to the owning app as a grant-gated
 //     `view.action` dispatch on `POST /api/plugins/:id/host` — exactly the split the
@@ -27,6 +29,12 @@ import { z } from "zod";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { LocalizedError, localize } from "../cli/localizedText.ts";
 import { useCore } from "../core/CoreContext.tsx";
+import {
+	type CoreViewRequest,
+	viewActionRequest,
+	viewHostDispatchRequest,
+	viewSourceRequest,
+} from "../core/contribution-http.ts";
 import type { ContributedView as ContributedViewModel } from "../core/contributions.ts";
 import { useShellKeyboardCaptured } from "../core/InputFocusContext.tsx";
 import type {
@@ -35,12 +43,7 @@ import type {
 	ViewActionContext,
 	ViewSource,
 } from "../core/views.ts";
-import {
-	isCoreApiPath,
-	renderActionHttp,
-	sourceItemsFromResponse,
-	viewSpecSchema,
-} from "../core/views.ts";
+import { sourceItemsFromResponse, viewSpecSchema } from "../core/views.ts";
 import { tf } from "../i18n/translate.ts";
 import { useOverlay } from "../overlays/OverlayHost.tsx";
 import { actionFailedText } from "./contributed-view-text.ts";
@@ -50,17 +53,13 @@ import { useToast } from "./toast.tsx";
 const coreViewPayloadSchema = z.json();
 type CoreViewPayload = z.infer<typeof coreViewPayloadSchema>;
 
-/** GET/POST a Core-relative path with the active node's credentials, returning the
- *  parsed JSON body. Refuses a path outside `/api/` before a request is made. */
+/** Send one request with the active node's credentials and return the parsed
+ *  JSON body. It takes only a request that src/core/contribution-http.ts built,
+ *  which is where the path is tested. */
 async function coreJson(
 	target: ApiTarget,
-	method: string,
-	path: string,
-	body?: Parameters<typeof JSON.stringify>[0]
+	{ method, path, body }: CoreViewRequest
 ): Promise<CoreViewPayload> {
-	if (!isCoreApiPath(path)) {
-		throw new Error(`declarative view path must start with /api/: ${path}`);
-	}
 	const resp = await fetchForTarget(target)(apiUrl(target, path), {
 		method,
 		headers: makeHeaders(target.token, target.userJwt),
@@ -108,13 +107,28 @@ export function ContributedViewPanel({ focused, view }: ContributedViewProps) {
 			? parsedSpec.data.source
 			: undefined;
 
+	// `null` when the view has no source, or when the gate refuses its path.
+	const sourceRequest = useMemo(
+		() =>
+			viewSourceRequest(
+				{ plugin: view.plugin, httpPolicy: view.httpPolicy },
+				source
+			),
+		[view.plugin, view.httpPolicy, source]
+	);
+
 	useEffect(() => {
 		if (!source) {
 			setSourceItems(null);
 			return;
 		}
+		if (!sourceRequest) {
+			// A refused source degrades to the spec's empty state, like a failed read.
+			setSourceItems([]);
+			return;
+		}
 		let cancelled = false;
-		coreJson(target, source.http.method ?? "GET", source.http.path)
+		coreJson(target, sourceRequest)
 			.then((payload) => {
 				if (!cancelled) {
 					setSourceItems(sourceItemsFromResponse(source, payload));
@@ -131,35 +145,29 @@ export function ContributedViewPanel({ focused, view }: ContributedViewProps) {
 			cancelled = true;
 		};
 		// url/token are primitives; including them refetches on a node switch.
-	}, [source, target, url, token, reloadToken]);
+	}, [source, sourceRequest, target, url, token, reloadToken]);
 
 	const runAction = useCallback(
 		async (action: ViewAction, ctx: ViewActionContext) => {
 			try {
 				if (action.http) {
-					const rendered = renderActionHttp(action.http, ctx);
-					await coreJson(target, rendered.method, rendered.path, rendered.body);
-				} else if (view.plugin.length > 0) {
+					await coreJson(target, viewActionRequest(view, action.http, ctx));
+				} else {
 					// App-backed intent: the grant-gated `view.action` dispatch on the
 					// plugin host bridge. Core-client exposes no host-invoke helper, so
 					// it is POSTed with the shared primitives (the `{method, args}`
-					// envelope the bridge expects).
-					await coreJson(
-						target,
-						"POST",
-						`/api/plugins/${encodeURIComponent(view.plugin)}/host`,
-						{
-							method: "view.action",
-							args: {
-								view_id: view.id,
-								action_id: action.id,
-								intent: action.intent ?? null,
-								payload: action.payload ?? null,
-								values: ctx.values ?? null,
-								item: ctx.item ?? null,
-							},
-						}
-					);
+					// envelope the bridge expects). `null` when the view has no owner.
+					const dispatch = viewHostDispatchRequest(view, {
+						view_id: view.id,
+						action_id: action.id,
+						intent: action.intent ?? null,
+						payload: action.payload ?? null,
+						values: ctx.values ?? null,
+						item: ctx.item ?? null,
+					});
+					if (dispatch) {
+						await coreJson(target, dispatch);
+					}
 				}
 				setReloadToken((n) => n + 1);
 			} catch (err) {

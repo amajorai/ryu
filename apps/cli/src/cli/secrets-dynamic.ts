@@ -9,6 +9,7 @@
 import { readFile } from "node:fs/promises";
 import {
 	deleteVaultDynamicRole,
+	forceRevokeVaultRetryLease,
 	issueVaultDynamicCredential,
 	listVaultDynamicRoles,
 	listVaultLeases,
@@ -31,7 +32,8 @@ import { type CliContext, UsageError } from "./types.ts";
 const DYNAMIC_USAGE =
 	"Usage: ryu-cli secrets dynamic roles | put ROLE FILE | delete ROLE | issue ROLE [--ttl 1h] | revoke-all ROLE";
 const LEASE_USAGE =
-	"Usage: ryu-cli secrets lease list [--name ROLE] [--all] | renew ID [--increment 1h] | revoke ID";
+	"Usage: ryu-cli secrets lease list [--name ROLE] [--all] | renew ID [--increment 1h] | revoke ID | force-revoke ID --acknowledge-credential-may-be-live";
+const FORCE_REVOKE_ACK = "--acknowledge-credential-may-be-live";
 
 const roleFileSchema = z.strictObject({
 	provider: providerSchema,
@@ -72,13 +74,23 @@ function ttlFlag(args: SecretsArgs, name: string): number | undefined {
 	return value === undefined ? undefined : parseDuration(value);
 }
 
+function leaseState(lease: VaultLease): string {
+	const retry = lease.pendingRevoke ? "retry lease" : "";
+	if (lease.revokedAt === null) {
+		return retry;
+	}
+	return [retry, `revoked ${String(lease.revokedAt)}`]
+		.filter(Boolean)
+		.join(", ");
+}
+
 function leaseRows(leases: VaultLease[]): string[][] {
 	return leases.map((lease) => [
 		lease.id,
 		lease.role,
 		lease.provider,
 		String(lease.expiresAt),
-		lease.revokedAt === null ? "" : `revoked ${String(lease.revokedAt)}`,
+		leaseState(lease),
 	]);
 }
 
@@ -200,6 +212,36 @@ async function leaseOp(
 	return 0;
 }
 
+/**
+ * `lease force-revoke ID` marks a retry lease revoked without calling its
+ * provider. Refused here without the acknowledgement flag, before any request.
+ */
+async function forceRevoke(
+	ctx: CliContext,
+	args: SecretsArgs
+): Promise<number> {
+	const id = arg(args, 2, `lease force-revoke ID ${FORCE_REVOKE_ACK}`);
+	if (!args.booleans.has(FORCE_REVOKE_ACK)) {
+		throw new UsageError(
+			tf(
+				"Refusing to force-revoke {id}: it only marks the retry lease revoked in Ryu and revokes nothing at the provider, so the credential may still be live. Revoke the credential at the provider first, then run this again with {flag}.",
+				{ id, flag: FORCE_REVOKE_ACK }
+			)
+		);
+	}
+	const { lease } = await forceRevokeVaultRetryLease(ctx.target, id, {
+		acknowledgeCredentialMayBeLive: true,
+	});
+	if (ctx.flags.json) {
+		printJson(ctx, lease);
+		return 0;
+	}
+	ctx.io.out(
+		`${tf("Marked retry lease {id} of {role} revoked. Nothing was revoked at the provider: revoke the credential there if you have not.", { id, role: lease.role })}\n`
+	);
+	return 0;
+}
+
 export async function leases(
 	ctx: CliContext,
 	args: SecretsArgs
@@ -207,6 +249,9 @@ export async function leases(
 	const action = args.positional[1] ?? "list";
 	if (action === "renew" || action === "revoke") {
 		return await leaseOp(ctx, args, action);
+	}
+	if (action === "force-revoke") {
+		return await forceRevoke(ctx, args);
 	}
 	if (action !== "list" && action !== "ls") {
 		throw new UsageError(LEASE_USAGE);

@@ -59,8 +59,6 @@ import {
 	nextTierName,
 	offerLifetimeAccess,
 	planLabel,
-	showTrialCountdown,
-	trialDaysLabel,
 } from "./nav-user-plan.ts";
 
 const TRAILING_SLASH_RE = /\/$/;
@@ -202,17 +200,11 @@ export function NavUser(props: NavUserProps) {
 	const currentPlan = organization
 		? organizationPlan
 		: (entitlement?.plan ?? verdict?.plan ?? null);
-	const currentPlanLabel = planLabel(
-		currentPlan,
-		!organization && verdict?.reason === "trial"
-	);
-	const trialCountdown = showTrialCountdown(verdict)
-		? trialDaysLabel(verdict.daysLeftInTrial, tl)
-		: null;
+	const currentPlanLabel = planLabel(currentPlan, false);
 	const upgradeTier = nextTierName(currentPlan);
-	// Free during beta (trial rollout off): no upgrade or Lifetime pitch in the
-	// menu. Payers resolve as "subscription"/"license" and keep theirs.
-	const showUpsell = verdict?.reason !== "beta";
+	// Personal use is free: no upgrade or Lifetime pitch in the menu. Payers
+	// resolve as "subscription"/"license" and keep theirs.
+	const showUpsell = verdict?.reason !== "free";
 	const creditsLeft = (() => {
 		if (wallet) {
 			return formatMicroUsd(wallet.balanceMicroUsd, wallet.currency);
@@ -271,7 +263,6 @@ export function NavUser(props: NavUserProps) {
 		organization,
 		resetDate,
 		showUpsell,
-		trialCountdown,
 		upgradeTier,
 	};
 	const showCreate = !(botProduct || isMenubar);

@@ -1,8 +1,8 @@
 // `ryu secrets ssh …`: SSH certificate authorities over Core's
 // `/api/vault/ssh/cas` routes (roles, signing and revocation are in
-// `secrets-ssh-certs.ts`). Creating a CA needs `admin` on
-// `sys/ssh/cas/<name>`; Core generates the key and returns only its public
-// half, so nothing secret is printed.
+// `secrets-ssh-certs.ts`, one-time passwords in `secrets-ssh-otp.ts`).
+// Creating a CA needs `admin` on `sys/ssh/cas/<name>`; Core generates the key
+// and returns only its public half, so nothing secret is printed.
 
 import {
 	createVaultSshCa,
@@ -16,9 +16,10 @@ import { formatTable } from "./output.ts";
 import { arg, flag, intFlag, type SecretsArgs } from "./secrets-args.ts";
 import { printJson } from "./secrets-output.ts";
 import { SSH_CERT_USAGE, sshCerts } from "./secrets-ssh-certs.ts";
+import { SSH_OTP_USAGE, sshOtp } from "./secrets-ssh-otp.ts";
 import { type CliContext, UsageError } from "./types.ts";
 
-const USAGE = `Usage: ryu-cli secrets ssh cas | ssh ca create NAME [--key-type ed25519|rsa|ecdsa] [--key-bits N]\n${SSH_CERT_USAGE}`;
+const USAGE = `Usage: ryu-cli secrets ssh cas | ssh ca create NAME [--key-type ed25519|rsa|ecdsa] [--key-bits N]\n${SSH_CERT_USAGE}\n${SSH_OTP_USAGE}`;
 
 const keyTypeSchema = z.enum(VAULT_SSH_CA_KEY_TYPES);
 
@@ -79,7 +80,7 @@ export async function ssh(ctx: CliContext, args: SecretsArgs): Promise<number> {
 		}
 		return 0;
 	}
-	const handled = await sshCerts(ctx, args);
+	const handled = (await sshCerts(ctx, args)) ?? (await sshOtp(ctx, args));
 	if (handled !== null) {
 		return handled;
 	}

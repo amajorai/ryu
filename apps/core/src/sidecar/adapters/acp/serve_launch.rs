@@ -26,6 +26,7 @@ pub(super) async fn launch_agent_server(
     additional_directories: &Vec<PathBuf>,
     agent_id: &str,
 ) -> anyhow::Result<Option<LaunchedServer>> {
+    use crate::server::oauth_pool_policy::agent_account_pools::engine_token;
     // Told to the user once, on the first turn, when the agent runs under the
     // untrusted-workspace profile (or could not be confined).
     let mut sandbox_notice: Option<String> = None;
@@ -54,6 +55,15 @@ pub(super) async fn launch_agent_server(
                     stdio.env.retain(|variable| {
                         !crate::pi_config::secret_env::is_secret_env_name(&variable.name)
                     });
+                } else if let Some(bearer) = engine_token::mint(agent_id) {
+                    // This turn's Pi calls Core's provider proxies with its
+                    // agent's own bearer, so they can apply the agent's
+                    // custom account pool.
+                    set_stdio_env(
+                        &mut stdio.env,
+                        crate::pi_config::secret_env::NODE_TOKEN_ENV.to_owned(),
+                        bearer,
+                    );
                 }
                 if let Some(captured) = captured_pi_account.as_ref() {
                     set_stdio_env(
@@ -127,6 +137,8 @@ pub(super) async fn launch_agent_server(
                 account_confinement,
                 &cwd,
                 &additional_directories,
+                crate::server::chat_checkpoints::turn_folders::node_bounds_turn_folders(),
+                crate::agent_sandbox::untrusted_support,
             )
             .await
             {
@@ -151,10 +163,26 @@ pub(super) async fn launch_agent_server(
                     .await;
                     return Ok(None);
                 }
+                Err(LaunchRefusal::SharedNode(reason)) => {
+                    let failure = shared_node_sandbox_failure(reason.as_deref());
+                    refuse_turns(turns_rx, None, failure).await;
+                    return Ok(None);
+                }
             };
             agent_client_protocol::schema::v1::McpServer::Stdio(stdio)
         }
-        other => other,
+        // A server that is not stdio starts no program, so there is nothing
+        // Ryu could sandbox. A personal node passes it on as before, and its
+        // one consumer answers it with an error (`AcpSpawn::into_agent`). On a
+        // node that bounds its turns that is a rule: the turns are refused here.
+        other => {
+            if crate::server::chat_checkpoints::turn_folders::node_bounds_turn_folders() {
+                tracing::warn!("shared node: refusing an agent server that is not stdio");
+                refuse_turns(turns_rx, None, shared_node_server_failure()).await;
+                return Ok(None);
+            }
+            other
+        }
     };
     Ok(Some(LaunchedServer {
         server,

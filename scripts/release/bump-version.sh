@@ -226,4 +226,4 @@ fi
 log "Bump complete: $OLD -> $NEW. Changed files:"
 git diff --stat -- $(git ls-files '*Cargo.toml' '*Cargo.lock' '*package.json' '*tauri.conf.json' 'packages/create-ryu-app/index.ts' 'packages/create-ryu-app/index.test.ts') | tail -1
 printf '\nReview with: git diff --stat\n'
-printf 'Then sync bun.lock: bun install   (bun 1.4.4, matches CI)\n'
+printf 'Then sync bun.lock: bun install   (bun 1.4.5, matches CI)\n'

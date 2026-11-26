@@ -75,7 +75,8 @@ export const MIGRATION_SOURCES: readonly MigrationSource[] = [
 		id: "hermes",
 		label: "Hermes",
 		logo: { light: "hermes_light", dark: "hermes_dark" },
-		homes: [".hermes"],
+		// `%LOCALAPPDATA%\hermes` is the Hermes home on Windows.
+		homes: [".hermes", "AppData/Local/hermes"],
 		hint: "Your ~/.hermes folder",
 	},
 	{
@@ -206,9 +207,18 @@ export function newMigrationItems(scan: ScanResult): ScanItem[] {
 	return scan.items.filter((item) => !item.alreadyExists);
 }
 
-function joinHome(home: string, name: string): string {
+/** `name` (written with `/`) under the node's home, in the node's path style. */
+export function joinHome(home: string, name: string): string {
 	const separator = home.includes("\\") ? "\\" : "/";
-	return `${home.replace(/[\\/]$/, "")}${separator}${name}`;
+	return `${home.replace(/[\\/]$/, "")}${separator}${name.replaceAll("/", separator)}`;
+}
+
+/**
+ * The Hermes home folder name under the node's home. Hermes on Windows keeps
+ * its home in `%LOCALAPPDATA%\hermes`; everywhere else it is `~/.hermes`.
+ */
+export function hermesHomeName(home: string): string {
+	return home.includes("\\") ? "AppData/Local/hermes" : ".hermes";
 }
 
 /**

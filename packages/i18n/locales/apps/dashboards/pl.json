@@ -1,0 +1,17 @@
+{
+  "Agent widget refresh requires delegated execution authority that this host does not provide.": "Odświeżanie widżetu agenta wymaga delegowanych uprawnień do wykonywania, których ten host nie zapewnia.",
+  "Agent widgets are not available on this node: refreshing them needs delegated user execution authority that refresh jobs do not carry. Use an http, composio, or static source instead.": "Widżety agenta nie są dostępne w tym węźle: ich odświeżanie wymaga delegowanych uprawnień użytkownika do wykonywania, których zadania odświeżania nie niosą. Użyj źródła http, composio lub statycznego.",
+  "Monitor widgets are not available yet: no host capability lets an app read monitor results. Use an http, composio, or static source instead.": "Widżety monitorów nie są jeszcze dostępne: żadna funkcja hosta nie pozwala aplikacji odczytywać wyników monitorów. Użyj zamiast tego źródła http, composio lub statycznego.",
+  "Ryu metric widgets are not available yet: apps cannot read Ryu's internal metrics, and no host capability exposes them. Use an http, composio, or static source instead.": "Widżety metryk Ryu nie są jeszcze dostępne: aplikacje nie mogą odczytywać wewnętrznych metryk Ryu, a żadna możliwość hosta ich nie udostępnia. Użyj zamiast tego źródła http, composio lub statycznego.",
+  "The Composio action failed: {error}": "Akcja Composio nie powiodła się: {error}",
+  "The Composio action returned HTTP {status}.": "Akcja Composio zwróciła HTTP {status}.",
+  "The web source redirected, and redirects are not allowed.": "Źródło internetowe przekierowało, a przekierowania nie są dozwolone.",
+  "The web source returned HTTP {status}.": "Źródło internetowe zwróciło HTTP {status}.",
+  "The web source sent a reply Ryu could not read: {error}": "Źródło internetowe wysłało odpowiedź, której Ryu nie potrafi odczytać: {error}",
+  "The widget's agent run failed: {error}": "Uruchomienie agenta widżetu nie powiodło się: {error}",
+  "Widget “{title}” broke": "Widżet „{title}” przestał działać",
+  "Widget “{title}” recovered": "Widżet „{title}” został przywrócony",
+  "Workflow widgets are not available yet: no host capability lets an app run a saved workflow. Use an http, composio, or static source instead.": "Widżety przepływów pracy nie są jeszcze dostępne: żadna możliwość hosta nie pozwala aplikacji uruchomić zapisanego przepływu pracy. Użyj zamiast tego źródła http, composio lub static.",
+  "dashboard not found": "nie znaleziono pulpitu",
+  "not found": "nie znaleziono"
+}

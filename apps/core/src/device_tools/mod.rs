@@ -34,6 +34,7 @@ pub(crate) mod check_code;
 pub(crate) mod claims;
 pub(crate) mod codes;
 pub(crate) mod confirm;
+pub(crate) mod conversation_taint;
 pub(crate) mod declaration;
 pub(crate) mod device_stream;
 pub(crate) mod dispatch;
@@ -67,6 +68,8 @@ mod caps_tests;
 mod catalog_tests;
 #[cfg(test)]
 mod claims_tests;
+#[cfg(test)]
+mod conversation_taint_tests;
 #[cfg(test)]
 mod dispatch_tests;
 #[cfg(test)]

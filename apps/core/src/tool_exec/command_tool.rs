@@ -51,6 +51,10 @@ pub async fn run_command_tool_with_agent_and_workspace(
         ));
     }
 
+    // 1a. SHARED NODE: decided here, before the version probe can run the binary.
+    let bounded = command_confinement::node_is_shared();
+    command_confinement::shared_node_precheck(bounded, crate::agent_sandbox::untrusted_support)?;
+
     // 1b. EGRESS ⇒ VERSION: the egress broker only mediates a binary release that
     //     was verified to honour `HTTP(S)_PROXY`, so a URL-fetching command tool
     //     must never run unversioned. Manifest validation already requires
@@ -134,8 +138,11 @@ pub async fn run_command_tool_with_agent_and_workspace(
         &argv,
         !workspace_path_args.is_empty(),
         &hidden,
+        bounded,
         crate::agent_sandbox::untrusted_support,
     )?;
+    let child_dir =
+        command_confinement::command_child_dir(cwd, workspace_root, bounded, &abs_path, &hidden)?;
 
     // 4b. ENV overlay: layer ONLY the declared vars onto the scrubbed base.
     //     Declared VALUES never enter the scan/audit content below.
@@ -254,7 +261,7 @@ pub async fn run_command_tool_with_agent_and_workspace(
     for (k, v) in &child_env {
         cmd.env(k, v);
     }
-    if let Some(dir) = cwd {
+    if let Some(dir) = child_dir.dir() {
         cmd.current_dir(dir);
     }
     cmd.stdin(std::process::Stdio::null())

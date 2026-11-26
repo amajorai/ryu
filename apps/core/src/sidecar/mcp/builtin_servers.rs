@@ -10,6 +10,8 @@
 //! registration keeps such a slug under `app.<slug>`, refuses a raw registration,
 //! and dispatch never treats a reserved id as a native app tool.
 
+pub(crate) mod diagnostics;
+
 /// Server segments Core dispatches itself. Kept as one list so registration,
 /// manifest id derivation, and dispatch share the same reservation.
 pub(crate) const BUILTIN_SERVER_NAMES: &[&str] = &[
@@ -25,6 +27,7 @@ pub(crate) const BUILTIN_SERVER_NAMES: &[&str] = &[
     super::working_memory_tool::SERVER_NAME,
     super::ui_tool::SERVER_NAME,
     super::consent_tool::SERVER_NAME,
+    super::feedback_tool::SERVER_NAME,
     super::tasks_tool::SERVER_NAME,
     super::workspace_tool::SERVER_NAME,
     super::routines_tool::SERVER_NAME,
@@ -37,6 +40,7 @@ pub(crate) const BUILTIN_SERVER_NAMES: &[&str] = &[
     super::orchestrator::SERVER_NAME,
     super::skills_tool::SERVER_NAME,
     super::usage_tool::SERVER_NAME,
+    diagnostics::SERVER_NAME,
     super::treg_tool::SERVER_NAME,
     super::challenges_tool::SERVER_NAME,
     super::marketplace_tool::SERVER_NAME,
@@ -65,12 +69,21 @@ mod tests {
     #[test]
     fn reserves_every_built_in_dispatch_server() {
         for server in [
-            "channel", "spaces", "threads", "routines", "notify", "cloud", "sandbox",
+            "channel",
+            "spaces",
+            "threads",
+            "routines",
+            "notify",
+            "cloud",
+            "sandbox",
+            "diagnostics",
         ] {
             assert!(is_builtin_server(server), "{server} must be reserved");
         }
         assert!(is_builtin_server_id("channel.send"));
         assert!(is_builtin_server_id("spaces.get_page"));
+        assert!(is_builtin_server_id(diagnostics::SNAPSHOT_TOOL_ID));
+        assert!(is_builtin_server_id(diagnostics::RECENT_ERRORS_TOOL_ID));
     }
 
     #[test]

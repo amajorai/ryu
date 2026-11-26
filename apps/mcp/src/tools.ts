@@ -32,6 +32,7 @@ import { fetchTeams } from "@ryuhq/core-client/teams";
 import { fetchWorkflows, runWorkflow } from "@ryuhq/core-client/workflows";
 import * as z from "zod/v4";
 import { fetchSession, loadToken } from "./auth.ts";
+import { requirePathId } from "./tool-path-id.ts";
 
 type ToolText = CallToolResult;
 
@@ -246,8 +247,17 @@ export const registerRyuTools = (
 					.describe("Read-only preview; no run history or effectful nodes."),
 			}),
 		},
+		// The id becomes a Core path segment: refuse path characters first, so
+		// the call cannot reach a route outside this tool list.
 		({ id, input, dryRun }) =>
-			run(() => runWorkflow(target, id, input ?? {}, { dryRun }))
+			run(() =>
+				runWorkflow(
+					target,
+					requirePathId("ryu_run_workflow", "id", id),
+					input ?? {},
+					{ dryRun }
+				)
+			)
 	);
 
 	// ── MCP bridge ──────────────────────────────────────────────────────────────
@@ -335,8 +345,16 @@ export const registerRyuTools = (
 					.describe("Max matches to return."),
 			}),
 		},
+		// Same rule as ryu_run_workflow: the spaceId becomes a Core path segment.
 		({ spaceId, query, limit }) =>
-			run(() => searchSpace(target, spaceId, query, limit))
+			run(() =>
+				searchSpace(
+					target,
+					requirePathId("ryu_search_space", "spaceId", spaceId),
+					query,
+					limit
+				)
+			)
 	);
 
 	server.registerTool(

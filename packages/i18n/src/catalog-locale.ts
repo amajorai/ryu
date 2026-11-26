@@ -11,6 +11,7 @@ export const OFFICIAL_CATALOG_LOCALES: readonly string[] = [
 	"it",
 	"ja",
 	"ko",
+	"pl",
 	"pt-BR",
 	"ru",
 	"zh-CN",

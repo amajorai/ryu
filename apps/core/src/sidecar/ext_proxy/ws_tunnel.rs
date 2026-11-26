@@ -82,6 +82,7 @@ pub(super) async fn ext_ws_tunnel(
     };
     let auth = route.auth;
     let required = required_permission_for(route, sub_path, plugin_id);
+    let route_scope = route_match::agent_devices::route_scope(manifest, route, sub_path, "GET");
     let mount = http
         .mount
         .as_deref()
@@ -117,12 +118,13 @@ pub(super) async fn ext_ws_tunnel(
     // upgrade; otherwise a view-only caller could reach the control stream.
     if let Some((permission, resource_id)) = required {
         let caller = ticket.as_ref().and_then(|ticket| ticket.caller.clone());
-        if let Err(status) = crate::server::enforce_permission_on(
+        if let Err(status) = route_match::agent_devices::enforce_route_permission(
             state,
             &caller,
             &permission,
             plugin_id,
             &resource_id,
+            &route_scope,
         )
         .await
         {

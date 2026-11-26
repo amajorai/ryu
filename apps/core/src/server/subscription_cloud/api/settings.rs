@@ -175,7 +175,8 @@ fn validate_accounts(owner: &str, settings: &RoutingSettings) -> Result<(), ApiE
         }
     }
     for (provider, order) in &settings.account_fallbacks {
-        if order.len() > accounts::MAX_ACCOUNTS_PER_PROVIDER + 1 {
+        // Every entry must be the default sign-in or a linked account, once.
+        if order.len() > store::accounts(owner).len() + 1 {
             return Err(bad_request("A fallback list is too long."));
         }
         let mut seen = Vec::new();

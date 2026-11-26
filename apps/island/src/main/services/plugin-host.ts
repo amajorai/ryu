@@ -26,6 +26,7 @@ import type {
 	PluginView,
 } from "../../shared/ipc.ts";
 import { coreHeaders, loadConfig } from "./config.ts";
+import type { CoreHttpAllowed } from "./plugin-core-http.ts";
 import {
 	hostErrorSchema,
 	hostResultSchema,
@@ -242,50 +243,49 @@ export async function pluginHostInvoke(
 	}
 }
 
-/** HTTP methods a declarative view action may use. Mirrors the vocabulary's
- *  `VIEW_ACTION_HTTP_METHODS` (`@ryu/app-host/views`) — duplicated here because the
- *  main process stays free of app-host imports (it is Core plumbing, not a renderer). */
-const CORE_HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
-
 /**
  * Authenticated Core HTTP on behalf of a declarative view (the http-action tier +
- * the view `source` fetch). Defense in depth: the renderer already refuses
- * non-`/api/` paths (`isCoreApiPath`), but this hop holds the node token, so it
- * re-validates the path shape and method allowlist before fetching. Never rejects.
+ * the view `source` fetch) or of the host itself. This hop holds the node token,
+ * so the method and the route are decided in ./plugin-core-http.ts, from the
+ * request's `owner` and on the URL a parser produces, before `sendCoreHttp`
+ * builds a single header. Never rejects.
+ *
+ * The gate is loaded here, on the call, and not with a static import. Several
+ * tests copy this file and its static imports by name into a temp folder, and
+ * one of them is over the staged size limit and cannot be edited, so the static
+ * imports stay as they were. A gate that cannot be loaded refuses the call and
+ * nothing is sent.
  */
 export async function pluginCoreHttp(
 	req: PluginCoreHttpRequest
 ): Promise<PluginCoreHttpResult> {
-	const method = req.method.toUpperCase();
-	if (!CORE_HTTP_METHODS.has(method)) {
+	const gate = await import("./plugin-core-http.ts").catch(() => null);
+	if (!gate) {
 		return {
 			ok: false,
-			code: "invalid_args",
-			message: `unsupported method '${req.method}'`,
+			code: "server_error",
+			message: "the Core HTTP gate could not be loaded",
 		};
 	}
-	if (
-		!req.path.startsWith("/api/") ||
-		req.path.split("/").some((segment) => segment === "..")
-	) {
-		return {
-			ok: false,
-			code: "invalid_args",
-			message: `view http path must start with /api/: ${req.path}`,
-		};
-	}
-	const { coreBaseUrl } = loadConfig();
+	return gate.pluginCoreHttpVia(req, loadConfig().coreBaseUrl, sendCoreHttp);
+}
+
+/** Send a call that passed the gate, with the node's credentials. */
+async function sendCoreHttp(
+	target: CoreHttpAllowed,
+	body: unknown
+): Promise<PluginCoreHttpResult> {
 	try {
 		return await withResponseDeadline<PluginCoreHttpResult>(
-			`${coreBaseUrl}${req.path}`,
+			target.url,
 			{
-				method,
+				method: target.method,
 				headers: coreHeaders(
-					req.body === undefined
+					body === undefined
 						? undefined
 						: { "Content-Type": "application/json" }
 				),
-				body: req.body === undefined ? undefined : JSON.stringify(req.body),
+				body: body === undefined ? undefined : JSON.stringify(body),
 			},
 			INVOKE_TIMEOUT_MS,
 			async (resp) => {
@@ -293,7 +293,7 @@ export async function pluginCoreHttp(
 					return {
 						ok: false,
 						code: codeForStatus(resp.status),
-						message: `${req.path} failed: ${resp.status}`,
+						message: `${target.path} failed: ${resp.status}`,
 					};
 				}
 				const data = z.json().parse(await resp.json().catch(() => null));

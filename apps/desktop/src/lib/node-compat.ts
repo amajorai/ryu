@@ -7,11 +7,12 @@
 // mismatch happened to fail.
 //
 // Re-exported (rather than deleted) so the existing desktop call sites and this
-// module's tests keep working unchanged. Behaviour is identical: a minimum-version
-// floor plus capability negotiation instead of a compatibility matrix, both
-// fail-soft, and every verdict advisory — the desktop and a *local* node move in
-// lockstep (one release train, and a lapsed-updates install pins both), so the
-// real skew is a *remote* node on its own release schedule.
+// module's tests keep working unchanged. A protocol range (`node-protocol.ts`)
+// answers whether the two can talk and names the side to update when they
+// cannot; capability flags gate features; version and channel verdicts stay
+// advisory. The desktop and a *local* node usually move together (one release
+// train), so the real skew is a *remote* node on its own release schedule, or a
+// local Core left running across an app update.
 
 import { assessNode } from "@ryuhq/core-client/node-compat.ts";
 
@@ -21,12 +22,19 @@ export {
 	compareSemver,
 	fetchNodeIdentity,
 	hasCapability,
-	isNodeCompatible,
-	MIN_CORE_VERSION,
 	type NodeCompatibility,
 	type NodeIdentity,
 	STABLE_CHANNEL,
 } from "@ryuhq/core-client/node-compat.ts";
+export {
+	assessNodeProtocol,
+	CLIENT_ACCEPTED_RANGE,
+	CORE_PROTOCOL_RANGE,
+	negotiateProtocol,
+	type ProtocolRange,
+	type ProtocolVerdict,
+	reportedProtocolRange,
+} from "@ryuhq/core-client/node-protocol.ts";
 
 /**
  * Whether the desktop and the node it is driving are on different release

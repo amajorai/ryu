@@ -259,7 +259,7 @@ pub(in crate::server) fn declarative_http_policy(
 ) -> Result<&'static str, String> {
     let core = crate::plugins::builtins::tier_for_manifest(manifest)
         == crate::plugin_manifest::PluginTier::Core;
-    manifest.validate_declarative_http_policy(core)?;
+    manifest.validate_declarative_http_authority(core)?;
     Ok(if core { "core" } else { "owner" })
 }
 
@@ -273,5 +273,45 @@ pub(in crate::server) fn stamp_contribution_authority(
         // Always overwrite a publisher-supplied lookalike. This field is an
         // authorization decision made by Core, never manifest data.
         object.insert("http_policy".to_string(), serde_json::json!(http_policy));
+    }
+}
+
+#[cfg(test)]
+mod declarative_http_policy_tests {
+    fn community_manifest(source_path: &str) -> crate::plugin_manifest::PluginManifest {
+        serde_json::from_value(serde_json::json!({
+            "id": "@acme/notes",
+            "name": "Notes",
+            "version": "1.0.0",
+            "runnables": [],
+            "contributes": {
+                "views": [{
+                    "id": "notes",
+                    "view": "list-detail",
+                    "spec": {
+                        "view": "list-detail",
+                        "items": [],
+                        "source": { "http": { "path": source_path } }
+                    }
+                }]
+            }
+        }))
+        .expect("manifest shape")
+    }
+
+    /// The contributions feed and the Store tabs resolve their HTTP authority
+    /// here, so this is where an installed manifest is checked again.
+    #[test]
+    fn a_path_a_url_parser_moves_out_of_the_mount_gets_no_http_authority() {
+        let owned = community_manifest("/api/ext/@acme/notes/items");
+        assert_eq!(super::declarative_http_policy(&owned), Ok("owner"));
+        for separator in ['\t', '\n', '\r'] {
+            let hop = format!(".{separator}.");
+            let path = format!("/api/ext/@acme/notes/{hop}/{hop}/{hop}/conversations");
+            assert!(
+                super::declarative_http_policy(&community_manifest(&path)).is_err(),
+                "must be refused: {path:?}"
+            );
+        }
     }
 }

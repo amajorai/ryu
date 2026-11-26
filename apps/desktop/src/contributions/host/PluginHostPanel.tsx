@@ -34,6 +34,7 @@ import {
 	createSileoToastRenderer,
 } from "@ryu/app-host/toast-host";
 import { browserRecordingHost } from "@ryu/blocks/companion/browser-recording.ts";
+import { useOpenExternalAsk } from "@ryu/blocks/desktop/agent-elements/open-external-confirm.tsx";
 import { useI18n, useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useQuery } from "@tanstack/react-query";
@@ -300,8 +301,9 @@ export function PluginHostPanel({
 	// so two companions of the same app share one slice (they are one app to the
 	// user) while different apps stay isolated.
 	const assistantOwner = `plugin:${companion.pluginId}:${companion.id}:${nonce}`;
-	const modelContext = useModelContextStore(
-		(store) => store.entries[assistantOwner]?.state ?? null
+	// Read through `get`, so the frame still sees the entry held back on blur.
+	const modelContext = useModelContextStore((store) =>
+		store.get("assistant", assistantOwner)
 	);
 	useEffect(() => {
 		filePushRef.current?.({
@@ -322,6 +324,9 @@ export function PluginHostPanel({
 
 	const { assistantContextRef, assistantSurfaceRef, isActiveTabRef } =
 		usePluginAssistantBridge(assistantOwner);
+	const openExternalPrompt = useOpenExternalAsk(
+		companion.label || companion.name
+	);
 
 	// The privileged services. `listAgents` holds the token and returns a minimal
 	// projection; `registerRoute` accepts ONLY this plugin's own `/plugin/<id>`
@@ -329,6 +334,7 @@ export function PluginHostPanel({
 	const services = useMemo<HostServices>(() => {
 		const context: PluginHostServicesContext = {
 			approvedGrantList,
+			askOpenExternal: openExternalPrompt.ask,
 			assistantContextRef,
 			assistantOwner,
 			assistantSurfaceRef,
@@ -366,6 +372,7 @@ export function PluginHostPanel({
 		companion.name,
 		companion.pluginId,
 		approvedGrantList,
+		openExternalPrompt.ask,
 		assistantOwner,
 		openGateway,
 		openTab,
@@ -484,6 +491,7 @@ export function PluginHostPanel({
 					/>
 				</div>
 			)}
+			{openExternalPrompt.dialog}
 		</div>
 	);
 }

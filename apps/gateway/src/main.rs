@@ -412,6 +412,8 @@ async fn run(seal_key: SealKeyStatus) -> anyhow::Result<()> {
             Ok(())
         }
     };
+    // Send the usage summaries still queued for the relay (bounded).
+    ryu_analytics::shutdown().await;
     // Flush consented OTLP spans before exit (bounded; no-op without an exporter).
     let _ = tokio::task::spawn_blocking(telemetry::shutdown).await;
     served?;

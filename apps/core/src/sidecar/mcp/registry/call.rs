@@ -2,6 +2,47 @@
 
 use crate::sidecar::mcp::*;
 
+/// Why a caller of the plain [`McpRegistry::call_tool`] entry may not run
+/// `target` (the resolved approval target of `tool_id`); `None` when it may.
+///
+/// That entry serves unattended callers: a workflow `tool`, `mcp` or plugin
+/// tool node, a monitor, a quest job. It has no agent, no chat and nobody to
+/// answer a card, and it dispatches through the no-gate core. The approval
+/// policy holds some tools for a person on every call, in every approval mode
+/// (a mutating `ryu_api.*` tool, `research.run`, a challenge submission, the
+/// interface switch), and a mutating `ryu_ext.*` tool unless the operator set
+/// the mode to an explicit `off` (`mode_pref` is the raw preference; unknown
+/// counts as not off). A saved or scheduled workflow must not be a way around
+/// that, so such a call is refused here instead of run.
+///
+/// The tier is read from the policy itself, asked as if approvals were `off`,
+/// so a tool added to it later is covered without a change here. Everything
+/// else the policy gates (by name, by the `manual` mode, or as a routine,
+/// Spaces, budget or agent mail change) keeps running: a workflow is an
+/// automation its author set up, which is what the plain entry is for.
+///
+/// The text is a tool error in plain English, like the approval gate's own
+/// (`approvals::gate`), and reaches a person inside the node's error.
+pub(crate) fn unattended_call_refusal(
+    tool_id: &str,
+    target: &str,
+    mode_pref: Option<&str>,
+) -> Option<String> {
+    use crate::approvals::policy::{should_require_approval_local, ApprovalMode};
+    let held = |pref: Option<&str>| {
+        should_require_approval_local(&[], target, ApprovalMode::Off, pref).is_some()
+    };
+    let every_call = held(Some("off"));
+    let app_write = crate::ext_api::is_mutating(target) && held(mode_pref);
+    (every_call || app_write).then(|| {
+        format!(
+            "This action (`{tool_id}`) needs your approval on every call, so it cannot run from a \
+             workflow tool node or any other unattended run. It was not run. Ask an agent in a \
+             chat to do it, where you can approve the call."
+        )
+    })
+}
+
 impl McpRegistry {
     /// Resolve the exact dispatch ids a certified Safe Actions step may traverse.
     /// Capability facades are excluded because their provider selection is mutable
@@ -178,6 +219,19 @@ impl McpRegistry {
                 )
                 .await;
         }
+        // The rest of the every-call tier, and an app API write the mode still
+        // gates, are refused: nobody here can answer a card, and the no-gate core
+        // below would run them (see `unattended_call_refusal`).
+        let target = self.canonical_tool_id_for_registry(&target);
+        let mode_pref = match crate::approvals::global_engine() {
+            Some(engine) if crate::ext_api::is_mutating(&target) => {
+                engine.approval_mode_pref().await
+            }
+            _ => None,
+        };
+        if let Some(refusal) = unattended_call_refusal(tool_id, &target, mode_pref.as_deref()) {
+            bail!(refusal);
+        }
         // No identity binding on the plain path (workflows/monitors/recipes have
         // no agent card). Route through the NO-GATE core: the approval gate is for
         // *agent* tool calls (the chat/ACP/PTC planes call `call_tool_with_identity`
@@ -296,3 +350,7 @@ impl McpRegistry {
 #[cfg(test)]
 #[path = "../tests/verified_hash.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/unattended_tier.rs"]
+mod unattended_tier;

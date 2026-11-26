@@ -4,6 +4,8 @@
 use super::Dispatch;
 use crate::sidecar::mcp::*;
 
+mod widget_sources;
+
 impl McpRegistry {
     // Built-in self-build provider (U57): scaffold_runnable, install_app,
     // write_ryu_json. Dispatched in-process; requires `self_build_manifests`
@@ -140,6 +142,12 @@ impl McpRegistry {
         // change one.
         if tool != "get_dashboard" {
             require_unrestricted_for_builder(account_policy.as_ref(), "dashboards")?;
+            // A widget source runs again on every refresh with nobody
+            // approving the run, so one that is not a plain read is refused
+            // before the Dashboards app is asked to store it.
+            if let Some(refused) = widget_sources::refusal(&arguments) {
+                return Ok(refused);
+            }
         }
         let mut result = crate::runnable::dashboard_builder::dispatch(
             tool,

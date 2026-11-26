@@ -30,7 +30,9 @@ use crate::server::conversations::{ConversationStore, MessageSearchHit};
 
 /// The live turn's verified sender only ever widens this tool's read filter
 /// (see `visibility::visible_ids`), so the binding is exported from here.
-pub(crate) use super::authenticated_scope::with_turn_sender;
+pub(crate) use super::authenticated_scope::{
+    with_instance_senders, with_turn_sender, InstanceSenders,
+};
 
 /// Reserved registry server name for the built-in conversation-search provider.
 pub const SERVER_NAME: &str = "search_conversations";

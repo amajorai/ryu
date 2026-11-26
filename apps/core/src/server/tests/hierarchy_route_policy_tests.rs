@@ -8,6 +8,7 @@ fn registered_hierarchy_operations_keep_their_chat_capability_gate() {
         "/api/hierarchy/main-threads",
         "/api/hierarchy/threads/main",
         "/api/hierarchy/threads/main/sessions",
+        "/api/hierarchy/threads/main/tree",
         "/api/hierarchy/projects/project/threads",
     ] {
         for method in [Method::GET, Method::HEAD] {
@@ -35,6 +36,8 @@ fn unsupported_hierarchy_operations_and_scope_defaults_remain_owner_only() {
     for (method, path) in [
         (Method::POST, "/api/hierarchy/main-threads"),
         (Method::POST, "/api/hierarchy/threads/main/sessions"),
+        (Method::POST, "/api/hierarchy/threads/main/tree"),
+        (Method::GET, "/api/hierarchy/threads//tree"),
         (Method::DELETE, "/api/hierarchy/main-threads"),
         (Method::GET, "/api/hierarchy/threads/main/project"),
         (Method::PUT, "/api/hierarchy/threads//project"),

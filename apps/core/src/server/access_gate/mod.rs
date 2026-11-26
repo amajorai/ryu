@@ -10,3 +10,7 @@ mod app_lifecycle_permissions;
 pub(in crate::server) use app_lifecycle_permissions::*;
 mod marketplace_package;
 pub(in crate::server) use marketplace_package::*;
+#[cfg(test)]
+mod account_limit_claim_tests;
+/// Plan limits Core enforces on its own data, as `crate::server::plan_limits`.
+pub(crate) mod plan_limits;

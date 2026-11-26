@@ -65,6 +65,9 @@ pub async fn run_team_reply_text(
         skills,
         traces,
         agent_resource_authorization: None,
+        // Channel runs keep the team's strategy; thread ownership applies to
+        // the streaming chat path only.
+        thread: None,
     };
 
     // Pre-turn hooks run before anything is persisted or fanned out: one rewrite

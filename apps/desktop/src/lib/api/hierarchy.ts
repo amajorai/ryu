@@ -75,6 +75,14 @@ const sessionsResponseSchema = z.looseObject({
 const fetchThreadSessionsResponseSchema = z.looseObject({
 	sessions: z.array(sessionsResponseSchema).optional(),
 });
+const threadTreeNodeSchema = z.looseObject({
+	conversation: sessionsResponseSchema,
+	parent_id: z.union([z.null(), z.string()]).optional(),
+});
+const fetchThreadTreeResponseSchema = z.looseObject({
+	nodes: z.array(threadTreeNodeSchema).optional(),
+	truncated: z.boolean().optional(),
+});
 const fetchScopeDefaultsResponseSchema = z.looseObject({
 	defaults: z.record(z.string(), defaultsResponseSchema).optional(),
 });
@@ -254,6 +262,41 @@ export async function fetchThreadSessions(
 		fetchThreadSessionsResponseSchema
 	);
 	return response.sessions ?? [];
+}
+
+/** One thread of a session tree and the visible thread it hangs under. */
+export interface ThreadTreeNode {
+	conversation: SessionSummary;
+	/** Null or absent for a thread with no visible thread above it. */
+	parent_id?: string | null;
+}
+
+/** The whole nest a thread sits in, as Core returns it. */
+export interface ThreadTree {
+	/** Parents come before their children. */
+	nodes: ThreadTreeNode[];
+	/** Core cut the tree at its level or thread limit. */
+	truncated: boolean;
+}
+
+/**
+ * The root of the chain a thread sits in and every session below it that the
+ * caller may read. A Core that predates the route answers 404.
+ */
+export async function fetchThreadTree(
+	target: ApiTarget,
+	conversationId: string
+): Promise<ThreadTree> {
+	const response = await request(
+		target,
+		`/api/hierarchy/threads/${encodeURIComponent(conversationId)}/tree`,
+		undefined,
+		fetchThreadTreeResponseSchema
+	);
+	return {
+		nodes: response.nodes ?? [],
+		truncated: response.truncated ?? false,
+	};
 }
 
 /** Put a thread in a project, or take it out with `null`. `spawnedBy` files it

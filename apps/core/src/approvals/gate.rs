@@ -139,12 +139,17 @@ pub(crate) async fn gate_tool_call_with_engine(
     }
     let raw_pref = engine.approval_mode_pref().await;
     let mode = policy::ApprovalMode::from_pref(raw_pref.as_deref().unwrap_or_default());
-    let tags = policy::should_require_approval_local(
+    let mut tags = policy::should_require_approval_local(
         agent_approval_tools,
         policy_tool_id,
         mode,
         raw_pref.as_deref(),
     )?;
+    // A held egress call is the one caller that passes `false` here. Mark it
+    // so surfaces that hide the arguments (chat app buttons) leave it alone.
+    if !chat_grants_honored {
+        tags.push(HELD_EGRESS_TAG.to_owned());
+    }
     // The user already allowed this exact call (or this tool for the whole
     // conversation) in the chat that raised it. See `chat_grants`.
     if chat_grants_honored

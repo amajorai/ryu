@@ -1,0 +1,36 @@
+name: nightly-retry
+
+# Gives a nightly run one more try when GitHub cancelled one of its jobs because
+# no hosted runner picked it up within about 15 minutes ("The job was not
+# acquired by Runner of type hosted even after multiple attempts"). The nightly
+# asks for five macOS arm64 runners at once, and between 13 and 17 Nov 2026
+# three of its five builds lost a macOS job that way. The release of 17 Nov
+# shipped without the Apple Silicon desktop build for that reason.
+#
+# Nothing inside nightly.yml can queue a job again, so the retry is this second
+# workflow. It re-runs only when a job never reached a runner, and only once.
+# The rules are in .github/scripts/retry-unacquired-jobs.sh.
+
+on:
+  workflow_run:
+    workflows: [nightly]
+    types: [completed]
+
+permissions:
+  actions: write
+  checks: read
+  contents: read
+
+jobs:
+  retry:
+    # A skipped (gate) or green run concludes `success` and needs no runner here.
+    if: github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Re-run the jobs no runner picked up
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: bash .github/scripts/retry-unacquired-jobs.sh

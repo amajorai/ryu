@@ -132,7 +132,10 @@ async fn run_configuration_approval_fixture() {
     assert_eq!(captured_allowlist.as_ref(), Some(&allowlist));
     assert_eq!(captured_agent.as_deref(), Some("ryu"));
     assert!(*captured_grant);
-    engine.decide(&pending[0].id, true, None).await.unwrap();
+    engine
+        .decide(&pending[0].id, true, None, None)
+        .await
+        .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             if agents.get(&target.id).await.unwrap().unwrap().name == "Changed" {
@@ -150,7 +153,10 @@ async fn run_configuration_approval_fixture() {
     })
     .await
     .expect("approved configuration must execute");
-    engine.decide(&pending[0].id, true, None).await.unwrap();
+    engine
+        .decide(&pending[0].id, true, None, None)
+        .await
+        .unwrap();
     assert_eq!(
         agents.get(&target.id).await.unwrap().unwrap().name,
         "Changed"

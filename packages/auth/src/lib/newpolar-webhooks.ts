@@ -1,3 +1,4 @@
+import { RefundReason } from "@polar-sh/sdk/models/components/refundreason";
 import { WebhookCustomerSeatAssignedPayload$inboundSchema } from "@polar-sh/sdk/models/components/webhookcustomerseatassignedpayload";
 import { WebhookCustomerSeatClaimedPayload$inboundSchema } from "@polar-sh/sdk/models/components/webhookcustomerseatclaimedpayload";
 import { WebhookCustomerSeatRevokedPayload$inboundSchema } from "@polar-sh/sdk/models/components/webhookcustomerseatrevokedpayload";
@@ -43,6 +44,39 @@ export {
 /** The header shape emitted by Polar's Standard Webhooks delivery. */
 export type PolarWebhookHeaders = Record<string, string>;
 
+/** The refund reasons the installed SDK lists, and where an event keeps one. */
+const knownRefundReasons = new Set<string>(Object.values(RefundReason));
+const refundReasonSchema = z.looseObject({
+	type: z.enum(["refund.created", "refund.updated"]),
+	data: z.looseObject({ id: z.string().optional(), reason: z.string() }),
+});
+
+/**
+ * Polar sends refund reasons that the installed SDK's closed list refuses
+ * (`tax_refund`, `vat_reverse_charge_correction`, and any value it adds later).
+ * One such value fails the whole event, the route answers 400 on every retry,
+ * and repeated failures make Polar switch the endpoint off. No reader in the
+ * repo acts on the reason, so a reason the SDK does not list is read as
+ * `other` and the raw value is logged. Every other field and every other event
+ * type stays as strict as before.
+ *
+ * Call this only with a payload whose signature has already been verified.
+ * Returns null when the payload is not a refund event with an unlisted reason.
+ */
+function unknownRefundReasonAsOther(payload: unknown) {
+	const refund = refundReasonSchema.safeParse(payload);
+	if (!refund.success || knownRefundReasons.has(refund.data.data.reason)) {
+		return null;
+	}
+	const { data, type } = refund.data;
+	console.warn("[polar-webhook] unknown refund reason read as other:", {
+		type,
+		refundId: data.id,
+		rawReason: data.reason.slice(0, 80),
+	});
+	return { ...refund.data, data: { ...data, reason: RefundReason.Other } };
+}
+
 /**
  * Parse only event shapes consumed by the current billing handler, using the
  * generated Polar SDK schemas so snake_case wire fields are remapped to the
@@ -71,9 +105,13 @@ function parsePolarWebhookPayload(
 		case "order.refunded":
 			return WebhookOrderRefundedPayload$inboundSchema.parse(payload);
 		case "refund.created":
-			return WebhookRefundCreatedPayload$inboundSchema.parse(payload);
+			return WebhookRefundCreatedPayload$inboundSchema.parse(
+				unknownRefundReasonAsOther(payload) ?? payload
+			);
 		case "refund.updated":
-			return WebhookRefundUpdatedPayload$inboundSchema.parse(payload);
+			return WebhookRefundUpdatedPayload$inboundSchema.parse(
+				unknownRefundReasonAsOther(payload) ?? payload
+			);
 		case "subscription.active":
 			return WebhookSubscriptionActivePayload$inboundSchema.parse(payload);
 		case "subscription.canceled":
@@ -109,6 +147,33 @@ const unifiedVerificationError = z
 	).parse;
 
 /**
+ * The legacy path below hands verification and parsing to the SDK in one call,
+ * so a refund the SDK refuses never reaches the parser above. That call stays
+ * the first and deciding check, and a verification error from it ends the
+ * request before this function runs. Only when it fails for another reason
+ * does this function verify the same body again with the same key (the base64
+ * of the raw secret, as the SDK builds it), so the object parsed here is one
+ * whose signature this module checked itself. It accepts a refund event with
+ * an unlisted reason and nothing else. For anything else, and on any error,
+ * it returns null and the SDK's error stands.
+ */
+function legacyRefundWithUnknownReason(
+	body: string | Buffer,
+	headers: PolarWebhookHeaders,
+	secret: string
+) {
+	try {
+		const key = Buffer.from(secret, "utf-8").toString("base64");
+		const refund = unknownRefundReasonAsOther(
+			new Webhook(key).verify(body, headers)
+		);
+		return refund ? parsePolarWebhookPayload(refund) : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Verify and parse a Polar delivery.
  *
  * New Polar API webhook secrets are `whsec_` keys whose suffix is already the
@@ -139,6 +204,10 @@ export function validatePolarEvent(
 	} catch (error) {
 		if (isVerificationError(error)) {
 			throw unifiedVerificationError(error);
+		}
+		const refund = legacyRefundWithUnknownReason(body, headers, secret);
+		if (refund) {
+			return refund;
 		}
 		throw error;
 	}

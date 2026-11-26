@@ -1,7 +1,9 @@
 //! Framework-aware detectors for moving an existing agent setup into Ryu:
 //! OpenClaw (`~/.openclaw`, legacy `~/.clawdbot` / `~/.moltbot`), Hermes Agent
-//! (`~/.hermes`), an extracted Meta Muse filesystem export, and Mastra or
-//! LangChain/LangGraph projects.
+//! (`~/.hermes`, on Windows `%LOCALAPPDATA%\hermes`, with one bot per
+//! `profiles/<name>/`), an extracted Meta Muse filesystem export, a staged Grok
+//! Bot export archive (see `bot_archive`), and Mastra or LangChain/LangGraph
+//! projects.
 //!
 //! This extends the generic setup scan in the parent module rather than adding
 //! a second importer. Every item is emitted as an existing scan kind
@@ -35,12 +37,16 @@ use crate::sidecar::mcp::McpServerConfig;
 
 mod code_agents;
 mod config;
+mod grok_bot;
+mod hermes_profiles;
 mod lexer;
 mod memory;
 mod notes;
 
 pub use code_agents::*;
 pub use config::*;
+use grok_bot::*;
+use hermes_profiles::*;
 pub use lexer::*;
 pub use memory::*;
 pub use notes::*;
@@ -68,6 +74,9 @@ pub enum Framework {
     Muse,
     Mastra,
     LangChain,
+    /// A bot export archive, unpacked into a staging folder: the zip a
+    /// migrator prompt builds inside xAI's Grok Bot.
+    GrokBot,
     /// A bare persona folder (`SOUL.md` / `IDENTITY.md`, optional `MEMORY.md`)
     /// with no product-specific markers — for example a scanned OpenClaw
     /// workspace, or instructions and notes saved out of a hosted agent that
@@ -84,6 +93,7 @@ impl Framework {
             Self::Muse => "muse",
             Self::Mastra => "mastra",
             Self::LangChain => "langchain",
+            Self::GrokBot => "grok-bot",
             Self::Persona => "persona",
         }
     }
@@ -96,6 +106,7 @@ impl Framework {
             Self::Muse => "Muse",
             Self::Mastra => "Mastra",
             Self::LangChain => "LangChain",
+            Self::GrokBot => "Grok Bot",
             Self::Persona => "Persona",
         }
     }
@@ -104,7 +115,7 @@ impl Framework {
     pub fn has_persona_home(self) -> bool {
         matches!(
             self,
-            Self::OpenClaw | Self::Hermes | Self::Muse | Self::Persona
+            Self::OpenClaw | Self::Hermes | Self::Muse | Self::GrokBot | Self::Persona
         )
     }
 }
@@ -116,6 +127,10 @@ pub const OPENCLAW_CONFIG_FILES: &[&str] = &["openclaw.json", "clawdbot.json", "
 /// Detect which framework a scanned folder belongs to. Cheap probes only; a
 /// plain project with none of these markers returns `None`.
 pub fn detect(root: &Path) -> Option<Framework> {
+    // A staging folder is written by Ryu itself and holds nothing else.
+    if is_bot_archive(root) {
+        return Some(Framework::GrokBot);
+    }
     let dir_name = root
         .file_name()
         .and_then(|n| n.to_str())
@@ -126,9 +141,13 @@ pub fn detect(root: &Path) -> Option<Framework> {
     {
         return Some(Framework::OpenClaw);
     }
+    // The Windows home is `%LOCALAPPDATA%\hermes`, which has no leading dot,
+    // so a home that holds only bots (`profiles/`) is recognised by its name.
     if dir_name == ".hermes"
         || (root.join("config.yaml").is_file()
-            && (root.join("SOUL.md").is_file() || root.join("memories").is_dir()))
+            && (root.join("SOUL.md").is_file()
+                || root.join("memories").is_dir()
+                || (dir_name == "hermes" && root.join("profiles").is_dir())))
     {
         return Some(Framework::Hermes);
     }
@@ -191,6 +210,7 @@ pub(super) fn collect(root: &Path, c: &mut Collector) -> Option<Framework> {
         Framework::Hermes => collect_hermes_notes(root, c),
         Framework::Muse => collect_muse_notes(root, c),
         Framework::Persona => note_persona_leftovers(root, c),
+        Framework::GrokBot => collect_bot_archive(root, c),
         Framework::Mastra | Framework::LangChain => collect_code_agents(root, framework, c),
     }
     collect_env_credential_names(root, framework, c);
@@ -210,11 +230,20 @@ const PERSONA_FILES: &[(&str, &str)] = &[
 ];
 
 /// Workspace folders that hold a persona: the root itself, then OpenClaw's
-/// `workspace/`, `workspace.default/`, and per-agent `workspace-<id>/`.
+/// `workspace/`, `workspace.default/`, and per-agent `workspace-<id>/`, or
+/// each Hermes bot under `profiles/<name>/`, or each bot of a staged export
+/// archive under `bots/<key>/`.
 fn persona_workspaces(root: &Path, framework: Framework) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if is_persona_dir(root) {
         out.push(root.to_path_buf());
+    }
+    if framework == Framework::Hermes {
+        out.extend(hermes_profile_dirs(root));
+        return out;
+    }
+    if framework == Framework::GrokBot {
+        return archive_bot_dirs(root);
     }
     if framework != Framework::OpenClaw {
         return out;
@@ -272,6 +301,9 @@ fn collect_persona_home(root: &Path, framework: Framework, c: &mut Collector) {
     if memories.is_dir() {
         collect_memory_docs(&memories, framework, c);
     }
+    if framework == Framework::Hermes {
+        collect_hermes_profiles(root, c);
+    }
 }
 
 /// Emit memory items for `MEMORY.md`, `USER.md`, dated daily notes under
@@ -318,10 +350,15 @@ fn push_memory_item(path: &Path, framework: Framework, c: &mut Collector) {
     if entries == 0 {
         return;
     }
-    let name = path
+    let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("memory");
+    // Every bot of an export archive has a `MEMORY.md`; name it by its bot.
+    let bot_name = (framework == Framework::GrokBot)
+        .then(|| archive_memory_name(&c.root, path))
+        .flatten();
+    let name = bot_name.as_deref().unwrap_or(file_name);
     let title = if entries == 1 {
         Message::new(messages::IMPORT_SOURCE_MEMORY_ONE_TITLE_MESSAGE)
     } else {

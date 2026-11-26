@@ -1,3 +1,7 @@
+import {
+	OnboardingLanguageControl,
+	onboardingPhaseKeepsLanguage,
+} from "@/src/components/onboarding/OnboardingLanguageControl.tsx";
 import { RyuOnboardingPersonaProvider } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import { useOnboardingActivation } from "./OnboardingPage.activation.ts";
 import { useOnboardingAgentsStep } from "./OnboardingPage.agents-step.ts";
@@ -33,7 +37,7 @@ type OnboardingPageScope = {
 
 export default function OnboardingPage(props: OnboardingPageProps) {
 	return (
-		<div className="size-full bg-background">
+		<div className="relative size-full bg-background">
 			<RyuOnboardingPersonaProvider>
 				<OnboardingPageContent {...props} />
 			</RyuOnboardingPersonaProvider>
@@ -61,9 +65,14 @@ function OnboardingPageContent({
 	Object.assign(scope, useOnboardingNodeChoice(scope));
 	Object.assign(scope, useOnboardingSteps(scope));
 	Object.assign(scope, useOnboardingActivation(scope));
-	const renderedOnboardingSetupPhase = renderOnboardingSetupPhase(scope);
-	if (renderedOnboardingSetupPhase !== undefined) {
-		return renderedOnboardingSetupPhase;
-	}
-	return renderOnboardingPhase(scope);
+	const rendered =
+		renderOnboardingSetupPhase(scope) ?? renderOnboardingPhase(scope);
+	return (
+		<>
+			{rendered}
+			{onboardingPhaseKeepsLanguage(scope.phase) ? (
+				<OnboardingLanguageControl />
+			) : null}
+		</>
+	);
 }

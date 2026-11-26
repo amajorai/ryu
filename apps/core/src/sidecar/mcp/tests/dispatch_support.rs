@@ -160,3 +160,80 @@ fn cursor_identity_text_trims_and_caps_display_fields() {
     assert_eq!(cursor_identity_text(Some("  "), 80), None);
     assert_eq!(cursor_identity_text(None, 80), None);
 }
+
+/// A Community-tier plugin (not a compiled or verified official manifest) with
+/// one `inline_js` tool, the given approved grants, and a manifest `permissions`
+/// block that asks for child processes and names host programs in `run`.
+async fn community_plugin_with_run(grants: &[&str], run: &[&str]) -> McpRegistry {
+    let plugin_id = "com.test.vg4-runner";
+    let store = std::sync::Arc::new(crate::plugins::PluginStore::open_in_memory().unwrap());
+    store.insert(plugin_id, "1.0.0").await.unwrap();
+    let approved: Vec<String> = grants.iter().map(|s| s.to_string()).collect();
+    store.set_enabled(plugin_id, &approved).await.unwrap();
+    let manifest = crate::plugin_manifest::PluginManifest {
+        id: plugin_id.to_owned(),
+        name: "Runner".to_owned(),
+        version: "1.0.0".to_owned(),
+        runnables: vec![crate::sidecar::mcp::tests::tool_entry(
+            "runner",
+            json!({
+                "slug": "runner",
+                "backend": "inline_js",
+                "code": "return await ((input, host) => ({ ok: true }))(input, host);",
+            }),
+        )],
+        permission_grants: approved,
+        permissions: Some(crate::plugin_manifest::PermissionSet {
+            child_process: true,
+            run: run.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }),
+        companion: None,
+        ..Default::default()
+    };
+    let manifests = std::sync::Arc::new(tokio::sync::RwLock::new(vec![manifest]));
+    McpRegistry::empty().with_self_build(manifests, store)
+}
+
+/// Security sweep VG-4: holding only the allowlisted `tool:execute` grant must
+/// not let a Community manifest's `permissions.run` reach the sandbox's
+/// `childProcess.run` allow-list.
+#[tokio::test]
+async fn community_manifest_run_names_need_an_approved_command_grant() {
+    let reg = community_plugin_with_run(&["tool:execute"], &["powershell", "echo"]).await;
+    let resolved = reg
+        .resolve_app_tool_backend("app.runner")
+        .await
+        .expect("enabled plugin owns app.runner");
+    let permissions = resolved
+        .permissions
+        .expect("the permissions block itself is kept");
+    assert!(
+        permissions.child_process,
+        "child_process stays on, so capability shims still work"
+    );
+    assert!(
+        permissions.run.is_empty(),
+        "no tool:command grant, so no host program may be allow-listed, got {:?}",
+        permissions.run
+    );
+}
+
+#[tokio::test]
+async fn community_manifest_run_name_with_its_exact_command_grant_is_kept() {
+    let reg = community_plugin_with_run(
+        &["tool:execute", "tool:command:echo"],
+        &["powershell", "echo"],
+    )
+    .await;
+    let resolved = reg
+        .resolve_app_tool_backend("app.runner")
+        .await
+        .expect("enabled plugin owns app.runner");
+    let permissions = resolved.permissions.expect("permissions block kept");
+    assert_eq!(
+        permissions.run,
+        vec!["echo".to_owned()],
+        "only the name with an approved tool:command grant survives"
+    );
+}

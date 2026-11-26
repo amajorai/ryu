@@ -152,6 +152,15 @@ describe("selectUpsellCards — friction + desire stay silent until V2", () => {
 		expect(cards).toEqual([]);
 	});
 
+	it("ignores historical cap hits for unlimited tabs and remote nodes", () => {
+		const cards = selectUpsellCards(
+			{ ...EMPTY, capHits: { maxOpenTabs: 10, maxRemoteNodes: 10 } },
+			UPSELL_WEIGHTS,
+			NOW
+		);
+		expect(cards).toEqual([]);
+	});
+
 	it("emits no friction/desire cards when the maps are empty", () => {
 		const cards = selectUpsellCards(
 			{ ...EMPTY, agentSeconds: 7200 },
@@ -165,7 +174,7 @@ describe("selectUpsellCards — friction + desire stay silent until V2", () => {
 		const snapshot: UsageSnapshot = {
 			...EMPTY,
 			agentSeconds: 7200, // investment: ~37.2
-			capHits: { maxOpenTabs: 4 }, // friction: 32
+			capHits: { spaceStorageLimitGb: 4 }, // friction: 32
 			gatedAttempts: { "managed-inference": 3 }, // desire: 36
 		};
 		const cards = selectUpsellCards(snapshot, UPSELL_WEIGHTS, NOW);
@@ -185,7 +194,7 @@ describe("selectUpsellCards — lever diversity", () => {
 			sessionCount: 1200,
 			agentSeconds: 7200,
 			requestCount: 1100,
-			capHits: { maxOpenTabs: 2 }, // friction: 16 (below the investment trio)
+			capHits: { spaceStorageLimitGb: 2 }, // friction: 16 (below the investment trio)
 		};
 		const cards = selectUpsellCards(snapshot, UPSELL_WEIGHTS, NOW);
 		expect(cards).toHaveLength(3);
@@ -208,7 +217,7 @@ describe("selectUpsellCards — clients localize from id, metric and value", () 
 			sessionCount: 1200,
 			agentSeconds: 7200,
 			requestCount: 1100,
-			capHits: { maxOpenTabs: 3 },
+			capHits: { spaceStorageLimitGb: 3 },
 			gatedAttempts: { "managed-inference": 4 },
 		};
 		const weights = { ...UPSELL_WEIGHTS, maxCards: 10 };

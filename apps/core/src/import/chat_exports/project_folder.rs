@@ -44,8 +44,19 @@ pub fn ensure_project_folder(
     source: ExportSource,
     project: &ExportProject,
 ) -> Result<ProjectFolder> {
+    ensure_project_folder_for(base, source.id(), source.label(), project)
+}
+
+/// [`ensure_project_folder`] for a source that is not a ChatGPT or Claude
+/// export, named by its id and its label.
+pub fn ensure_project_folder_for(
+    base: &Path,
+    source_id: &str,
+    source_label: &str,
+    project: &ExportProject,
+) -> Result<ProjectFolder> {
     fs::create_dir_all(base)?;
-    let owner = |files: &serde_json::Map<String, Value>| serde_json::json!({ "source": source.id(), "projectId": project.id, "files": files });
+    let owner = |files: &serde_json::Map<String, Value>| serde_json::json!({ "source": source_id, "projectId": project.id, "files": files });
     let name = safe_file_name(&project.name);
     let mut folder = base.join(&name);
     let mut attempt = 1;
@@ -60,7 +71,7 @@ pub fn ensure_project_folder(
             .ok()
             .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
         let owned = existing.as_ref().is_some_and(|existing| {
-            existing.get("source").and_then(Value::as_str) == Some(source.id())
+            existing.get("source").and_then(Value::as_str) == Some(source_id)
                 && existing.get("projectId").and_then(Value::as_str) == Some(project.id.as_str())
         });
         if owned {
@@ -74,7 +85,7 @@ pub fn ensure_project_folder(
             break;
         }
         attempt += 1;
-        folder = base.join(format!("{name} ({} {attempt})", source.label()));
+        folder = base.join(format!("{name} ({source_label} {attempt})"));
         if attempt > 50 {
             bail!(
                 "could not find a free folder name for project {:?}",
@@ -92,7 +103,7 @@ pub fn ensure_project_folder(
     let mut agents = format!(
         "# {}\n\nImported from {}.\n",
         project.name.trim(),
-        source.label()
+        source_label
     );
     if !project.description.is_empty() {
         agents.push_str(&format!("\n{}\n", project.description));

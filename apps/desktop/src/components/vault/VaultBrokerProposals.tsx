@@ -119,7 +119,7 @@ export function BrokerProposals({ target }: { target: ApiTarget }) {
 		onError: (error) => {
 			sileo.error({
 				title: tl("Could not update the proposal"),
-				description: vaultErrorMessage(error, "Try again.", tl),
+				description: vaultErrorMessage(error, tl("Try again."), tl),
 			});
 		},
 	});

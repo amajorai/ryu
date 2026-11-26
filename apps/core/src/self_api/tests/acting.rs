@@ -275,3 +275,72 @@ async fn loopback_substitutes_path_param() {
         .unwrap_err();
     assert!(err.to_string().contains("missing required path parameter"));
 }
+
+#[tokio::test]
+async fn an_agent_cannot_write_the_list_of_allowed_credential_tools() {
+    use axum::{routing::put, Router};
+    // The resolved path of the setting, built from the key the rule reads.
+    let setting = format!(
+        "/api/preferences/{}",
+        crate::sidecar::mcp::CREDENTIAL_TOOLS_ALLOWED_PREF_KEY
+    );
+    // The route template stays in the catalog; other settings stay writable.
+    assert!(!is_denied("/api/preferences/{key}", "put"));
+    assert!(!is_denied("/api/preferences/theme", "put"));
+    assert!(!is_denied(&setting, "get"));
+    for method in ["put", "PUT", "post", "patch", "delete"] {
+        assert!(is_denied(&setting, method), "{method}");
+    }
+
+    // The agent's own tool call: the loopback refuses the resolved path before
+    // it sends anything. The listener is this test's own, on loopback, so a
+    // write that is not refused is seen here and goes nowhere else.
+    let app = Router::new().route(
+        "/api/preferences/:key",
+        put(|axum::extract::Path(key): axum::extract::Path<String>| async move { key }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let route = CoreApiRoute {
+        id: "ryu_api.put_api_preferences_key".to_string(),
+        method: "PUT".to_string(),
+        path_template: "/api/preferences/{key}".to_string(),
+        summary: String::new(),
+        path_params: vec!["key".to_string()],
+        query_params: vec![],
+        has_body: true,
+        input_schema: json!({ "type": "object", "properties": {}, "required": ["key"] }),
+    };
+    let base = format!("http://{addr}");
+    let client = reqwest::Client::new();
+    let refused = send_request(
+        &client,
+        &base,
+        None,
+        &route,
+        &json!({
+            "key": crate::sidecar::mcp::CREDENTIAL_TOOLS_ALLOWED_PREF_KEY,
+            "body": { "value": "[\"bitwarden.get\"]" },
+        }),
+    )
+    .await
+    .expect_err("the write of the allow list is refused");
+    assert!(
+        refused.to_string().contains("resolved to a denied path"),
+        "{refused}"
+    );
+    // Another setting still goes through the same route.
+    let other = send_request(
+        &client,
+        &base,
+        None,
+        &route,
+        &json!({ "key": "theme", "body": { "value": "dark" } }),
+    )
+    .await
+    .expect("another setting is written");
+    assert_eq!(other["status"], json!(200));
+}

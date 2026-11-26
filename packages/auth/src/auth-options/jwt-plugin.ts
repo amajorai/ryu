@@ -53,7 +53,9 @@ export const jwtPlugins = [
 			// omitted (flags off) on any failure, including a roster read failure.
 			// `ryu_limits` (`CORE_LIMITS_CLAIM` in lib/plans.ts) carries the same
 			// org's Box concurrency cap, `{ boxConcurrency }`, and is omitted on
-			// any failure, so Core falls back to the Box service's own limits.
+			// any failure, so Core falls back to the Box service's own limits. It
+			// also carries `accountsPerProvider`, from the org's plan and the
+			// user's own plan or desktop license.
 			// Each org's access policy (IP allowlist, required two-factor, session
 			// max age; lib/jwt-org-access.ts) is applied to this mint first: an org
 			// that refuses this session is left out of `orgs`, `teams` and the
@@ -110,7 +112,11 @@ export const jwtPlugins = [
 						: { keys: [], organizationId: null }
 				);
 				const coreLimits = claimOrganization.then((selected) =>
-					resolveCoreLimitsClaim(selected?.organization?.id ?? null)
+					resolveCoreLimitsClaim(
+						selected?.organization?.id ?? null,
+						undefined,
+						user.id
+					)
 				);
 				// The two rosters are independent, so they overlap. The team
 				// roster's `catch` keeps a team-roster failure from rejecting the

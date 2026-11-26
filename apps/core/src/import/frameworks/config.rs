@@ -10,7 +10,12 @@ pub(super) fn read_openclaw_config(root: &Path) -> Option<Value> {
 }
 
 pub(super) fn read_hermes_config(root: &Path) -> Option<Value> {
-    let raw = read_bounded(&root.join("config.yaml"), MAX_FRAMEWORK_FILE_BYTES)?;
+    read_yaml(&root.join("config.yaml"))
+}
+
+/// A bounded YAML file as a JSON value.
+pub(super) fn read_yaml(path: &Path) -> Option<Value> {
+    let raw = read_bounded(path, MAX_FRAMEWORK_FILE_BYTES)?;
     let yaml: noyalib::compat::serde_yaml::Value =
         noyalib::compat::serde_yaml::from_str(&raw).ok()?;
     serde_json::to_value(yaml).ok()
@@ -43,8 +48,10 @@ pub(super) fn lower_mcp_map(map: Option<&Value>) -> Vec<(String, McpServerConfig
     map.iter()
         .filter_map(|(name, entry)| {
             let entry = entry.as_object()?;
-            // Ryu enables every imported server, so a server the user switched
-            // off in the source is not offered at all.
+            // A server the user switched off in the source is not offered at
+            // all. One that is offered lands disabled in Ryu whatever the
+            // source says (`write_imported_mcp_entry`), so the `enabled: true`
+            // below only marks it as offered and is never what gets written.
             if entry.get("enabled").and_then(Value::as_bool) == Some(false) {
                 return None;
             }

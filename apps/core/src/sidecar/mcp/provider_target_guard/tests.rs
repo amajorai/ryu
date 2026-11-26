@@ -29,6 +29,8 @@ fn every_core_built_in_server_is_reserved() {
         super::super::consent_tool::SERVER_NAME,
         super::super::delegate::SERVER_NAME,
         super::super::device_tool::SERVER_NAME,
+        super::super::builtin_servers::diagnostics::SERVER_NAME,
+        super::super::feedback_tool::SERVER_NAME,
         super::super::marketplace_tool::SERVER_NAME,
         super::super::notify_tool::SERVER_NAME,
         super::super::orchestrator::SERVER_NAME,

@@ -1,6 +1,7 @@
 //! Secret resolution context and command workspace roots.
 // test-exempt: moved verbatim out of sidecar/mcp/mod.rs; covered by the McpRegistry tests under sidecar/mcp/tests/.
 
+use crate::server::chat_checkpoints::turn_folders;
 use crate::sidecar::mcp::*;
 
 impl McpRegistry {
@@ -124,6 +125,8 @@ impl McpRegistry {
     /// caller-provided absolute path. On an unbound local node, the Core process
     /// directory is the only available local workspace fallback; bound nodes
     /// require a conversation whose run metadata names an existing workspace.
+    /// On a shared node a stored folder outside the member folders is no root,
+    /// whoever stored it, and Core's own directory is never the fallback.
     pub(in crate::sidecar::mcp) async fn command_workspace_root(
         &self,
         host_conversation_id: Option<&str>,
@@ -141,7 +144,9 @@ impl McpRegistry {
                 .flatten()
                 {
                     if let Ok(path) = std::fs::canonicalize(raw) {
-                        if crate::tool_exec::is_usable_workspace_root(&path) {
+                        if crate::tool_exec::is_usable_workspace_root(&path)
+                            && turn_folders::stored_folder_allowed(&path)
+                        {
                             return Some(path);
                         }
                     }
@@ -151,6 +156,7 @@ impl McpRegistry {
 
         if crate::sidecar::control_plane::registered_org().is_none()
             && host_conversation_id.is_none()
+            && !turn_folders::node_bounds_turn_folders()
         {
             return std::env::current_dir()
                 .ok()
@@ -202,3 +208,7 @@ impl McpRegistry {
         Ok(resolved)
     }
 }
+
+#[cfg(test)]
+#[path = "secrets_folder_tests.rs"]
+mod secrets_folder_tests;

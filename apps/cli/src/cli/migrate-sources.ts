@@ -16,7 +16,11 @@ export const SOURCES = {
 		label: "OpenClaw",
 		defaults: ["~/.openclaw", "~/.clawdbot", "~/.moltbot"],
 	},
-	hermes: { label: "Hermes", defaults: ["~/.hermes"] },
+	// `~/AppData/Local/hermes` is the Hermes home on Windows.
+	hermes: {
+		label: "Hermes",
+		defaults: ["~/.hermes", "~/AppData/Local/hermes"],
+	},
 	chatgpt: {
 		label: "ChatGPT",
 		defaults: [],

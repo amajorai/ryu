@@ -62,6 +62,7 @@ pub(in crate::server) async fn refuse_update_breaking_dependents(
 /// none).
 pub(in crate::server) async fn install_new_dependencies_for_update(
     state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
     manifest: &crate::plugin_manifest::PluginManifest,
     buyer_token: Option<String>,
     dry_run: bool,
@@ -183,6 +184,15 @@ pub(in crate::server) async fn install_new_dependencies_for_update(
     if dry_run {
         return Ok(dep_order.into_iter().map(|plugin| plugin.id).collect());
     }
+
+    // Installing a dependency is an install. The update route only asked for
+    // `app.update`; the install route asks for `app.install`.
+    enforce_app_lifecycle_permission(
+        state,
+        caller,
+        crate::identity_verify::permissions::APP_INSTALL,
+    )
+    .await?;
 
     // ── Install the new-dep closure with rollback (reuses install_closure +
     //    persist_installed_plugin + rollback_plugin_install — the same sinks

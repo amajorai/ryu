@@ -12,6 +12,7 @@ interface SignedLicenseFixture {
 	nbf?: number;
 	organizationId?: string;
 	plan?: string;
+	seats?: number | string | null;
 }
 function encode(
 	value: SignedLicenseFixture | { alg: string; typ: string }
@@ -101,6 +102,67 @@ describe("verifySelfHostedEnterpriseLicense", () => {
 		).toBeNull();
 		expect(
 			verifySelfHostedEnterpriseLicense(wrongAudience, publicKeyPem)
+		).toBeNull();
+	});
+
+	it("reads an optional seat count and ignores a missing or malformed one", () => {
+		const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+			modulusLength: 2048,
+		});
+		const publicKeyPem = publicKey
+			.export({ type: "spki", format: "pem" })
+			.toString();
+		const basePayload = {
+			capabilities: ["enterprise.scim"],
+			exp: 2_000_000_000,
+			organizationId: "507f1f77bcf86cd799439011",
+			plan: "enterprise",
+		};
+		const seatsOf = (seats?: number | string | null) =>
+			verifySelfHostedEnterpriseLicense(
+				createLicense(
+					privateKey,
+					seats === undefined ? basePayload : { ...basePayload, seats }
+				),
+				publicKeyPem,
+				new Date(1_950_000_000 * 1000)
+			);
+
+		expect(seatsOf(25)?.seats).toBe(25);
+		expect(seatsOf(1)?.seats).toBe(1);
+		// No claim: the license is valid and states no seat count.
+		expect(seatsOf()?.seats).toBeNull();
+		expect(seatsOf()?.plan).toBe("enterprise");
+		// A malformed claim never invalidates the license or sets a count.
+		for (const malformed of [0, -3, 2.5, "25", null]) {
+			const license = seatsOf(malformed);
+			expect(license?.plan).toBe("enterprise");
+			expect(license?.seats).toBeNull();
+		}
+	});
+
+	it("does not let an unsigned seat count through", () => {
+		const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+			modulusLength: 2048,
+		});
+		const payload = {
+			capabilities: ["enterprise.scim"],
+			exp: 2_000_000_000,
+			organizationId: "507f1f77bcf86cd799439011",
+			plan: "enterprise",
+			seats: 5,
+		};
+		const [header = "", , signature = ""] = createLicense(
+			privateKey,
+			payload
+		).split(".");
+		const raised = `${header}.${encode({ ...payload, seats: 500 })}.${signature}`;
+		expect(
+			verifySelfHostedEnterpriseLicense(
+				raised,
+				publicKey.export({ type: "spki", format: "pem" }).toString(),
+				new Date(1_950_000_000 * 1000)
+			)
 		).toBeNull();
 	});
 });

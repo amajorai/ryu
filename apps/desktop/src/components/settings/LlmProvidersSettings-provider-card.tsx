@@ -12,6 +12,7 @@ import { StatusBadge } from "@ryu/ui/components/status-badge.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { ProviderAccountSection } from "@/components/agent-elements/input/provider-account-section.tsx";
 import { useProviderCommandNavigation } from "@/components/agent-elements/input/provider-command-dialog.tsx";
+import { ProviderAccountLimit } from "@/src/components/billing/AccountLimitNotice.tsx";
 import { gatewayProviderSlug } from "@/src/lib/api/pi-config.ts";
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
@@ -27,7 +28,7 @@ import {
 	managedBadgeLabel,
 	type ProviderCardProps,
 } from "./LlmProvidersSettings-shared.ts";
-import { OAuthAccountPoolControls } from "./OAuthAccountPoolControls.tsx";
+import { ProviderCredentialRouting } from "./ProviderCredentialRouting.tsx";
 import { ProviderDesktopRouteSetting } from "./ProviderDesktopRouteSetting.tsx";
 import { SettingsCard } from "./shared/settings-items.tsx";
 
@@ -182,6 +183,7 @@ function ProviderCardContent(props: ProviderCardProps) {
 						<ProviderSubscriptionSection state={state} />
 					) : null}
 
+					<ProviderAccountLimit count={provider.accounts?.length ?? 0} />
 					<ProviderAccountSection
 						accounts={provider.accounts ?? []}
 						canSetGateway={canSetGatewayAccount}
@@ -195,25 +197,7 @@ function ProviderCardContent(props: ProviderCardProps) {
 							handleSwitchAccount(account.accountId, target)
 						}
 					/>
-					{provider.accountRouting &&
-					(provider.accounts?.some((account) =>
-						provider.accountRouting?.credentialKinds.some(
-							(kind) => kind === account.kind
-						)
-					) ??
-						false) ? (
-						<OAuthAccountPoolControls
-							accounts={
-								provider.accounts?.filter((account) =>
-									provider.accountRouting?.credentialKinds.some(
-										(kind) => kind === account.kind
-									)
-								) ?? []
-							}
-							capabilities={provider.accountRouting}
-							providerId={provider.id}
-						/>
-					) : null}
+					<ProviderCredentialRouting provider={provider} />
 
 					{needsKey ? <ProviderApiKeySection state={state} /> : null}
 

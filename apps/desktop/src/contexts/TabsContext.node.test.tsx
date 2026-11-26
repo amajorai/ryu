@@ -27,7 +27,13 @@ mock.module("@/src/contexts/entitlement-context.tsx", () => ({
 			upgradePrompts += 1;
 		},
 		// A RESOLVED free verdict: an unresolved (null) one fails open.
-		verdict: { plan: null, proUnlocked: false },
+		verdict: {
+			managedInference: false,
+			marketplaceApps: false,
+			plan: null,
+			proUnlocked: true,
+			reason: "free",
+		},
 	}),
 }));
 mock.module("@/src/lib/window-routing.ts", () => ({
@@ -156,7 +162,7 @@ test("naming the default computer dedupes onto the default tab", async () => {
 	expect(overrides()).toEqual({});
 });
 
-test("at the tab cap the active tab is never rebound", async () => {
+test("a fourth tab on a free desktop opens bound to its computer, with no prompt", async () => {
 	await mount({ conversationId: "first" });
 	await act(() => {
 		tabs?.openTab("/chat", { conversationId: "second" });
@@ -171,9 +177,12 @@ test("at the tab cap the active tab is never rebound", async () => {
 			tabs?.openTab("/chat", { conversationId: "fourth", node: "studio" }) ??
 			"";
 	});
-	expect(upgradePrompts).toBe(1);
-	expect(returned).toBe(active);
-	expect(tabs?.tabs).toHaveLength(3);
+	expect(upgradePrompts).toBe(0);
+	expect(returned).not.toBe(active);
+	expect(tabs?.tabs).toHaveLength(4);
+	expect(tabs?.activeTabId).toBe(returned);
+	expect(overrides()[returned]).toBe("studio");
+	// The tab that was active before is not rebound.
 	expect(overrides()[active]).toBeUndefined();
 });
 

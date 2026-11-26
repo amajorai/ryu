@@ -22,6 +22,15 @@ function identityAndItems({ tr }: HelpTranslator): HelpEntry[] {
 			tr("Check a token against the JWKS; exit 1 when invalid"),
 		],
 		"",
+		tr("SSH one-time passwords:"),
+		"  ssh otp-roles | ssh otp-role show NAME | ssh otp-role delete NAME",
+		"  ssh otp-role set NAME --default-user U --cidr C… [--allowed-user U…] [--exclude-cidr C…]",
+		["[--port 22] [--ttl 10m]", tr("Replaces the whole role"), 6],
+		[
+			"ssh otp ROLE --ip IP [--username U]",
+			tr("Print a one-time password for one login to host IP"),
+		],
+		"",
 		tr("TOTP and typed items:"),
 		[
 			"totp code NAME | totp validate NAME CODE",

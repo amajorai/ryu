@@ -57,6 +57,20 @@ impl McpRegistry {
                 ..Default::default()
             },
             ServerSummary {
+                name: builtin_servers::diagnostics::SERVER_NAME.to_owned(),
+                command: "(built-in)".to_owned(),
+                args: vec![],
+                description: Some(
+                    "Built-in self diagnostics: read-only checks of Ryu's own state (Core, the \
+                     Gateway, background services, Safe Mode, the audits) and the faults of the \
+                     current chat, with credentials and personal data removed."
+                        .to_owned(),
+                ),
+                enabled: true,
+                available: Some(true),
+                ..Default::default()
+            },
+            ServerSummary {
                 name: challenges_tool::SERVER_NAME.to_owned(),
                 command: "(built-in HTTPS)".to_owned(),
                 args: vec![],
@@ -243,6 +257,20 @@ impl McpRegistry {
                     "Built-in consent requests: ask the user, with an inline chat card, to \
                      connect an app account (consent.connect_app) or install a plugin \
                      (consent.install_plugin). Nothing is granted until the user confirms."
+                        .to_owned(),
+                ),
+                enabled: true,
+                available: Some(true),
+                ..Default::default()
+            },
+            ServerSummary {
+                name: feedback_tool::SERVER_NAME.to_owned(),
+                command: "(built-in)".to_owned(),
+                args: vec![],
+                description: Some(
+                    "Built-in feedback draft: draft an idea or a bug report about Ryu as an \
+                     inline chat card (feedback.draft). The user reviews the draft and what \
+                     the app would attach. Nothing is sent until the user confirms."
                         .to_owned(),
                 ),
                 enabled: true,

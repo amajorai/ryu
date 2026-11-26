@@ -155,3 +155,8 @@ pub(crate) fn describe_stream_error(
     }
     error.to_string()
 }
+
+// The one rule for a model request that does not go to the Gateway (CE-37).
+#[path = "direct_hop_guard.rs"]
+mod direct_hop_guard;
+pub(crate) use direct_hop_guard::*;

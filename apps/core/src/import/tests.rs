@@ -65,6 +65,111 @@ command = "mcp-git"
     let _ = fs::remove_dir_all(&root);
 }
 
+/// TC-3: the picker must be able to show what an MCP item would run. The scan
+/// response carries the command, its arguments and the env variable NAMES,
+/// never an env value. Read through the wire form, as a client sees it.
+#[test]
+fn mcp_scan_item_shows_the_command_and_env_names_but_no_env_values() {
+    let root = temp_tree();
+    write(
+        &root,
+        "mcp.json",
+        r#"{"mcpServers":{
+            "git":{"command":"mcp-git","args":["--repo","."],"env":{"GIT_TOKEN":"tok-value-123"}},
+            "docs":{"url":"https://mcp.example.com/mcp"}
+        }}"#,
+    );
+    let res = scan_source(&root).unwrap();
+    let wire = serde_json::to_value(&res.items).unwrap();
+    let item = |name: &str| {
+        let id = format!("{}/mcp/json/{name}", kind::MCP_SERVER);
+        wire.as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id.as_str())
+            .unwrap_or_else(|| panic!("no item {id}: {wire:#}"))
+            .clone()
+    };
+    let git = item("git");
+    assert_eq!(git["mcp"]["command"], "mcp-git", "{git:#}");
+    assert_eq!(git["mcp"]["args"], serde_json::json!(["--repo", "."]));
+    assert_eq!(git["mcp"]["env_names"], serde_json::json!(["GIT_TOKEN"]));
+    assert!(
+        !wire.to_string().contains("tok-value-123"),
+        "an env value reached the scan response: {wire:#}"
+    );
+    let docs = item("docs");
+    assert_eq!(
+        docs["mcp"]["url"], "https://mcp.example.com/mcp",
+        "{docs:#}"
+    );
+    assert!(docs["mcp"].get("command").is_none(), "{docs:#}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// TC-12: the picker must be able to show which headers a remote MCP item
+/// would send, and that a header or env value names one of the user's saved
+/// keys. The scan response carries the header NAMES and one flag, never a
+/// header or env value. Read through the wire form, as a client sees it.
+#[test]
+fn mcp_scan_item_shows_header_names_and_flags_a_saved_key_reference() {
+    let root = temp_tree();
+    write(
+        &root,
+        "mcp.json",
+        r#"{"mcpServers":{
+            "keyed":{"type":"http","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer secret:TC12_SAVED_KEY","X-Team":"literal-header-value-123"}},
+            "envkeyed":{"command":"mcp-git","env":{"GIT_TOKEN":"vault:TC12_OTHER_KEY"}},
+            "plain":{"url":"https://mcp.example.com/open","headers":{"X-Client":"ryu-client-value"}}
+        }}"#,
+    );
+    let res = scan_source(&root).unwrap();
+    let wire = serde_json::to_value(&res.items).unwrap();
+    let item = |name: &str| {
+        let id = format!("{}/mcp/json/{name}", kind::MCP_SERVER);
+        wire.as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id.as_str())
+            .unwrap_or_else(|| panic!("no item {id}: {wire:#}"))
+            .clone()
+    };
+    let keyed = item("keyed");
+    assert_eq!(
+        keyed["mcp"]["header_names"],
+        serde_json::json!(["Authorization", "X-Team"]),
+        "{keyed:#}"
+    );
+    assert_eq!(keyed["mcp"]["names_saved_key"], true, "{keyed:#}");
+    let envkeyed = item("envkeyed");
+    assert_eq!(envkeyed["mcp"]["names_saved_key"], true, "{envkeyed:#}");
+    assert!(
+        envkeyed["mcp"].get("header_names").is_none(),
+        "{envkeyed:#}"
+    );
+    // A literal header is listed by name and is not a saved key reference.
+    let plain = item("plain");
+    assert_eq!(
+        plain["mcp"]["header_names"],
+        serde_json::json!(["X-Client"]),
+        "{plain:#}"
+    );
+    assert!(plain["mcp"].get("names_saved_key").is_none(), "{plain:#}");
+    let text = wire.to_string();
+    for value in [
+        "TC12_SAVED_KEY",
+        "literal-header-value-123",
+        "TC12_OTHER_KEY",
+        "ryu-client-value",
+    ] {
+        assert!(
+            !text.contains(value),
+            "a header or env value ({value}) reached the scan response: {wire:#}"
+        );
+    }
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn scan_skips_vcs_and_node_modules() {
     let root = temp_tree();

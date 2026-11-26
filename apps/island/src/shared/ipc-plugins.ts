@@ -76,15 +76,28 @@ export type PluginHostInvokeResult =
 	| { ok: true; result: unknown }
 	| { ok: false; code: PluginHostErrorCode; message: string };
 
+/** Who an authenticated Core HTTP call is for. Main decides the routes from it
+ *  before it attaches a credential (`main/services/plugin-core-http.ts`).
+ *  - `contribution` is a declarative view. `plugin` and `http_policy` are the two
+ *    fields Core stamped on it, passed on unchanged. The call may address the
+ *    owning app's own `/api/ext/<plugin id>` mount, or any Core route only when
+ *    Core stamped `"core"`.
+ *  - `host` is the shell itself, limited to a fixed list of routes in main. */
+export type PluginCoreHttpOwner =
+	| { http_policy?: unknown; kind: "contribution"; plugin: string | undefined }
+	| { kind: "host" };
+
 /** Body for an authenticated Core HTTP call on behalf of a declarative view
  *  (renderer → main): the http tier of view actions + the view `source` fetch.
- *  `path` must be a Core-relative `/api/...` path (validated main-side too);
- *  `body` (when present) is JSON-serialized. The renderer templates paths/bodies
- *  BEFORE this hop (`@ryu/app-host/views` `renderActionHttp`). */
+ *  `owner` says whose call it is and so which routes `path` may name (validated
+ *  main-side); `body` (when present) is JSON-serialized. The renderer templates
+ *  paths/bodies BEFORE this hop (`@ryu/app-host/views`
+ *  `renderContributionActionHttp`). */
 export interface PluginCoreHttpRequest {
 	body?: unknown;
 	coreGeneration?: number;
 	method: string;
+	owner: PluginCoreHttpOwner;
 	path: string;
 }
 

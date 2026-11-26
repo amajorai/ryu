@@ -26,6 +26,26 @@ pub(in crate::server) async fn set_preference(
     if let Some(response) = generic_preference_write_denial(&key) {
         return response;
     }
+    // The member folders decide where every turn on a shared node may work. A
+    // request that carries a person needs `nodes.manage`; the node credential
+    // with no person is the machine's operator. The answer names no folder.
+    // The list of allowed credential tools decides which tools may hand back
+    // a stored secret, and is written under the same rule.
+    if (key == chat_checkpoints::turn_folders::MEMBER_WORKSPACE_ROOTS_PREF_KEY
+        || key == crate::sidecar::mcp::CREDENTIAL_TOOLS_ALLOWED_PREF_KEY)
+        && caller.is_some()
+    {
+        let permission = crate::identity_verify::permissions::NODES_MANAGE;
+        if enforce_permission(&state, &caller, permission)
+            .await
+            .is_err()
+        {
+            return json_error(
+                StatusCode::FORBIDDEN,
+                format!("insufficient permissions: {permission}"),
+            );
+        }
+    }
     // Exporter-preset fields: refuse values that could never resolve, and keep
     // literal credentials out of the preferences store.
     if let Err(message) = crate::privacy::validate_otlp_preset_pref(&key, &body.value) {
@@ -114,6 +134,12 @@ pub(in crate::server) async fn set_preference(
             }
             if key == crate::workspace_trust::TRUSTED_WORKSPACES_PREF_KEY {
                 crate::workspace_trust::set_from_pref(&body.value);
+            }
+            if key == chat_checkpoints::turn_folders::MEMBER_WORKSPACE_ROOTS_PREF_KEY {
+                chat_checkpoints::turn_folders::set_from_pref(&body.value);
+            }
+            if key == crate::sidecar::mcp::CREDENTIAL_TOOLS_ALLOWED_PREF_KEY {
+                crate::sidecar::mcp::set_credential_tools_allowed_from_pref(&body.value);
             }
             if key == conversations::ConversationStore::CHAT_MEMORY_ENABLED_PREF_KEY {
                 let enabled =

@@ -17,7 +17,7 @@ import type {
 } from "@/src/lib/api/agent-sync.ts";
 import {
 	HOME_PROVIDERS,
-	pathSeparator,
+	providerHomePath,
 } from "./AgentSyncSections-providers.ts";
 import { EmptyCard, LoadErrorRow } from "./AgentSyncSections-rows.tsx";
 
@@ -56,11 +56,10 @@ export function RootDetection({
 			</div>
 		);
 	}
-	const separator = pathSeparator(home);
 	return (
 		<SettingsGroup>
 			{HOME_PROVIDERS.map((provider) => {
-				const path = `${home}${separator}${provider.home}`;
+				const path = providerHomePath(home, provider);
 				return (
 					<SettingsNavRow
 						key={provider.value}

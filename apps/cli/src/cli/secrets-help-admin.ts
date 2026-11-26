@@ -130,6 +130,12 @@ function dynamicAndShare({ tr }: HelpTranslator): HelpEntry[] {
 			tr("Print a new credential and its lease id"),
 		],
 		"  lease list [--name ROLE] [--all] | lease renew ID [--increment 1h] | lease revoke ID",
+		[
+			"lease force-revoke ID --acknowledge-credential-may-be-live",
+			tr(
+				"Mark a retry lease revoked without revoking it at the provider (configuration manager)"
+			),
+		],
 		"",
 		tr("Share and request links (opened in a browser, once):"),
 		[

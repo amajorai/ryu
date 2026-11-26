@@ -82,10 +82,12 @@ pub(super) async fn serve_until_shutdown(
     // (downloads/all-events SSE, the realtime socket) never close on their own.
     // A restart-for-update must not hang on a connected desktop with the
     // listener already closed, so it gets a bounded drain before cleanup runs.
+    // The drain starts only once the restart may go ahead: until no agent run
+    // is active, the listener stays open and Core keeps serving.
     let result = tokio::select! {
         result = serve => result,
         () = async {
-            crate::update::restart_requested().await;
+            crate::update::schedule::restart_gate::restart_ready().await;
             tokio::time::sleep(std::time::Duration::from_secs(20)).await;
         } => {
             tracing::warn!("restart-for-update: connections did not drain in time; stopping anyway");

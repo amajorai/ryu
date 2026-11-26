@@ -29,7 +29,7 @@ interface BillingSnapshot {
 	invoices: { id: string; amount: number; status: string }[];
 	preferences: Record<string, string>;
 	requests: CapturedRequest[];
-	scenario: "paid" | "trial";
+	scenario: "paid" | "free";
 	tauriCalls: { args: ProofJsonRecord | null; command: string }[];
 }
 
@@ -65,7 +65,7 @@ function apiWrites(snapshot: BillingSnapshot, url: string): CapturedRequest[] {
 
 async function openBilling(
 	page: Page,
-	scenario: "paid" | "trial"
+	scenario: "paid" | "free"
 ): Promise<void> {
 	// BetterAuth captures fetch during its static module initialization, before
 	// the harness installs its in-page API ledger. Serve this authentic client
@@ -156,7 +156,7 @@ test("validates and retries low-balance alerts, auto-recharge, and the sandbox b
 }) => {
 	const pageErrors: string[] = [];
 	page.on("pageerror", (error) => pageErrors.push(error.message));
-	await openBilling(page, "trial");
+	await openBilling(page, "free");
 	await expect(page.getByText("$42.50", { exact: true })).toBeVisible();
 
 	const recipient = page.getByRole("combobox", { exact: true, name: "Email" });
@@ -539,20 +539,69 @@ test("renders plan and invoice history and retries portal and lifetime actions",
 	});
 });
 
-test("Unlock Pro opens the actual trial-expired paywall", async ({ page }) => {
-	await openBilling(page, "trial");
-	const unlock = page.getByRole("button", { exact: true, name: "Unlock Pro" });
-	await expect(unlock).toBeVisible();
-	await unlock.click();
+test("a free desktop shows Free with no trial, no paywall and no trial request", async ({
+	page,
+}) => {
+	await openBilling(page, "free");
 	await expect(
-		page.getByRole("heading", { name: /trial has ended/iu })
+		page.getByText(
+			"Every feature on your computer is free. Managed inference and cloud nodes bill separately.",
+			{ exact: true }
+		)
 	).toBeVisible();
 	await expect(
-		page.getByRole("button", { exact: true, name: "Continue with free chat" })
-	).toBeVisible();
+		page.getByRole("button", { exact: true, name: "Unlock Pro" })
+	).toHaveCount(0);
+	await expect(page.getByText(/trial has ended/iu)).toHaveCount(0);
+	await expect(
+		page.getByRole("heading", { name: "Choose a plan" })
+	).toHaveCount(0);
+	const snapshot = await readProof(page);
+	expect(
+		snapshot.requests.filter((request) =>
+			request.url.includes("/api/billing/trial")
+		)
+	).toEqual([]);
 	await page.screenshot({
 		animations: "disabled",
 		fullPage: true,
-		path: evidencePath("billing-tab-desktop-trial-paywall"),
+		path: evidencePath("billing-tab-desktop-free"),
 	});
+});
+
+test("the declared use is shown, can be changed, and changes nothing else", async ({
+	page,
+}) => {
+	await openBilling(page, "free");
+	const use = page.getByRole("combobox", {
+		exact: true,
+		name: "How you use Ryu",
+	});
+	// Never asked: treated as personal use.
+	await expect(use).toContainText("Personal use");
+	await selectOption(page, "How you use Ryu", "Team or company use");
+	await expect(use).toContainText("Team or company use");
+	expect(
+		await page.evaluate(() => localStorage.getItem("ryu_declared_use"))
+	).toBe("work");
+	// Work use is a declaration only: the desktop stays free, with no prompt.
+	await expect(
+		page.getByText(
+			"Every feature on your computer is free. Managed inference and cloud nodes bill separately.",
+			{ exact: true }
+		)
+	).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "Choose a plan" })
+	).toHaveCount(0);
+	await page.screenshot({
+		animations: "disabled",
+		fullPage: true,
+		path: evidencePath("billing-tab-declared-use-work"),
+	});
+	await selectOption(page, "How you use Ryu", "Personal use");
+	await expect(use).toContainText("Personal use");
+	expect(
+		await page.evaluate(() => localStorage.getItem("ryu_declared_use"))
+	).toBe("personal");
 });

@@ -97,8 +97,28 @@ pub(crate) struct WorkspaceAutonomy {
 }
 
 impl WorkspaceAutonomy {
-    pub(crate) fn evaluate(cwd: &Path, additional: &[PathBuf], is_claude_code: bool) -> Self {
-        let trusted = crate::workspace_trust::is_trusted(cwd)
+    /// [`Self::evaluate`] for an instance on this node: asks, once, whether the
+    /// node bounds its turns (a shared node).
+    pub(crate) fn for_this_node(cwd: &Path, additional: &[PathBuf], is_claude_code: bool) -> Self {
+        Self::evaluate(
+            cwd,
+            additional,
+            is_claude_code,
+            crate::server::chat_checkpoints::turn_folders::node_bounds_turn_folders(),
+        )
+    }
+
+    /// A `bounded` turn (a shared node) is never trusted, whatever the folder:
+    /// the trust list is the owner's, and it must not lift the sandbox, the
+    /// refusal of modes that skip prompts or the other limits for a member.
+    pub(crate) fn evaluate(
+        cwd: &Path,
+        additional: &[PathBuf],
+        is_claude_code: bool,
+        bounded: bool,
+    ) -> Self {
+        let trusted = !bounded
+            && crate::workspace_trust::is_trusted(cwd)
             && additional
                 .iter()
                 .all(|path| crate::workspace_trust::is_trusted(path));
@@ -122,3 +142,6 @@ impl WorkspaceAutonomy {
         ))
     }
 }
+
+#[cfg(test)]
+mod shared_node_tests;

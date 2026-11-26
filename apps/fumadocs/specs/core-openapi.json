@@ -5022,7 +5022,7 @@
         "tags": [
           "Cloud environments"
         ],
-        "description": "Link another Claude or ChatGPT account on this node. Ryu makes a new, owner-only CLI config folder for it and starts the CLI's own sign-in with that folder (`claude auth login` with `CLAUDE_CONFIG_DIR`, `codex login` with `CODEX_HOME`), which opens the provider's page in the browser. The CLI writes its sign-in into the folder itself; Ryu never reads, copies or stores it. Poll `GET /api/cloud-task-backends/accounts` for the result. Up to 8 accounts per provider. Node owner only.",
+        "description": "Link another Claude or ChatGPT account on this node. Ryu makes a new, owner-only CLI config folder for it and starts the CLI's own sign-in with that folder (`claude auth login` with `CLAUDE_CONFIG_DIR`, `codex login` with `CODEX_HOME`), which opens the provider's page in the browser. The CLI writes its sign-in into the folder itself; Ryu never reads, copies or stores it. Poll `GET /api/cloud-task-backends/accounts` for the result. The plan limits accounts per provider. Node owner only.",
         "operationId": "add_cloud_task_plan_account",
         "requestBody": {
           "content": {
@@ -5052,7 +5052,7 @@
             "description": "subscription_backend_owner_only or cloud_environment_feature_unavailable"
           },
           "409": {
-            "description": "subscription_account_limit"
+            "description": "provider_account_limit"
           },
           "503": {
             "description": "subscription_cli_missing"
@@ -15413,6 +15413,216 @@
                 "schema": {}
               }
             }
+          }
+        }
+      }
+    },
+    "/api/pi-config/providers/account-pools": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "List custom account pools and agent assignments",
+        "operationId": "list_account_pools",
+        "responses": {
+          "200": {
+            "description": "Pools, the pool of each agent and the limits",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "Could not read account pools"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Create a custom account pool",
+        "operationId": "create_account_pool",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created pool",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name or accounts"
+          },
+          "409": {
+            "description": "Pool limit reached"
+          },
+          "500": {
+            "description": "Could not save account pools"
+          }
+        }
+      }
+    },
+    "/api/pi-config/providers/account-pools/agents/{agent_id}": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "The custom account pool an agent is limited to",
+        "operationId": "get_agent_account_pool",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "description": "Agent id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pool id, or null when the agent has none",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "Could not read account pools"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Limit an agent to a custom account pool, or clear its pool",
+        "operationId": "put_agent_account_pool",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "description": "Agent id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved assignment",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid agent id"
+          },
+          "404": {
+            "description": "Pool not found"
+          },
+          "500": {
+            "description": "Could not save account pools"
+          }
+        }
+      }
+    },
+    "/api/pi-config/providers/account-pools/{pool_id}": {
+      "put": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Rename a custom account pool or set its accounts",
+        "operationId": "update_account_pool",
+        "parameters": [
+          {
+            "name": "pool_id",
+            "in": "path",
+            "description": "Pool id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved pool",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name or accounts"
+          },
+          "404": {
+            "description": "Pool not found"
+          },
+          "500": {
+            "description": "Could not save account pools"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Delete a custom account pool and clear it from every agent",
+        "operationId": "delete_account_pool",
+        "parameters": [
+          {
+            "name": "pool_id",
+            "in": "path",
+            "description": "Pool id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Pool not found"
+          },
+          "500": {
+            "description": "Could not save account pools"
           }
         }
       }
@@ -30913,6 +31123,44 @@
         "responses": {
           "200": {
             "description": "Counts",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vault/sys/leases/force-revoke/{id}": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Mark a retry lease revoked without calling its provider (configuration manager; the credential may still be live)",
+        "operationId": "sys_lease_force_revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Retry lease id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Lease",
             "content": {
               "application/json": {
                 "schema": {}

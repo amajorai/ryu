@@ -4,6 +4,11 @@
 
 use super::*;
 
+mod conversation_id;
+pub use conversation_id::{
+    core_conversation_id, is_core_conversation_id, MAX_CORE_CONVERSATION_ID_LEN,
+};
+
 /// Per-bot state shared by the transport-agnostic path.
 ///
 /// One of these is embedded in each adapter and exposed via [`Channel::runtime`].
@@ -36,6 +41,9 @@ pub struct ChannelRunResult {
     /// Emojis the agent reacted to the user's message with (`agents.react`),
     /// oldest first. Mirrored onto the provider message that started the turn.
     pub agent_reactions: Vec<String>,
+    /// Tool approvals the turn left waiting that a chat button may decide.
+    /// Empty unless Core has this channel's chat approval setting on.
+    pub approval_prompts: Vec<crate::approvals::ApprovalPrompt>,
 }
 
 /// Lifecycle reaction placed while a turn is running.
@@ -177,13 +185,10 @@ impl ChannelRuntime {
 
     /// Map the platform's reply target to the stable Core session id for this
     /// bot. The raw target remains the value passed to platform send/typing
-    /// verbs; only the Core key is namespaced.
+    /// verbs; only the Core key is namespaced per store-backed bot and written
+    /// in the id grammar Core accepts (see [`core_conversation_id`]).
     pub fn core_conversation_id(&self, platform_target: &str) -> String {
-        self.cfg
-            .channel_id
-            .as_deref()
-            .map(|channel_id| format!("channel:{channel_id}:{platform_target}"))
-            .unwrap_or_else(|| platform_target.to_owned())
+        core_conversation_id(self.cfg.channel_id.as_deref(), platform_target)
     }
 
     /// Route one turn through Core's session seam and return the reply plus the
@@ -253,6 +258,12 @@ impl ChannelRuntime {
             .unwrap_or_default();
         Ok(ChannelRunResult {
             reply: body["reply"].as_str().unwrap_or("").to_owned(),
+            // A malformed list costs the buttons, never the reply.
+            approval_prompts: body
+                .get("approvalPrompts")
+                .cloned()
+                .and_then(|value| serde_json::from_value(value).ok())
+                .unwrap_or_default(),
             assistant_message_id,
             assistant_message_ids,
             agent_reactions,

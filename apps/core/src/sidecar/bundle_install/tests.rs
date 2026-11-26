@@ -270,3 +270,147 @@ fn windows_refuses_archive_symlinks() {
     assert!(!dest.exists(), "a refused archive must not install");
     assert_eq!(fs::read_dir(tmp.path().join("bin")).unwrap().count(), 0);
 }
+
+// ── A later component that holds `:` (`repo/C:x`) ──────────────────────────
+//
+// On Windows `staging/repo` joined with `C:x` is `C:x`, a path outside the
+// bundle. These tests use a drive letter that is NOT in use on this PC, so
+// code that fails to refuse the name can create nothing outside the temp
+// folder. Elsewhere `Q:x` is a plain name.
+
+/// A drive letter with no volume. Panics, never skips, if none is free.
+fn unused_drive_letter() -> char {
+    if !cfg!(windows) {
+        return 'Q';
+    }
+    ('G'..='Z')
+        .rev()
+        .find(|letter| !Path::new(&format!("{letter}:\\")).exists())
+        .expect("no free drive letter from Z down to G")
+}
+
+impl TarBuilder {
+    fn hard_link(mut self, path: &str, target: &str) -> Self {
+        let mut header = Self::header(path, tar::EntryType::Link, 0o644, 0);
+        let link = &mut header.as_old_mut().linkname;
+        link[..target.len()].copy_from_slice(target.as_bytes());
+        header.set_cksum();
+        self.builder.append(&header, io::empty()).unwrap();
+        self
+    }
+}
+
+/// Install `archive` and require the refusal of an unsafe entry path, with
+/// nothing installed and no staging folder left behind.
+fn assert_bundle_refused(what: &str, archive: TarBuilder) {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("evil.tar.gz");
+    let sha = archive.write(&file);
+    let dest = tmp.path().join("bin").join("demo.d");
+    let result = install_bundle(&file, &sha, &dest, ENTRY, "1");
+    println!("TCW1 bundle {what}: {result:?}");
+    let err = result.expect_err("a bundle with a drive name must be refused whole");
+    assert!(
+        err.to_string().contains("unsafe archive entry path"),
+        "{what}: {err:#}"
+    );
+    assert!(format!("{err:#}").contains("is refused: it holds ':'"));
+    assert!(!dest.exists(), "a refused archive must not install");
+    assert_eq!(fs::read_dir(tmp.path().join("bin")).unwrap().count(), 0);
+}
+
+#[test]
+fn bundle_refuses_a_drive_file_entry() {
+    let name = format!("repo/{}:x", unused_drive_letter());
+    assert_bundle_refused(&name, app_archive().file(&name, 0o644, b"tcw1"));
+}
+
+#[test]
+fn bundle_refuses_a_drive_directory_entry() {
+    let name = format!("repo/{}:dir/", unused_drive_letter());
+    assert_bundle_refused(&name, app_archive().dir(&name));
+}
+
+#[test]
+fn bundle_refuses_a_file_below_a_drive_directory() {
+    let name = format!("repo/{}:dir/file", unused_drive_letter());
+    assert_bundle_refused(&name, app_archive().file(&name, 0o644, b"tcw1"));
+}
+
+#[test]
+fn bundle_refuses_a_drive_entry_that_climbs() {
+    let name = format!("repo/{}:../x", unused_drive_letter());
+    assert_bundle_refused(&name, app_archive().file(&name, 0o644, b"tcw1"));
+}
+
+/// A hard link is copied from its source, so a source such as `repo/C:name`
+/// would read a file from outside the bundle into it.
+#[test]
+fn bundle_refuses_a_hard_link_whose_source_is_a_drive_name() {
+    let source = format!("repo/{}:name", unused_drive_letter());
+    let archive = app_archive().hard_link("Demo.app/alias", &source);
+    assert_bundle_refused(&source, archive);
+}
+
+#[test]
+fn an_entrypoint_with_a_drive_name_is_refused() {
+    let entrypoint = format!("a/{}:x", unused_drive_letter());
+    let refused = safe_relative(Path::new(&entrypoint));
+    println!("TCW1 bundle entrypoint {entrypoint}: {refused:?}");
+    assert!(refused.is_err(), "safe_relative accepted {entrypoint}");
+
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("demo.tar.gz");
+    let sha = app_archive().write(&archive);
+    let dest = tmp.path().join("bin").join("demo.d");
+    install_bundle(&archive, &sha, &dest, ENTRY, "1").unwrap();
+    assert_eq!(installed_entrypoint(&dest, &entrypoint, "1"), None);
+    assert!(install_bundle(&archive, &sha, &dest, &entrypoint, "2").is_err());
+    assert!(installed_entrypoint(&dest, ENTRY, "1").is_some());
+}
+
+/// Guard, green before and after the fix: an entry that starts with `./`
+/// installs as it always did.
+#[test]
+fn a_dot_slash_entry_still_installs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("demo.tar.gz");
+    let sha = app_archive()
+        .file("./extra/b", 0o644, b"dot")
+        .write(&archive);
+    let dest = tmp.path().join("bin").join("demo.d");
+    install_bundle(&archive, &sha, &dest, ENTRY, "1").unwrap();
+    assert_eq!(fs::read(dest.join("extra").join("b")).unwrap(), b"dot");
+}
+
+/// A destination folder such as `C:x` (what joining a name `C:x` onto the real
+/// folder gives on Windows) is refused by the three extractors and by the
+/// bundle installer before they read the archive or create anything. The
+/// letter has no volume, so code without the refusal fails in the OS instead
+/// and creates nothing either; the test tells the two apart by the error text.
+#[cfg(windows)]
+#[test]
+fn a_drive_relative_destination_is_refused_before_anything_is_read() {
+    use crate::sidecar::download_manager::{
+        extract_tar_bz2_to_dir, extract_tar_gz_to_dir, extract_zip_to_dir,
+    };
+    let dest = PathBuf::from(format!("{}:dest", unused_drive_letter()));
+    let missing = Path::new("no-such-archive.tar.gz");
+    let results = [
+        extract_tar_gz_to_dir(b"", &dest, None).map(drop),
+        extract_tar_bz2_to_dir(b"", &dest, None).map(drop),
+        extract_zip_to_dir(b"", &dest, None).map(drop),
+        install_bundle(missing, "", &dest, ENTRY, "1").map(drop),
+    ];
+    for (index, result) in results.into_iter().enumerate() {
+        println!(
+            "TCW1 destination {} case {index}: {result:?}",
+            dest.display()
+        );
+        let err = result.expect_err("a drive-relative destination must be refused");
+        assert!(
+            err.to_string().contains("has a drive prefix and no root"),
+            "case {index}: {err:#}"
+        );
+    }
+}

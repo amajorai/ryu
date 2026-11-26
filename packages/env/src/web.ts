@@ -40,6 +40,11 @@ export const env = createEnv({
 		// unset ⇒ the client Sentry init is a graceful no-op (no vendor wired). It is
 		// the one web DSN: the server/edge runtimes read the same build-time value.
 		NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),
+		// Set to "self-hosted" on a customer-operated install, next to the
+		// server's RYU_DEPLOYMENT_MODE. Only then does the web app ask the server
+		// for the install's member limit; unset or any other value is the hosted
+		// cloud, which makes no such request. The server stays the authority.
+		NEXT_PUBLIC_RYU_DEPLOYMENT_MODE: z.string().optional(),
 	},
 	runtimeEnv: {
 		NEXT_PUBLIC_SERVER_URL: process.env.NEXT_PUBLIC_SERVER_URL,
@@ -57,6 +62,8 @@ export const env = createEnv({
 		NEXT_PUBLIC_POSTHOG_KEY: process.env.NEXT_PUBLIC_POSTHOG_KEY,
 		NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST,
 		NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+		NEXT_PUBLIC_RYU_DEPLOYMENT_MODE:
+			process.env.NEXT_PUBLIC_RYU_DEPLOYMENT_MODE,
 	},
 	emptyStringAsUndefined: true,
 	// Skip validation during the Docker build (server modules pulled into the

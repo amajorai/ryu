@@ -19,8 +19,6 @@ use std::path::PathBuf;
 
 /// The CLI's own default sign-in on this node.
 pub(crate) const DEFAULT_ACCOUNT: &str = "default";
-/// The most accounts one owner may link per provider.
-pub(crate) const MAX_ACCOUNTS_PER_PROVIDER: usize = 8;
 const MAX_LABEL_CHARS: usize = 40;
 
 /// A linked account. It holds no credential: only where the CLI keeps its own sign-in.

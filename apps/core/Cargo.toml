@@ -14,12 +14,14 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("voice-par
 [dependencies]
 ryu-runtime-install = { path = "../../crates/core/runtime-install", features = ["tokio-process"] }
 ryu-gw-credentials = { path = "../../crates/gateway/credentials" }
+# The protocol range Core reports on `/api/health` and negotiates with the Gateway.
+ryu-protocol = { path = "../../crates/core/protocol" }
 ryu-gw-providers = { path = "../../crates/gateway/providers" }
 ryu-gw-router = { path = "../../crates/gateway/router" }
 tokio = { version = "1", features = ["full", "test-util"] }
 axum = { version = "0.7", features = ["ws", "multipart"] }
 tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"

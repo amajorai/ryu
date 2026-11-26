@@ -75,7 +75,29 @@ pub const PREF_TOKEN: &str = "pref:";
 /// can only hard-code the value, which means one fixed bucket for every install: the
 /// provider then returns nothing, forever, silently. That is the same
 /// silently-serves-nothing failure a provider with no verbs would cause.
+///
+/// A key that names a credential-bearing preference is left out, so dispatch never
+/// reads (and the store never decrypts) it for a token. See [`refused_pref_keys`].
 pub fn referenced_pref_keys(binding: &CapabilityToolBinding) -> Vec<String> {
+    pref_keys(binding, false)
+}
+
+/// Whether a `pref:` token must NOT resolve this preference key.
+///
+/// A provider's `arg_defaults` go to the provider's own tool as they resolve, and
+/// no grant names that read. A credential-bearing preference (an API key, a bearer
+/// token) must never travel that way, so a token that names one is treated like a
+/// token with no stored value. The test is the preferences store's OWN one, the
+/// same `host.getPreference` applies, asked with the trimmed key the store would
+/// be read with. There is no second list of names here to keep in step.
+fn is_refused_pref_key(key: &str) -> bool {
+    crate::server::preferences::is_secret_preference_key(key.trim())
+}
+
+/// Every key named by a `pref:` token in a binding's `arg_defaults`, at any depth,
+/// trimmed: the ones a token may resolve (`refused == false`) or the
+/// credential-bearing ones it may not (`refused == true`).
+fn pref_keys(binding: &CapabilityToolBinding, refused: bool) -> Vec<String> {
     fn walk(value: &Value, out: &mut Vec<String>) {
         match value {
             Value::String(s) => {
@@ -95,9 +117,39 @@ pub fn referenced_pref_keys(binding: &CapabilityToolBinding) -> Vec<String> {
     for value in binding.arg_defaults.values() {
         walk(value, &mut out);
     }
+    out.retain(|key| is_refused_pref_key(key) == refused);
     out.sort();
     out.dedup();
     out
+}
+
+/// The credential-bearing preference keys a binding's `pref:` tokens name. They
+/// never resolve: [`referenced_pref_keys`] leaves them out and
+/// [`resolve_arg_defaults`] drops their arguments.
+pub fn refused_pref_keys(binding: &CapabilityToolBinding) -> Vec<String> {
+    pref_keys(binding, true)
+}
+
+/// Refuse a manifest whose provider bindings name a credential-bearing preference
+/// in a `pref:` token, with a sentence for the app's author.
+///
+/// This is the visible half only. A manifest that reaches Core some other way is
+/// still safe, because the token never resolves at call time.
+pub fn refuse_secret_pref_tokens(manifest: &PluginManifest) -> Result<(), String> {
+    for entry in manifest.provided_capabilities() {
+        for (verb, binding) in &entry.tools {
+            if let Some(key) = refused_pref_keys(binding).first() {
+                return Err(format!(
+                    "app '{}' maps '{verb}' with an argument default that names the \
+                     credential-bearing preference '{key}' in a pref: token; a pref: token \
+                     cannot read a credential, use the governed secret-header or vault \
+                     capability instead",
+                    manifest.id
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Substitute `pref:<key>` tokens in a binding's `arg_defaults` with their stored
@@ -108,6 +160,10 @@ pub fn referenced_pref_keys(binding: &CapabilityToolBinding) -> Vec<String> {
 /// literal `"pref:mem0.user-id"` upstream, an unresolved token DROPS its argument, so
 /// the provider sees a missing field and can say so, instead of a nonsense value it
 /// will treat as real.
+///
+/// A token that names a credential-bearing preference drops its argument the same
+/// way, EVEN WHEN `prefs` holds a value for that key: the refusal does not depend
+/// on the caller having left the key unread.
 pub fn resolve_arg_defaults(
     binding: &CapabilityToolBinding,
     prefs: &BTreeMap<String, String>,
@@ -115,6 +171,7 @@ pub fn resolve_arg_defaults(
     fn subst(value: &Value, prefs: &BTreeMap<String, String>) -> Option<Value> {
         match value {
             Value::String(s) => match s.strip_prefix(PREF_TOKEN) {
+                Some(key) if is_refused_pref_key(key) => None,
                 Some(key) => prefs
                     .get(key.trim())
                     .filter(|v| !v.trim().is_empty())
@@ -167,5 +224,118 @@ pub fn apply_layer_defaults(defaults: &Map<String, Value>, arguments: Value) -> 
         // A non-object payload has no named arguments to merge into; the caller's
         // value stands rather than being silently replaced by defaults.
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+    use crate::plugin_manifest::ProvidesEntry;
+    use crate::server::preferences::is_secret_preference_key;
+
+    fn provider(arg_defaults: Value) -> PluginManifest {
+        let binding: CapabilityToolBinding = serde_json::from_value(json!({
+            "tool": "acme.search",
+            "arg_defaults": arg_defaults,
+        }))
+        .expect("the manifest form must deserialize");
+        PluginManifest {
+            id: "@acme/search".to_owned(),
+            name: "Acme".to_owned(),
+            version: "1.0.0".to_owned(),
+            provides: vec![ProvidesEntry {
+                capability: CAP_WEB_SEARCH.to_owned(),
+                version: "1.0.0".to_owned(),
+                tools: [("web.search".to_owned(), binding)].into_iter().collect(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_refusal_is_the_stores_own_secret_test_on_the_trimmed_key() {
+        // No list of names lives in this module. Whatever the store seals is
+        // refused, whatever it stores as plain text may resolve.
+        for key in [
+            "openrouter-api-key",
+            "managed-gateway-token",
+            "github-api-token",
+            "hf-token",
+            "smtp-password",
+            "acp-agent-settings",
+            "mem0.user-id",
+            "honcho.workspace-id",
+            "theme",
+        ] {
+            let manifest = provider(json!({ "a": format!("pref: {key} ") }));
+            let binding = &manifest.provides[0].tools["web.search"];
+            let secret = is_secret_preference_key(key);
+            assert_eq!(refused_pref_keys(binding).contains(&key.to_owned()), secret);
+            assert_eq!(
+                referenced_pref_keys(binding).contains(&key.to_owned()),
+                !secret,
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn refused_pref_keys_finds_a_credential_key_at_any_depth() {
+        let manifest = provider(json!({
+            "user": "pref:mem0.user-id",
+            "nested": { "list": [{ "k": "pref: hf-token " }] },
+            "auth": "pref:openrouter-api-key",
+            "again": "pref:openrouter-api-key",
+        }));
+        let binding = &manifest.provides[0].tools["web.search"];
+        assert_eq!(
+            refused_pref_keys(binding),
+            vec!["hf-token".to_owned(), "openrouter-api-key".to_owned()]
+        );
+        assert_eq!(
+            referenced_pref_keys(binding),
+            vec!["mem0.user-id".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_manifest_that_names_a_credential_in_a_pref_token_is_refused_by_name() {
+        let manifest = provider(json!({ "filters": { "t": "pref:managed-gateway-token" } }));
+        let refusal = refuse_secret_pref_tokens(&manifest).expect_err("must be refused");
+        for part in ["@acme/search", "web.search", "managed-gateway-token"] {
+            assert!(
+                refusal.contains(part),
+                "the refusal names {part}: {refusal}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_manifest_with_ordinary_pref_tokens_or_none_is_accepted() {
+        let ordinary = provider(json!({ "user_id": "pref:mem0.user-id", "infer": false }));
+        assert_eq!(refuse_secret_pref_tokens(&ordinary), Ok(()));
+        assert_eq!(refuse_secret_pref_tokens(&provider(json!({}))), Ok(()));
+        assert_eq!(
+            refuse_secret_pref_tokens(&PluginManifest::default()),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn no_shipped_manifest_is_refused_at_install() {
+        // The install refusal must not lock out an app Ryu ships.
+        use crate::plugin_manifest::PluginManifestLoader as Loader;
+        let mut shipped = Loader::load_builtins();
+        shipped.extend(Loader::load_install_catalog());
+        assert!(!shipped.is_empty());
+        for manifest in shipped {
+            assert_eq!(
+                refuse_secret_pref_tokens(&manifest),
+                Ok(()),
+                "{}",
+                manifest.id
+            );
+        }
     }
 }

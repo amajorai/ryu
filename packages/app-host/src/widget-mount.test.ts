@@ -37,11 +37,13 @@ import { buildWidgetCsp } from "./widget-bootstrap.ts";
 // ── (A) mount seam: the hard-pinned widget CSP ─────────────────────────────────
 
 describe("widget mount CSP contract (buildWidgetCsp)", () => {
-	const NONCE = "mount-nonce-xyz";
-	const csp = buildWidgetCsp(NONCE);
+	// The hash source of the script text "abc"; the host lists one per script.
+	const HASH = "'sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0='";
+	const csp = buildWidgetCsp([HASH]);
 
-	it("gates every script on the host nonce (no unsafe-inline / unsafe-eval)", () => {
-		expect(csp).toContain(`script-src 'nonce-${NONCE}'`);
+	it("gates every script on a host-computed hash (no nonce / unsafe-inline / unsafe-eval)", () => {
+		expect(csp).toContain(`script-src ${HASH};`);
+		expect(csp).not.toContain("nonce-");
 		expect(csp).not.toContain("unsafe-eval");
 		expect(csp).not.toContain("script-src 'unsafe-inline'");
 	});
@@ -62,7 +64,7 @@ describe("widget mount CSP contract (buildWidgetCsp)", () => {
 	});
 
 	it("widens passive-asset src to the Core proxy origin but NEVER connect-src", () => {
-		const widened = buildWidgetCsp(NONCE, "http://127.0.0.1:7980");
+		const widened = buildWidgetCsp([HASH], "http://127.0.0.1:7980");
 		expect(widened).toContain("img-src data: http://127.0.0.1:7980");
 		expect(widened).toContain("font-src data: http://127.0.0.1:7980");
 		expect(widened).toContain("media-src data: http://127.0.0.1:7980");
@@ -73,7 +75,7 @@ describe("widget mount CSP contract (buildWidgetCsp)", () => {
 	});
 
 	it("drops a proxy origin carrying CSP-delimiter chars (no directive injection)", () => {
-		const bad = buildWidgetCsp(NONCE, "http://127.0.0.1:7980; script-src *");
+		const bad = buildWidgetCsp([HASH], "http://127.0.0.1:7980; script-src *");
 		// The sanitizer rejects it → the data:-only lock, byte-for-byte.
 		expect(bad).toBe(csp);
 		expect(bad).not.toContain("script-src *");
@@ -82,7 +84,7 @@ describe("widget mount CSP contract (buildWidgetCsp)", () => {
 	it("never widens to a raw remote https host — only the Core proxy origin", () => {
 		// The proxy origin is loopback http; a public https host is not a valid proxy
 		// origin here and the raw remote host must never appear in the widget CSP.
-		const widened = buildWidgetCsp(NONCE, "http://127.0.0.1:7980");
+		const widened = buildWidgetCsp([HASH], "http://127.0.0.1:7980");
 		expect(widened).not.toContain("evil.example.com");
 	});
 });

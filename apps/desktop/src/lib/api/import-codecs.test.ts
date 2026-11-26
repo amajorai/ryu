@@ -3,8 +3,8 @@
 // Core owns the import vocabulary: `import::kind::*` in
 // `apps/core/src/import/mod.rs` (item kinds, including the chat-export
 // `conversations` group) and `normalize_provider` in
-// `apps/core/src/server/agent_sync.rs` (sync providers, including the chat-export
-// sources `chatgpt` and `claude-ai` and the framework sources). The Desktop
+// `apps/core/src/server/agent_sync/projection.rs` (sync providers, including the
+// chat-export sources `chatgpt` and `claude-ai` and the framework sources). The Desktop
 // response codecs for `/api/import/run` and `/api/agent-sync/*` once lagged
 // behind that vocabulary: a ChatGPT export import came back as a ZodError instead
 // of a result, and a Hermes or OpenClaw profile made the whole profile list
@@ -154,7 +154,7 @@ function coreImportKinds(): string[] {
 
 /** The provider names `normalize_provider` lets through. */
 function coreSyncProviders(): string[] {
-	const source = coreSource("server/agent_sync.rs");
+	const source = coreSource("server/agent_sync/projection.rs");
 	const start = source.indexOf("fn normalize_provider(");
 	const matchesAt = source.indexOf("matches!(", start);
 	const end = source.indexOf("unsupported provider", matchesAt);

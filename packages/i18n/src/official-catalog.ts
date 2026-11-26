@@ -21,6 +21,7 @@ const OFFICIAL_LITERAL_CATALOGS: Readonly<Record<string, () => CatalogModule>> =
 		it: () => import("../locales/it.json"),
 		ja: () => import("../locales/ja.json"),
 		ko: () => import("../locales/ko.json"),
+		pl: () => import("../locales/pl.json"),
 		"pt-BR": () => import("../locales/pt-BR.json"),
 		ru: () => import("../locales/ru.json"),
 		"zh-CN": () => import("../locales/zh-CN.json"),

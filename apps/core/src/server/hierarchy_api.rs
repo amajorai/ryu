@@ -45,6 +45,7 @@ pub fn routes() -> Router<ServerState> {
             put(set_thread_coordination),
         )
         .route("/api/hierarchy/threads/:id/sessions", get(list_sessions))
+        .route("/api/hierarchy/threads/:id/tree", get(tree::thread_tree))
         .route(
             "/api/hierarchy/main-threads",
             get(find_main_thread).post(ensure_main_thread),
@@ -78,6 +79,9 @@ pub fn routes() -> Router<ServerState> {
 
 #[path = "hierarchy_scope_api.rs"]
 mod scope;
+
+#[path = "hierarchy_tree_api.rs"]
+mod tree;
 
 #[path = "primary_bot.rs"]
 pub mod primary_bot;

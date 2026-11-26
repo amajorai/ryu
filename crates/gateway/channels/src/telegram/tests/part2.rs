@@ -25,8 +25,20 @@ async fn callback_update_routes_typed_action_and_sends_returned_buttons() {
         axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
             let core_tx = core_tx.clone();
             async move {
+                // Core's own rule: it answers 400 for an id outside it, so this
+                // turn fails here if the Gateway builds such an id again.
+                let accepted = body["conversation_id"]
+                    .as_str()
+                    .is_some_and(crate::is_core_conversation_id);
                 let _ = core_tx.send(body);
-                axum::Json(json!({
+                if !accepted {
+                    let error = "conversation_id is outside Core's id rule";
+                    return (
+                        axum::http::StatusCode::BAD_REQUEST,
+                        axum::Json(json!({ "error": error })),
+                    );
+                }
+                let reply = json!({
                     "reply": "Choose what to do next.",
                     "assistantMessageId": "assistant-1",
                     "assistantMessageIds": ["assistant-1"],
@@ -41,7 +53,8 @@ async fn callback_update_routes_typed_action_and_sends_returned_buttons() {
                             }
                         }]]
                     }
-                }))
+                });
+                (axum::http::StatusCode::OK, axum::Json(reply))
             }
         }),
     );
@@ -125,6 +138,10 @@ async fn callback_update_routes_typed_action_and_sends_returned_buttons() {
         .unwrap()
         .unwrap();
     assert_eq!(core_request["text"], "Selected: Continue");
+    assert_eq!(
+        core_request["conversation_id"], "channel__channel-test__42",
+        "the id Core gets for chat 42 on the store bot channel-test"
+    );
     assert_eq!(
         core_request["channelAction"]["actionId"],
         "workflow.continue"

@@ -218,7 +218,7 @@ pub(in crate::server) async fn install_app_from_url(
     }
     // URL installs have no verified package provenance and are always Community
     // authority: their declarative HTTP may reach only their own ext mount.
-    if let Err(error) = manifest.validate_declarative_http_policy(false) {
+    if let Err(error) = manifest.validate_declarative_http_authority(false) {
         return json_error(StatusCode::UNPROCESSABLE_ENTITY, error);
     }
 

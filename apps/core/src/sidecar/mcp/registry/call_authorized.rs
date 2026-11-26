@@ -54,6 +54,11 @@ impl McpRegistry {
         // refused outright instead of being queued for a human to approve.
         self.enforce_org_tool_policy(tool_id, host_conversation_id)
             .await?;
+        // The node-user rule and the credential tool rule are asked here as
+        // well, only so a call they refuse is not queued for a human to
+        // approve first. The dispatch core is the authority for both.
+        Box::pin(self.enforce_node_user_tool_access(tool_id, host_conversation_id)).await?;
+        Box::pin(self.enforce_credential_tool_allowed(tool_id)).await?;
         if let Some(agent_id) = agent_id {
             if !crate::fleet::is_agent_available(agent_id) {
                 return Err(anyhow!(

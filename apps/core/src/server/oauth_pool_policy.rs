@@ -14,8 +14,16 @@ use serde_json::json;
 
 use super::{preferences::PreferencesStore, ServerState};
 
+pub(crate) mod claude_fallback;
+pub(crate) mod credentials;
+pub(crate) mod failover_rules;
+pub(crate) mod paid_key_notice;
+
 const PREF_PREFIX: &str = "oauth-account-pool:";
 const MAX_ACCOUNT_RULES: usize = 100;
+
+/// Custom account pools an agent can be limited to; they restrict [`Policy`].
+pub(crate) mod agent_account_pools;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,6 +60,11 @@ pub struct Policy {
     pub drain_threshold_percent: u8,
     #[serde(default)]
     pub accounts: HashMap<String, AccountRule>,
+    /// The account ids of the requesting agent's custom pool for this
+    /// provider (`agent_account_pools`). Set per request, never stored or
+    /// sent to a client. `None` is no restriction.
+    #[serde(skip)]
+    pub pool: Option<std::sync::Arc<std::collections::BTreeSet<String>>>,
 }
 
 fn default_drain_threshold() -> u8 {
@@ -64,15 +77,31 @@ impl Default for Policy {
             strategy: Strategy::Manual,
             drain_threshold_percent: default_drain_threshold(),
             accounts: HashMap::new(),
+            pool: None,
         }
     }
 }
 
 impl Policy {
+    /// Whether a conversation may use the account: enabled here and, for an
+    /// agent with a custom pool, inside that pool.
     pub fn allowed(&self, account_id: &str) -> bool {
+        self.in_pool(account_id) && self.enabled(account_id)
+    }
+
+    /// The account's own switch, whatever agent asks.
+    pub fn enabled(&self, account_id: &str) -> bool {
         self.accounts
             .get(account_id)
             .is_none_or(|rule| rule.enabled)
+    }
+
+    /// False only when the requesting agent's pool limits this provider and
+    /// does not hold the account.
+    pub fn in_pool(&self, account_id: &str) -> bool {
+        self.pool
+            .as_ref()
+            .is_none_or(|pool| pool.contains(account_id))
     }
 
     pub fn priority(&self, account_id: &str) -> u8 {
@@ -178,17 +207,21 @@ fn policy_supported(provider_id: &str, policy: &Policy) -> bool {
                     .all(|rule| rule.drain_threshold_percent.is_none())))
 }
 
+/// The saved policy. In a provider proxy request of an agent that has a
+/// custom account pool, it is also limited to that pool.
 pub async fn load(preferences: &PreferencesStore, provider_id: &str) -> Policy {
     if !supported(provider_id) {
         return Policy::default();
     }
-    match preferences.get(&pref_key(provider_id)).await {
+    let mut policy = match preferences.get(&pref_key(provider_id)).await {
         Ok(Some(raw)) => serde_json::from_str::<Policy>(&raw)
             .ok()
             .filter(|policy| policy.validate().is_ok() && policy_supported(provider_id, policy))
             .unwrap_or_default(),
         _ => Policy::default(),
-    }
+    };
+    agent_account_pools::scope::restrict_for_request(preferences, &mut policy, provider_id).await;
+    policy
 }
 
 #[utoipa::path(

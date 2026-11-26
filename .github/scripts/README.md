@@ -12,6 +12,7 @@ they do not depend on the executable bit.
 | `stable-release-notes.sh` | release | Write notes and create the prerelease. |
 | `rolling-prerelease.sh` | canary, nightly | Create this build's prerelease and prune old ones. |
 | `nightly-gate.sh` | nightly | Skip a scheduled nightly when nothing changed. |
+| `retry-unacquired-jobs.sh` | nightly-retry | Re-run a nightly once when no runner picked a job up. |
 | `compile-tui.sh` | release | Compile the `ryu-cli` terminal client natively. |
 | `collect-desktop-installers.sh` | all three | Gather, arch-stamp and rename Tauri bundles. |
 | `collect-island-installers.sh` | all three | Gather the Island installers. |
@@ -20,6 +21,7 @@ they do not depend on the executable bit.
 | `package-binary.sh` | all three | Name the binary by asset contract and checksum it. |
 | `upload-release-assets.sh` | all three | Upload a directory through the assets endpoint. |
 | `stable-updater-feed.sh` | release | Publish `latest.json` and `latest-beta.json`. |
+| `release-signing-key-gate.mjs` | release | Stop the Core and Desktop builds while no release signing public key is set. |
 
 ## Workflow notes
 
@@ -27,12 +29,15 @@ These notes describe the workflow files themselves.
 
 ### Two `release.yml` files
 
-The hub's `release.yml` is published into the public repository and fires only
-on a `v*` tag pushed directly to it, or on a manual dispatch. The authoritative
-producer is the private monorepo's own `release.yml`. That workflow builds
-everything here plus the hub headless assets and the apps-store sidecar
-binaries into a draft release, and `mirror-releases.yml` copies the hub assets
-into this repository.
+The hub's `release.yml` is published into the public repository and builds its
+stable releases. A `v*` tag pushed in the release procedure reaches the public
+repo in the same second as the private one and starts this workflow. A manual
+dispatch starts it too. It built the stable releases v0.5.0 and v0.5.1, and its
+last job, `promote`, made them stable. The private monorepo has its own
+`release.yml`. That workflow builds everything here plus the hub headless
+assets and the apps-store sidecar binaries into a draft release. When that
+draft is published, `mirror-releases.yml` copies its assets into this
+repository's release of the same tag and replaces files of the same name.
 
 They are not copies and must not be kept in sync job for job. The difference is
 forced by source availability: the public mirror carries `apps/desktop`,
@@ -41,7 +46,7 @@ here at all, but not `apps/ghost`, `apps/shadow` or the `apps-store/*` packages.
 This workflow therefore cannot build those artifacts. Do not copy the private
 `binaries` job here; the code it compiles is not in this repository.
 
-As a result, a `v*` tag pushed here yields a release with no app sidecar
+As a result, a release built here has no app sidecar
 binaries. Ghost and Shadow archives are owned by the `amajorai/ghost` and
 `amajorai/shadow` satellite releases, so Core's downloaders resolve
 independently of this hub release. Tag the private repository for the complete
@@ -56,6 +61,28 @@ repositories. Asset names match Core's updater and installer contract
 `<asset>.sha256` that the installers verify. The public mirror ships no root
 `Cargo.toml`, so every manifest builds as its own workspace and its binary lands
 in `<manifest-dir>/target/release/`.
+
+### Release signing key gate
+
+`release-signing-key-gate.mjs` is the first step after checkout in the
+`desktop` and `build` jobs, run as
+`node .github/scripts/release-signing-key-gate.mjs`. Core's self-update and
+Desktop's runtime install verify the publisher's signature over a release's
+`SHA256SUMS` only when a public key is compiled in. That key is the repository
+variable `RYU_RELEASE_SIGNING_PUBKEY`, or the key in
+`apps/core/src/update/release_signing.pub` when the variable is blank.
+
+- With no key, both jobs fail at that step on every platform. `promote` needs
+  them, so it is skipped and the release stays a prerelease that holds only the
+  CLI and Island assets.
+- With a key, the build steps receive the variable and compile it in. Such a
+  build refuses every update until the release also carries `SHA256SUMS` and
+  `SHA256SUMS.sig` signed with the matching private key. This repository does
+  not hold that key, and this workflow neither creates nor checks those two
+  files.
+
+The canary and nightly workflows do not pass the variable, so their builds
+carry no key.
 
 The `build` and `notes` jobs check out the requested tag, so they run the
 scripts from that tag's tree. To dispatch a tag whose tree predates these

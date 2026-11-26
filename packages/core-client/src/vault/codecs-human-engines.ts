@@ -54,6 +54,40 @@ export const vaultHumanSshCertRecords = vaultMachineCodec(
 	z.object({ certificates: z.array(vaultHumanSshCertRecord) })
 );
 
+const vaultHumanSshOtpRole = vaultMachineCodec(
+	z.object({
+		name: vaultHumanText,
+		defaultUser: vaultHumanText,
+		allowedUsers: z.array(vaultHumanText),
+		cidrList: z.array(vaultHumanText),
+		excludeCidrList: z.array(vaultHumanText),
+		port: vaultHumanNumber,
+		ttlSecs: vaultHumanNumber,
+	})
+);
+
+export const vaultHumanSshOtpRoles = vaultMachineCodec(
+	z.object({ roles: z.array(vaultHumanSshOtpRole) })
+);
+
+export const vaultHumanSshOtpRoleResponse = vaultMachineCodec(
+	z.object({ role: vaultHumanSshOtpRole })
+);
+
+export const vaultHumanSshOtpCredential = vaultMachineCodec(
+	z.object({
+		credential: z.object({
+			key: vaultHumanText,
+			keyType: z.literal("otp"),
+			username: vaultHumanText,
+			ip: vaultHumanText,
+			port: vaultHumanNumber,
+			// Core renders `expiresAt` (epoch ms) as RFC 3339.
+			expiresAt: vaultHumanTimestamp,
+		}),
+	})
+);
+
 const vaultHumanDynamicRole = vaultMachineCodec(
 	z.object({
 		name: vaultHumanText,

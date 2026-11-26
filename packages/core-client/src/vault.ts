@@ -50,6 +50,7 @@ export * from "./vault/seal.ts";
 export * from "./vault/shared.ts";
 export * from "./vault/shares.ts";
 export * from "./vault/ssh.ts";
+export * from "./vault/ssh-otp.ts";
 export * from "./vault/tokens.ts";
 export * from "./vault/totp.ts";
 export * from "./vault/transfer.ts";

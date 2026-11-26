@@ -41,7 +41,10 @@ impl McpRegistry {
         binding: &crate::plugin_manifest::CapabilityToolBinding,
     ) -> serde_json::Map<String, Value> {
         let keys = capability_tools::referenced_pref_keys(binding);
-        if keys.is_empty() {
+        // A token that names a credential-bearing preference is not among the keys
+        // and is never read. The binding still goes through the substitution, which
+        // drops that argument, so not even the token's own text is sent upstream.
+        if keys.is_empty() && capability_tools::refused_pref_keys(binding).is_empty() {
             return binding.arg_defaults.clone();
         }
         let mut resolved = std::collections::BTreeMap::new();

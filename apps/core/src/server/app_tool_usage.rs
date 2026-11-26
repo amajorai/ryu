@@ -27,6 +27,11 @@ const MAX_TOOL_ID_BYTES: usize = 256;
 const MAX_REQUEST_ID_BYTES: usize = 256;
 const MAX_TRANSACTION_ID_BYTES: usize = 256;
 const MAX_TASK_LABEL_BYTES: usize = 256;
+/// Hard ceiling on the raw cost one report may carry (1 USD). A sidecar reports
+/// the provider's price, so without a bound one call could debit the whole org
+/// wallet. The kernel row's `tools.invoke` grant decides WHO may report; this
+/// decides HOW MUCH one report may move.
+const MAX_COST_MICRO_USD_PER_REPORT: u64 = 1_000_000;
 
 /// Body for `POST /api/host/capability/billing.recordToolCharge`.
 #[derive(Debug, Deserialize)]
@@ -75,6 +80,12 @@ impl ToolUsageBody {
         }
         if self.tool_calls == 0 {
             return Err("tool_calls must be positive");
+        }
+        if self
+            .cost_micro_usd
+            .is_some_and(|cost| cost > MAX_COST_MICRO_USD_PER_REPORT)
+        {
+            return Err("cost_micro_usd is above the per-report ceiling");
         }
         if self.provider.trim() == "composio" || self.composio_usage.is_some() {
             return Err("Composio usage is reported by Core, not by an app sidecar");
@@ -187,6 +198,24 @@ mod tests {
         let mut long = valid_body();
         long.task_label = Some("x".repeat(MAX_TASK_LABEL_BYTES + 1));
         assert_eq!(long.validate(), Err("task_label is too long"));
+    }
+
+    #[test]
+    fn refuses_a_cost_above_the_per_report_ceiling() {
+        let mut at_ceiling = valid_body();
+        at_ceiling.cost_micro_usd = Some(MAX_COST_MICRO_USD_PER_REPORT);
+        assert!(at_ceiling.validate().is_ok());
+
+        let mut above = valid_body();
+        above.cost_micro_usd = Some(MAX_COST_MICRO_USD_PER_REPORT + 1);
+        assert_eq!(
+            above.validate(),
+            Err("cost_micro_usd is above the per-report ceiling")
+        );
+
+        let mut huge = valid_body();
+        huge.cost_micro_usd = Some(500_000_000);
+        assert!(huge.validate().is_err());
     }
 
     #[test]

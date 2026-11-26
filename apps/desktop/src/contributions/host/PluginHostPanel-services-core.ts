@@ -5,6 +5,7 @@ import {
 	ryuSubscriptionsSchema,
 } from "@ryu/app-host/app-bridge";
 import { useModelContextStore } from "@ryu/app-host/model-context";
+import { gateOpenExternal } from "@ryu/app-host/open-external-gate";
 import { assertOpenedFileUri } from "@ryu/app-host/opened-file";
 import {
 	appBackupMethodSchema,
@@ -29,10 +30,6 @@ import {
 	pluginHostInvoke,
 	pluginHostInvokeStream,
 } from "@/src/lib/api/plugins.ts";
-import {
-	type SpaceMatch as DesktopSpaceMatch,
-	searchSpace,
-} from "@/src/lib/api/spaces.ts";
 import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
 import {
 	backgroundStopResponseSchema,
@@ -42,7 +39,20 @@ import {
 } from "./node-response-contracts.ts";
 import type { PluginHostServicesContext } from "./PluginHostPanel-services-context.ts";
 
+// Core's `host.spaces_search` reply. Only the fields of the frame contract pass on.
+const spaceSearchResponseSchema = z.object({
+	matches: z.array(
+		z.object({
+			chunk_id: z.string(),
+			content: z.string(),
+			distance: z.number().nullable(),
+			document_id: z.string(),
+		})
+	),
+});
+
 export function buildPluginHostCoreServices({
+	askOpenExternal,
 	assistantContextRef,
 	assistantOwner,
 	assistantSurfaceRef,
@@ -67,9 +77,16 @@ export function buildPluginHostCoreServices({
 		getModelContext: () =>
 			useModelContextStore.getState().get("assistant", assistantOwner),
 		updateModelContext: async (input) => {
+			// Inactive tabs stay mounted (hidden). A background app's text must not
+			// ride the person's Ask Ryu turns, so the store keeps it back until this
+			// tab is in front again. The label is the companion's real name, stamped
+			// here by the shell, never a string the frame sends.
 			const state = useModelContextStore
 				.getState()
-				.update("assistant", assistantOwner, input);
+				.update("assistant", assistantOwner, input, {
+					held: !isActiveTabRef.current,
+					label: companion.name,
+				});
 			return state;
 		},
 		readOpenedFile: fileAccess
@@ -87,7 +104,11 @@ export function buildPluginHostCoreServices({
 					throw new Error("This file representation is read-only");
 				}
 			: undefined,
-		openExternal: ({ href }) => openExternal(href),
+		// No grant covers this call, so the shell asks the person first and the
+		// Tauri opener runs only after a yes.
+		openExternal: gateOpenExternal(askOpenExternal, ({ href }) =>
+			openExternal(href)
+		),
 		uiToastDismiss: (input) => toastHost.dismiss(input),
 		uiToastShow: (input) => toastHost.show(input),
 		uiToastUpdate: (input) => toastHost.update(input),
@@ -340,9 +361,10 @@ export function buildPluginHostCoreServices({
 				onChunk: emit,
 				signal,
 			}),
-		// Creation runs through the caller-scoped app bridge; semantic retrieval
-		// remains a host-direct Core API call. The frame never receives the node
-		// token, and Core applies its normal user/organization visibility checks.
+		// Creation and semantic retrieval both run through the caller-scoped app
+		// bridge, so Core applies the user's Space ACL and limits search hits to
+		// the app's own app:<pluginId> documents. The frame never receives the
+		// node token.
 		spacesEnsureSpace: (input) =>
 			pluginHostInvoke(
 				toTarget(node),
@@ -350,20 +372,15 @@ export function buildPluginHostCoreServices({
 				"spaces.ensureSpace",
 				input
 			).then(z.string().parse),
-		spacesSearch: async (input) => {
-			const matches = await searchSpace(
-				toTarget(node),
-				input.space_id,
-				input.query,
-				input.limit
-			);
-			return matches.map((match: DesktopSpaceMatch) => ({
-				chunk_id: match.chunkId,
-				content: match.content,
-				distance: match.distance,
-				document_id: match.documentId,
-			}));
-		},
+		spacesSearch: async (input) =>
+			spaceSearchResponseSchema.parse(
+				await pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"spaces.search",
+					input
+				)
+			).matches,
 		// Spaces documents — the app owns Space docs of kind app:<pluginId>.
 		spacesCreateDoc: (input) =>
 			pluginHostInvoke(

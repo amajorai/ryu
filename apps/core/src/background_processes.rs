@@ -10,6 +10,12 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// Durable long operations (imports and similar): the long-lived sibling of
+/// this registry, with records that outlast the process. Its files sit in
+/// `src/operations/`.
+#[path = "operations/mod.rs"]
+pub mod operations;
+
 const FINISHED_RETENTION: Duration = Duration::from_secs(5 * 60);
 const RUNNING_RETENTION: Duration = Duration::from_secs(30);
 const MAX_RECORDS: usize = 512;

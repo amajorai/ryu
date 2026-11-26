@@ -18,6 +18,10 @@ fn update_mutations_require_node_management_before_side_effects() {
             "async fn cancel_update_schedule(",
             "crate::update::schedule::clear_pending(",
         ),
+        (
+            "async fn update_restart_now(",
+            "crate::update::schedule::restart_gate::restart_now(",
+        ),
     ] {
         let body = source
             .split_once(handler)

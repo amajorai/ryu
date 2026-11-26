@@ -9,6 +9,20 @@
 import { z } from "zod";
 import { appResponseValueSchema } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
+import { encodeMountPathId } from "./path-id.ts";
+
+/**
+ * The one-segment static paths of `apps-store/teams/manifest.json`. A team ID
+ * equal to one of them is refused: Core would serve the static route instead
+ * of the team. `mount-path-id.test.ts` fails when the manifest and this list
+ * differ.
+ */
+export const TEAM_ROUTE_NAMES = ["resolve"] as const;
+/**
+ * The manifest declares no static name after `/:id/members/`, so an agent ID
+ * is only kept inside its segment.
+ */
+const TEAM_MEMBER_ROUTE_NAMES: readonly string[] = [];
 
 /** How a team's members respond when the team is called. Mirrors Core's enum. */
 export type Coordination =
@@ -160,7 +174,7 @@ export async function fetchTeams(target: ApiTarget): Promise<Team[]> {
 export async function fetchTeam(target: ApiTarget, id: string): Promise<Team> {
 	const json = await request(
 		target,
-		`/api/teams/${id}`,
+		`/api/teams/${encodeMountPathId(id, TEAM_ROUTE_NAMES)}`,
 		{},
 		teamEnvelopeResponseSchema
 	);
@@ -212,7 +226,7 @@ export async function updateTeam(
 	}
 	const json = await request(
 		target,
-		`/api/teams/${id}`,
+		`/api/teams/${encodeMountPathId(id, TEAM_ROUTE_NAMES)}`,
 		{
 			method: "PATCH",
 			body,
@@ -225,7 +239,7 @@ export async function updateTeam(
 export async function deleteTeam(target: ApiTarget, id: string): Promise<void> {
 	await request(
 		target,
-		`/api/teams/${id}`,
+		`/api/teams/${encodeMountPathId(id, TEAM_ROUTE_NAMES)}`,
 		{ method: "DELETE" },
 		teamDeleteResponseSchema
 	);
@@ -239,7 +253,7 @@ export async function addTeamMember(
 ): Promise<Team> {
 	const json = await request(
 		target,
-		`/api/teams/${teamId}/members`,
+		`/api/teams/${encodeMountPathId(teamId, TEAM_ROUTE_NAMES)}/members`,
 		{ method: "POST", body: { agent_id: agentId } },
 		teamEnvelopeResponseSchema
 	);
@@ -254,7 +268,7 @@ export async function removeTeamMember(
 ): Promise<Team> {
 	const json = await request(
 		target,
-		`/api/teams/${teamId}/members/${agentId}`,
+		`/api/teams/${encodeMountPathId(teamId, TEAM_ROUTE_NAMES)}/members/${encodeMountPathId(agentId, TEAM_MEMBER_ROUTE_NAMES)}`,
 		{ method: "DELETE" },
 		teamEnvelopeResponseSchema
 	);

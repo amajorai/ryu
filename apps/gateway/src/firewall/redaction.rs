@@ -65,7 +65,31 @@ impl FirewallScanner {
     /// the previous behaviour. Set either to `false` to suppress that category
     /// independently of the Sanitize policy decision.
     pub fn sanitize(&self, text: &str) -> String {
-        let mut result = text.to_string();
+        self.sanitize_changed(text)
+            .unwrap_or_else(|| text.to_string())
+    }
+
+    /// [`Self::sanitize`] for a caller that only acts on a change: `None`
+    /// when the text comes back as it went in, so it is not copied.
+    pub fn sanitize_changed(&self, text: &str) -> Option<String> {
+        // Every pattern `sanitize_passes` runs is a member of `scan_set` or
+        // the ASCII twin of one, and a twin is picked only where it finds
+        // exactly the original's matches. So when no member matches the
+        // input, the first pattern rewrites nothing, the next one sees the
+        // same text, and none of them changes it. The validators only reject
+        // matches. A scanner with a custom pattern has no set.
+        if self.scan_set.is_some_and(|set| !set.is_match(text)) {
+            debug_assert!(self.sanitize_passes(text).is_none());
+            return None;
+        }
+        self.sanitize_passes(text)
+            .filter(|sanitized| sanitized != text)
+    }
+
+    /// One replace pass per configured pattern, in order. `None` when no
+    /// pattern matched (a validator can still leave a match as it was).
+    fn sanitize_passes(&self, text: &str) -> Option<String> {
+        let mut result = Cow::Borrowed(text);
 
         if self.config.redact_pii {
             // A rewrite keeps the gate when its placeholder is ASCII: the text
@@ -84,7 +108,7 @@ impl FirewallScanner {
                 };
                 if let Some(next) = next {
                     agree &= placeholder.is_ascii();
-                    result = next;
+                    result = Cow::Owned(next);
                 }
             }
         }
@@ -94,12 +118,12 @@ impl FirewallScanner {
             {
                 let next = owned(re.replace_all(&result, placeholder.as_str()));
                 if let Some(next) = next {
-                    result = next;
+                    result = Cow::Owned(next);
                 }
             }
         }
 
-        result
+        owned(result)
     }
 
     /// Redact secret-like tokens from outbound response/log/error text.

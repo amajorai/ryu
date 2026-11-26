@@ -14,6 +14,22 @@ import {
 	appResponseValueSchema,
 } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
+import { encodeMountPathId } from "./path-id.ts";
+
+/**
+ * Recipes is an app that Core serves through a mount (Core decodes the path
+ * tail once), so a slash in a name would be a separator again at Core:
+ * `record/start` would reach the static route that starts a recording. The
+ * manifest declares no one-segment static route beside `/:name`, so the list
+ * is empty; monitors-path-id.test.ts reads apps-store/recipes/manifest.json
+ * and fails when that changes.
+ */
+export const RECIPE_ROUTE_NAMES: readonly string[] = [];
+
+/** A recipe name as one path segment under the recipes mount. */
+function recipePath(name: string): string {
+	return `/api/recipes/${encodeMountPathId(name, RECIPE_ROUTE_NAMES)}`;
+}
 
 function recipeResponse<S extends z.ZodType>(fields: S) {
 	return z.custom<z.output<S>>(
@@ -303,7 +319,7 @@ export async function getRecipe(
 ): Promise<Recipe> {
 	const json = await request(
 		target,
-		`/api/recipes/${encodeURIComponent(name)}`,
+		recipePath(name),
 		{},
 		recipeGetResponseSchema
 	);
@@ -332,7 +348,7 @@ export async function deleteRecipe(
 ): Promise<void> {
 	await request(
 		target,
-		`/api/recipes/${encodeURIComponent(name)}`,
+		recipePath(name),
 		{
 			method: "DELETE",
 		},
@@ -347,7 +363,7 @@ export async function runRecipe(
 ): Promise<RecipeRunResult> {
 	const json = await request(
 		target,
-		`/api/recipes/${encodeURIComponent(name)}/run`,
+		`${recipePath(name)}/run`,
 		{ method: "POST", body: { params } },
 		recipeRunResponseSchema
 	);

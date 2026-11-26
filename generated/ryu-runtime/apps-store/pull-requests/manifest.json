@@ -55,12 +55,12 @@
         "mount": "/api/pull-requests",
         "public_mount": "/api/pull-requests",
         "routes": [
-          { "path": "/auth/device", "permission": "pull-requests.review" },
+          { "path": "/auth/device", "permission": "pull-requests.manage" },
           { "path": "/status", "permission": "pull-requests.view" },
           { "path": "/repository", "permission": "pull-requests.view" },
           {
             "path": "/repository/create",
-            "permission": "pull-requests.review"
+            "permission": "pull-requests.manage"
           },
           { "path": "/pulls", "permission": "pull-requests.view" },
           { "path": "/pulls/branch", "permission": "pull-requests.view" },
@@ -140,6 +140,12 @@
       "id": "pull-requests.review",
       "label": "Can review",
       "description": "Post comments and reviews, mark drafts ready, manage stacked pull requests, merge pull requests, and comment on or close issues using your local GitHub CLI credentials.",
+      "implies": ["pull-requests.view"]
+    },
+    {
+      "id": "pull-requests.manage",
+      "label": "Can manage GitHub sign-in and publishing",
+      "description": "Start, read, or cancel the GitHub CLI sign-in on this node, and publish a local project folder as a new GitHub repository with the GitHub account signed in on this node. Not part of Can review.",
       "implies": ["pull-requests.view"]
     },
     {

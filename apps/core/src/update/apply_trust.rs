@@ -17,7 +17,7 @@ use super::super::ReleaseAsset;
 use super::release::{
     fetch_release_metadata, github_gave_no_verdict, release_asset_named, release_digest,
 };
-use super::signature::{fetch_signed_sums, release_signing_key, SignedSums};
+use super::signature::{fetch_signed_sums, release_signing_key, SignedSums, SIGNATURE_CHECK_OFF};
 
 /// The trust material for one release, fetched once per apply and shared by the
 /// Core asset and the Gateway updated alongside it.
@@ -41,7 +41,10 @@ impl ReleaseTrust {
                     .await
                     .with_context(|| format!("verifying the signed SHA256SUMS of {tag}"))?,
             ),
-            None => None,
+            None => {
+                tracing::warn!("{SIGNATURE_CHECK_OFF}");
+                None
+            }
         };
         let metadata = fetch_release_metadata(tag)
             .await

@@ -5,9 +5,13 @@ if (!GlobalRegistrator.isRegistered) {
 	GlobalRegistrator.register();
 }
 
-const { listSettings, resetAllSettings, resetCategory } = await import(
-	"./settings-registry.ts"
-);
+const {
+	listSettings,
+	listSettingsByLevel,
+	resetAllSettings,
+	resetCategory,
+	settingLevel,
+} = await import("./settings-registry.ts");
 
 for (const modulePath of [
 	"../lib/appearance-settings.ts",
@@ -75,5 +79,27 @@ describe("registered Desktop settings", () => {
 
 	test("actual defaults can be restored outside a mounted Settings dialog", () => {
 		expect(() => resetAllSettings()).not.toThrow();
+	});
+});
+
+describe("registered Desktop settings levels", () => {
+	test("every registered setting has a level, and all of them are app level", () => {
+		const entries = listSettings();
+		expect(entries.length).toBeGreaterThan(0);
+		// Every registered setting writes local app storage (localStorage or the
+		// Tauri shell), so by the storage rule in settings-levels.ts it is app.
+		expect(entries.map(settingLevel).filter((l) => l !== "app")).toEqual([]);
+		expect(listSettingsByLevel("app")).toHaveLength(entries.length);
+		expect(listSettingsByLevel("computer")).toEqual([]);
+	});
+
+	test("an explicit level wins over the category level", () => {
+		const entry = {
+			category: "general" as const,
+			id: "probe",
+			reset: () => {},
+		};
+		expect(settingLevel(entry)).toBe("app");
+		expect(settingLevel({ ...entry, level: "computer" })).toBe("computer");
 	});
 });

@@ -1,14 +1,15 @@
-import arCatalog from "../locales/email/ar.json";
-import deCatalog from "../locales/email/de.json";
-import esCatalog from "../locales/email/es.json";
-import frCatalog from "../locales/email/fr.json";
-import hiCatalog from "../locales/email/hi.json";
-import itCatalog from "../locales/email/it.json";
-import jaCatalog from "../locales/email/ja.json";
-import koCatalog from "../locales/email/ko.json";
-import ptBRCatalog from "../locales/email/pt-BR.json";
-import ruCatalog from "../locales/email/ru.json";
-import zhCNCatalog from "../locales/email/zh-CN.json";
+import arCatalog from "../locales/email/ar.json" with { type: "json" };
+import deCatalog from "../locales/email/de.json" with { type: "json" };
+import esCatalog from "../locales/email/es.json" with { type: "json" };
+import frCatalog from "../locales/email/fr.json" with { type: "json" };
+import hiCatalog from "../locales/email/hi.json" with { type: "json" };
+import itCatalog from "../locales/email/it.json" with { type: "json" };
+import jaCatalog from "../locales/email/ja.json" with { type: "json" };
+import koCatalog from "../locales/email/ko.json" with { type: "json" };
+import plCatalog from "../locales/email/pl.json" with { type: "json" };
+import ptBRCatalog from "../locales/email/pt-BR.json" with { type: "json" };
+import ruCatalog from "../locales/email/ru.json" with { type: "json" };
+import zhCNCatalog from "../locales/email/zh-CN.json" with { type: "json" };
 import { officialCatalogLocale } from "./catalog-locale.ts";
 import {
 	type LiteralCatalog,
@@ -29,6 +30,7 @@ const OFFICIAL_EMAIL_CATALOGS: Readonly<Record<string, LiteralCatalog>> = {
 	it: itCatalog,
 	ja: jaCatalog,
 	ko: koCatalog,
+	pl: plCatalog,
 	"pt-BR": ptBRCatalog,
 	ru: ruCatalog,
 	"zh-CN": zhCNCatalog,

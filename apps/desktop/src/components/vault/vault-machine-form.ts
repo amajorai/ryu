@@ -15,7 +15,7 @@ import { listField } from "./vault-token-role-form.ts";
 import { parseTtl } from "./vault-ttl.ts";
 
 /** Core clamps an identity's token TTL to 1m..24h (`vault/machine.rs`) and a
- *  minted token's to 10s..24h (`vault/tokens.rs`). A value outside is
+ *  minted token's to 10s..24h (`vault/tokens/admit_create.rs`). A value outside is
  *  refused here rather than silently clamped there. */
 export const MIN_TOKEN_TTL_SECS = 60;
 export const MIN_ISSUED_TTL_SECS = 10;

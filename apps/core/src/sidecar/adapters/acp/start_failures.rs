@@ -139,6 +139,41 @@ pub(super) enum LaunchRefusal {
     /// The agent's account access needs the OS sandbox, and it could not be
     /// applied.
     AccountAccess(String),
+    /// The node is shared, so it bounds this turn, and the OS sandbox could
+    /// not be applied. Nothing was started. `Some` is the sandbox probe's own
+    /// reason, the only text of the host a member is shown. `None` when a
+    /// later step failed (the loopback relay or the wrap): its error chain
+    /// can name paths of the host, so it is in the log and not in the card.
+    SharedNode(Option<String>),
+}
+
+/// The failed-turn frame for a turn on a shared node whose engine Ryu could
+/// not sandbox. It reuses the start-failure card of the catalog, so the
+/// sentence is English inside a translated card. `probe_reason` is the
+/// sandbox probe's own answer ([`LaunchRefusal::SharedNode`]); without one
+/// the sentence is fixed and the cause is in the node's log only.
+pub(super) fn shared_node_sandbox_failure(probe_reason: Option<&str>) -> AcpFailure {
+    match probe_reason {
+        Some(reason) => agent_start_failure(format!(
+            "this node is shared, and Ryu could not sandbox the agent on this computer \
+             ({reason}), so it did not start the agent"
+        )),
+        None => agent_start_failure(
+            "this node is shared, and Ryu could not sandbox the agent on this computer (the \
+             cause is in the node's log), so it did not start the agent",
+        ),
+    }
+}
+
+/// The failed-turn frame for a turn on a shared node whose agent declares a
+/// server that is not stdio. Such a server starts no program, so there is
+/// nothing Ryu could sandbox, and a shared node refuses it by rule. The
+/// sentence is fixed.
+pub(super) fn shared_node_server_failure() -> AcpFailure {
+    agent_start_failure(
+        "this node is shared, and this agent does not start as a program Ryu can sandbox, so \
+         it did not start the agent",
+    )
 }
 
 /// The failed-turn frame for an agent with limited account access that Ryu
@@ -167,3 +202,6 @@ pub(crate) fn account_sandbox_failure(
         ],
     )
 }
+
+#[cfg(test)]
+mod shared_node_tests;

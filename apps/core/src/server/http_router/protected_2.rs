@@ -8,6 +8,7 @@ use crate::server::*;
 /// then wraps them in the auth layer stack, so a route added here inherits
 /// `require_auth` exactly as it did in the single chain.
 pub(in crate::server) fn protected_routes_2(state: &ServerState) -> Router<ServerState> {
+    use crate::server::oauth_pool_policy::agent_account_pools::{routes as pools, scope};
     Router::new()
         // Streaming agent.run for full-page apps (governance-filtered SSE).
         .route(
@@ -138,7 +139,10 @@ pub(in crate::server) fn protected_routes_2(state: &ServerState) -> Router<Serve
         )
         .route(
             "/api/pi-config/claude/v1/messages",
-            post(claude_api::messages).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+            // The subscription handler, wrapped so an API key can take over
+            // when the user allowed it (off by default).
+            post(oauth_pool_policy::claude_fallback::messages)
+                .layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
         )
         .route(
             "/api/pi-config/kiro/v1/chat/completions",
@@ -161,6 +165,20 @@ pub(in crate::server) fn protected_routes_2(state: &ServerState) -> Router<Serve
             "/api/pi-config/qoder-cn/v1/models",
             get(qoder_api::cn_models),
         )
+        // Custom account pools and the pool an agent is limited to. Static
+        // segments, so they win over `providers/:id`.
+        .route(
+            "/api/pi-config/providers/account-pools",
+            get(pools::list_account_pools).post(pools::create_account_pool),
+        )
+        .route(
+            "/api/pi-config/providers/account-pools/:pool_id",
+            put(pools::update_account_pool).delete(pools::delete_account_pool),
+        )
+        .route(
+            "/api/pi-config/providers/account-pools/agents/:agent_id",
+            get(pools::get_agent_account_pool).put(pools::put_agent_account_pool),
+        )
         .route(
             "/api/pi-config/providers/:id/accounts",
             get(pi_provider_accounts),
@@ -172,6 +190,15 @@ pub(in crate::server) fn protected_routes_2(state: &ServerState) -> Router<Serve
         .route(
             "/api/pi-config/providers/:id/account-pool",
             get(oauth_pool_policy::get_policy).put(oauth_pool_policy::put_policy),
+        )
+        .route(
+            "/api/pi-config/providers/:id/credentials",
+            get(oauth_pool_policy::credentials::get_credentials)
+                .put(oauth_pool_policy::credentials::put_credentials),
+        )
+        .route(
+            "/api/conversations/:id/paid-key-notice",
+            post(oauth_pool_policy::paid_key_notice::claim),
         )
         .route(
             "/api/pi-config/providers/:id/accounts/switch",
@@ -292,4 +319,12 @@ pub(in crate::server) fn protected_routes_2(state: &ServerState) -> Router<Serve
         .route("/api/acl/vocabulary", get(acl_vocabulary))
         .route("/api/acl/principals", get(acl_principals))
         .route("/api/acl/resources", get(acl_list_resources))
+        // The provider proxies above (`/api/pi-config/claude`, `chatgpt`, `kiro` and so on)
+        // run as the agent whose managed Pi called them, so the account
+        // choice stays inside that agent's custom account pool. Every other
+        // route passes straight through.
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            scope::provider_route_scope,
+        ))
 }

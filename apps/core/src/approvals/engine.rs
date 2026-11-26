@@ -101,11 +101,16 @@ impl ApprovalEngine {
     /// approve the status is flipped *durably first*, then the action executes —
     /// so a crash mid-execute fails safe (the action is lost, never double-run).
     /// Returns the updated request, or `None` if no such id.
+    ///
+    /// `approver` is the verified person who decided, when one is known. It
+    /// is handed to the run of the approved action
+    /// ([`Self::execute_approved`]) and is never stored on the request.
     pub async fn decide(
         &self,
         id: &str,
         approve: bool,
         note: Option<String>,
+        approver: Option<crate::identity_verify::VerifiedCaller>,
     ) -> anyhow::Result<Option<ApprovalRequest>> {
         let Some(mut req) = self.store.get(id).await? else {
             return Ok(None);
@@ -143,7 +148,7 @@ impl ApprovalEngine {
                 let engine = self.clone();
                 let id = req.id.clone();
                 tokio::spawn(async move {
-                    match engine.execute_action(&action).await {
+                    match engine.execute_approved(&action, approver.as_ref()).await {
                         Ok(Some(result)) => engine.record_action_result(&id, result).await,
                         Ok(None) => {}
                         Err(e) => {
@@ -161,6 +166,27 @@ impl ApprovalEngine {
         }
 
         Ok(Some(req))
+    }
+
+    /// Execute an approved action for the person who approved it. The run is
+    /// a spawned task, which inherits no scope, so the approver is handed in
+    /// and bound here as the sender of this run: a tool that asks who a call
+    /// acts for (`sidecar::mcp::dispatch::node_user`) then sees the approver
+    /// beside the owner of the stored conversation. The principal, the vault's
+    /// secret owner and the stored request are unchanged. With no approver
+    /// nothing is bound, and such a tool is refused on a shared node.
+    pub(super) async fn execute_approved(
+        &self,
+        action: &PendingAction,
+        approver: Option<&crate::identity_verify::VerifiedCaller>,
+    ) -> anyhow::Result<Option<String>> {
+        let run = self.execute_action(action);
+        match approver {
+            Some(approver) => {
+                crate::sidecar::mcp::search_conversations::with_turn_sender(approver, run).await
+            }
+            None => run.await,
+        }
     }
 
     /// Record that an approved action failed to execute, onto the row (so the
@@ -238,3 +264,7 @@ impl ApprovalEngine {
         Ok(n)
     }
 }
+
+#[cfg(test)]
+#[path = "engine_approver_test.rs"]
+mod approver_test;

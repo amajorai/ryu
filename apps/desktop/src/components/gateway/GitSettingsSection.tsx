@@ -23,6 +23,7 @@ import {
 	DEFAULT_GIT_SETTINGS,
 	resolveGitSetting,
 } from "./developer-settings.ts";
+import { GitCreditSection } from "./GitCreditSection.tsx";
 import {
 	GovernanceScopeSwitcher,
 	type GovernanceView,
@@ -285,6 +286,8 @@ export function GitSettingsSection({
 					/>
 				</SettingsGroup>
 			</SettingsSection>
+
+			<GitCreditSection target={target} />
 
 			<SettingsSection
 				caption={

@@ -36,6 +36,8 @@ pub(super) struct CuratedPatterns {
     /// passes `ascii_boundaries_agree` before any rewrite: its twin when it
     /// has one, else the original, in the same order.
     pub(super) outbound_agree: Option<RegexSet>,
+    /// Every `injection` pattern as one set, for the inbound prefilter.
+    injection_set: Option<RegexSet>,
 }
 
 impl CuratedPatterns {
@@ -47,6 +49,13 @@ impl CuratedPatterns {
         let pii = pii == self.pii.len();
         let scan = self.outbound_scan.as_ref().filter(|_| secret && pii);
         (scan, self.secret_set.as_ref().filter(|_| secret))
+    }
+
+    /// The injection set for a scanner whose injection list has this length,
+    /// under the same length rule as [`Self::sets`].
+    pub(super) fn injection_set(&self, injection: usize) -> Option<&RegexSet> {
+        let curated = injection == self.injection.len();
+        self.injection_set.as_ref().filter(|_| curated)
     }
 }
 
@@ -72,6 +81,8 @@ pub(super) fn curated_patterns() -> &'static CuratedPatterns {
         let (pii, pii_twins) = untwin(build_pii_patterns_with_twins());
         let (outbound, outbound_twins) = untwin(build_outbound_patterns_with_twins());
         let secret = build_secret_patterns();
+        let injection = build_injection_patterns();
+        let injection_set = set_of(injection.iter().map(|(_, re)| re));
         let outbound_scan = set_of(secret.iter().chain(&pii).map(|(_, re)| re));
         let secret_set = set_of(secret.iter().map(|(_, re)| re));
         let agree = outbound.iter().zip(&outbound_twins);
@@ -79,7 +90,7 @@ pub(super) fn curated_patterns() -> &'static CuratedPatterns {
         CuratedPatterns {
             pii,
             secret,
-            injection: build_injection_patterns(),
+            injection,
             outbound,
             code_injection: build_code_injection_patterns(),
             toxicity: build_toxicity_patterns(),
@@ -89,6 +100,7 @@ pub(super) fn curated_patterns() -> &'static CuratedPatterns {
             outbound_scan,
             secret_set,
             outbound_agree,
+            injection_set,
         }
     })
 }

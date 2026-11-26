@@ -21,7 +21,22 @@ pub(super) const DENIED_PREFIXES: &[&str] = &[
     // authenticated desktop route, but must not become an agent-controlled
     // loopback file browser through CoreApi.
     "/api/rules/",
+    // Folder import (scan and run) also accepts a filesystem path, and the run
+    // writes what it finds there (instructions, skills, plugins, MCP servers)
+    // into this node. It stays an action of the desktop and the CLI, where a
+    // person picks the folder. As a CoreApi tool, one approval given for a chat
+    // would cover every later import in that chat, whatever folder it names.
+    "/api/import/",
 ];
+
+/// Path prefixes whose **reads** (GET) are excluded. A read shows the person
+/// no approval card, and these handlers take the folder to work in (`cwd`,
+/// `path`) from the query string. Today the OpenAPI attributes declare no such
+/// parameter, so the loopback drops it and the calls fail before git starts.
+/// Declaring one later (for the docs, say) would let an agent run git or list
+/// folders anywhere on the node unasked. Writes under these prefixes stay:
+/// every one shows the approval card first, in every approval mode.
+pub(super) const DENIED_READ_PREFIXES: &[&str] = &["/api/git/", "/api/workspace/"];
 
 /// Exact paths excluded for every verb.
 pub(super) const DENIED_EXACT: &[&str] = &[
@@ -100,6 +115,14 @@ pub(super) const DENIED_CREDENTIAL_WRITE_PREFIXES: &[&str] = &[
     "/api/channels/managed-bot",
     // Mints the backup recovery credential.
     "/api/backups/recovery-key",
+    // Catalog sources are the registries and marketplaces that installs and
+    // updates come from. Adding one can store a marketplace credential, and a
+    // source decides which addresses an install writes. An agent that added an
+    // MCP registry of its own could name it in a forced reinstall, which keeps
+    // the server's saved key headers (and, for a local server, its environment
+    // values) and takes the address from that registry. Add, remove, select
+    // and reorder stay in Settings; the list (GET) stays available.
+    "/api/catalog/sources",
 ];
 
 /// Exact paths whose writes manage credentials (see
@@ -165,6 +188,13 @@ pub(super) fn is_credential_write(path: &str, method: &str) -> bool {
         || after_id_has("/api/agents/", DENIED_AGENT_LOGIN_SEGMENTS)
 }
 
+/// The resolved path of the preference that names the credential tools the
+/// node's owner allowed (`credential-tools-allowed`). The route template
+/// `/api/preferences/{key}` stays reachable; this one key is caught at
+/// dispatch, after the `{key}` parameter is substituted.
+pub(super) const CREDENTIAL_TOOLS_ALLOWED_PREFERENCE_PATH: &str =
+    "/api/preferences/credential-tools-allowed";
+
 /// Substrings marking non-request/response routes (WebSocket upgrades + SSE
 /// streams). A blocking loopback call to these hangs until timeout, so they are
 /// never useful as request/response tools and are excluded at generation time.
@@ -185,6 +215,13 @@ pub fn is_denied(path: &str, method: &str) -> bool {
         return true;
     }
     if DENIED_PREFIXES.iter().any(|p| path.starts_with(p)) {
+        return true;
+    }
+    // Git and workspace reads take a folder and show no card (see
+    // `DENIED_READ_PREFIXES`).
+    if method.eq_ignore_ascii_case("get")
+        && DENIED_READ_PREFIXES.iter().any(|p| path.starts_with(p))
+    {
         return true;
     }
     if DENIED_STREAMING_SUBSTRINGS.iter().any(|s| path.contains(s)) {
@@ -237,6 +274,12 @@ pub fn is_denied(path: &str, method: &str) -> bool {
     if path.starts_with("/api/composio/trigger-subscriptions/")
         && method.eq_ignore_ascii_case("delete")
     {
+        return true;
+    }
+    // The list of allowed credential tools: reads OK, every write forbidden.
+    // An agent that could write it would allow itself a tool that hands back
+    // a stored secret.
+    if path == CREDENTIAL_TOOLS_ALLOWED_PREFERENCE_PATH && !method.eq_ignore_ascii_case("get") {
         return true;
     }
     // Approvals: reads OK, mutations forbidden (self-approval bypass).

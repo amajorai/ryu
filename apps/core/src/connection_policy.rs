@@ -76,6 +76,49 @@ pub fn action_for_tool(
     }
 }
 
+/// The rule every unattended refusal ends with, so the person reads one sentence
+/// wherever the refusal is raised.
+pub const UNATTENDED_READ_RULE: &str = "A source that refreshes on a timer, such as a dashboard \
+     widget, can only run actions that read data";
+
+/// Whether a plane that runs with nobody watching (a dashboard widget that
+/// refreshes on a timer) may run a provider action. Only a read may. The action
+/// is classified as the chat plane classifies a connected-account tool
+/// ([`action_for_tool`], by name, since providers publish no effect metadata
+/// for these ids), and a write, a delete and an action that cannot be
+/// classified are all refused. In chat such a call would wait for the person's
+/// approval; here nobody is there to give it.
+///
+/// One class is narrower than in chat. The classifier calls a name with a
+/// preview word (`plan`, `check`, `validate`) beside one write verb a preview,
+/// which the connection ceiling counts as a read. That is a guess about the
+/// name (`STRIPE_CREATE_PLAN` creates a billing plan), so a preview is not
+/// enough here: the name itself must read as a read.
+///
+/// `tool_id` is the provider's own action id (`GMAIL_FETCH_EMAILS`). The error
+/// is a sentence the caller can show.
+pub fn require_unattended_read(provider: &str, tool_id: &str) -> Result<(), String> {
+    let provider = provider.trim();
+    let tool_id = tool_id.trim();
+    let registry_id = if provider == COMPOSIO_PROVIDER {
+        format!("{COMPOSIO_PROVIDER}.{tool_id}")
+    } else {
+        tool_id.to_owned()
+    };
+    let effect = crate::agent_execution::classify_tool_with_metadata(&registry_id, None, None);
+    let kind = match action_for_tool(&registry_id, None, None) {
+        ConnectionAction::Read if effect == ToolEffect::Read => return Ok(()),
+        ConnectionAction::Read | ConnectionAction::Unknown => {
+            "Ryu cannot tell that it only reads data"
+        }
+        ConnectionAction::Write => "it changes or sends data",
+        ConnectionAction::Delete => "it deletes data",
+    };
+    Err(format!(
+        "the action '{tool_id}' cannot run here because {kind}. {UNATTENDED_READ_RULE}"
+    ))
+}
+
 /// Resolve the toolkit prefix used by Composio's action slugs, such as
 /// `GITHUB_CREATE_ISSUE` or `SLACK_SEND_MESSAGE`. Unknown/malformed ids return
 /// `None`; callers then use the safe default policy rather than guessing a
@@ -164,6 +207,71 @@ mod tests {
             action_for_tool("vendor.mystery", None, None),
             ConnectionAction::Unknown
         );
+    }
+
+    #[test]
+    fn an_unattended_plane_runs_reads_only() {
+        for read in [
+            "GMAIL_FETCH_EMAILS",
+            "GITHUB_LIST_REPOSITORY_ISSUES",
+            "GOOGLECALENDAR_EVENTS_LIST",
+            "SLACK_SEARCH_MESSAGES",
+        ] {
+            assert_eq!(require_unattended_read("composio", read), Ok(()), "{read}");
+        }
+        for (action, why) in [
+            ("GMAIL_SEND_EMAIL", "changes or sends"),
+            ("SLACK_SEND_MESSAGE", "changes or sends"),
+            ("GITHUB_CREATE_ISSUE", "changes or sends"),
+            ("NOTION_UPDATE_PAGE", "changes or sends"),
+            ("GITHUB_DELETE_A_REPOSITORY", "deletes"),
+            // No verb the classifier knows: unknown is not a read.
+            ("GITHUB_STAR_A_REPOSITORY", "cannot tell"),
+            ("X", "cannot tell"),
+        ] {
+            let refusal = require_unattended_read("composio", action)
+                .expect_err("only a read may run unattended");
+            assert!(refusal.contains(why), "{action}: {refusal}");
+            assert!(refusal.contains(action), "{refusal}");
+        }
+    }
+
+    #[test]
+    fn the_unattended_rule_never_passes_what_chat_would_hold() {
+        for action in [
+            "GMAIL_FETCH_EMAILS",
+            "GMAIL_SEND_EMAIL",
+            "GITHUB_DELETE_ISSUE",
+            "VENDOR_MYSTERY",
+            "STRIPE_CREATE_PLAN",
+        ] {
+            let chat = action_for_tool(&format!("composio.{action}"), None, None);
+            if require_unattended_read("composio", action).is_ok() {
+                assert_eq!(chat, ConnectionAction::Read, "{action}");
+            }
+            if chat != ConnectionAction::Read {
+                assert!(
+                    require_unattended_read("composio", action).is_err(),
+                    "{action}"
+                );
+            }
+        }
+        // Another provider's id is classified as it stands, padding ignored.
+        assert!(require_unattended_read(" treg ", " x.posts.search ").is_ok());
+        assert!(require_unattended_read("treg", "x.post.create").is_err());
+        assert!(require_unattended_read("builtin", "GMAIL_SEND_EMAIL").is_err());
+    }
+
+    #[test]
+    fn a_name_guessed_to_be_a_preview_is_not_a_read_here() {
+        // The connection ceiling counts a preview as a read; a timer plane does not.
+        assert_eq!(
+            action_for_tool("composio.STRIPE_CREATE_PLAN", None, None),
+            ConnectionAction::Read
+        );
+        let refusal = require_unattended_read("composio", "STRIPE_CREATE_PLAN")
+            .expect_err("a guessed preview must not run unattended");
+        assert!(refusal.contains("cannot tell"), "{refusal}");
     }
 
     #[test]

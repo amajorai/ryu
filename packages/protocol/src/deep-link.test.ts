@@ -167,6 +167,47 @@ describe("parseRyuDeepLink", () => {
 		expect(parseRyuDeepLink("ryu://nodes/connect?name=x")).toBeNull();
 	});
 
+	it("rejects a node link whose url carries userinfo", () => {
+		for (const url of [
+			"https://trusted@evil.tld",
+			"https%3A%2F%2Ftrusted.example.com%40evil.tld",
+			"https://user:pass@evil.tld:7980",
+			"https://trusted.example.com%5C@evil.tld",
+		]) {
+			expect(
+				parseRyuDeepLink(`ryu://nodes/connect?url=${url}&token=t&name=home`)
+			).toBeNull();
+		}
+	});
+
+	it("rejects a node link that is not a readable http(s) address", () => {
+		for (const url of [
+			"node.example.com",
+			"ftp://node.example.com",
+			"javascript://node.example.com",
+			"https://%D0%B0pple.com",
+			"https://node.example.com:99999",
+			"http://2130706433",
+		]) {
+			expect(
+				parseRyuDeepLink(`ryu://nodes/connect?url=${url}&token=t`)
+			).toBeNull();
+		}
+	});
+
+	it("lower-cases the scheme and host of a node link, keeps punycode", () => {
+		expect(
+			parseRyuDeepLink(
+				"RYU://nodes/connect?url=HTTPS://XN--pple-43d.COM:7980&token=t"
+			)
+		).toEqual({
+			kind: "node",
+			name: "node-xn--pple-43d-com",
+			url: "https://xn--pple-43d.com:7980",
+			token: "t",
+		});
+	});
+
 	it("parses a page-navigation link and lower-cases the page key", () => {
 		expect(parseRyuDeepLink("ryu://open/agents")).toEqual({
 			kind: "page",

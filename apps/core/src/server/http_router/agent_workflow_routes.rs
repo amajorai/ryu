@@ -67,6 +67,17 @@ pub(in crate::server) fn agents_routes(state: &ServerState) -> Router<ServerStat
         //    `/import` parity. Scan lists; run imports the selection. ──
         .route("/api/import/scan", post(scan_import_handler))
         .route("/api/import/run", post(run_import_handler))
+        // ── Import a bot export archive (the zip a migrator prompt builds
+        //    inside Grok Bot). Stage checks and unpacks the upload and returns
+        //    the scan of it; the selection then goes through `/api/import/run`. ──
+        .route(
+            "/api/import/archive/stage",
+            post(stage_import_archive_handler).layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/api/import/archive/discard",
+            post(discard_import_archive_handler).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
         // ── ACP session config (agent-reported permission modes / models /
         //    config options like reasoning effort), Zed-style ──
         .route("/api/agents/:id/acp-config", get(acp_config))

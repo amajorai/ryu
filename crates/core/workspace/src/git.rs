@@ -12,16 +12,19 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::git_command::git_command;
 use crate::win_process::NoWindow;
 
 /// Git object storage for portable, commit-linked conversation checkpoints.
 pub mod history;
 
+mod credit;
 mod edits;
 mod local_actions;
 mod pull_request;
 mod remote;
 
+pub use credit::*;
 pub use edits::*;
 pub use local_actions::*;
 pub use pull_request::*;
@@ -180,8 +183,7 @@ fn query_diff_totals(cwd: &str) -> (u32, u32) {
 }
 
 fn run_git(cwd: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
-        .args(args)
+    let out = git_command(args)
         .current_dir(cwd)
         .no_window()
         .output()
@@ -193,22 +195,13 @@ fn run_git(cwd: &str, args: &[&str]) -> Option<String> {
     }
 }
 
-/// Return a `git` command whose hook directory cannot contain a repository
-/// hook. `--no-verify` covers commit/push hooks; this explicit `core.hooksPath`
-/// override also protects any future mutating command added here. `/dev/null`
-/// (or `NUL`) is intentionally used instead of a writable temp directory: a
-/// temp directory could itself be populated by another local process between
-/// creation and invocation.
+/// Return a hardened `git` command for a mutation. The name is kept for its
+/// callers: hooks are one of the repository-controlled programs that
+/// [`git_command`] switches off, next to the file monitor, external diff,
+/// credential helpers and the ssh command. `--no-verify` covers commit and
+/// push hooks; the `core.hooksPath` override also covers every other hook.
 pub(crate) fn git_without_hooks(args: &[&str]) -> Command {
-    let mut command = Command::new("git");
-    command
-        .arg("-c")
-        .arg(format!(
-            "core.hooksPath={}",
-            if cfg!(windows) { "NUL" } else { "/dev/null" }
-        ))
-        .args(args);
-    command
+    git_command(args)
 }
 
 /// Repo-local clean/smudge/process filters are executable code invoked by Git
@@ -217,17 +210,16 @@ pub(crate) fn git_without_hooks(args: &[&str]) -> Command {
 /// commands, so fail closed before staging anything. Global filters are outside
 /// this repository's control and are not part of this guard.
 pub(crate) fn reject_local_executable_filters(cwd: &str) -> Result<(), String> {
-    let output = Command::new("git")
-        .args([
-            "config",
-            "--local",
-            "--get-regexp",
-            r"^filter\..*\.(clean|process|smudge)$",
-        ])
-        .current_dir(cwd)
-        .no_window()
-        .output()
-        .map_err(|_| "could not inspect repository filter configuration".to_string())?;
+    let output = git_command(&[
+        "config",
+        "--local",
+        "--get-regexp",
+        r"^filter\..*\.(clean|process|smudge)$",
+    ])
+    .current_dir(cwd)
+    .no_window()
+    .output()
+    .map_err(|_| "could not inspect repository filter configuration".to_string())?;
     if output.status.success() && !output.stdout.is_empty() {
         return Err(
             "git mutation blocked: repository-local clean/smudge/process filters are not allowed"

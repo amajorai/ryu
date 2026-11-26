@@ -88,11 +88,11 @@ describe("teams client", () => {
 
 	test("patches only supplied fields", async () => {
 		const read = stub({ team: { ...wire, coordination: "debate-synthesis" } });
-		await updateTeam(target, "team/a", {
+		await updateTeam(target, "team?a", {
 			name: "Review 2",
 			leadAgentId: null,
 		});
-		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team/a");
+		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team%3Fa");
 		expect(parseJsonRequestBody(read().init?.body)).toEqual({
 			name: "Review 2",
 			lead_agent_id: null,
@@ -101,25 +101,44 @@ describe("teams client", () => {
 
 	test("covers fetch, delete, add-member, and remove-member routes", async () => {
 		let read = stub({ team: wire });
-		await fetchTeam(target, "team/a");
-		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team/a");
+		await fetchTeam(target, "team?a");
+		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team%3Fa");
 
 		read = stub({ success: true });
-		await deleteTeam(target, "team/a");
+		await deleteTeam(target, "team?a");
 		expect(read().init?.method).toBe("DELETE");
 
 		read = stub({ team: wire });
-		await addTeamMember(target, "team/a", "agent/1");
-		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team/a/members");
+		await addTeamMember(target, "team?a", "agent#1");
+		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team%3Fa/members");
 		expect(parseJsonRequestBody(read().init?.body)).toEqual({
-			agent_id: "agent/1",
+			agent_id: "agent#1",
 		});
 
 		read = stub({ team: wire });
-		await removeTeamMember(target, "team/a", "agent/1");
+		await removeTeamMember(target, "team?a", "agent#1");
 		expect(read().url).toBe(
-			"http://127.0.0.1:7980/api/teams/team/a/members/agent/1"
+			"http://127.0.0.1:7980/api/teams/team%3Fa/members/agent%231"
 		);
 		expect(read().init?.method).toBe("DELETE");
+	});
+
+	// Core serves teams through a mount and decodes the path once, so a slash
+	// that left as `%2F` would be a separator again there.
+	test("refuses a team or agent id that holds a path separator", async () => {
+		let read = stub({ team: wire });
+		await expect(fetchTeam(target, "team/a")).rejects.toThrow("path separator");
+		await expect(deleteTeam(target, "team/a/members/agent-1")).rejects.toThrow(
+			"path separator"
+		);
+		await expect(removeTeamMember(target, "team-1", "agent/1")).rejects.toThrow(
+			"path separator"
+		);
+		expect(read().url).toBeUndefined();
+
+		// The agent id of addTeamMember travels in the body, not in the path.
+		read = stub({ team: wire });
+		await addTeamMember(target, "team-1", "agent/1");
+		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team-1/members");
 	});
 });

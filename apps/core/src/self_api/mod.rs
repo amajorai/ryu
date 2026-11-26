@@ -41,6 +41,12 @@
 //!   reviewed [`RESTRICTED_SAFE_WRITES`] list (Spaces, memory entries,
 //!   conversation housekeeping, notifications, …). Everything else, including
 //!   any route added later, is refused for them ([`restricted_write_refusal`]).
+//! - **No agent switches on an MCP server from a registry.** A catalog install
+//!   lands switched off, and enabling its app record is what lets Core start
+//!   the package as the user. The enable tool is refused for such a record,
+//!   and for an app whose enable order would switch one on, whatever was
+//!   approved in chat ([`mcp_server_enable_refusal`]). The person switches it
+//!   on in Settings.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -70,6 +76,7 @@ const METHODS: &[&str] = &["get", "post", "put", "patch", "delete"];
 mod denylist;
 mod gates;
 mod loopback;
+mod mcp_enable;
 mod restricted;
 mod routes;
 #[cfg(test)]
@@ -78,5 +85,6 @@ mod tests;
 pub use denylist::*;
 pub use gates::*;
 pub use loopback::*;
+pub use mcp_enable::*;
 pub use restricted::*;
 pub use routes::*;

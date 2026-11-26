@@ -28,6 +28,7 @@ use crate::i18n::messages;
 use crate::i18n::Message;
 use crate::sidecar::mcp::McpServerConfig;
 
+pub mod bot_archive;
 pub mod chat_exports;
 pub mod frameworks;
 pub mod pasted_memory;
@@ -124,6 +125,34 @@ pub struct ScanItem {
     /// answer is reported by the import step.
     #[serde(skip_serializing_if = "is_false")]
     pub already_exists: bool,
+    /// For an `mcp_server` item, what importing it would register, so the
+    /// picker can show the command or the URL before the user selects it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<McpScanPreview>,
+}
+
+/// What an `mcp_server` scan item would register: the command line it would
+/// run, or the URL it would call and the headers it would send. Environment
+/// and header values never leave the file; only their names do, so the scan
+/// response carries no keys.
+#[derive(Debug, Clone, Serialize)]
+pub struct McpScanPreview {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub env_names: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Names of the request headers a remote entry would send.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub header_names: Vec<String>,
+    /// A header or environment value names one of the user's saved keys (a
+    /// `secret:`, `vault:` or `env:` reference), so the server would be sent
+    /// that key once it is enabled. Absent when no value does.
+    #[serde(skip_serializing_if = "is_false")]
+    pub names_saved_key: bool,
 }
 
 /// The result of a scan.
@@ -139,7 +168,7 @@ pub struct ScanResult {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warning_notices: Vec<ScanWarning>,
     /// Detected source (`openclaw`, `hermes`, `muse`, `mastra`, `langchain`,
-    /// `persona`, or a `chatgpt` / `claude-ai` data export), when the folder is
+    /// `persona`, `grok-bot`, or a `chatgpt` / `claude-ai` data export), when the folder is
     /// one. See [`frameworks`] and [`chat_exports`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<&'static str>,
@@ -252,7 +281,16 @@ impl ImportOutcome {
 fn is_skipped_dir(name: &str) -> bool {
     matches!(
         name,
-        ".git" | ".hg" | ".svn" | ".bzr" | "node_modules" | "target" | "dist" | "build"
+        ".git"
+            | ".hg"
+            | ".svn"
+            | ".bzr"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            // The files and conversations of a staged bot export archive.
+            | bot_archive::PAYLOAD_DIR
     )
 }
 

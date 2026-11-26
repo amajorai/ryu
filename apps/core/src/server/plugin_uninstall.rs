@@ -18,6 +18,15 @@ use std::collections::HashSet;
 
 use super::{caller_doc_filter, ServerState};
 
+// The uninstall preview lives in `inventory.rs` and the two cleanup entry points live in
+// `cleanup.rs`. Both start with `use super::*;`, so the imports above and the private
+// helpers below reach them exactly as they did in the single file.
+mod cleanup;
+mod inventory;
+
+pub use cleanup::*;
+pub use inventory::*;
+
 pub const CLEANUP_KEYBINDINGS: &str = "keybindings";
 pub const CLEANUP_SETTINGS: &str = "settings";
 pub const CLEANUP_SECRETS: &str = "secrets";
@@ -85,392 +94,6 @@ struct InventoryItem {
     details: Option<Vec<SpaceDetail>>,
 }
 
-/// `GET /api/plugins/:id/uninstall-data` — return the optional data this app
-/// currently owns. Counts are best-effort and never include secret values.
-#[utoipa::path(
-    get,
-    path = "/api/plugins/{id}/uninstall-data",
-    tag = "Plugins",
-    summary = "Preview optional app data before uninstall",
-    params(("id" = String, Path)),
-    responses(
-        (status = 200, description = "Optional data inventory", body = serde_json::Value),
-        (status = 404, description = "Plugin is not installed or has no manifest")
-    )
-)]
-pub async fn inventory_handler(
-    State(state): State<ServerState>,
-    Path(id): Path<String>,
-    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
-) -> Response {
-    let installed = match state.app_store.get_record(&id).await {
-        Ok(Some(_)) => true,
-        Ok(None) => false,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": error.to_string() })),
-            )
-                .into_response();
-        }
-    };
-    if !installed {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("app '{id}' is not installed") })),
-        )
-            .into_response();
-    }
-
-    let manifest = {
-        let manifests = state.app_manifests.read().await;
-        manifests.iter().find(|manifest| manifest.id == id).cloned()
-    };
-    let Some(manifest) = manifest else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("manifest for app '{id}' was not found") })),
-        )
-            .into_response();
-    };
-    let filter = caller_doc_filter(&caller);
-    let value = inventory(&state, &manifest, filter).await;
-    Json(value).into_response()
-}
-
-async fn inventory(
-    state: &ServerState,
-    manifest: &crate::plugin_manifest::PluginManifest,
-    filter: crate::server::spaces::DocFilter<'_>,
-) -> Value {
-    let plugin_id = &manifest.id;
-    let mut items = Vec::new();
-
-    let keybinding_count = match state.preferences.get("keybindings").await {
-        Ok(Some(raw)) => keybinding_overrides_for(plugin_id, &raw).len() as u64,
-        _ => 0,
-    };
-    if keybinding_count > 0 {
-        items.push(InventoryItem {
-            id: CLEANUP_KEYBINDINGS.to_owned(),
-            kind: "keybindings",
-            label: "Keyboard shortcuts".to_owned(),
-            description: format!(
-                "{} saved shortcut override{} for {}.",
-                keybinding_count,
-                if keybinding_count == 1 { "" } else { "s" },
-                manifest.name
-            ),
-            count: keybinding_count,
-            bytes: None,
-            details: None,
-        });
-    }
-
-    let (preference_count, preference_bytes) = settings_usage(state, manifest).await;
-    if preference_count > 0 {
-        items.push(InventoryItem {
-            id: CLEANUP_SETTINGS.to_owned(),
-            kind: "settings",
-            label: "Saved app settings".to_owned(),
-            description: format!(
-                "{} saved setting{} declared by {}.",
-                preference_count,
-                if preference_count == 1 { "" } else { "s" },
-                manifest.name
-            ),
-            count: preference_count,
-            bytes: Some(preference_bytes),
-            details: None,
-        });
-    }
-    // Saved secrets are not an optional row: uninstall always deletes them (see
-    // `UninstallRequest::effective_cleanup`), which `automatic` below states.
-
-    if let Some(storage) = crate::plugin_storage::global() {
-        if let Ok((count, bytes)) = storage.usage(plugin_id).await {
-            if count > 0 {
-                items.push(InventoryItem {
-                    id: CLEANUP_STORAGE.to_owned(),
-                    kind: "storage",
-                    label: "Plugin storage".to_owned(),
-                    description: format!(
-                        "{} key/value record{} stored by {}.",
-                        count,
-                        if count == 1 { "" } else { "s" },
-                        manifest.name
-                    ),
-                    count,
-                    bytes: Some(bytes),
-                    details: None,
-                });
-            }
-        }
-    }
-
-    let jobs: Vec<_> = crate::scheduler::store::list_jobs()
-        .into_iter()
-        .filter(|job| job.owner_app.as_deref() == Some(plugin_id.as_str()))
-        .collect();
-    if !jobs.is_empty() {
-        let bytes = jobs
-            .iter()
-            .filter_map(|job| serde_json::to_vec(job).ok())
-            .map(|value| value.len() as u64)
-            .sum();
-        items.push(InventoryItem {
-            id: CLEANUP_SCHEDULER.to_owned(),
-            kind: "scheduler",
-            label: "Scheduled automations".to_owned(),
-            description: format!(
-                "{} paused automation{} created by {}. They will not run while the app is absent.",
-                jobs.len(),
-                if jobs.len() == 1 { "" } else { "s" },
-                manifest.name
-            ),
-            count: jobs.len() as u64,
-            bytes: Some(bytes),
-            details: None,
-        });
-    }
-
-    let oauth_count = match crate::identity::global() {
-        Some(store) => store
-            .list_mcp_oauth_connections_for_plugin(plugin_id)
-            .await
-            .map(|connections| connections.len() as u64)
-            .unwrap_or(0),
-        None => 0,
-    };
-    if oauth_count > 0 {
-        items.push(InventoryItem {
-            id: CLEANUP_OAUTH.to_owned(),
-            kind: "oauth",
-            label: "Connected accounts".to_owned(),
-            description: format!(
-                "{} connected account{} used by {}.",
-                oauth_count,
-                if oauth_count == 1 { "" } else { "s" },
-                manifest.name
-            ),
-            count: oauth_count,
-            bytes: None,
-            details: None,
-        });
-    }
-
-    if let Ok(spaces) = state.spaces.app_space_usage(plugin_id, filter).await {
-        if !spaces.is_empty() {
-            let details: Vec<SpaceDetail> = spaces
-                .iter()
-                .map(|space| SpaceDetail {
-                    id: space.id.clone(),
-                    name: space.name.clone(),
-                    documents: space.document_count,
-                    bytes: space.storage_bytes.max(0) as u64,
-                    system: space.system,
-                })
-                .collect();
-            let bytes = details.iter().map(|detail| detail.bytes).sum();
-            items.push(InventoryItem {
-                id: CLEANUP_SPACES.to_owned(),
-                kind: "spaces",
-                label: "App spaces and documents".to_owned(),
-                description: format!(
-                    "{} Space{} containing {} app document{}.",
-                    details.len(),
-                    if details.len() == 1 { "" } else { "s" },
-                    details
-                        .iter()
-                        .map(|detail| detail.documents.max(0) as u64)
-                        .sum::<u64>(),
-                    if details
-                        .iter()
-                        .map(|detail| detail.documents.max(0) as u64)
-                        .sum::<u64>()
-                        == 1
-                    {
-                        ""
-                    } else {
-                        "s"
-                    }
-                ),
-                count: details.len() as u64,
-                bytes: Some(bytes),
-                details: Some(details),
-            });
-        }
-    }
-
-    let data_dir = plugin_data_dir(plugin_id);
-    let (file_count, file_bytes) = tokio::task::spawn_blocking(move || dir_usage(&data_dir))
-        .await
-        .unwrap_or((0, 0));
-    if file_count > 0 {
-        items.push(InventoryItem {
-            id: CLEANUP_FILES.to_owned(),
-            kind: "files",
-            label: "App files".to_owned(),
-            description: format!(
-                "{} file{} (databases, media and caches) {} keeps on this node.",
-                file_count,
-                if file_count == 1 { "" } else { "s" },
-                manifest.name
-            ),
-            count: file_count,
-            bytes: Some(file_bytes),
-            details: None,
-        });
-    }
-
-    if let Some(contributes) = &manifest.contributes {
-        for category in &contributes.data_categories {
-            let Some(count) =
-                crate::server::data_admin::app_category_count(state, manifest, &category.id).await
-            else {
-                continue;
-            };
-            if count == 0 {
-                continue;
-            }
-            items.push(InventoryItem {
-                id: format!("{CLEANUP_DATA_PREFIX}{}", category.id),
-                kind: "app-data",
-                label: category.title.clone(),
-                description: category.detail.clone(),
-                count,
-                bytes: None,
-                details: None,
-            });
-        }
-    }
-
-    json!({
-        "app": plugin_id,
-        "items": items,
-        "automatic": [
-            "The installed package, manifest, runtime contributions, approved permissions, and bundled skills are always removed.",
-            "Sidecar binaries owned by this app are always removed.",
-            "Saved secrets (encrypted credentials) for this app are always removed.",
-            "Unchecked data stays on the node and can be restored if you install the app again."
-        ]
-    })
-}
-
-/// Purge the app-declared data categories (`data:<category>` rows) the user
-/// checked, through the app's own `data.purge`. Runs BEFORE the uninstall
-/// deactivates the app: the capability broker only reaches an enabled provider,
-/// so purging after teardown is always refused. Errors are display-safe strings;
-/// a failed purge never blocks the uninstall.
-pub async fn purge_app_data(
-    state: &ServerState,
-    manifest: &crate::plugin_manifest::PluginManifest,
-    selected: &[String],
-) -> Vec<String> {
-    let selected: HashSet<&str> = selected.iter().map(String::as_str).collect();
-    let mut errors = Vec::new();
-    if let Some(contributes) = &manifest.contributes {
-        for category in &contributes.data_categories {
-            let selection = format!("{CLEANUP_DATA_PREFIX}{}", category.id);
-            if !selected.contains(selection.as_str()) {
-                continue;
-            }
-            if let Err(error) =
-                crate::server::data_admin::clear_app_category(state, manifest, &category.id).await
-            {
-                errors.push(format!("{}: {error}", category.title));
-            }
-        }
-    }
-    errors
-}
-
-/// Apply the optional Core-held cleanup rows the user checked (everything but
-/// app-declared data categories, which [`purge_app_data`] handles before
-/// teardown). Errors are returned as display-safe strings so uninstall itself
-/// can still complete.
-pub async fn apply_cleanup(
-    state: &ServerState,
-    manifest: &crate::plugin_manifest::PluginManifest,
-    selected: &[String],
-    filter: crate::server::spaces::DocFilter<'_>,
-) -> Vec<String> {
-    let selected: HashSet<&str> = selected.iter().map(String::as_str).collect();
-    let plugin_id = &manifest.id;
-    let mut errors = Vec::new();
-
-    if selected.contains(CLEANUP_KEYBINDINGS) {
-        if let Err(error) = clear_keybindings(state, plugin_id).await {
-            errors.push(format!("Keyboard shortcuts: {error}"));
-        }
-    }
-
-    if selected.contains(CLEANUP_SETTINGS) {
-        if let Err(error) = clear_settings(state, manifest).await {
-            errors.push(format!("Saved app settings: {error}"));
-        }
-    }
-
-    if selected.contains(CLEANUP_SECRETS) {
-        if let Some(store) = crate::plugin_secrets::global() {
-            if let Err(error) = store.delete_plugin(plugin_id).await {
-                errors.push(format!("Saved credentials: {error}"));
-            }
-        }
-    }
-
-    if selected.contains(CLEANUP_STORAGE) {
-        if let Some(store) = crate::plugin_storage::global() {
-            if let Err(error) = store.delete_plugin(plugin_id).await {
-                errors.push(format!("Plugin storage: {error}"));
-            }
-        }
-    }
-
-    if selected.contains(CLEANUP_SCHEDULER) {
-        for job in crate::scheduler::store::list_jobs()
-            .into_iter()
-            .filter(|job| job.owner_app.as_deref() == Some(plugin_id.as_str()))
-        {
-            if let Err(error) = crate::scheduler::store::delete_job(&job.id) {
-                errors.push(format!("Scheduled automation '{}': {error}", job.name));
-            }
-        }
-    }
-
-    if selected.contains(CLEANUP_OAUTH) {
-        match crate::mcp_oauth::global()
-            .disconnect_plugin(plugin_id)
-            .await
-        {
-            Ok(unconfirmed) if !unconfirmed.is_empty() => errors.push(format!(
-                "Connected accounts: local credentials removed, but remote revocation was not confirmed for {} account{}.",
-                unconfirmed.len(),
-                if unconfirmed.len() == 1 { "" } else { "s" }
-            )),
-            Ok(_) => {}
-            Err(error) => errors.push(format!("Connected accounts: {error}")),
-        }
-    }
-
-    if selected.contains(CLEANUP_SPACES) {
-        if let Err(error) = state.spaces.delete_app_data(plugin_id, filter).await {
-            errors.push(format!("App spaces and documents: {error}"));
-        }
-    }
-
-    if selected.contains(CLEANUP_FILES) {
-        let data_dir = plugin_data_dir(plugin_id);
-        match tokio::fs::remove_dir_all(&data_dir).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => errors.push(format!("App files: {error}")),
-        }
-    }
-
-    errors
-}
-
 /// `<data dir>/plugin-data/<dir>` — the folder Core gives the app's sidecars as
 /// `RYU_PLUGIN_DATA_DIR`.
 fn plugin_data_dir(plugin_id: &str) -> std::path::PathBuf {
@@ -530,6 +153,22 @@ async fn clear_keybindings(state: &ServerState, plugin_id: &str) -> anyhow::Resu
     Ok(())
 }
 
+/// Whether the uninstall cleanup may remove the preference `key` when an app's
+/// manifest names it as one of the app's saved settings.
+///
+/// A manifest names its settings keys freely, so it can name a key that belongs
+/// to Core and not to the app. The member folder list of a shared node is such a
+/// key. Every turn on that node is bounded by the copy of the list Core holds in
+/// memory, and only the preference route, with its `nodes.manage` check, writes
+/// the list and loads it again. An uninstall that deleted the stored list would
+/// change it behind that copy, so no uninstall removes it.
+///
+/// This function is the one place that decides it. The cleanup and the uninstall
+/// preview both ask it, so the preview never counts a key the cleanup will leave.
+fn cleanup_may_remove_preference(key: &str) -> bool {
+    key != crate::server::chat_checkpoints::turn_folders::MEMBER_WORKSPACE_ROOTS_PREF_KEY
+}
+
 async fn settings_usage(
     state: &ServerState,
     manifest: &crate::plugin_manifest::PluginManifest,
@@ -538,6 +177,9 @@ async fn settings_usage(
     let mut preference_count = 0;
     let mut preference_bytes = 0;
     for key in preference_keys {
+        if !cleanup_may_remove_preference(&key) {
+            continue;
+        }
         if let Ok(Some(value)) = state.preferences.get(&key).await {
             preference_count += 1;
             preference_bytes += value.len() as u64;
@@ -569,7 +211,7 @@ async fn clear_settings(
     drop(manifests);
 
     for key in preference_keys {
-        if !shared_keys.contains(&key) {
+        if cleanup_may_remove_preference(&key) && !shared_keys.contains(&key) {
             state.preferences.delete(&key).await?;
         }
     }
@@ -627,6 +269,9 @@ fn collect_setting_keys(
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod settings_tests;
 
 #[cfg(test)]
 mod tests {

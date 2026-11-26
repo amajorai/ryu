@@ -67,6 +67,7 @@ import {
 	widgetData,
 } from "./app-widget-payload.ts";
 import { useChatDisplayPrefs } from "./chat-display-prefs.tsx";
+import { useOpenExternalAsk } from "./open-external-confirm.tsx";
 import { useWidgetHost } from "./widget-host-context.tsx";
 
 const WIDGET_TOAST_RENDERER = createSileoToastRenderer(toast);
@@ -334,10 +335,15 @@ export function AppWidget({
 		[modelContextOwner, grantsKey]
 	);
 	const openExternalShell = host?.env.openExternal;
+	// The shell's own prompt in front of `ui.openExternal`, one per widget frame.
+	const openExternalPrompt = useOpenExternalAsk(
+		host?.env.appTitle ?? data?.toolName ?? ""
+	);
 
 	// Per-instance HostServices: close over the part identifiers (never
 	// frame-supplied) and delegate to the node-scoped context services.
 	const hostServices = useWidgetHostServices({
+		askOpenExternal: openExternalPrompt.ask,
 		data,
 		fileAccess,
 		globalsRef,
@@ -455,6 +461,7 @@ export function AppWidget({
 			>
 				{frame}
 			</div>
+			{openExternalPrompt.dialog}
 		</div>
 	);
 }

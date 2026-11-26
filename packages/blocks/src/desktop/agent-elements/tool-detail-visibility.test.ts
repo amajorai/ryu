@@ -57,6 +57,22 @@ describe("isHiddenAtNoDetail", () => {
 		);
 	});
 
+	it("keeps cards that ask the user something", () => {
+		// The agent ended its turn to wait for the answer, so the card must not
+		// vanish with the rest of the tool detail.
+		expect(isHiddenAtNoDetail({ type: "tool-feedback.draft" })).toBe(false);
+		expect(
+			isHiddenAtNoDetail({ type: "dynamic-tool", toolName: "feedback.draft" })
+		).toBe(false);
+		expect(isHiddenAtNoDetail({ type: "tool-consent.connect_app" })).toBe(
+			false
+		);
+		// Only the exact tool counts.
+		expect(
+			isHiddenAtNoDetail({ type: "dynamic-tool", toolName: "feedback.send" })
+		).toBe(true);
+	});
+
 	it("hides thinking/reasoning traces, which arrive as tool parts", () => {
 		expect(isHiddenAtNoDetail({ type: "tool-Thinking" })).toBe(true);
 		expect(

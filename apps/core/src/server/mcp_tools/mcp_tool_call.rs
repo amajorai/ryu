@@ -5,7 +5,8 @@ use crate::server::*;
 /// A conversationless call from a verified caller runs with that caller in the
 /// tool scope, so secret resolution and the org tool policy apply the caller's
 /// own `user:`/`role:`/`team:` rules. A call naming a host conversation keeps
-/// its conversation-owner resolution.
+/// its conversation-owner resolution, and its verified caller is bound as the
+/// sender of what runs in that conversation.
 pub(in crate::server) async fn call_mcp_tool_inner(
     state: ServerState,
     caller: Option<crate::identity_verify::VerifiedCaller>,
@@ -13,7 +14,8 @@ pub(in crate::server) async fn call_mcp_tool_inner(
     body: CallToolBody,
 ) -> axum::response::Response {
     let scoped = conversationless_caller(caller.as_ref(), &body);
-    let turn_sender = relayed_turn_sender(caller.as_ref(), &body);
+    let turn_sender = relayed_turn_sender(caller.as_ref(), &body)
+        .or_else(|| conversation_caller(caller.as_ref(), &body));
     let dispatch = Box::pin(dispatch_mcp_tool_call(state, caller, bound_agent_id, body));
     match (scoped, turn_sender) {
         (Some(caller), _) => {
@@ -40,6 +42,23 @@ fn relayed_turn_sender(
         body.host_conversation_id.as_deref()?,
         body.host_conversation_proof.as_deref()?,
     )
+}
+
+/// The verified caller of a call that names a host conversation, as the sender
+/// of what runs in it. The dispatch refuses such a call unless the caller owns
+/// that conversation (`authorize_tool_host_conversation`), so owner and sender
+/// are one person here. The principal stays the conversation's owner; a tool
+/// that asks who a call acts for (`dispatch::node_user`) needs the sender named
+/// as well. The managed Pi's tool calls arrive here with the caller their
+/// capability was issued to, so they are covered by the same line.
+fn conversation_caller(
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    body: &CallToolBody,
+) -> Option<std::sync::Arc<crate::identity_verify::VerifiedCaller>> {
+    caller
+        .filter(|_| body.host_conversation_id.is_some())
+        .cloned()
+        .map(std::sync::Arc::new)
 }
 
 /// The verified caller to bind as the tool principal: only when the body names

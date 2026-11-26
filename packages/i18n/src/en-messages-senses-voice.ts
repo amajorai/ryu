@@ -117,6 +117,16 @@ export const OFFICIAL_SENSE_MESSAGES_VOICE: Readonly<
 		"voice.studio.stories.instruct": "읽기 스타일",
 		"voice.studio.stories.lineLabel": "{number}번째 줄",
 	},
+	pl: {
+		"voice.studio.advanced.delivery": "Sposób czytania",
+		"voice.studio.advanced.deliveryAria": "Sposób czytania",
+		"voice.studio.settings.engine": "Model syntezy mowy",
+		"voice.studio.settings.voice": "Głos",
+		"voice.studio.stories.addLine": "Dodaj kwestię",
+		"voice.studio.stories.create": "Nowa opowieść",
+		"voice.studio.stories.instruct": "Sposób czytania",
+		"voice.studio.stories.lineLabel": "Kwestia {number}",
+	},
 	"pt-BR": {
 		"voice.studio.advanced.delivery": "Estilo de leitura",
 		"voice.studio.advanced.deliveryAria": "Estilo de leitura",

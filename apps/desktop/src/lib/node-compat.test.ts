@@ -1,19 +1,20 @@
 // apps/desktop/src/lib/node-compat.test.ts
 //
-// Tests for the node version floor + capability negotiation. Both are
-// deliberately FAIL-SOFT: an unparseable/absent version or capability list must
-// never falsely hide a feature (the version banner warns instead). These tests
-// pin the semver comparison ladder, the compatibility floor, and the
-// "no list ⇒ has everything" capability rule.
+// Tests for the desktop node compatibility helpers. Version comparison and
+// capability negotiation are deliberately FAIL-SOFT: an unparseable/absent
+// version or capability list must never falsely hide a feature. These tests pin
+// the semver comparison ladder, the protocol range the desktop accepts, and
+// the "no list ⇒ has everything" capability rule.
 
 import { describe, expect, it } from "bun:test";
 import {
+	assessNodeProtocol,
+	CLIENT_ACCEPTED_RANGE,
+	CORE_PROTOCOL_RANGE,
 	channelMismatch,
 	channelOf,
 	compareSemver,
 	hasCapability,
-	isNodeCompatible,
-	MIN_CORE_VERSION,
 } from "./node-compat.ts";
 
 describe("compareSemver", () => {
@@ -40,24 +41,36 @@ describe("compareSemver", () => {
 	});
 });
 
-describe("isNodeCompatible", () => {
-	it("treats an absent version as compatible (fail-soft)", () => {
-		expect(isNodeCompatible(null)).toBe(true);
-		expect(isNodeCompatible(undefined)).toBe(true);
-		expect(isNodeCompatible("")).toBe(true);
+describe("assessNodeProtocol", () => {
+	it("accepts a node that reports no protocol range (protocol 0)", () => {
+		// The first release with the range must still adopt a Core without it.
+		expect(CLIENT_ACCEPTED_RANGE.min).toBe(0);
+		for (const reported of [undefined, null, {}, "1"]) {
+			expect(assessNodeProtocol(reported)).toMatchObject({
+				compatible: true,
+				protocol: 0,
+			});
+		}
 	});
 
-	it("accepts a version at or above the floor", () => {
-		expect(isNodeCompatible(MIN_CORE_VERSION)).toBe(true);
-		expect(isNodeCompatible("9.9.9")).toBe(true);
+	it("accepts the range this release of Core reports", () => {
+		expect(assessNodeProtocol(CORE_PROTOCOL_RANGE)).toMatchObject({
+			compatible: true,
+			protocol: CORE_PROTOCOL_RANGE.max,
+		});
 	});
 
-	it("rejects a parseable version below the floor", () => {
-		expect(isNodeCompatible("0.0.0")).toBe(false);
-	});
-
-	it("treats an unparseable version as compatible (equal, fail-soft)", () => {
-		expect(isNodeCompatible("dev-build")).toBe(true);
+	it("names the app as the side to update for a node above its range", () => {
+		const node = {
+			max: CLIENT_ACCEPTED_RANGE.max + 2,
+			min: CLIENT_ACCEPTED_RANGE.max + 1,
+		};
+		expect(assessNodeProtocol(node)).toEqual({
+			client: CLIENT_ACCEPTED_RANGE,
+			compatible: false,
+			node,
+			update: "client",
+		});
 	});
 });
 

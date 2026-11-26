@@ -14,7 +14,6 @@ import {
 	COMPUTE_SHARE_FLAG,
 	catalogAudienceRule,
 	closedStandaloneProductPages,
-	DESKTOP_TRIAL_FLAG,
 	defaultFeatureFlags,
 	FAMILY_HUB_FLAG,
 	FAMILY_SHARING_FLAG,
@@ -72,13 +71,10 @@ describe("FEATURE_FLAGS catalog invariants", () => {
 		expect(defaultFeatureFlags()[WAITLIST_MANAGED_ONLY_FLAG.key]).toBe(false);
 	});
 
-	it("keeps the desktop trial off until the beta ends", () => {
-		expect(featureFlagByKey(DESKTOP_TRIAL_FLAG)).toMatchObject({
-			defaultValue: false,
-			exposure: "client",
-			failMode: "closed",
-		});
-		expect(featureFlagFallback(DESKTOP_TRIAL_FLAG)).toBe(false);
+	it("has retired the desktop trial flag, which older desktops read as off", () => {
+		expect(featureFlagByKey("billing.desktop_trial")).toBeUndefined();
+		expect(defaultFeatureFlags()).not.toHaveProperty("billing.desktop_trial");
+		expect(featureFlagFallback("billing.desktop_trial")).toBe(false);
 	});
 
 	it("keeps A Major Pass closed and public until it is explicitly opened", () => {

@@ -34,6 +34,7 @@ import { Empty, EmptyDescription } from "@ryu/ui/components/empty.tsx";
 import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useState } from "react";
+import { hermesHomeName, joinHome } from "@/src/lib/agent-migration.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	groupScanItems,
@@ -50,6 +51,7 @@ import {
 	scanWarnings,
 } from "@/src/lib/import-scan-text.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import { GrokBotImportButton } from "./GrokBotImportDialog.tsx";
 import { importOutcomeLine } from "./import-outcome-text.ts";
 import { NodeFolderBrowser } from "./NodeFolderBrowser.tsx";
 
@@ -106,9 +108,13 @@ export function ImportSetupDialog({
 		setOutcomes(null);
 		listDirectory(target)
 			.then((listing) => {
-				const sep = listing.home.includes("\\") ? "\\" : "/";
 				setQuickTargets(
-					AGENT_CONFIG_ROOTS.map((r) => `${listing.home}${sep}${r.key}`)
+					AGENT_CONFIG_ROOTS.map((r) =>
+						joinHome(
+							listing.home,
+							r.key === ".hermes" ? hermesHomeName(listing.home) : r.key
+						)
+					)
 				);
 			})
 			.catch(() => {
@@ -276,6 +282,12 @@ export function ImportSetupDialog({
 							/>
 							Choose a folder…
 						</Button>
+						<GrokBotImportButton
+							disabled={scanning || importing}
+							onImported={onImported}
+							onProjectFolder={addProjectFolder}
+							target={target}
+						/>
 					</div>
 				)}
 

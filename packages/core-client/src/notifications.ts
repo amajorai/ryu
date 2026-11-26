@@ -10,6 +10,7 @@ import { appResponseValueSchema } from "./app-request-json.ts";
 import { z } from "zod";
 import { activityJsonValueSchema } from "./activity.ts";
 import { type ApiTarget, request } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
 /** A human the active node has scoped to the caller's organization. */
 export interface MentionTargetUser {
@@ -153,7 +154,7 @@ export async function markNotificationRead(
 ): Promise<void> {
 	await request(
 		target,
-		`/api/notifications/${id}/read`,
+		`/api/notifications/${encodePathId(id)}/read`,
 		{ method: "POST" },
 		appResponseValueSchema
 	);
@@ -170,7 +171,7 @@ export async function ackNotification(
 	const json = notificationAckReplySchema.parse(
 		await request(
 			target,
-			`/api/notifications/${id}/ack`,
+			`/api/notifications/${encodePathId(id)}/ack`,
 			{ method: "POST" },
 			appResponseValueSchema
 		)

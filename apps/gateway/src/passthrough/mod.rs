@@ -121,7 +121,7 @@ use request::{
 };
 use response::redact_response_passthrough;
 pub use routes::{anthropic, codex};
-use upstream::{passthrough_client_for, STRIPPED_REQUEST_HEADERS};
+use upstream::{passthrough_client_for, with_route_deadline, STRIPPED_REQUEST_HEADERS};
 
 impl PassthroughFirewall for dyn FirewallBackend + '_ {
     fn sanitize(&self, text: &str) -> String {
@@ -332,7 +332,10 @@ async fn forward(
             return (StatusCode::SERVICE_UNAVAILABLE, reason).into_response();
         }
     };
-    let mut req = client.request(method.clone(), &url).body(forward_body);
+    let mut req = with_route_deadline(
+        client.request(method.clone(), &url).body(forward_body),
+        prompt_route,
+    );
     let mut req_headers = reqwest::header::HeaderMap::new();
     for (name, value) in &headers {
         // `x-ryu-*` headers are Gateway-local attribution and proof headers; the

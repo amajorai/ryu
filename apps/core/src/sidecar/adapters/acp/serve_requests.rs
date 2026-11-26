@@ -68,6 +68,7 @@ pub(super) async fn handle_permission_request(
     workspace_trusted: bool,
     tx_perm: mpsc::UnboundedSender<AcpEvent>,
     perm_conversation: String,
+    perm_store: Option<crate::server::conversations::ConversationStore>,
 ) -> Result<(), agent_client_protocol::Error> {
     // A cancelled turn answers every permission
     // request `cancelled` (ACP), without a scan.
@@ -91,14 +92,20 @@ pub(super) async fn handle_permission_request(
     let tool_call_json = serde_json::to_value(&req.tool_call).unwrap_or(serde_json::Value::Null);
     let scan = acp_exec_scan_verdict(&tool_call_json, &scan_agent).await;
     let mut route = route_permission(&scan, interactive, &tool_call_json, workspace_trusted);
-    // After a device read on this conversation's live turn, the agent's own
-    // egress-capable tool always asks, and never offers "always": the device
-    // exfiltration guard cannot see tools that bypass the bridge.
+    // After a device read in this conversation (its live turn, an ended turn
+    // or its stored history), the agent's own egress-capable tool always asks,
+    // and never offers "always": the device exfiltration guard cannot see
+    // tools that bypass the bridge.
     let kind = tool_call_json
         .get("kind")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("other");
-    let device_hold = crate::device_tools::taint::agent_egress_hold(&perm_conversation, kind);
+    let device_hold = crate::device_tools::taint::agent_egress_hold(
+        perm_store.as_ref(),
+        &perm_conversation,
+        kind,
+    )
+    .await;
     let mut options = req.options.clone();
     if device_hold.is_some() {
         options = without_always_options(options);

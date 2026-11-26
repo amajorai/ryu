@@ -274,8 +274,8 @@ pub(super) fn sanitize_messages(
 ) -> bool {
     let mut changed = false;
     visit_prompt_strings_mut(body, &mut |text| {
-        let sanitized = scanner.sanitize(text);
-        if sanitized != *text {
+        // `None` is an unchanged string: no copy and no compare.
+        if let Some(sanitized) = scanner.sanitize_changed(text) {
             *text = sanitized;
             changed = true;
         }

@@ -45,6 +45,7 @@ const communityLinkClass =
 const COPYRIGHT_YEAR = 2026;
 
 const NO_HIDDEN_PRODUCTS: readonly string[] = [];
+const NO_HIDDEN_HREFS: readonly string[] = [];
 
 /** The marketing site's href for a footer link; docs links go to the docs site. */
 export function footerHref(link: FooterLink): string {
@@ -218,8 +219,10 @@ function FooterColumnSection({ column }: { column: FooterColumn }) {
  * stay on one line.
  */
 function FooterColumns({
+	hiddenHrefs,
 	hiddenProductIds,
 }: {
+	hiddenHrefs: readonly string[];
 	hiddenProductIds: readonly string[];
 }) {
 	const tl = useLiteralMessages();
@@ -228,7 +231,7 @@ function FooterColumns({
 			aria-label={tl("Footer")}
 			className="grid grid-cols-1 py-8 md:grid-cols-3 md:gap-x-8 md:gap-y-10 md:py-16 xl:grid-cols-6"
 		>
-			{footerColumnsFor(hiddenProductIds).map((column) => (
+			{footerColumnsFor(hiddenProductIds, hiddenHrefs).map((column) => (
 				<FooterColumnSection column={column} key={column.title} />
 			))}
 		</nav>
@@ -238,12 +241,18 @@ function FooterColumns({
 export default function Footer({
 	cookieSettings,
 	githubStargazersCount,
+	hiddenHrefs = NO_HIDDEN_HREFS,
 	hiddenProductIds = NO_HIDDEN_PRODUCTS,
 	languagePicker,
 	soundToggle,
 }: {
 	cookieSettings?: ReactNode;
 	githubStargazersCount?: number | null;
+	/**
+	 * Site pages that answer 404 for now, such as the page of a program whose
+	 * rollout is closed; their links are left out.
+	 */
+	hiddenHrefs?: readonly string[];
 	/** Product slugs the host has not rolled out; their links are left out. */
 	hiddenProductIds?: readonly string[];
 	languagePicker?: ReactNode;
@@ -255,7 +264,10 @@ export default function Footer({
 			{/* Full-bleed shell: the link columns spread across the whole viewport. */}
 			<div className={footerContainerClass}>
 				<FooterLead />
-				<FooterColumns hiddenProductIds={hiddenProductIds} />
+				<FooterColumns
+					hiddenHrefs={hiddenHrefs}
+					hiddenProductIds={hiddenProductIds}
+				/>
 
 				{/* Bottom bar: two balanced rows instead of a stacked left column.
 				    Row 1: legal links | display controls. Row 2: company | build + credit. */}

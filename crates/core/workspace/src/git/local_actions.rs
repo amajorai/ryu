@@ -105,21 +105,20 @@ pub fn query_memory_trace(
     }
 
     let max_count = limit.clamp(1, 50).to_string();
-    let output = Command::new("git")
-        .args([
-            "log",
-            "--no-renames",
-            &format!("--max-count={max_count}"),
-            "--date=iso-strict",
-            "--format=%H%x1f%an%x1f%aI%x1f%s",
-            "--name-only",
-            "--",
-            path,
-        ])
-        .current_dir(cwd)
-        .no_window()
-        .output()
-        .map_err(|error| format!("could not read memory Git history: {error}"))?;
+    let output = git_command(&[
+        "log",
+        "--no-renames",
+        &format!("--max-count={max_count}"),
+        "--date=iso-strict",
+        "--format=%H%x1f%an%x1f%aI%x1f%s",
+        "--name-only",
+        "--",
+        path,
+    ])
+    .current_dir(cwd)
+    .no_window()
+    .output()
+    .map_err(|error| format!("could not read memory Git history: {error}"))?;
     if !output.status.success() {
         return Err(command_failure("log", &output));
     }
@@ -335,12 +334,14 @@ pub struct CommitPushOutcome {
 /// `commit-push`, or `push` (validated by the caller). When `include_unstaged`
 /// is set, stages everything before committing. Mutating commands reject
 /// repo-local executable filters, disable hooks, and return bounded operation
-/// errors rather than forwarding untrusted hook output to the caller.
+/// errors rather than forwarding untrusted hook output to the caller. When
+/// `credit` is set, the commit carries [`RYU_COAUTHOR_TRAILER`].
 pub fn run_git_action(
     cwd: &str,
     message: &str,
     action: &str,
     include_unstaged: bool,
+    credit: bool,
 ) -> Result<CommitPushOutcome, String> {
     // Confirm this is a git repo before touching the working tree.
     if current_branch(cwd).is_none() {
@@ -387,7 +388,7 @@ pub fn run_git_action(
         if !has_head && !has_staged {
             commit_args.insert(1, "--allow-empty");
         }
-        let commit = git_without_hooks(&commit_args)
+        let commit = git_without_hooks(&credited_commit_args(&commit_args, credit))
             .current_dir(cwd)
             .no_window()
             .output()

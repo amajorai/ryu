@@ -71,6 +71,10 @@ test.describe("node personalization onboarding", () => {
 		await expect(page.getByTestId("node-personalization-status")).toHaveText(
 			"saved: team"
 		);
+		// The answer is stored as the declared use for Settings and later work.
+		expect(
+			await page.evaluate(() => localStorage.getItem("ryu_declared_use"))
+		).toBe("work");
 		await page.locator(".scroll-fade").evaluate((element) => {
 			element.scrollTop = 0;
 		});
@@ -80,5 +84,21 @@ test.describe("node personalization onboarding", () => {
 			fullPage: true,
 			path: "e2e/artifacts/node-personalization-proof.png",
 		});
+	});
+
+	test("a personal answer is stored as personal use", async ({ page }) => {
+		await page.setViewportSize({ height: 1000, width: 1280 });
+		await page.goto(STORY_URL);
+		expect(
+			await page.evaluate(() => localStorage.getItem("ryu_declared_use"))
+		).toBeNull();
+		await page.getByRole("radio", { name: "Personal use" }).click();
+		await page.getByRole("button", { name: "Continue" }).click();
+		await expect(page.getByTestId("node-personalization-status")).toHaveText(
+			"saved: personal"
+		);
+		expect(
+			await page.evaluate(() => localStorage.getItem("ryu_declared_use"))
+		).toBe("personal");
 	});
 });

@@ -27,22 +27,38 @@ use super::*;
 /// `support` asks [`crate::agent_sandbox::untrusted_support`], only when needed: when the
 /// host cannot sandbox, a confined caller is refused and any other caller
 /// keeps the direct spawn behind the check-time refusals.
+///
+/// A `bounded` call (the node bounds the turn, [`node_is_shared`]) never runs
+/// the bin directly: it runs under the runner with the same masks, with or
+/// without path arguments, and is refused when the host cannot sandbox or
+/// when no store to hide could be listed.
 pub(super) fn command_spawn_program(
     bin: &Path,
     argv: &[String],
     has_path_args: bool,
     hidden: &[PathBuf],
+    bounded: bool,
     support: impl FnOnce() -> Result<(), String>,
 ) -> Result<(PathBuf, Vec<String>), String> {
     let direct = || Ok((bin.to_owned(), argv.to_vec()));
-    if !has_path_args && hidden.is_empty() {
+    if !bounded && !has_path_args && hidden.is_empty() {
         return direct();
     }
     let masks = command_child_masks(bin, hidden);
     if masks.is_empty() {
+        if bounded {
+            return Err(
+                "command tool: this node is shared, and Ryu found no store to hide from the \
+                 tool, so it was not run"
+                    .to_owned(),
+            );
+        }
         return direct();
     }
     if let Err(reason) = support() {
+        if bounded {
+            return Err(shared_node_refusal(&reason));
+        }
         if hidden.is_empty() {
             return direct();
         }
@@ -57,6 +73,106 @@ pub(super) fn command_spawn_program(
         runner,
         crate::agent_sandbox::masked_runner_args(bin, argv, &masks),
     ))
+}
+
+/// Whether this node bounds the turn a command tool runs for (a shared node,
+/// `turn_folders::node_bounds_turn_folders`). It takes no caller, so it holds
+/// for every way to a command tool.
+pub(super) fn node_is_shared() -> bool {
+    crate::server::chat_checkpoints::turn_folders::node_bounds_turn_folders()
+}
+
+/// The check that runs before anything of a command tool does (its version
+/// probe runs the binary outside the runner): a `bounded` call on a host that
+/// cannot sandbox is refused here, so nothing of the tool is started.
+pub(super) fn shared_node_precheck(
+    bounded: bool,
+    support: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if bounded {
+        support().map_err(|reason| shared_node_refusal(&reason))?;
+    }
+    Ok(())
+}
+
+fn shared_node_refusal(reason: &str) -> String {
+    format!(
+        "command tool: this node is shared, and this computer cannot sandbox command tools \
+         ({reason}), so the tool was not run"
+    )
+}
+
+/// The folder a command child starts in; `None` inherits Core's own.
+pub(super) struct CommandChildDir {
+    dir: Option<PathBuf>,
+    /// An empty folder made for this call, removed when the call ends.
+    _made: Option<tempfile::TempDir>,
+}
+
+impl CommandChildDir {
+    pub(super) fn dir(&self) -> Option<&Path> {
+        self.dir.as_deref()
+    }
+}
+
+/// The folder for a command child: the manifest's `cwd` as it is, or none.
+///
+/// A `bounded` call never inherits Core's working folder. Its folder is the
+/// manifest's `cwd` when that is absolute (a relative one would resolve
+/// against Core's folder and is refused), else `workspace_root` (the turn's
+/// checked folder, when the caller holds one), else an empty folder made for
+/// the call. A folder that is one of the child's masks, or lies below one, is
+/// refused: a child that stands inside a masked folder still reaches it.
+pub(super) fn command_child_dir(
+    manifest_cwd: Option<&str>,
+    workspace_root: Option<&Path>,
+    bounded: bool,
+    bin: &Path,
+    hidden: &[PathBuf],
+) -> Result<CommandChildDir, String> {
+    if !bounded {
+        return Ok(CommandChildDir {
+            dir: manifest_cwd.map(PathBuf::from),
+            _made: None,
+        });
+    }
+    let mut made = None;
+    let dir = match (manifest_cwd, workspace_root) {
+        (Some(cwd), _) if Path::new(cwd).is_absolute() => PathBuf::from(cwd),
+        (Some(_), _) => {
+            return Err(
+                "command tool: this node is shared, and the tool's working folder is not an \
+                 absolute path, so it was not run"
+                    .to_owned(),
+            )
+        }
+        (None, Some(root)) => root.to_owned(),
+        (None, None) => {
+            let empty = tempfile::Builder::new()
+                .prefix("ryu-command-")
+                .tempdir()
+                .map_err(|e| format!("command tool: could not make a working folder: {e}"))?;
+            let path = empty.path().to_owned();
+            made = Some(empty);
+            path
+        }
+    };
+    let dir = std::fs::canonicalize(&dir)
+        .map_err(|e| format!("command tool: the tool's working folder does not resolve: {e}"))?;
+    if command_child_masks(bin, hidden)
+        .iter()
+        .any(|mask| dir.starts_with(mask))
+    {
+        return Err(
+            "command tool: this node is shared, and the tool's working folder lies inside a \
+             store Ryu hides from command tools, so it was not run"
+                .to_owned(),
+        );
+    }
+    Ok(CommandChildDir {
+        dir: Some(dir),
+        _made: made,
+    })
 }
 
 /// The paths hidden from a path-taking command child: `hidden`, Ryu's data
@@ -106,9 +222,15 @@ mod tests {
     #[test]
     fn a_confined_path_call_runs_under_the_runner_with_its_hidden_stores_masked() {
         let (_tmp, store, bin) = fixture();
-        let (program, args) =
-            command_spawn_program(&bin, &argv(), true, std::slice::from_ref(&store), || Ok(()))
-                .unwrap();
+        let (program, args) = command_spawn_program(
+            &bin,
+            &argv(),
+            true,
+            std::slice::from_ref(&store),
+            false,
+            || Ok(()),
+        )
+        .unwrap();
         assert_eq!(program, std::env::current_exe().unwrap());
         assert_eq!(args[0], crate::agent_sandbox::AGENT_SANDBOX_RUNNER_ARG);
         assert!(mask_values(&args).contains(&store), "{args:?}");
@@ -120,7 +242,7 @@ mod tests {
     #[test]
     fn a_confined_path_call_is_refused_when_the_host_cannot_sandbox() {
         let (_tmp, store, bin) = fixture();
-        let refused = command_spawn_program(&bin, &argv(), true, &[store], || {
+        let refused = command_spawn_program(&bin, &argv(), true, &[store], false, || {
             Err("unprivileged user namespaces are not available".to_owned())
         })
         .unwrap_err();
@@ -130,16 +252,17 @@ mod tests {
     #[test]
     fn an_unconfined_call_keeps_the_direct_spawn_when_the_host_cannot_sandbox() {
         let (_tmp, _store, bin) = fixture();
-        let spawned =
-            command_spawn_program(&bin, &argv(), true, &[], || Err("no userns".to_owned()))
-                .unwrap();
+        let spawned = command_spawn_program(&bin, &argv(), true, &[], false, || {
+            Err("no userns".to_owned())
+        })
+        .unwrap();
         assert_eq!(spawned, (bin, argv()));
     }
 
     #[test]
     fn an_unconfined_call_without_path_arguments_runs_the_bin_directly() {
         let (_tmp, _store, bin) = fixture();
-        let spawned = command_spawn_program(&bin, &argv(), false, &[], || {
+        let spawned = command_spawn_program(&bin, &argv(), false, &[], false, || {
             panic!("no sandbox probe for an unconfined call without path arguments")
         })
         .unwrap();
@@ -156,6 +279,7 @@ mod tests {
             &argv(),
             false,
             std::slice::from_ref(&store),
+            false,
             || Ok(()),
         )
         .unwrap();
@@ -170,7 +294,7 @@ mod tests {
     #[test]
     fn a_confined_call_without_path_arguments_is_refused_when_the_host_cannot_sandbox() {
         let (_tmp, store, bin) = fixture();
-        let refused = command_spawn_program(&bin, &argv(), false, &[store], || {
+        let refused = command_spawn_program(&bin, &argv(), false, &[store], false, || {
             Err("no userns".to_owned())
         })
         .unwrap_err();
@@ -190,3 +314,6 @@ mod tests {
         assert!(!masks.iter().any(|mask| bin.starts_with(mask)), "{masks:?}");
     }
 }
+
+#[cfg(test)]
+mod shared_node_tests;

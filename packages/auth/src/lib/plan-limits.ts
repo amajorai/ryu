@@ -1,5 +1,6 @@
 import { PLANS } from "./plan-catalog.ts";
 import type { PlanId } from "./plan-core.ts";
+import { planLimit } from "./plan-quotas.ts";
 import type { Entitlement } from "./plan-subscription.ts";
 
 /** Plan catalog part: Gateway rate ceilings, Box concurrency and the Core limits claim. Re-exported by `plans.ts`. */
@@ -198,17 +199,26 @@ export function boxConcurrencyForEntitlement(
 
 /**
  * JWT claim Better Auth's `definePayload` (`../index.ts`) adds beside
- * `ryu_flags`: `{ boxConcurrency }`, the running-Box cap of the org the flags
- * were evaluated for. Core parses it into `VerifiedLimits` and refuses a new
- * session Box early when the owner is at the cap; the Box service enforces the
- * same cap from the tenant token whatever Core does. A missing claim means
- * "unknown", and Core falls through to the Box service's own limits.
+ * `ryu_flags`: `{ boxConcurrency, accountsPerProvider }`. Each number is left
+ * out when it could not be read.
+ *
+ *  - `boxConcurrency` is the running-Box cap of the org the flags were
+ *    evaluated for. Core parses it into `VerifiedLimits` and refuses a new
+ *    session Box early when the owner is at the cap; the Box service enforces
+ *    the same cap from the tenant token whatever Core does. Missing means
+ *    "unknown", and Core falls through to the Box service's own limits.
+ *  - `accountsPerProvider` is how many accounts (sign-ins or keys) one
+ *    provider may hold on a node this user is signed in to:
+ *    `planLimit(plan, "maxAccountsPerProvider")`. Core reads it in
+ *    `apps/core/src/server/access_gate/plan_limits.rs`. Missing means Core keeps the number of
+ *    the user's last token for a short while, then applies the free number.
  */
 export const CORE_LIMITS_CLAIM = "ryu_limits" as const;
 
 /** The claim's value. */
 export interface CoreLimitsClaim {
-	boxConcurrency: number;
+	accountsPerProvider?: number;
+	boxConcurrency?: number;
 }
 
 /**
@@ -220,7 +230,18 @@ export type CoreLimitsPlanResolver = (
 	organizationId: string
 ) => Promise<Pick<Entitlement, "plan" | "seats" | "trialing">>;
 
+/**
+ * A person's own plan, as `@ryu/api` resolves it: an individual plan or the
+ * one-time desktop license. Both are bought by the person, so an org's
+ * entitlement does not carry them. It must REJECT when billing cannot be read:
+ * a null plan means "free" and lowers the account limit.
+ */
+export type CoreLimitsUserPlanResolver = (
+	userId: string
+) => Promise<PlanId | null>;
+
 let coreLimitsPlanResolver: CoreLimitsPlanResolver | null = null;
+let coreLimitsUserPlanResolver: CoreLimitsUserPlanResolver | null = null;
 
 /** Install the plan resolver for the `ryu_limits` claim. Single slot, last wins. */
 export function registerCoreLimitsPlanResolver(
@@ -229,44 +250,107 @@ export function registerCoreLimitsPlanResolver(
 	coreLimitsPlanResolver = implementation;
 }
 
-const CORE_LIMITS_TIMEOUT_MS = 2000;
-const CORE_LIMITS_TIMED_OUT = Symbol("core-limits-claim-timeout");
+/** Install the resolver of a person's own plan. Single slot, last wins. */
+export function registerCoreLimitsUserPlanResolver(
+	implementation: CoreLimitsUserPlanResolver | null
+): void {
+	coreLimitsUserPlanResolver = implementation;
+}
 
-/**
- * The `ryu_limits` claim for `organizationId`, or null when there is no org,
- * no registered resolver, or the plan could not be read in time. NEVER THROWS
- * AND NEVER REJECTS: its caller mints every token, so a failure omits the
- * claim rather than delaying or failing sign-in.
- */
-export async function resolveCoreLimitsClaim(
-	organizationId: string | null,
-	timeoutMs: number = CORE_LIMITS_TIMEOUT_MS
-): Promise<CoreLimitsClaim | null> {
-	const implementation = coreLimitsPlanResolver;
-	if (!(organizationId && implementation)) {
-		return null;
+const CORE_LIMITS_TIMEOUT_MS = 2000;
+/** A plan lookup that does not apply, failed or ran out of time. */
+const CORE_LIMITS_UNKNOWN = Symbol("core-limits-claim-unknown");
+type CoreLimitsUnknown = typeof CORE_LIMITS_UNKNOWN;
+
+/** Run one plan lookup. Never throws and never rejects. */
+async function coreLimitsLookup<T>(
+	lookup: (() => Promise<T>) | null,
+	timeoutMs: number
+): Promise<T | CoreLimitsUnknown> {
+	if (!lookup) {
+		return CORE_LIMITS_UNKNOWN;
 	}
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
-		const entitlement = await Promise.race([
-			implementation(organizationId),
-			new Promise<typeof CORE_LIMITS_TIMED_OUT>((resolve) => {
-				timer = setTimeout(() => resolve(CORE_LIMITS_TIMED_OUT), timeoutMs);
+		return await Promise.race([
+			lookup(),
+			new Promise<CoreLimitsUnknown>((resolve) => {
+				timer = setTimeout(() => {
+					console.error("[auth] core limits claim: plan lookup timed out");
+					resolve(CORE_LIMITS_UNKNOWN);
+				}, timeoutMs);
 			}),
 		]);
-		if (entitlement === CORE_LIMITS_TIMED_OUT) {
-			console.error("[auth] core limits claim: plan lookup timed out");
-			return null;
-		}
-		return {
-			boxConcurrency: boxConcurrencyForEntitlement(entitlement).maxRunning,
-		};
 	} catch (error) {
 		console.error("[auth] core limits claim: plan lookup failed:", error);
-		return null;
+		return CORE_LIMITS_UNKNOWN;
 	} finally {
 		clearTimeout(timer);
 	}
+}
+
+/**
+ * The account limit of the plans that were read: the highest one, so a member
+ * of a paid org and a person with their own plan or license both get the paid
+ * number. `undefined` when no plan was read, and when a number cannot be
+ * signed (a plan with no row in `KERNEL_QUOTAS` is unbounded).
+ */
+function accountsPerProviderFor(
+	plans: readonly (PlanId | null)[]
+): number | undefined {
+	if (plans.length === 0) {
+		return;
+	}
+	const limit = Math.max(
+		...plans.map((plan) => planLimit(plan, "maxAccountsPerProvider"))
+	);
+	return Number.isSafeInteger(limit) && limit > 0 ? limit : undefined;
+}
+
+/**
+ * The `ryu_limits` claim for a token of `userId` whose flags were evaluated
+ * for `organizationId`, or null when nothing could be read. NEVER THROWS AND
+ * NEVER REJECTS: its caller mints every token, so a failure omits a number
+ * rather than delaying or failing sign-in.
+ *
+ * `boxConcurrency` needs the org and its resolver. `accountsPerProvider` reads
+ * the org's plan and the person's own plan, and is left out when a lookup that
+ * applies failed, so a billing outage never signs the free number for a paying
+ * user.
+ */
+export async function resolveCoreLimitsClaim(
+	organizationId: string | null,
+	timeoutMs: number = CORE_LIMITS_TIMEOUT_MS,
+	userId: string | null = null
+): Promise<CoreLimitsClaim | null> {
+	const orgResolver = coreLimitsPlanResolver;
+	const userResolver = coreLimitsUserPlanResolver;
+	const orgLookup =
+		organizationId && orgResolver ? () => orgResolver(organizationId) : null;
+	const userLookup = userId && userResolver ? () => userResolver(userId) : null;
+	const [entitlement, userPlan] = await Promise.all([
+		coreLimitsLookup(orgLookup, timeoutMs),
+		coreLimitsLookup(userLookup, timeoutMs),
+	]);
+	const claim: CoreLimitsClaim = {};
+	const plans: (PlanId | null)[] = [];
+	if (entitlement !== CORE_LIMITS_UNKNOWN) {
+		claim.boxConcurrency = boxConcurrencyForEntitlement(entitlement).maxRunning;
+		plans.push(entitlement.plan);
+	}
+	if (userPlan !== CORE_LIMITS_UNKNOWN) {
+		plans.push(userPlan);
+	}
+	const everyLookupAnswered =
+		(orgLookup === null || entitlement !== CORE_LIMITS_UNKNOWN) &&
+		(userLookup === null || userPlan !== CORE_LIMITS_UNKNOWN);
+	const accountsPerProvider = everyLookupAnswered
+		? accountsPerProviderFor(plans)
+		: undefined;
+	if (accountsPerProvider !== undefined) {
+		claim.accountsPerProvider = accountsPerProvider;
+	}
+	return Object.keys(claim).length > 0 ? claim : null;
 }
 
 /** Add the claim to a JWT payload; a null claim leaves the payload unchanged. */
@@ -277,9 +361,13 @@ export function withCoreLimitsClaim<T extends object>(
 	if (!claim) {
 		return payload;
 	}
+	const { accountsPerProvider, boxConcurrency } = claim;
 	return {
 		...payload,
-		[CORE_LIMITS_CLAIM]: { boxConcurrency: claim.boxConcurrency },
+		[CORE_LIMITS_CLAIM]: {
+			...(accountsPerProvider === undefined ? {} : { accountsPerProvider }),
+			...(boxConcurrency === undefined ? {} : { boxConcurrency }),
+		},
 	};
 }
 

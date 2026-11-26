@@ -5,6 +5,7 @@
 
 import type { AppJsonValue } from "../app-request-json.ts";
 import { type ApiTarget, request } from "../client.ts";
+import { encodePathId } from "../path-id.ts";
 import type { VaultAgentTarget } from "./agent-routes.ts";
 import type {
 	VaultBrokerCredentialRequest,
@@ -320,6 +321,6 @@ export function vaultAgentBrokerProposal(
 	return agentRequest(
 		vaultBrokerProposalReply,
 		target,
-		`/api/vault/agent/broker/proposals/${encodeURIComponent(id)}`
+		`/api/vault/agent/broker/proposals/${encodePathId(id)}`
 	);
 }

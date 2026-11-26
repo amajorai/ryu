@@ -77,7 +77,7 @@ export function VaultDynamicPanel({ target }: { target: ApiTarget }) {
 		onError: (error) => {
 			sileo.error({
 				title: tl("That did not work"),
-				description: vaultErrorMessage(error, "Try again.", tl),
+				description: vaultErrorMessage(error, tl("Try again."), tl),
 			});
 		},
 	});

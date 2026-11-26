@@ -84,6 +84,8 @@ pub(in crate::server) fn protected_routes_6(state: &ServerState) -> Router<Serve
                 .post(schedule_update)
                 .delete(cancel_update_schedule),
         )
+        // Override for a restart that is waiting for agent runs to finish.
+        .route("/api/update/restart-now", post(update_restart_now))
         // ── Cross-surface preferences (theme sync: desktop ↔ island) ────────
         // SSE stream is registered before the `:key` route so the static
         // `stream` segment is matched first.

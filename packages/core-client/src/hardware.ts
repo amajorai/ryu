@@ -48,6 +48,7 @@ import {
 	makeHeaders,
 	request,
 } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
 export type {
 	RhpDevice,
@@ -379,7 +380,7 @@ export async function updateDevice(
 ): Promise<RhpDevice> {
 	const json = await request(
 		target,
-		`/api/hardware/devices/${deviceId}`,
+		`/api/hardware/devices/${encodePathId(deviceId)}`,
 		{ method: "PATCH", body: update },
 		hardwareUpdateResponseSchema
 	);
@@ -399,7 +400,7 @@ export async function revokeDevice(
 ): Promise<void> {
 	await request(
 		target,
-		`/api/hardware/devices/${deviceId}`,
+		`/api/hardware/devices/${encodePathId(deviceId)}`,
 		{
 			method: "DELETE",
 		},

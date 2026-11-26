@@ -14,9 +14,14 @@ const CONTEXT_END = "\n</page-context>\n\n";
 
 /** Page context is untrusted (a PR diff, a document): drop chat-template
  *  control tokens that could impersonate a new turn, and neutralize any text
- *  that would close or reopen the wrapper, so it cannot step outside the block. */
-function escapeContextDelimiters(block: string): string {
-	return stripTemplateTokens(block).replace(/<(\/?)(page-context)/gi, "‹$1$2");
+ *  that would close or reopen the wrapper, so it cannot step outside the block.
+ *  App context (`ui.updateModelContext`) rides the same user message under its
+ *  own app-context tag, so both tags are neutralized in both kinds of text. */
+export function escapeContextDelimiters(block: string): string {
+	return stripTemplateTokens(block).replace(
+		/<(\/?)(page-context|app-context)/gi,
+		"‹$1$2"
+	);
 }
 
 export function composeAssistantContext(

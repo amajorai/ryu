@@ -9,8 +9,10 @@ pub(in crate::server) fn imported_memory_metadata() -> memory::MemoryMetadata {
     memory::MemoryMetadata::from_source(memory::MemorySource::Import)
 }
 
-/// Lower a foreign MCP entry into `~/.ryu/mcp.json` (enabled — it is the user's
-/// own server), screening remote URLs and refusing names that collide.
+/// Lower a foreign MCP entry into `~/.ryu/mcp.json` (every entry, stdio or
+/// remote, lands disabled until the user enables it, see
+/// `write_imported_mcp_entry`), screening remote URLs and refusing names that
+/// collide.
 pub(in crate::server) async fn import_mcp_item(
     state: &ServerState,
     root: &std::path::Path,

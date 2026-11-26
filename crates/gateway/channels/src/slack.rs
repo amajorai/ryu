@@ -63,6 +63,7 @@ use crate::{
 };
 
 mod api;
+mod approvals;
 mod channel;
 mod inbound;
 mod mrkdwn;

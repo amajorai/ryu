@@ -56,6 +56,15 @@ impl Channel for SlackChannel {
         Ok(())
     }
 
+    async fn send_approval_prompt(
+        &self,
+        chat_id: &str,
+        prompt: &crate::approvals::ApprovalPrompt,
+        locale: &str,
+    ) -> anyhow::Result<bool> {
+        self.post_approval_prompt(chat_id, prompt, locale).await
+    }
+
     /// Post the reply as mrkdwn. Without the conversion Slack renders the agent's
     /// CommonMark literally: `**bold**` shows its asterisks and `[a](b)` shows its
     /// brackets.
@@ -260,6 +269,17 @@ impl Channel for SlackChannel {
                         if let Some(envelope_id) = envelope_id.as_deref() {
                             let ack = json!({ "envelope_id": envelope_id }).to_string();
                             let _ = ws.send(WsMessage::Text(ack)).await;
+                        }
+
+                        // An approval button is decided off the read loop:
+                        // Core may take seconds, and envelopes must keep
+                        // being acknowledged meanwhile.
+                        if let Some(press) = super::approvals::parse_press(&payload) {
+                            let channel = Arc::clone(&self);
+                            tokio::spawn(async move {
+                                channel.handle_approval_press(press).await;
+                            });
+                            continue;
                         }
 
                         if self.handle_interactive(&payload).await {

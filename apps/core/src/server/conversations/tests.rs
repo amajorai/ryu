@@ -59,6 +59,7 @@ fn production_sources() -> Vec<(&'static str, String)> {
         ("sessions", include_str!("sessions.rs")),
         ("side_chats", include_str!("side_chats.rs")),
         ("store", include_str!("store.rs")),
+        ("strict_parts", include_str!("strict_parts.rs")),
         ("summary_types", include_str!("summary_types.rs")),
         ("sync_messages", include_str!("sync_messages.rs")),
         ("tenancy", include_str!("tenancy.rs")),

@@ -69,6 +69,10 @@ impl McpRegistry {
         // Built-in provider-usage reads. Credentials stay in Core; the tools
         // return only normalized remaining/used windows and reset metadata.
         all.extend(usage_tool::tools());
+        // Built-in self diagnostics: two read-only tools without arguments that
+        // report Ryu's own state and the faults of the calling chat. Dispatch
+        // decides per call how far the caller may look.
+        all.extend(builtin_servers::diagnostics::tools());
         // Built-in Treg tools (flagged: `RYU_TREG_AGENT_TOOLS`). Calls go through
         // the Gateway's managed connection layer, so the Treg token and the wallet
         // debit stay in Gateway.
@@ -152,6 +156,9 @@ impl McpRegistry {
         // Built-in consent requests — ask the user to connect an app or install a
         // plugin through an inline card. Client-rendered (Core dispatch is a no-op).
         all.extend(consent_tool::tools());
+        // Built-in feedback draft: an idea or bug report about Ryu shown as an
+        // inline card the user reviews. Client-rendered (Core dispatch is a no-op).
+        all.extend(feedback_tool::tools());
         // Built-in suggested next task — an optional card above the composer whose
         // Start button opens a new chat. Client-rendered (Core dispatch is a no-op).
         all.extend(tasks_tool::tools());

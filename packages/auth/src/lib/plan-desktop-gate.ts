@@ -1,105 +1,45 @@
 import type { Entitlement, PlanId } from "./plans.ts";
 
 /* -------------------------------------------------------------------------- *
- * Desktop trial + paywall gate (epic #496, Unit C1).
+ * Desktop access (personal use is free).
  *
- * The desktop is a PAID product ($200 list / $129 launch one-time license or a
- * Plus/Pro/Max/Teams/Teams Lite/Business subscription),
- * but Ryu is open-core: BASIC local/free chat must stay usable forever. So the
- * gate covers only Pro features + managed inference; it never blocks the app
- * shell. A fresh install gets a 7-day trial of full access; after expiry, with
- * no active sub and no valid license key, the Pro-feature set is locked behind
- * a (dismissible) paywall, dropping the user into free local chat.
+ * Every feature that runs on the user's own computer or with their own keys is
+ * free: there is no trial clock, no paywall and no numeric desktop cap. The only
+ * gated capabilities are the ones Ryu pays for per user (managed inference,
+ * cloud sync, cloud nodes, hosted bots, team seats, agent mail); they need an
+ * active subscription and are listed in CAPABILITY_TIERS below.
  *
- * NOTHING HARDCODED: the trial length, the offline-grace window, and the gated
- * feature set live ONLY here, as one config, never inlined across components.
+ * A subscription or a desktop license key still resolves as before, so an
+ * existing license holder keeps their state. The offline-grace window keeps a
+ * paying user's plan when the control plane is briefly unreachable.
  * -------------------------------------------------------------------------- */
 
-/** One day in milliseconds; the unit the trial/grace windows are measured in. */
+/** One day in milliseconds; the unit the offline-grace window is measured in. */
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-/**
- * The desktop gate's tunable windows. Defaults match the epic #496 pricing
- * decisions (7-day trial). The offline-grace window is how long a cached
- * last-good entitlement is honoured when the control plane is unreachable, so a
- * paying user is NOT falsely locked out by a flaky network.
- */
+/** The desktop gate's tunable windows. */
 export interface DesktopGateConfig {
-	/**
-	 * OFF-BY-DEFAULT escape hatch: while true, the gate grants Pro features to
-	 * every user (no trial clock, no paywall). This is NOT the shipped model —
-	 * "free Pro forever" is wrong; the correct model is open-core (the desktop
-	 * shell + local/BYOK chat are ALWAYS free — the paywall is dismissible into
-	 * free local chat) PLUS a 7-day full trial of Pro that then upsells. So the
-	 * default is `false`: new installs get the 7-day trial, then the paywall.
-	 * Keep this flag only as a break-glass to re-open everything (e.g. an
-	 * incident); flipping it ships as a normal release, delivered through the
-	 * user-controlled auto-updater.
-	 * It always withholds managed inference (real cloud spend) and never
-	 * overrides a real paying subscription/license.
-	 */
-	readonly betaFree: boolean;
 	/** How long a cached entitlement is trusted while offline, in days. */
 	readonly offlineGraceDays: number;
-	/** Free-trial length from first launch, in days. */
+	/**
+	 * Retired: the desktop has no trial and {@link decideDesktopAccess} never
+	 * reads this. It stays only because the public pricing text still prints it;
+	 * remove it together with that line.
+	 */
 	readonly trialDays: number;
 }
 
-/**
- * What the free trial is a trial OF — and it is NOT Pro.
- *
- * The trial branch of {@link decideDesktopAccess} returns
- * `proUnlocked: true, managedInference: false`. That is Band 2 and only Band 2:
- * the numeric desktop allowances a one-time **Lifetime Desktop license** unlocks
- * forever. Local power features remain free after the trial. The trial grants
- * no managed inference, credits, or cloud node; those require paid managed access.
- *
- * Calling it a "Pro trial" therefore oversold it in both directions: it promised
- * credits and a server the trial never grants, and it hid that what the user is
- * actually sampling is the Lifetime Desktop product. A trialist who then bought
- * Pro expecting the same thing plus a bill is a support ticket; one who assumed
- * the trial included managed inference is a refund.
- *
- * Single source of truth so the name cannot drift across the desktop, the web
- * pricing page and the docs the way "Pro trial" did.
- */
-export const DESKTOP_TRIAL_LABEL = "Lifetime Desktop trial";
-
-/**
- * One line for "what does the trial actually include", for any surface that
- * needs to say so. Names the exclusions explicitly, because the exclusions are
- * the part that was previously misrepresented.
- */
-export const DESKTOP_TRIAL_INCLUDES =
-	"Full desktop app access. Managed inference, credits and cloud nodes are not included.";
-
 /** The single default gate config (swappable; never inlined per-component). */
 export const DESKTOP_GATE: DesktopGateConfig = {
-	// Open-core + a 7-day LIFETIME DESKTOP trial → upsell is the shipped model
-	// (see `DESKTOP_TRIAL_LABEL` for why it is not a "Pro" trial). `betaFree` is a
-	// break-glass escape hatch only (see the field doc); the default is OFF so a
-	// fresh install gets the trial, then the paywall — not free Pro forever.
-	betaFree: false,
 	trialDays: 7,
 	offlineGraceDays: 7,
 };
 
 /**
- * The gate config for a client that has resolved the `billing.desktop_trial`
- * rollout flag. Trial off turns on `betaFree`, so the desktop is free and
- * uncapped (no trial clock, no paywall) while real subscriptions and licences
- * still win in {@link decideDesktopAccess}.
- */
-export const desktopGateConfig = (
-	trialEnabled: boolean,
-	base: DesktopGateConfig = DESKTOP_GATE
-): DesktopGateConfig => (trialEnabled ? base : { ...base, betaFree: true });
-
-/**
  * Local/BYOK chat, agents, tools, MCP, skills, workflows, Prompt Studio, evals,
  * GraphRAG, Companion, and Gateway governance UI are free desktop features.
- * They are absent from the paid capability map by construction. The desktop
- * license lifts separate numeric caps; managed services require paid access.
+ * They are absent from the paid capability map by construction. Managed
+ * services require paid access.
  * The legacy "pro" tier remains available for compatibility with band helpers.
  */
 export type CapabilityTier = "pro" | "subscription";
@@ -126,21 +66,18 @@ export const GATED_CAPABILITIES = Object.keys(CAPABILITY_TIERS).filter(
 export const capabilityTier = (cap: GatedCapability): CapabilityTier =>
 	CAPABILITY_TIERS[cap];
 
-/** Why access is currently granted (or why it is not). */
+/** Why the desktop resolved to this access state. */
 export type AccessReason =
 	| "subscription" // an active Plus/Pro/Max/Teams/Teams Lite/Business subscription
 	| "license" // a valid desktop license key
-	| "beta" // free-during-beta flag is on (no trial clock, no paywall)
-	| "trial" // still inside the 7-day trial window
-	| "offline-grace" // live check failed; riding a cached last-good entitlement
-	| "trial-expired" // trial over, no sub/license, online (locked)
-	| "locked"; // no entitlement and grace exhausted (locked)
+	| "offline-grace" // live check failed; riding a cached last-good paid plan
+	| "free"; // personal use: every local feature, no managed services
 
 /**
- * A cached last-good entitlement, persisted locally so a paying user is not
- * locked out when the control plane is briefly unreachable. `proUnlocked` is
- * the resolved Pro state at the time it was cached; `cachedAtMs` anchors the
- * offline-grace window.
+ * A cached last-good entitlement, persisted locally so a paying user does not
+ * lose their plan when the control plane is briefly unreachable. `proUnlocked`
+ * is the resolved desktop access at the time it was cached; `cachedAtMs`
+ * anchors the offline-grace window.
  */
 export interface CachedEntitlement {
 	readonly cachedAtMs: number;
@@ -155,8 +92,6 @@ export interface CachedEntitlement {
 export interface DesktopGateInput {
 	/** Last-good cached entitlement, or null when none has ever been cached. */
 	readonly cached?: CachedEntitlement | null;
-	/** First-launch timestamp (server-authoritative when available). */
-	readonly firstLaunchMs: number | null;
 	/**
 	 * Whether a desktop license key validated as active on this device. Resolved
 	 * by the client from the validate endpoint; folded into the verdict here so
@@ -175,53 +110,33 @@ export interface DesktopGateInput {
 
 /** The resolved desktop-access verdict. */
 export interface DesktopGateVerdict {
-	/** Days remaining in the trial (0 once expired); for the countdown UI. */
-	readonly daysLeftInTrial: number;
-	/** True when managed inference is available (sub with the pool, not trial). */
+	/** True when managed inference is available (a subscription with the pool). */
 	readonly managedInference: boolean;
 	/** Whether the resolved state can use supported paid Marketplace apps. */
 	readonly marketplaceApps: boolean;
-	/**
-	 * True when the user is on the FREE band only (no Lifetime license, no active
-	 * subscription, trial expired). Under the soft paywall this NEVER blanks the
-	 * app shell — it drives the dismissible upsell modal and pauses always-on
-	 * background automation (a Band-2 feature). Band 1 local chat stays usable.
-	 */
-	readonly paywalled: boolean;
 	/** The effective plan id, or null. */
 	readonly plan: PlanId | null;
-	/** True when Pro features are unlocked (sub / license / trial / grace). */
+	/**
+	 * Whether every local desktop feature is available. Always true: personal
+	 * use is free. Kept so plan-band helpers and stored entitlements keep their
+	 * shape.
+	 */
 	readonly proUnlocked: boolean;
 	readonly reason: AccessReason;
 }
 
-const daysLeft = (firstLaunchMs: number, nowMs: number, trialDays: number) => {
-	const elapsedMs = nowMs - firstLaunchMs;
-	const remainingMs = trialDays * MS_PER_DAY - elapsedMs;
-	if (remainingMs <= 0) {
-		return 0;
-	}
-	return Math.ceil(remainingMs / MS_PER_DAY);
-};
-
-// A null first-launch (server unreachable / never anchored) is treated as a
-// FRESH trial, never an expired one — so a new or offline install is granted
-// the trial rather than falsely locked out before its anchor is known.
-const inTrial = (firstLaunchMs: number | null, nowMs: number, days: number) =>
-	firstLaunchMs === null || nowMs - firstLaunchMs < days * MS_PER_DAY;
-
 const cacheIsFresh = (cached: CachedEntitlement, nowMs: number, days: number) =>
 	nowMs - cached.cachedAtMs < days * MS_PER_DAY;
 
-/** The offline-grace verdict: the live check failed and a fresh Pro cache exists. */
+/** The offline-grace verdict: the live check failed and a fresh paid cache exists. */
 const offlineGraceVerdict = (
 	{ liveEntitlement, cached, nowMs }: DesktopGateInput,
-	config: DesktopGateConfig,
-	daysLeftInTrial: number
+	config: DesktopGateConfig
 ): DesktopGateVerdict | null => {
 	if (
 		liveEntitlement !== null ||
 		!cached?.proUnlocked ||
+		!cached.plan ||
 		!cacheIsFresh(cached, nowMs, config.offlineGraceDays)
 	) {
 		return null;
@@ -231,40 +146,28 @@ const offlineGraceVerdict = (
 		marketplaceApps: cached.marketplaceApps,
 		managedInference: cached.managedInference,
 		plan: cached.plan,
-		paywalled: false,
 		reason: "offline-grace",
-		daysLeftInTrial,
 	};
 };
 
 /**
- * Decide desktop access from first-launch, the live entitlement, a license
- * check, and a cached last-good entitlement. Pure and deterministic (inject
- * `nowMs`): the sole unit-test surface and the only verification available
- * without a Tauri runtime.
+ * Decide desktop access from the live entitlement, a license check, and a
+ * cached last-good entitlement. Pure and deterministic (inject `nowMs`).
  *
  * Precedence:
- *  1. Active subscription (live)        → Pro unlocked, managed-inference per plan.
- *  2. Valid desktop license (live)      → Pro unlocked, no managed inference.
- *  3. Free-during-beta flag on          → Pro unlocked (beta), no managed pool,
- *                                         unless offline with a fresh cached paid
- *                                         plan, which keeps that plan (as step 5).
- *  4. Inside the 7-day trial            → Pro unlocked (trial), no managed pool.
- *  5. Live check FAILED + fresh cache   → ride the cached last-good entitlement
- *                                         (offline grace) so no false lockout.
- *  6. Otherwise                         → locked (paywall); free local chat stays.
+ *  1. Active subscription or license (live): that plan, managed inference per plan.
+ *  2. Valid desktop license key: license, no managed inference.
+ *  3. Live check FAILED with a fresh paid cache: ride the cached plan (offline
+ *     grace).
+ *  4. Otherwise: free. Every local feature, no managed services.
  *
- * Note open-core: a locked verdict NEVER blocks the app shell — the caller gates
- * only {@link GATED_CAPABILITIES}, and the paywall is dismissible into free chat.
+ * No branch locks the desktop. The caller gates only {@link GATED_CAPABILITIES}.
  */
 export const decideDesktopAccess = (
 	input: DesktopGateInput,
 	config: DesktopGateConfig = DESKTOP_GATE
 ): DesktopGateVerdict => {
-	const { liveEntitlement, licenseActive, firstLaunchMs, nowMs } = input;
-	const trialDaysLeft = firstLaunchMs
-		? daysLeft(firstLaunchMs, nowMs, config.trialDays)
-		: config.trialDays;
+	const { liveEntitlement, licenseActive } = input;
 
 	// 1) A successful live check with an entitling subscription/license.
 	if (liveEntitlement?.desktopAccess) {
@@ -275,9 +178,7 @@ export const decideDesktopAccess = (
 			marketplaceApps: liveEntitlement.marketplaceApps,
 			managedInference: liveEntitlement.managedInference,
 			plan: liveEntitlement.plan,
-			paywalled: false,
 			reason,
-			daysLeftInTrial: trialDaysLeft,
 		};
 	}
 
@@ -289,65 +190,24 @@ export const decideDesktopAccess = (
 			marketplaceApps: false,
 			managedInference: false,
 			plan: "desktop-license",
-			paywalled: false,
 			reason: "license",
-			daysLeftInTrial: trialDaysLeft,
 		};
 	}
 
-	// 3) Free-during-beta flag: with no real subscription/license (those win
-	//    above, keeping a paying user's managed inference), grant Pro features to
-	//    everyone — no trial clock, no paywall. Managed inference stays withheld
-	//    (it bills real cloud spend); flip `betaFree` off to enable the paid gate.
-	if (config.betaFree) {
-		// A subscriber whose live check failed keeps the cached paid plan (and its
-		// managed inference) instead of dropping to the beta's free tier.
-		const grace = offlineGraceVerdict(input, config, trialDaysLeft);
-		if (grace?.plan) {
-			return grace;
-		}
-		return {
-			proUnlocked: true,
-			marketplaceApps: false,
-			managedInference: false,
-			plan: null,
-			paywalled: false,
-			reason: "beta",
-			daysLeftInTrial: 0,
-		};
-	}
-
-	// 4) Inside the trial window.
-	if (inTrial(firstLaunchMs, nowMs, config.trialDays)) {
-		return {
-			proUnlocked: true,
-			marketplaceApps: false,
-			managedInference: false,
-			plan: null,
-			paywalled: false,
-			reason: "trial",
-			daysLeftInTrial: trialDaysLeft,
-		};
-	}
-
-	// 5) Live check failed (offline) but we have a fresh, Pro last-good cache:
-	//    ride the grace window rather than falsely locking a paying user out.
-	const grace = offlineGraceVerdict(input, config, trialDaysLeft);
+	// 3) A subscriber whose live check failed keeps the cached paid plan (and its
+	//    managed inference) for the grace window.
+	const grace = offlineGraceVerdict(input, config);
 	if (grace) {
 		return grace;
 	}
 
-	// 6) Locked. Free local chat stays usable; the paywall gates Pro features.
+	// 4) Personal use is free. Managed inference stays withheld because it bills
+	//    real cloud spend; the server and the gateway gate it either way.
 	return {
-		proUnlocked: false,
+		proUnlocked: true,
 		marketplaceApps: false,
 		managedInference: false,
 		plan: null,
-		paywalled: true,
-		reason:
-			firstLaunchMs !== null && nowMs - firstLaunchMs >= 0
-				? "trial-expired"
-				: "locked",
-		daysLeftInTrial: 0,
+		reason: "free",
 	};
 };

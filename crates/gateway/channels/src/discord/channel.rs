@@ -50,6 +50,15 @@ impl Channel for DiscordChannel {
         Ok(())
     }
 
+    async fn send_approval_prompt(
+        &self,
+        chat_id: &str,
+        prompt: &crate::approvals::ApprovalPrompt,
+        locale: &str,
+    ) -> anyhow::Result<bool> {
+        self.post_approval_prompt(chat_id, prompt, locale).await
+    }
+
     async fn send_typing(&self, chat_id: &str) -> anyhow::Result<()> {
         let target = target_channel(chat_id);
         let url = format!("{API_BASE}/channels/{target}/typing");

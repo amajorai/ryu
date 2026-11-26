@@ -58,6 +58,7 @@
         "Resources/it.lproj/InfoPlist.strings": "locales/it.lproj/InfoPlist.strings",
         "Resources/ja.lproj/InfoPlist.strings": "locales/ja.lproj/InfoPlist.strings",
         "Resources/ko.lproj/InfoPlist.strings": "locales/ko.lproj/InfoPlist.strings",
+        "Resources/pl.lproj/InfoPlist.strings": "locales/pl.lproj/InfoPlist.strings",
         "Resources/pt-BR.lproj/InfoPlist.strings": "locales/pt-BR.lproj/InfoPlist.strings",
         "Resources/ru.lproj/InfoPlist.strings": "locales/ru.lproj/InfoPlist.strings",
         "Resources/zh-Hans.lproj/InfoPlist.strings": "locales/zh-Hans.lproj/InfoPlist.strings"
@@ -75,13 +76,15 @@
           "Italian",
           "Japanese",
           "Korean",
+          "Polish",
           "PortugueseBR",
           "Russian",
           "SimpChinese"
         ],
         "displayLanguageSelector": false,
         "customLanguageFiles": {
-          "Hindi": "nsis/Hindi.nsh"
+          "Hindi": "nsis/Hindi.nsh",
+          "Polish": "nsis/Polish.nsh"
         }
       },
       "wix": {

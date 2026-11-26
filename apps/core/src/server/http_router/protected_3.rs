@@ -199,6 +199,9 @@ pub(in crate::server) fn protected_routes_3(state: &ServerState) -> Router<Serve
         .merge(onboarding_profile::routes())
         .merge(continuity::router())
         .merge(backups::router())
+        // Long operations that outlive their request (imports and similar):
+        // list, read, cancel, retry and the live stream.
+        .merge(crate::background_processes::operations::routes::router())
         // ── Danger zone: irreversible bulk "delete all X" (settings) ─────────
         .route("/api/data/counts", get(data_admin::data_counts))
         .route("/api/data/clear", post(data_admin::data_clear))

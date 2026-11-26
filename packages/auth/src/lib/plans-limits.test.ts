@@ -18,7 +18,7 @@ import {
 
 describe("planLimit — numeric caps (free baseline vs paid rows)", () => {
 	it("returns the free baseline for a null plan", () => {
-		expect(planLimit(null, "maxOpenTabs")).toBe(3);
+		expect(planLimit(null, "maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
 		expect(planLimit(null, "maxAgents")).toBe(Number.POSITIVE_INFINITY);
 		expect(planLimit(null, "maxSpaces")).toBe(Number.POSITIVE_INFINITY);
 		expect(planLimit(null, "maxConcurrentRuns")).toBe(Number.POSITIVE_INFINITY);
@@ -26,7 +26,7 @@ describe("planLimit — numeric caps (free baseline vs paid rows)", () => {
 			Number.POSITIVE_INFINITY
 		);
 		expect(planLimit(null, "spaceStorageLimitGb")).toBe(1);
-		expect(planLimit(null, "maxRemoteNodes")).toBe(1);
+		expect(planLimit(null, "maxRemoteNodes")).toBe(Number.POSITIVE_INFINITY);
 	});
 
 	it("mirrors FREE_TIER_LIMITS exactly for a null plan (single source)", () => {
@@ -73,6 +73,14 @@ describe("planLimit — numeric caps (free baseline vs paid rows)", () => {
 		}
 	});
 
+	it("caps accounts per provider at 10 free and 50 on every plan", () => {
+		expect(planLimit(null, "maxAccountsPerProvider")).toBe(10);
+		// Every plan id, so a new plan cannot fall through to an unbounded default.
+		for (const plan of PLAN_IDS) {
+			expect(planLimit(plan, "maxAccountsPerProvider")).toBe(50);
+		}
+	});
+
 	/**
 	 * The whole tier × key matrix, written out. The registry derives every paid
 	 * row from {@link QuotaSpec.paid} defaulting to unbounded, so a mistyped
@@ -82,11 +90,14 @@ describe("planLimit — numeric caps (free baseline vs paid rows)", () => {
 	it("pins every tier × quota number", () => {
 		const INF = Number.POSITIVE_INFINITY;
 		const matrix = {
+			maxAccountsPerProvider: [10, 50, 50, 50, 50, 50, 50, 50],
 			maxAgents: [INF, INF, INF, INF, INF, INF, INF, INF],
 			maxConcurrentRuns: [INF, INF, INF, INF, INF, INF, INF, INF],
 			maxEvalRunsMonthly: [INF, INF, INF, INF, INF, INF, INF, INF],
-			maxOpenTabs: [3, INF, INF, INF, INF, INF, INF, INF],
-			maxRemoteNodes: [1, INF, INF, INF, INF, INF, INF, INF],
+			maxHostedNodes: [50, 50, 50, 50, 50, 50, 50, 50],
+			maxOpenTabs: [INF, INF, INF, INF, INF, INF, INF, INF],
+			maxRateLimitedWrites: [30, 30, 30, 30, 30, 30, 30, 30],
+			maxRemoteNodes: [INF, INF, INF, INF, INF, INF, INF, INF],
 			maxSpaces: [INF, INF, INF, INF, INF, INF, INF, INF],
 			spaceStorageLimitGb: [1, 20, 10, 10, 50, 50, 50, 50],
 		} satisfies Record<
@@ -130,6 +141,7 @@ describe("planLimit — numeric caps (free baseline vs paid rows)", () => {
 describe("quota ownership — Core-owned limits", () => {
 	it("leaves shell and Core-subsystem quotas unowned", () => {
 		for (const field of [
+			"maxAccountsPerProvider",
 			"maxOpenTabs",
 			"maxRemoteNodes",
 			"maxSpaces",
@@ -186,7 +198,6 @@ describe("Lifetime (desktop-license) bands into the pro capability tier", () => 
 
 	it("unlocks pro features (proUnlocked) for a desktop license", () => {
 		const NOW = 1_000_000_000_000;
-		const DAY = 24 * 60 * 60 * 1000;
 		const licenseEnt: Entitlement = {
 			plan: "desktop-license",
 			desktopAccess: true,
@@ -196,7 +207,6 @@ describe("Lifetime (desktop-license) bands into the pro capability tier", () => 
 			seats: 1,
 		};
 		const v = decideDesktopAccess({
-			firstLaunchMs: NOW - 30 * DAY, // trial long over
 			liveEntitlement: licenseEnt,
 			licenseActive: false,
 			cached: null,

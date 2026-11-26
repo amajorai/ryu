@@ -173,6 +173,19 @@ pub async fn start_with_options(
     account_id: Option<&str>,
     enable_plan_use: bool,
 ) -> Result<String> {
+    // A full provider would refuse the new account only after the person has
+    // signed in, so say it before the provider's page opens. Signing in again
+    // to a saved account (`account_id`) is never refused.
+    if account_id.is_none() {
+        let auth_key = match ryu_provider_id {
+            "kiro" => Some("kiro"),
+            super::CHATGPT_PLAN_PROVIDER_ID => Some(super::CHATGPT_PLAN_AUTH_KEY),
+            other => oauth_auth_key(other),
+        };
+        if let Some(auth_key) = auth_key {
+            super::accounts::ensure_provider_has_room(auth_key)?;
+        }
+    }
     if ryu_provider_id == "kiro" {
         return start_kiro(account_id).await;
     }

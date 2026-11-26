@@ -360,6 +360,69 @@ async fn the_run_scope_is_visible_only_inside_it() {
     assert!(current_sandbox_run().is_none());
 }
 
+/// What the registry would decide for `web_fetch.get` in the current scope.
+fn fetch_hold_in_scope() -> Option<String> {
+    current_sandbox_run().and_then(|run| held_by(&run, built_in("web_fetch.get")))
+}
+
+#[tokio::test]
+async fn a_run_started_inside_a_marked_scope_inherits_the_mark() {
+    // The device-read chat turn is the enclosing scope; the program run starts
+    // inside it and must not start clean.
+    let turn = Arc::new(RunDataFlow::default());
+    turn.mark_private_read("device.location.current");
+    let program = Arc::new(RunDataFlow::default());
+    let held = scope_sandbox_run(
+        Arc::clone(&turn),
+        scope_sandbox_run(Arc::clone(&program), async { fetch_hold_in_scope() }),
+    )
+    .await;
+    assert_eq!(held.as_deref(), Some("device.location.current"));
+    assert_eq!(
+        program.private_read_source(),
+        Some("device.location.current"),
+        "the mark stays on the run, so its later calls are held too"
+    );
+}
+
+#[tokio::test]
+async fn a_run_started_inside_an_unmarked_scope_or_no_scope_starts_clean() {
+    let turn = Arc::new(RunDataFlow::default());
+    let program = Arc::new(RunDataFlow::default());
+    let held = scope_sandbox_run(
+        Arc::clone(&turn),
+        scope_sandbox_run(Arc::clone(&program), async { fetch_hold_in_scope() }),
+    )
+    .await;
+    assert_eq!(held, None);
+    assert_eq!(program.private_read_source(), None);
+
+    let alone = Arc::new(RunDataFlow::default());
+    let held = scope_sandbox_run(Arc::clone(&alone), async { fetch_hold_in_scope() }).await;
+    assert_eq!(held, None);
+    assert_eq!(alone.private_read_source(), None);
+}
+
+#[tokio::test]
+async fn a_run_s_own_read_does_not_mark_the_enclosing_scope() {
+    let turn = Arc::new(RunDataFlow::default());
+    let program = Arc::new(RunDataFlow::default());
+    scope_sandbox_run(
+        Arc::clone(&turn),
+        scope_sandbox_run(Arc::clone(&program), async {
+            if let Some(run) = current_sandbox_run() {
+                run.mark_private_read("search_conversations.search");
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        program.private_read_source(),
+        Some("search_conversations.search")
+    );
+    assert_eq!(turn.private_read_source(), None);
+}
+
 #[test]
 fn held_messages_name_the_tool_and_the_source() {
     let message = held_without_engine("web.extract", "memory.search").to_string();

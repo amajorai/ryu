@@ -1,6 +1,7 @@
 import { open, seal } from "@ryu/db/crypto";
 import { mongodbAdapter } from "better-auth/adapters/mongodb";
 import { z } from "zod";
+import { loadAuthRequestScope } from "./auth-request-scope.ts";
 import { AuthTokenAtRest } from "./auth-token-at-rest.ts";
 import {
 	openSessionPii,
@@ -221,6 +222,8 @@ function defaultAtRest(): AuthTokenAtRest {
  *
  * Besides SSO provider secrets this seals OAuth account tokens and stores
  * session tokens and device codes as lookup digests (`auth-token-at-rest.ts`).
+ * Every method first resolves the request scope, which that module needs to
+ * hand a raw session token back only to the request that presented it.
  */
 export function wrapSsoProviderAdapter<
 	T extends BetterAuthAdapter | BetterAuthTransactionAdapter,
@@ -230,6 +233,7 @@ export function wrapSsoProviderAdapter<
 	wrapped.create = async <V extends AdapterWriteData, R = V>(
 		input: AdapterCreateInput<V>
 	) => {
+		await loadAuthRequestScope();
 		const presented = atRest.presentedTokens(input.model, [
 			...Object.entries(input.data).map(([field, value]) => ({
 				field,
@@ -254,6 +258,7 @@ export function wrapSsoProviderAdapter<
 	wrapped.findOne = async <V>(
 		input: Parameters<BetterAuthAdapter["findOne"]>[0]
 	) => {
+		await loadAuthRequestScope();
 		const presented = atRest.presentedTokens(input.model, input.where);
 		const result = await originalFindOne<V>({
 			...input,
@@ -265,6 +270,7 @@ export function wrapSsoProviderAdapter<
 	wrapped.findMany = async <V>(
 		input: Parameters<BetterAuthAdapter["findMany"]>[0]
 	) => {
+		await loadAuthRequestScope();
 		const presented = atRest.presentedTokens(input.model, input.where);
 		const result = await originalFindMany<V>({
 			...input,
@@ -275,12 +281,18 @@ export function wrapSsoProviderAdapter<
 		);
 	};
 	const originalCount = adapter.count;
-	wrapped.count = async (input) =>
-		originalCount({ ...input, where: atRest.where(input.model, input.where) });
+	wrapped.count = async (input) => {
+		await loadAuthRequestScope();
+		return originalCount({
+			...input,
+			where: atRest.where(input.model, input.where),
+		});
+	};
 	const originalUpdate = adapter.update;
 	wrapped.update = async <V>(
 		input: Parameters<BetterAuthAdapter["update"]>[0]
 	) => {
+		await loadAuthRequestScope();
 		const presented = atRest.presentedTokens(input.model, input.where);
 		const result = await originalUpdate<V>({
 			...input,
@@ -290,30 +302,37 @@ export function wrapSsoProviderAdapter<
 		return transformRead(atRest, input.model, result, presented);
 	};
 	const originalUpdateMany = adapter.updateMany;
-	wrapped.updateMany = async (input) =>
-		originalUpdateMany({
+	wrapped.updateMany = async (input) => {
+		await loadAuthRequestScope();
+		return originalUpdateMany({
 			...input,
 			where: atRest.where(input.model, input.where),
 			update: transformWrite(atRest, input.model, input.update),
 		});
+	};
 	const originalDelete = adapter.delete;
 	wrapped.delete = async <V>(
 		input: Parameters<BetterAuthAdapter["delete"]>[0]
-	) =>
-		originalDelete<V>({
+	) => {
+		await loadAuthRequestScope();
+		return originalDelete<V>({
 			...input,
 			where: atRest.where(input.model, input.where),
 		});
+	};
 	const originalDeleteMany = adapter.deleteMany;
-	wrapped.deleteMany = async (input) =>
-		originalDeleteMany({
+	wrapped.deleteMany = async (input) => {
+		await loadAuthRequestScope();
+		return originalDeleteMany({
 			...input,
 			where: atRest.where(input.model, input.where),
 		});
+	};
 	const originalConsumeOne = adapter.consumeOne;
 	wrapped.consumeOne = async <V>(
 		input: Parameters<BetterAuthAdapter["consumeOne"]>[0]
 	) => {
+		await loadAuthRequestScope();
 		const presented = atRest.presentedTokens(input.model, input.where);
 		const result = await originalConsumeOne<V>({
 			...input,
@@ -325,6 +344,7 @@ export function wrapSsoProviderAdapter<
 	wrapped.incrementOne = async <V>(
 		input: Parameters<BetterAuthAdapter["incrementOne"]>[0]
 	) => {
+		await loadAuthRequestScope();
 		const presented = atRest.presentedTokens(input.model, input.where);
 		const result = await originalIncrementOne<V>({
 			...input,

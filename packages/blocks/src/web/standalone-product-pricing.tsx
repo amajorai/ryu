@@ -14,21 +14,24 @@ import {
 } from "@ryu/ui/components/card";
 import { planCardConicGradient } from "@ryu/ui/components/plan-badge";
 import { cn } from "@ryu/ui/lib/utils";
-import { ChevronDown } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
+import { PRODUCT_REALMS } from "./data/product-realm-list.ts";
 import {
 	getStandaloneProductPricing,
 	type StandaloneProductPricing,
 	standaloneProductPricing,
 } from "./data/standalone-pricing.ts";
 import {
+	type StandalonePricePoint,
+	standalonePricePoints,
+} from "./data/standalone-pricing-points.ts";
+import {
 	landingContainerClass,
 	landingSectionClass,
 	landingSubheadlineBodyClass,
 } from "./landing-typography.ts";
 import { LinkArrow } from "./link-arrow.tsx";
-import { depositFeeAmounts } from "./pricing-deposit-fee-format.ts";
 import motionStyles from "./pricing-motion.module.css";
 import { SectionHeading } from "./sections.tsx";
 
@@ -76,31 +79,90 @@ function productHref(slug: string): Route {
 	return `/products/${slug}` as Route;
 }
 
+/** The headline figures of one product: the amount first, its unit under it. */
+function PricePoints({ points }: { points: readonly StandalonePricePoint[] }) {
+	if (points.length === 0) {
+		return null;
+	}
+	return (
+		<dl
+			className={cn(
+				"grid gap-x-4 gap-y-3 border-border/60 border-y py-4",
+				points.length >= 3 && "grid-cols-3",
+				points.length === 2 && "grid-cols-2"
+			)}
+			data-price-points
+		>
+			{points.map((point) => (
+				// The unit is the term and the amount its value; reversed on screen
+				// so the amount leads.
+				<div className="flex min-w-0 flex-col-reverse gap-1" key={point.id}>
+					<dt className="text-pretty text-muted-foreground text-xs leading-snug">
+						{point.unit}
+					</dt>
+					<dd className="font-heading font-medium text-2xl tabular-nums tracking-tight">
+						{point.value}
+					</dd>
+				</div>
+			))}
+		</dl>
+	);
+}
+
 function StandaloneProductPricingCard({
 	entry,
 }: {
 	entry: StandaloneProductPricing;
 }) {
+	const tl = useLiteralMessages();
+	const locale = useOptionalI18n()?.locale;
 	const tlRich = useRichLiteralMessages();
 	const isGatewayPayg = entry.slug === "gateway";
+	const realm = PRODUCT_REALMS.find((candidate) => candidate.id === entry.slug);
+	const points = standalonePricePoints(entry.slug, tl, locale);
 	const card = (
 		<Card
 			className={
 				isGatewayPayg ? "relative h-full border-transparent" : "h-full"
 			}
+			data-standalone-product={entry.slug}
 		>
 			<CardHeader>
-				<div className="flex min-h-7 items-baseline justify-between gap-3">
-					<CardTitle variant="subsection">{entry.name}</CardTitle>
-					<Badge className="shrink-0 text-[13px]" variant="secondary">
+				<div className="flex min-h-8 items-center justify-between gap-3">
+					<div className="flex min-w-0 items-center gap-2.5">
+						{realm ? (
+							<span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+								<realm.icon aria-hidden="true" className="size-4" />
+							</span>
+						) : null}
+						<CardTitle variant="subsection">{entry.name}</CardTitle>
+					</div>
+					<Badge
+						className="shrink-0 text-[13px]"
+						variant={entry.status === "Early access" ? "outline" : "secondary"}
+					>
 						{entry.status}
 					</Badge>
 				</div>
+				{/* What the product is, in the one line the product menu uses. */}
+				{realm ? (
+					<p className="text-pretty text-muted-foreground text-sm leading-relaxed">
+						{realm.description}
+					</p>
+				) : null}
 			</CardHeader>
 			<CardContent className="h-full" layout="stack">
-				{/* Phones keep each entry to name, price, and one link; the product
-				    page carries the rest. */}
-				<p className="text-muted-foreground text-sm leading-relaxed max-md:line-clamp-2">
+				<PricePoints points={points} />
+				{/* The full published price: fine print under the figures, and the
+				    only price line for a product with no published rate. Phones
+				    clamp it; the product page carries the rest. */}
+				<p
+					className={cn(
+						"text-muted-foreground leading-relaxed max-md:line-clamp-3",
+						points.length > 0 ? "text-xs" : "text-sm"
+					)}
+					data-standalone-price
+				>
 					{entry.price}
 				</p>
 				{/* One link per product: the product page carries the usage detail. */}
@@ -205,6 +267,44 @@ export function StandaloneProductPricingSection({ slug }: { slug: string }) {
 
 const NO_HIDDEN_SERVICES: readonly string[] = [];
 
+/** One group of product cards under its own small heading. */
+function CatalogGroup({
+	entries,
+	id,
+	note,
+	title,
+}: {
+	entries: readonly StandaloneProductPricing[];
+	id: string;
+	note?: string;
+	title: string;
+}) {
+	if (entries.length === 0) {
+		return null;
+	}
+	return (
+		<div data-standalone-group={id}>
+			<div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+				<h3 className="font-heading font-medium text-lg tracking-tight">
+					{title}
+				</h3>
+				{note ? <p className="text-muted-foreground text-sm">{note}</p> : null}
+			</div>
+			<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+				{entries.map((entry) => (
+					<StandaloneProductPricingCard entry={entry} key={entry.slug} />
+				))}
+			</div>
+		</div>
+	);
+}
+
+/**
+ * "Standalone product pricing": one card per rolled-out product, with what
+ * it is, its headline figures, its access status, and a link to its product
+ * page. Products with a published rate or allowance come first; early-access
+ * products follow in their own group.
+ */
 export function StandaloneProductPricingCatalog({
 	hiddenSlugs = NO_HIDDEN_SERVICES,
 }: {
@@ -217,15 +317,18 @@ export function StandaloneProductPricingCatalog({
 }) {
 	const tl = useLiteralMessages();
 	const locale = useOptionalI18n()?.locale;
-	const fees = depositFeeAmounts(locale);
 	const hidden = new Set(hiddenSlugs);
 	const entries = standaloneProductPricing(tl, locale).filter(
 		(entry) => !hidden.has(entry.slug)
 	);
+	const earlyAccess = entries.filter(
+		(entry) => entry.status === "Early access"
+	);
+	const open = entries.filter((entry) => entry.status !== "Early access");
 	return (
 		<section
 			aria-label="Standalone product pricing"
-			className={cn(landingContainerClass, "py-12 md:py-16")}
+			className={cn(landingContainerClass, "scroll-mt-20 py-12 md:py-16")}
 			data-testid="standalone-pricing-catalog"
 			id="standalone-pricing"
 		>
@@ -235,10 +338,14 @@ export function StandaloneProductPricingCatalog({
 				title="Standalone product pricing"
 			/>
 			{entries.length > 0 ? (
-				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-					{entries.map((entry) => (
-						<StandaloneProductPricingCard entry={entry} key={entry.slug} />
-					))}
+				<div className="flex flex-col gap-10">
+					<CatalogGroup entries={open} id="open" title={tl("Available now")} />
+					<CatalogGroup
+						entries={earlyAccess}
+						id="early-access"
+						note={tl("No self-serve hosted checkout yet")}
+						title={tl("Early access")}
+					/>
 				</div>
 			) : (
 				<p
@@ -249,34 +356,6 @@ export function StandaloneProductPricingCatalog({
 					purchases yet.
 				</p>
 			)}
-			<details className="group mt-6 rounded-2xl border border-border/60 bg-muted/20 px-5 py-4">
-				<summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-4 rounded-sm font-medium text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-					Marketplace and credit fees
-					<ChevronDown
-						aria-hidden="true"
-						className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
-					/>
-				</summary>
-				<div className="mt-3 text-muted-foreground text-sm leading-relaxed">
-					<p>
-						Ryu Marketplace purchases are seller-priced. Ryu's current
-						commission is 20% of the pre-tax item price; Stripe processing is
-						separate and can vary by payment method, card country, currency, and
-						Ryu's Stripe agreement.
-					</p>
-					<p className="mt-2">
-						{tl(
-							"Manual no-plan top-ups use a {baseDepositFee} deposit fee with a {depositFeeMinimum} minimum. Active plans receive lower rates: {proDepositFee} on Pro and {teamDepositFee} on Max, Teams, and Business. Enterprise rates are contracted. A prepaid balance enables managed Gateway; other product access and metering remain separate.",
-							{
-								baseDepositFee: fees.baseDepositFee,
-								depositFeeMinimum: fees.depositFeeMinimum,
-								proDepositFee: fees.proDepositFee,
-								teamDepositFee: fees.teamDepositFee,
-							}
-						)}
-					</p>
-				</div>
-			</details>
 		</section>
 	);
 }

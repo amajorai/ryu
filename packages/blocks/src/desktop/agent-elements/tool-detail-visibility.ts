@@ -30,6 +30,7 @@ import {
 
 import { z } from "zod";
 import { consentRequestKind } from "./tools/consent-tool.ts";
+import { isFeedbackDraftPart } from "./tools/feedback-tool.ts";
 import { hasTurnEndCards } from "./turn-end-cards.ts";
 import { nativeSdkSchemaAdmits } from "./utils/native-sdk-admission.ts";
 import type { NativeSdkValue } from "./utils/native-sdk-observation.ts";
@@ -92,13 +93,17 @@ export function isFailedToolPart(part: NativeSdkValue): boolean {
 	return isNativeText(part.errorText) && part.errorText.trim().length > 0;
 }
 
-/** A consent card part, typed or carried by a `dynamic-tool` name. */
+/** A card that asks the user something (a consent request or a feedback
+ *  draft), typed or carried by a `dynamic-tool` name. */
 function isConsentPart(part: NativeSdkValue): boolean {
 	if (!(isRecord(part) && isNativeText(part.type))) {
 		return false;
 	}
 	const toolName = isNativeText(part.toolName) ? part.toolName : undefined;
-	return consentRequestKind(part.type, toolName) !== null;
+	return (
+		consentRequestKind(part.type, toolName) !== null ||
+		isFeedbackDraftPart(part.type, toolName)
+	);
 }
 
 /**
@@ -109,9 +114,9 @@ function isConsentPart(part: NativeSdkValue): boolean {
  * content belongs to the parent Task row) — counting it as visible here would
  * produce exactly the empty turn this module exists to prevent.
  *
- * Consent requests (`consent.connect_app` / `consent.install_plugin`) always
- * show: they are a question to the user, not tool detail, and the agent is
- * waiting on the answer.
+ * Consent requests (`consent.connect_app` / `consent.install_plugin`) and the
+ * feedback draft (`feedback.draft`) always show: they are a question to the
+ * user, not tool detail, and the agent is waiting on the answer.
  */
 export function isHiddenAtNoDetail(part: NativeSdkValue): boolean {
 	if (!isToolLikePart(part)) {

@@ -159,7 +159,7 @@ async fn decide_is_idempotent() {
 
     // First reject transitions to Rejected.
     let r1 = engine
-        .decide(&req.id, false, Some("no".to_owned()))
+        .decide(&req.id, false, Some("no".to_owned()), None)
         .await
         .unwrap()
         .unwrap();
@@ -167,7 +167,11 @@ async fn decide_is_idempotent() {
     assert_eq!(r1.note.as_deref(), Some("no"));
 
     // Second decide (approve) must NOT flip it — already decided.
-    let r2 = engine.decide(&req.id, true, None).await.unwrap().unwrap();
+    let r2 = engine
+        .decide(&req.id, true, None, None)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         r2.status,
         ApprovalStatus::Rejected,
@@ -215,7 +219,11 @@ async fn dedup_skips_second_pending_for_same_source() {
 async fn decide_unknown_id_returns_none() {
     let store = ApprovalStore::open_in_memory().unwrap();
     let engine = ApprovalEngine::new(store, reqwest::Client::new());
-    assert!(engine.decide("nope", true, None).await.unwrap().is_none());
+    assert!(engine
+        .decide("nope", true, None, None)
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]

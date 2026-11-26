@@ -351,7 +351,11 @@ async fn disabled_reaction_learning_does_not_persist_reply_links() {
     assert_eq!(
         runtime
             .pairing
-            .reply_message("telegram", "channel:telegram-bot:123", "provider-42")
+            .reply_message(
+                "telegram",
+                &runtime.core_conversation_id("123"),
+                "provider-42",
+            )
             .await,
         None
     );
@@ -417,11 +421,26 @@ fn store_backed_channel_sessions_are_namespaced_per_bot() {
         PairingStore::ephemeral(),
         None,
     );
-    assert_eq!(
-        runtime.core_conversation_id("discord:guild-1:channel-1"),
-        "channel:bot-a:discord:guild-1:channel-1"
-    );
+    // Namespaced per bot, and written in the id grammar Core accepts: the old
+    // `channel:bot-a:<target>` form was refused with 400 on every message.
+    let id = runtime.core_conversation_id("discord:guild-1:channel-1");
+    assert_eq!(id, "channel__bot-a__discord_3Aguild-1_3Achannel-1");
+    assert!(is_core_conversation_id(&id));
     assert!(runtime.routes_via_core());
+
+    let other_bot = ChannelRuntime::new(
+        reqwest::Client::new(),
+        CommonChannelConfig {
+            channel_id: Some("bot-b".to_owned()),
+            ..Default::default()
+        },
+        PairingStore::ephemeral(),
+        None,
+    );
+    assert_ne!(
+        other_bot.core_conversation_id("discord:guild-1:channel-1"),
+        id
+    );
 
     let legacy = ChannelRuntime::new(
         reqwest::Client::new(),
@@ -429,7 +448,12 @@ fn store_backed_channel_sessions_are_namespaced_per_bot() {
         PairingStore::ephemeral(),
         None,
     );
+    // A bot without a store id keeps a plain target as its id, and a packed
+    // thread, which carries a colon, is escaped instead of refused by Core.
     assert_eq!(legacy.core_conversation_id("chat-1"), "chat-1");
+    let thread = legacy.core_conversation_id(&pack_thread("-1001234567890", Some("42")));
+    assert_eq!(thread, "-1001234567890_3A42");
+    assert!(is_core_conversation_id(&thread));
 }
 
 /// Channel allowlist env reading. Run as ONE sequential test because it

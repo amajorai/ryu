@@ -5,11 +5,7 @@ import {
 	appRequestValueSchema,
 } from "@ryuhq/core-client/app-request-json.ts";
 import { z } from "zod";
-import type {
-	LicenseValidateResult,
-	SubscriptionStatus,
-	TrialAnchor,
-} from "./billing.ts";
+import type { LicenseValidateResult, SubscriptionStatus } from "./billing.ts";
 import { billingSubscriptionFieldsSchema } from "./billing-login-stream-contracts.ts";
 
 // These are the actual plan IDs published by auth/plans.ts PLAN_IDS. Keep this
@@ -52,14 +48,6 @@ export const subscriptionStatusSchema = z.custom<SubscriptionStatus>(
 	(value) =>
 		appJsonValueSchema.safeParse(value).success &&
 		subscriptionStatusFieldsSchema.safeParse(value).success
-);
-const trialAnchorFieldsSchema = z.object({
-	firstLaunchAt: z.string().nullish(),
-});
-export const trialAnchorSchema = z.custom<Partial<TrialAnchor>>(
-	(value) =>
-		appJsonValueSchema.safeParse(value).success &&
-		trialAnchorFieldsSchema.safeParse(value).success
 );
 const licenseValidateFieldsSchema = z.object({
 	active: z.boolean(),

@@ -42,9 +42,10 @@ import { APP_OTHER_SETTINGS_ENTRIES } from "./settings-index/app-other.ts";
 import { APP_SOUNDS_SETTINGS_ENTRIES } from "./settings-index/app-sounds.ts";
 import { GATEWAY_SETTINGS_ENTRIES } from "./settings-index/gateway.ts";
 import { GATEWAY_MORE_SETTINGS_ENTRIES } from "./settings-index/gateway-more.ts";
+import type { SettingsDialogKind, SettingsLevel } from "./settings-levels.ts";
 
 /** Which of the two settings dialogs owns a setting. */
-export type SettingsDialogId = "app" | "gateway";
+export type SettingsDialogId = SettingsDialogKind;
 
 export interface SettingsEntry {
 	/** Hidden outside the native desktop shell. */
@@ -59,6 +60,12 @@ export interface SettingsEntry {
 	keywords?: string;
 	/** The row's visible title, verbatim — this is also the DOM anchor. */
 	label: string;
+	/**
+	 * The level the setting belongs to (app, account, org, computer, bot),
+	 * decided by where its value is stored, not by the dialog that renders it.
+	 * See `settings-levels.ts`.
+	 */
+	level: SettingsLevel;
 	/** Hidden when the user cannot open any workspace interface. */
 	requiresWorkspace?: boolean;
 	/** The dialog section value (`general`, `appearance`, `routing`, …). */

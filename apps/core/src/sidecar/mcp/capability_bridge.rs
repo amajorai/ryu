@@ -156,6 +156,9 @@ pub(super) struct ResolvedAppTool {
     /// dispatch. This is kept beside the resolved backend so the approval path
     /// and execution path read the same live manifest record.
     pub(super) needs_approval: bool,
+    /// Whether the owning manifest marks this tool as returning the value of a
+    /// stored credential (`"returns_credential": true` in its tool config).
+    pub(super) returns_credential: bool,
     /// Whether the owning plugin owns the tool id's server namespace (see
     /// [`app_tool_namespace`]). Only then may it shadow a configured MCP server
     /// of that name or read vault values bound to that server.

@@ -8,10 +8,7 @@ import {
 import { registerTabIcon } from "@/src/contributions/tab-icon-registry.ts";
 import { subscribeFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
-import {
-	type EventChannel,
-	subscribeChannel,
-} from "@/src/lib/api/eventStream.ts";
+import { subscribeChannel } from "@/src/lib/api/eventStream.ts";
 import {
 	parseCompanionCommands,
 	parseCompanionEventChannels,
@@ -19,20 +16,13 @@ import {
 } from "./node-response-contracts.ts";
 import type { PluginHostServicesContext } from "./PluginHostPanel-services-context.ts";
 import { readHostThemeTokens } from "./PluginHostPanel-theme-tokens.ts";
-
-/** The node event-stream channels a `shell.eventsSubscribe` call may request (grant
- *  `shell:integrate`). A companion's requested set is intersected with this — an
- *  unknown channel is silently dropped. Mirrors the `EventChannel` union. */
-const SHELL_EVENT_CHANNELS: readonly EventChannel[] = [
-	"activity",
-	"notifications",
-	"quests",
-	"monitors",
-	"approvals",
-	"downloads",
-];
+import {
+	servedShellEventChannels,
+	shellEventSignal,
+} from "./shell-event-gate.ts";
 
 export function buildPluginHostShellServices({
+	approvedGrantList,
 	companion,
 	node,
 	openTab,
@@ -40,8 +30,9 @@ export function buildPluginHostShellServices({
 	return {
 		// --- Shell primitives (grant shell:integrate). The generic shell-integration
 		// lane. The host owns every seam (tabs / theme / palette / event stream), so
-		// none of these reach Core — they resolve entirely in the trusted webview
-		// (like the per-app nav verbs above). `shellOpenTab` re-applies the route
+		// none of these reach Core, except `shellEventsSubscribe`, whose events come
+		// from the node's stream (see shell-event-gate.ts). The others resolve in the
+		// trusted webview (like the per-app nav verbs above). `shellOpenTab` re-applies the route
 		// ALLOWLIST on top of the grant (a granted companion can still only open a
 		// safe first-party destination). The three subscribe/register verbs are
 		// streaming: each attaches its listener and releases it when `signal` aborts
@@ -192,14 +183,16 @@ export function buildPluginHostShellServices({
 			}),
 		shellEventsSubscribe: (input, emit, signal) =>
 			new Promise<void>((resolve) => {
-				const requested = parseCompanionEventChannels(input);
-				const allowed = SHELL_EVENT_CHANNELS.filter((ch) =>
-					requested.includes(ch)
+				// The shell grant alone opens no channel. Each one is a feed with a
+				// grant of its own, and an event goes out as a signal with no row.
+				const allowed = servedShellEventChannels(
+					parseCompanionEventChannels(input),
+					approvedGrantList
 				);
 				const disposers = allowed.map((ch) =>
 					subscribeChannel(toTarget(node), ch, (data) => {
 						try {
-							emit(JSON.stringify({ channel: ch, data }));
+							emit(shellEventSignal({ channel: ch, data }));
 						} catch {
 							// non-fatal
 						}

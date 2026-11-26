@@ -43,7 +43,9 @@ export const FOOTER_TAGLINE = "Run agents with the tools and rules they need.";
  * from /products. Some links are flag-gated (closed standalone services such as
  * Mail, unlaunched products such as Workflows): hosts filter unreleased and
  * closed products through footerColumnsFor. Platform ends with the standalone
- * services, then the self-hosted and overview pages.
+ * services, then the self-hosted and overview pages. /startups and /students
+ * answer 404 while their program is closed: a host that reads the rollout
+ * passes the closed ones to footerColumnsFor too.
  */
 export const FOOTER_COLUMNS: readonly FooterColumn[] = [
 	{
@@ -193,17 +195,22 @@ export function footerProductSlug(link: FooterLink): string | undefined {
 
 /**
  * `FOOTER_COLUMNS` without the product pages in `hiddenProductIds` (the host's
- * closed or unlaunched product slugs, the list the header hides). A column
- * left empty is dropped; the shared column data is never edited.
+ * closed or unlaunched product slugs, the list the header hides) and without
+ * the site pages in `hiddenHrefs` (pages that answer 404 for now, such as the
+ * page of a program whose rollout is closed). A column left empty is dropped;
+ * the shared column data is never edited.
  */
 export function footerColumnsFor(
-	hiddenProductIds: readonly string[] = []
+	hiddenProductIds: readonly string[] = [],
+	hiddenHrefs: readonly string[] = []
 ): FooterColumn[] {
-	const hidden = new Set(hiddenProductIds);
+	const hiddenProducts = new Set(hiddenProductIds);
+	const hiddenPages = new Set(hiddenHrefs);
+	const isHidden = (link: FooterLink) =>
+		hiddenProducts.has(footerProductSlug(link) ?? "") ||
+		((link.kind ?? "site") === "site" && hiddenPages.has(link.href));
 	return FOOTER_COLUMNS.flatMap((column) => {
-		const links = column.links.filter(
-			(link) => !hidden.has(footerProductSlug(link) ?? "")
-		);
+		const links = column.links.filter((link) => !isHidden(link));
 		return links.length > 0 ? [{ ...column, links }] : [];
 	});
 }

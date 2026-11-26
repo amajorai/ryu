@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub(in crate::sidecar::ext_proxy) mod agent_devices;
+
 /// Match an incoming sub-path against a declared route pattern. Supports `:param`
 /// (one non-empty segment) and a trailing `*rest` (the remainder). Pure + unit-tested
 /// because this IS the gate: undeclared paths must 404, and a parametric route like
@@ -298,7 +300,40 @@ pub(super) fn resolve_route<'a>(
             }
         }
     }
+    if best.is_some_and(|(_, _, route)| record_id_decodes_again(route, sub_path)) {
+        return None;
+    }
     best
+}
+
+/// Whether the record id a route names for its permission (`resource_param`) would
+/// still change under one more percent-decode.
+///
+/// Axum has decoded the path once, and the permission is checked on exactly that
+/// text, but the apps decode the id a second time (axum's `Path`, or
+/// `decodeURIComponent`). So `%2572oom_1` would be checked as `%72oom_1`, which no
+/// per-record rule names, and served as `room_1`. Such a path resolves no route
+/// (404) on both lanes, rather than a `None` from [`required_permission_for`], which
+/// would mean "no permission needed". Routes without `resource_param` are unchanged.
+fn record_id_decodes_again(
+    route: &crate::plugin_manifest::schema::RouteSpec,
+    sub_path: &str,
+) -> bool {
+    let Some(id) = route
+        .resource_param
+        .as_deref()
+        .and_then(|param| captured_param(&route.path, sub_path, param))
+    else {
+        return false;
+    };
+    match urlencoding::decode(&id) {
+        Ok(decoded) => decoded.as_ref() != id.as_str(),
+        // Not UTF-8 once decoded: the app cannot read it as Core did either.
+        // Defence in depth. `resolve_route` cannot reach this arm today, because
+        // `has_dot_segment` runs first and refuses a path whose decode fails, and
+        // an id whose decode fails makes the whole path fail. So it has no test.
+        Err(_) => true,
+    }
 }
 
 // ── Hop-by-hop header handling (mirrors mail.rs) ──────────────────────────────

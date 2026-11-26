@@ -39,6 +39,7 @@ import { MemoryTab } from "./MemoryTab.tsx";
 import { PluginSettingsFields } from "./PluginSettingsFields.tsx";
 import { PredictSettings } from "./PredictSettings.tsx";
 import { QuestsSettings } from "./QuestsSettings.tsx";
+import { ShadowCaptureConsent } from "./ShadowCaptureConsent.tsx";
 import { ShadowSettings } from "./ShadowSettings.tsx";
 import { SpacesSettings } from "./SpacesSettings.tsx";
 import { SettingsSection } from "./shared/settings-items.tsx";
@@ -62,6 +63,20 @@ function IslandUnavailable() {
 }
 
 /**
+ * Shadow's settings body: the capture consent step first, then the settings
+ * that apply to the kinds the user turned on. Shadow captures nothing until a
+ * kind is turned on in the consent step.
+ */
+function ShadowSettingsWithConsent() {
+	return (
+		<div className="space-y-6">
+			<ShadowCaptureConsent />
+			<ShadowSettings />
+		</div>
+	);
+}
+
+/**
  * First-party settings views, keyed by the OWNING plugin id. Mirrors the
  * `path → component` table built-in routes use (`contributions/builtins.ts`). A
  * built-in app whose settings are a rich custom UI declares `{"view": "..."}` in
@@ -80,7 +95,7 @@ const SETTINGS_VIEWS = new Map<string, ComponentType>([
 	["@ryu/meetings", MeetingsSettings],
 	["@ryu/memory", MemoryTab],
 	["@ryu/quests", QuestsSettings],
-	["@ryu/shadow", ShadowSettings],
+	["@ryu/shadow", ShadowSettingsWithConsent],
 	["@ryu/spaces", SpacesSettings],
 	["@ryu/dictation", DictationSettings],
 	["predict", PredictSettings],

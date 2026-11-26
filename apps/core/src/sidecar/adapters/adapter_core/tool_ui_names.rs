@@ -183,6 +183,9 @@ pub(crate) fn acp_tool_ui_name(kind: &str, title: &str, input: &Value) -> (Strin
         _ if title.ends_with("consent.install_plugin") => {
             ("consent.install_plugin".to_owned(), true)
         }
+        // Built-in feedback draft card (`feedback.draft`), matched by its qualified
+        // name only, for the same reason: no other tool may become a report card.
+        _ if title.ends_with("feedback.draft") => ("feedback.draft".to_owned(), true),
         // Built-in suggested next task (`tasks.suggest`), matched by name for the
         // same reason: only Core's own tool may become a Start card.
         _ if title.ends_with("tasks.suggest") => ("tasks.suggest".to_owned(), true),

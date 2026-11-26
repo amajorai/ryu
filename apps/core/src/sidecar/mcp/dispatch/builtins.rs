@@ -286,6 +286,29 @@ impl McpRegistry {
         consent_tool::dispatch(tool, arguments).await
     }
 
+    // Built-in feedback draft: a client-rendered card (no-op in Core). Nothing
+    // is sent from here; the user reviews the draft and decides on the card.
+    pub(super) async fn dispatch_feedback_tool(
+        &self,
+        call: Dispatch<'_>,
+        server: &str,
+        tool: &str,
+    ) -> Result<Value> {
+        let Dispatch {
+            tool_id,
+            arguments,
+            allowlist,
+            ..
+        } = call;
+        if let Some(list) = allowlist {
+            let candidate = RegistryTool::candidate(tool_id, server, tool);
+            if !tool_allowed(&candidate, list) {
+                return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+            }
+        }
+        feedback_tool::dispatch(tool, arguments).await
+    }
+
     // Built-in suggested next task: a client-rendered card (no-op in Core).
     // The task only runs when the user clicks Start, as an ordinary new chat.
     pub(super) async fn dispatch_tasks_tool(

@@ -63,6 +63,9 @@ impl McpRegistry {
         if server == consent_tool::SERVER_NAME {
             return self.dispatch_consent_tool(call, server, tool).await;
         }
+        if server == feedback_tool::SERVER_NAME {
+            return self.dispatch_feedback_tool(call, server, tool).await;
+        }
         if server == tasks_tool::SERVER_NAME {
             return self.dispatch_tasks_tool(call, server, tool).await;
         }
@@ -101,6 +104,9 @@ impl McpRegistry {
         }
         if server == usage_tool::SERVER_NAME {
             return self.dispatch_usage_tool(call, server, tool).await;
+        }
+        if server == builtin_servers::diagnostics::SERVER_NAME {
+            return self.dispatch_diagnostics(call, server, tool).await;
         }
         if server == treg_tool::SERVER_NAME {
             return self.dispatch_treg_tool(call, server, tool).await;

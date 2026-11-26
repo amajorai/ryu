@@ -194,6 +194,23 @@ impl TelegramChannel {
         }
 
         if let Some(callback) = update.callback_query {
+            // An approval button is answered by its own handler: the
+            // acknowledgement carries the outcome, and the press is never a
+            // conversation turn.
+            let press = callback
+                .data
+                .as_deref()
+                .and_then(crate::approvals::decode_press);
+            if let Some((token, approve)) = press {
+                let channel = Arc::clone(self);
+                tokio::spawn(async move {
+                    channel
+                        .handle_approval_press(callback, token, approve)
+                        .await;
+                });
+                complete_claimed_delivery(Arc::clone(self), claimed_delivery_id);
+                return;
+            }
             let callback_id = callback.id.clone();
             let channel = Arc::clone(self);
             tokio::spawn(async move {

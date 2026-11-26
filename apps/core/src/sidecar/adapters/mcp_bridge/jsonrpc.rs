@@ -379,7 +379,9 @@ where
             // carrying `isError: true` — not a JSON-RPC error. Conflating the two
             // makes a refused tool read to the client as a transport fault, and a
             // model driving the client cannot recover from a transport fault.
-            match handler.dispatch_tool(name, args).await {
+            // Behind the same device-read guards as the rmcp transport; a
+            // network request has no turn or conversation, so none apply.
+            match handler.dispatch_guarded(name, args).await {
                 Ok(text) => Some(rpc_ok(
                     id,
                     with_modern_result(

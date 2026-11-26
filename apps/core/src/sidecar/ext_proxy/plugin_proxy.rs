@@ -44,6 +44,8 @@ pub(super) async fn proxy_for_plugin(
     // Resolved while the manifest guard is still held, since the gate below runs
     // after it is dropped.
     let required = required_permission_for(route, sub_path, plugin_id);
+    let route_scope =
+        route_match::agent_devices::route_scope(manifest, route, sub_path, &request_method);
     // Only a web-delegated request pays for (or is affected by) these facts.
     let web_facts = req
         .headers()
@@ -149,13 +151,15 @@ pub(super) async fn proxy_for_plugin(
     if let Some((permission, resource_id)) = required {
         // The plugin id is the resource KIND, so an app's resource ids live in their
         // own keyspace and can never be confused with the kernel's (`space:abc`) or
-        // another app's.
-        if let Err(status) = crate::server::enforce_permission_on(
+        // another app's. The one exception is a route that addresses an agent,
+        // which is checked on that agent (see `route_match::agent_devices`).
+        if let Err(status) = route_match::agent_devices::enforce_route_permission(
             state,
             &caller,
             &permission,
             plugin_id,
             &resource_id,
+            &route_scope,
         )
         .await
         {

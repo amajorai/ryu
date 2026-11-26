@@ -187,6 +187,25 @@ test("footer leaves out the products the host has not launched", () => {
 	]);
 });
 
+test("footer leaves out the pages the host has closed", () => {
+	const html = renderToStaticMarkup(
+		<Footer hiddenHrefs={["/startups", "/students"]} />
+	);
+
+	expect(html).not.toContain('href="/startups"');
+	expect(html).not.toContain('href="/students"');
+	// The other programs stay, and so does their column.
+	const programs = columnHtml(html, "Programs");
+	expect(programs).toContain('href="/creator"');
+	expect(programs).toContain('href="/referrals"');
+	expect(programs).toContain('href="/perks"');
+
+	// A host that passes no list shows both.
+	const open = renderToStaticMarkup(<Footer />);
+	expect(open).toContain('href="/startups"');
+	expect(open).toContain('href="/students"');
+});
+
 test("footer without a hidden list renders every column link", () => {
 	const html = renderToStaticMarkup(<Footer />);
 

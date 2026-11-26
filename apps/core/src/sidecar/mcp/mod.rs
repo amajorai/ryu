@@ -41,6 +41,7 @@ mod discovery;
 mod discovery_backoff;
 mod dispatch;
 mod dispatch_support;
+pub mod feedback_tool;
 pub mod forms;
 #[cfg(test)]
 mod honcho_registry_runtime_test;

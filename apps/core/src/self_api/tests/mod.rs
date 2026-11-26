@@ -4,6 +4,7 @@ use super::*;
 
 mod acting;
 mod catalog;
+mod catalog_sources;
 mod restricted;
 
 fn sample_spec() -> Value {

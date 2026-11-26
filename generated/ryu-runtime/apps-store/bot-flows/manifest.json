@@ -144,6 +144,7 @@
       "http": {
         "mount": "/api/bot-flows",
         "public_mount": "/bots",
+        "forward_caller_rate_subject": true,
         "max_body_bytes": 1048576,
         "routes": [
           {

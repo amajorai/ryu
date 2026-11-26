@@ -45,11 +45,29 @@ pub(in crate::server) async fn get_pi_config_catalog() -> Json<serde_json::Value
 pub(in crate::server) async fn put_pi_config(
     Json(input): Json<crate::pi_config::PiConfigInput>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    let _ = crate::server::plan_limits::take_refusal();
     match crate::pi_config::apply(input) {
         Ok(view) => (StatusCode::OK, Json(json!({ "config": view }))),
-        Err(e) => (
+        Err(e) => provider_write_refusal(&e),
+    }
+}
+
+/// The answer to a failed provider write. A full provider is refused inside
+/// the account vault and `pi_config` reports every vault failure with one
+/// generic sentence, so the reason is read back from
+/// [`crate::server::plan_limits::take_refusal`]: `409 provider_account_limit` when the
+/// vault refused a new account during this call, else `400` with the error.
+/// The caller clears an older refusal before the write, with no `.await`
+/// between the two.
+fn provider_write_refusal(error: &anyhow::Error) -> (StatusCode, Json<serde_json::Value>) {
+    let refusal = crate::server::plan_limits::AccountLimitReached::from_error(error)
+        .cloned()
+        .or_else(crate::server::plan_limits::take_refusal);
+    match refusal {
+        Some(refusal) => refusal.response(),
+        None => (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": e.to_string() })),
+            Json(json!({ "error": error.to_string() })),
         ),
     }
 }
@@ -74,6 +92,7 @@ pub(in crate::server) async fn configure_pi_provider(
             .api_key
             .as_ref()
             .is_some_and(|key| !key.trim().is_empty());
+    let _ = crate::server::plan_limits::take_refusal();
     match crate::pi_config::configure_provider(input) {
         Ok(catalog) => {
             let custom_provider = catalog["providers"].as_array().is_some_and(|providers| {
@@ -90,10 +109,7 @@ pub(in crate::server) async fn configure_pi_provider(
             }
             (StatusCode::OK, Json(catalog))
         }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": e.to_string() })),
-        ),
+        Err(e) => provider_write_refusal(&e),
     }
 }
 

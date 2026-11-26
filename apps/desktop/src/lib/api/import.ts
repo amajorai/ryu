@@ -71,7 +71,8 @@ export interface ScanResult {
 	/** Canonicalized absolute path of the scanned folder. */
 	root: string;
 	/** Detected source framework (`openclaw`, `hermes`, `muse`, `mastra`,
-	    `langchain`, `persona`); absent for a plain folder or an older node. */
+	    `langchain`, `persona`, `grok-bot`); absent for a plain folder or an
+	    older node. */
 	source?: string;
 	/** The warnings with their Core messages; from an older node, the English
 	    `warnings` with no message. */
@@ -79,7 +80,7 @@ export interface ScanResult {
 	warnings: string[];
 }
 
-interface ScanResultWire {
+export interface ScanResultWire {
 	items?: ScanItemWire[];
 	root?: string;
 	source?: string | null;
@@ -184,9 +185,20 @@ export async function scanImportFolder(
 	}
 	// SAFETY: After the status check, native scan_import_handler serializes ScanResult root/items/warnings/source; every scanner ScanItem kind is one of the seven authored kind constants, and serde omits absent optional strings/false existence hints. This trusts that native route producer, not arbitrary JSON.
 	const body = (await resp.json()) as ScanResultWire;
+	return scanResultFromWire(body, path);
+}
+
+/**
+ * A scan as Core serializes it: the reply of `/api/import/scan`, and the scan
+ * part of `/api/import/archive/stage` (see `import-archive.ts`).
+ */
+export function scanResultFromWire(
+	body: ScanResultWire,
+	fallbackRoot: string
+): ScanResult {
 	const warnings = body.warnings ?? [];
 	return {
-		root: body.root ?? path,
+		root: body.root ?? fallbackRoot,
 		items: (body.items ?? []).map(toItem),
 		source: typeof body.source === "string" ? body.source : undefined,
 		warningNotices: toNotices(body, warnings),

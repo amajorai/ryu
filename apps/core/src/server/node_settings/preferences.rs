@@ -109,6 +109,17 @@ pub(in crate::server) fn generic_preference_write_denial(
     if key == crate::acp_agent_settings::ACP_AGENT_SETTINGS_PREF_KEY {
         return Some(acp_agent_settings_generic_denial());
     }
+    // Names who may decide approvals from a chat app. Only the approvals route
+    // writes it, after the `approvals.decide` check.
+    if key == crate::approvals::channel_settings::CHANNEL_DECIDERS_PREF {
+        return Some(
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "Use /api/approvals/channel-deciders/{connection} to change chat approval settings" })),
+            )
+                .into_response(),
+        );
+    }
     (key == crate::skills_catalog::distribution::INSTALL_TARGETS_PREF).then(|| {
         (
             StatusCode::FORBIDDEN,

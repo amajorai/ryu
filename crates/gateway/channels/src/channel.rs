@@ -63,6 +63,19 @@ pub trait Channel: Send + Sync {
         self.send_reply(chat_id, text, rich_text).await
     }
 
+    /// Post one waiting tool approval with Approve and Deny buttons whose
+    /// callback data is [`crate::approvals::encode_press`]. Returns `false`
+    /// when the platform has no buttons; the approval then stays in the inbox
+    /// only. Agent, tool and summary text are untrusted: escape them.
+    async fn send_approval_prompt(
+        &self,
+        _chat_id: &str,
+        _prompt: &crate::approvals::ApprovalPrompt,
+        _locale: &str,
+    ) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+
     /// Run the channel's inbound loop until the process exits. Each inbound
     /// message should be passed to [`handle_turn`].
     async fn run(self: Arc<Self>, host: Arc<dyn ChannelHost>) -> anyhow::Result<()>;

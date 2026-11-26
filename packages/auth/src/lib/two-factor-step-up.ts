@@ -50,6 +50,43 @@ export const TWO_FACTOR_OTP_ENROLLMENT_DISABLED =
 	"TWO_FACTOR_OTP_ENROLLMENT_DISABLED";
 
 /**
+ * Better Auth's authenticator and recovery code checks. The library counts
+ * wrong guesses only for a pending two-factor sign-in (its cookie, no session
+ * yet). Asked by a signed-in session over HTTP, both answer right or wrong
+ * with no counter and no lockout, and a right recovery code is spent. On an
+ * account whose two-factor is on that is a guessing oracle beside the step-up
+ * guess budget (`reserveStepUpAttempt`), so the gate refuses the HTTP request.
+ *
+ * Two callers stay open. First enrollment (two-factor still off) confirms the
+ * secret the caller was just handed. Ryu's own step-up check
+ * (`/api/step-up/verify`) reserves a guess and then calls `auth.api.verifyTOTP`
+ * or `auth.api.verifyBackupCode` in process, which carries no `request`; every
+ * HTTP call reaches a hook with one.
+ */
+export const ENROLLED_TWO_FACTOR_VERIFY_PATHS: ReadonlySet<string> = new Set([
+	"/two-factor/verify-backup-code",
+	"/two-factor/verify-totp",
+]);
+
+export const TWO_FACTOR_VERIFY_SIGNED_IN = "TWO_FACTOR_VERIFY_SIGNED_IN";
+
+/**
+ * Whether a code check on `path` is refused: an HTTP request (`viaHttp`) from a
+ * signed-in session of an account whose two-factor is on.
+ */
+export function isRefusedTwoFactorVerify(
+	path: string,
+	caller: { signedIn: boolean; twoFactorEnabled: boolean; viaHttp: boolean }
+): boolean {
+	return (
+		ENROLLED_TWO_FACTOR_VERIFY_PATHS.has(path) &&
+		caller.viaHttp &&
+		caller.signedIn &&
+		caller.twoFactorEnabled
+	);
+}
+
+/**
  * Better Auth's `/two-factor/enable` also takes `method: "otp"`, which turns
  * `twoFactorEnabled` on from the password alone with no authenticator behind
  * it. Ryu enrolls only authenticator apps, so any method other than `totp`
@@ -84,6 +121,9 @@ export function enrolledTwoFactorStepUpScope(
  * It also refuses `SIGN_IN_ONLY_TWO_FACTOR_PATHS` to a signed-in session, so an
  * emailed code can never mark an account as having an authenticator, and it
  * refuses `/two-factor/enable` with any method but `totp` for the same reason.
+ * Last, it refuses `ENROLLED_TWO_FACTOR_VERIFY_PATHS` over HTTP to a signed-in
+ * session whose two-factor is on, so a code is only ever guessed against the
+ * step-up budget.
  */
 export function twoFactorStepUpGate(): BetterAuthPlugin {
 	return {
@@ -140,6 +180,28 @@ export function twoFactorStepUpGate(): BetterAuthPlugin {
 							code: TWO_FACTOR_OTP_SIGNED_IN,
 							message:
 								"Emailed two-factor codes are only used to finish signing in",
+						});
+					}),
+				},
+				{
+					matcher: (context: { path?: string }) =>
+						ENROLLED_TWO_FACTOR_VERIFY_PATHS.has(context.path ?? ""),
+					handler: createAuthMiddleware(async (ctx) => {
+						// An in-process `auth.api` call carries no request. It is
+						// Ryu's own step-up check, whose guess is already counted.
+						const viaHttp = Boolean(ctx.request);
+						const resolved = viaHttp ? await resolveSessionForHook(ctx) : null;
+						const refused = isRefusedTwoFactorVerify(ctx.path ?? "", {
+							signedIn: Boolean(resolved?.session.id),
+							twoFactorEnabled: resolved?.user.twoFactorEnabled === true,
+							viaHttp,
+						});
+						if (!refused) {
+							return;
+						}
+						throw new APIError("FORBIDDEN", {
+							code: TWO_FACTOR_VERIFY_SIGNED_IN,
+							message: "Verify your identity to continue",
 						});
 					}),
 				},

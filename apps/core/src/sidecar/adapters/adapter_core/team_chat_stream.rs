@@ -18,6 +18,9 @@ pub async fn route_team_chat_stream(
     mcp: Arc<McpRegistry>,
     skills: SkillRegistry,
     traces: TraceStore,
+    // The thread's ownership record for this turn (`open_team_thread_turn`).
+    // With one, `team` is already narrowed to the members that take part.
+    thread: Option<Arc<TeamThreadTurn>>,
 ) -> Response {
     if let Err(error) = capture_acp_conversation_generation(&mut req, &conversations).await {
         return error_stream(error);
@@ -44,6 +47,7 @@ pub async fn route_team_chat_stream(
         skills,
         traces,
         agent_resource_authorization: req.agent_resource_authorization.clone(),
+        thread,
     };
 
     // Turn-boundary hooks for a team turn fire exactly ONCE, here, over the whole
@@ -179,6 +183,7 @@ pub async fn route_team_chat_stream(
             Coordination::Broadcast => {
                 for (idx, (mid, mname)) in members.iter().enumerate() {
                     let reply = run_member_text_with_flags(mid, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
+                    if deps.stopped() { break; }
                     let text = team_member_reply_text(locale, mid, reply);
                     let mut block = Vec::new();
                     push_member_block(&mut block, &mut combined, &format!("m{idx}"), mname, &text);
@@ -199,6 +204,7 @@ pub async fn route_team_chat_stream(
                         messages_with_preamble(&original_messages, &preamble)
                     };
                     let reply = run_member_text_with_flags(mid, msgs, conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
+                    if deps.stopped() { break; }
                     let text = team_member_reply_text(locale, mid, reply);
                     transcript.push_str(&format!("{mname}: {text}\n\n"));
                     let mut block = Vec::new();
@@ -212,6 +218,7 @@ pub async fn route_team_chat_stream(
                 let mut round1 = String::new();
                 for (idx, (mid, mname)) in members.iter().enumerate() {
                     let reply = run_member_text_with_flags(mid, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
+                    if deps.stopped() { break; }
                     let text = team_member_reply_text(locale, mid, reply);
                     round1.push_str(&format!("{mname}: {text}\n\n"));
                     let mut block = Vec::new();
@@ -230,11 +237,13 @@ pub async fn route_team_chat_stream(
                 );
                 let msgs = messages_with_preamble(&original_messages, &preamble);
                 let reply = run_member_text_with_flags(&lead_id, msgs, conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
-                let synth = team_synthesis_text(locale, &lead_id, reply);
-                let mut block = Vec::new();
-                push_member_block(&mut block, &mut combined, "synth", &team_synthesis_label(locale, &lead_name), &synth);
-                for f in &block { yield Ok(f.clone()); }
-                frames.extend(block);
+                if !deps.stopped() {
+                    let synth = team_synthesis_text(locale, &lead_id, reply);
+                    let mut block = Vec::new();
+                    push_member_block(&mut block, &mut combined, "synth", &team_synthesis_label(locale, &lead_name), &synth);
+                    for f in &block { yield Ok(f.clone()); }
+                    frames.extend(block);
+                }
             }
             // A router picks the single best-suited member, then only it answers.
             Coordination::Router => {
@@ -262,12 +271,27 @@ pub async fn route_team_chat_stream(
                     .cloned()
                     .unwrap_or_else(|| members[0].clone());
                 let reply = run_member_text_with_flags(&chosen.0, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
-                let text = team_member_reply_text(locale, &chosen.0, reply);
-                let mut block = Vec::new();
-                push_member_block(&mut block, &mut combined, "m0", &team_routed_label(locale, &chosen.1), &text);
-                for f in &block { yield Ok(f.clone()); }
-                frames.extend(block);
+                if !deps.stopped() {
+                    let text = team_member_reply_text(locale, &chosen.0, reply);
+                    let mut block = Vec::new();
+                    push_member_block(&mut block, &mut combined, "m0", &team_routed_label(locale, &chosen.1), &text);
+                    for f in &block { yield Ok(f.clone()); }
+                    frames.extend(block);
+                }
             }
+        }
+
+        // In a thread with an owner, the members the owner asked in its reply
+        // answer once, after it. Their replies are not read for further asks.
+        let asked = deps.thread.as_deref().map(|thread| thread.asked(&original_messages)).unwrap_or_default();
+        for (idx, (mid, mname, msgs)) in asked.into_iter().enumerate() {
+            let reply = run_member_text_with_flags(&mid, msgs, conversation_id.clone(), &deps, member_plugin_flags.clone()).await;
+            if deps.stopped() { break; }
+            let text = team_member_reply_text(locale, &mid, reply);
+            let mut block = Vec::new();
+            push_member_block(&mut block, &mut combined, &format!("a{idx}"), &mname, &text);
+            for f in &block { yield Ok(f.clone()); }
+            frames.extend(block);
         }
 
         yield Ok(ui_finish());

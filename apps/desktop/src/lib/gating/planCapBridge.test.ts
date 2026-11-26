@@ -74,62 +74,98 @@ describe("effectivePlan", () => {
 			effectivePlan({
 				plan: "max",
 				proUnlocked: true,
-				daysLeftInTrial: 0,
 				managedInference: true,
 				marketplaceApps: true,
-				paywalled: false,
 				reason: "subscription",
 			})
 		).toBe("max");
 	});
 
-	test("trial / lifetime (proUnlocked, no purchased plan) bands into 'pro'", () => {
+	test("a desktop license holder keeps the license plan", () => {
+		expect(
+			effectivePlan({
+				plan: "desktop-license",
+				proUnlocked: true,
+				managedInference: false,
+				marketplaceApps: false,
+				reason: "license",
+			})
+		).toBe("desktop-license");
+	});
+
+	test("a free (personal use) desktop resolves to the free (null) row", () => {
 		expect(
 			effectivePlan({
 				plan: null,
 				proUnlocked: true,
-				daysLeftInTrial: 1,
 				managedInference: false,
 				marketplaceApps: false,
-				paywalled: false,
-				reason: "trial",
-			})
-		).toBe("pro");
-	});
-
-	test("signed-in free (not proUnlocked, no plan) stays on the free (null) caps", () => {
-		expect(
-			effectivePlan({
-				plan: null,
-				proUnlocked: false,
-				daysLeftInTrial: 0,
-				managedInference: false,
-				marketplaceApps: false,
-				paywalled: true,
-				reason: "trial-expired",
+				reason: "free",
 			})
 		).toBeNull();
 	});
 });
 
+describe("a free account has no desktop caps", () => {
+	test("tabs, remote nodes, agents, runs and Spaces are unlimited and never prompt", () => {
+		let upgrades = 0;
+		syncPlanCapState(null, () => {
+			upgrades += 1;
+		});
+		billingAuthOn = true;
+		for (const field of [
+			"maxOpenTabs",
+			"maxRemoteNodes",
+			"maxAgents",
+			"maxConcurrentRuns",
+			"maxSpaces",
+		] as const) {
+			expect(resolveCapLimit(field)).toBe(Number.POSITIVE_INFINITY);
+			expect(capLimit(null, field)).toBe(Number.POSITIVE_INFINITY);
+			expect(() => enforcePlanCap(field, 10_000)).not.toThrow();
+		}
+		expect(upgrades).toBe(0);
+	});
+
+	test("ten tabs and three remote nodes open with no prompt", () => {
+		let upgrades = 0;
+		syncPlanCapState(null, () => {
+			upgrades += 1;
+		});
+		billingAuthOn = true;
+		for (let open = 0; open < 10; open += 1) {
+			expect(() => enforcePlanCap("maxOpenTabs", open)).not.toThrow();
+		}
+		for (let nodes = 0; nodes < 3; nodes += 1) {
+			expect(() => enforcePlanCap("maxRemoteNodes", nodes)).not.toThrow();
+		}
+		expect(upgrades).toBe(0);
+	});
+});
+
+// The enforcement primitives still hold for a quota with a finite number. The
+// only one left is hosted Space storage (1 GB free, 10 GB on Pro), which costs
+// money per user, so it is the field these tests drive.
 describe("resolveCapLimit — after sync", () => {
 	test("off the managed path is Infinity even with a free plan synced", () => {
 		syncPlanCapState(null, () => undefined);
 		billingAuthOn = false;
-		// A finite free cap would apply on the managed path, but not off it.
-		expect(resolveCapLimit("maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
+		// A finite free quota would apply on the managed path, but not off it.
+		expect(resolveCapLimit("spaceStorageLimitGb")).toBe(
+			Number.POSITIVE_INFINITY
+		);
 	});
 
 	test("managed path + free plan reads the finite FREE_TIER_LIMITS value", () => {
 		syncPlanCapState(null, () => undefined);
 		billingAuthOn = true;
-		// FREE_TIER_LIMITS.maxOpenTabs === 3 (single source of truth in plans.ts).
-		expect(resolveCapLimit("maxOpenTabs")).toBe(3);
+		expect(resolveCapLimit("spaceStorageLimitGb")).toBe(1);
 	});
 
-	test("a paid plan lifts the cap (Infinity) on the managed path", () => {
+	test("a paid plan reads its own row on the managed path", () => {
 		syncPlanCapState("pro", () => undefined);
 		billingAuthOn = true;
+		expect(resolveCapLimit("spaceStorageLimitGb")).toBe(10);
 		expect(resolveCapLimit("maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
 	});
 });
@@ -138,43 +174,30 @@ describe("an unresolved verdict", () => {
 	test("re-syncing an unknown plan fails open again on the managed path", () => {
 		syncPlanCapState(null, () => undefined);
 		billingAuthOn = true;
-		expect(resolveCapLimit("maxOpenTabs")).toBe(3);
+		expect(resolveCapLimit("spaceStorageLimitGb")).toBe(1);
 		syncPlanCapState(effectivePlan(null), () => undefined);
-		expect(resolveCapLimit("maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
-		expect(() => enforcePlanCap("maxRemoteNodes", 10_000)).not.toThrow();
+		expect(resolveCapLimit("spaceStorageLimitGb")).toBe(
+			Number.POSITIVE_INFINITY
+		);
+		expect(() => enforcePlanCap("spaceStorageLimitGb", 10_000)).not.toThrow();
 	});
 
-	test("capLimit is Infinity for an unknown plan and the free cap for null", () => {
-		expect(capLimit(undefined, "maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
-		expect(capLimit(null, "maxOpenTabs")).toBe(3);
+	test("capLimit is Infinity for an unknown plan and the free number for null", () => {
+		expect(capLimit(undefined, "spaceStorageLimitGb")).toBe(
+			Number.POSITIVE_INFINITY
+		);
+		expect(capLimit(null, "spaceStorageLimitGb")).toBe(1);
 	});
 });
 
 describe("enforcePlanCap", () => {
-	test("free agents, concurrent runs, and Spaces never prompt an upgrade", () => {
-		let upgrades = 0;
-		syncPlanCapState(null, () => {
-			upgrades += 1;
-		});
-		billingAuthOn = true;
-		for (const field of [
-			"maxAgents",
-			"maxConcurrentRuns",
-			"maxSpaces",
-		] as const) {
-			expect(resolveCapLimit(field)).toBe(Number.POSITIVE_INFINITY);
-			expect(() => enforcePlanCap(field, 10_000)).not.toThrow();
-		}
-		expect(upgrades).toBe(0);
-	});
-
 	test("under the cap is a silent no-op (no throw, no upgrade prompt)", () => {
 		let upgrades = 0;
-		syncPlanCapState(null, () => {
+		syncPlanCapState("pro", () => {
 			upgrades += 1;
 		});
-		billingAuthOn = true; // free cap: maxOpenTabs === 3
-		expect(() => enforcePlanCap("maxOpenTabs", 2)).not.toThrow();
+		billingAuthOn = true; // Pro row: spaceStorageLimitGb === 10
+		expect(() => enforcePlanCap("spaceStorageLimitGb", 9)).not.toThrow();
 		expect(upgrades).toBe(0);
 	});
 
@@ -186,30 +209,32 @@ describe("enforcePlanCap", () => {
 		billingAuthOn = true;
 		let caught: unknown;
 		try {
-			enforcePlanCap("maxOpenTabs", 3);
+			enforcePlanCap("spaceStorageLimitGb", 1);
 		} catch (error) {
 			caught = error;
 		}
 		expect(caught).toBeInstanceOf(PlanCapError);
 		// SAFETY: The preceding matcher established the caught instance of the real PlanCapError thrown by enforcePlanCap; its constructor owns this field.
 		expect((caught as InstanceType<typeof PlanCapError>).field).toBe(
-			"maxOpenTabs"
+			"spaceStorageLimitGb"
 		);
 		// SAFETY: This is the same caught PlanCapError already checked above; its real constructor assigns the numeric limit without an intervening write.
-		expect((caught as InstanceType<typeof PlanCapError>).limit).toBe(3);
+		expect((caught as InstanceType<typeof PlanCapError>).limit).toBe(1);
 		expect(upgrades).toBe(1);
 	});
 
 	test("throws even when the registered requester is a no-op (cap still holds)", () => {
 		syncPlanCapState(null, () => undefined);
 		billingAuthOn = true;
-		expect(() => enforcePlanCap("maxOpenTabs", 999)).toThrow(PlanCapError);
+		expect(() => enforcePlanCap("spaceStorageLimitGb", 999)).toThrow(
+			PlanCapError
+		);
 	});
 
 	test("off the managed path never throws — self-host stays uncapped", () => {
 		syncPlanCapState(null, () => undefined);
 		billingAuthOn = false;
-		expect(() => enforcePlanCap("maxOpenTabs", 10_000)).not.toThrow();
+		expect(() => enforcePlanCap("spaceStorageLimitGb", 10_000)).not.toThrow();
 	});
 });
 

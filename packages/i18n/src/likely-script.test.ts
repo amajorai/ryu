@@ -49,6 +49,7 @@ const CORE_LIKELY_SCRIPTS: Record<string, string> = {
 	it: "Latn",
 	ja: "Jpan",
 	ko: "Kore",
+	pl: "Latn",
 	pt: "Latn",
 	ru: "Cyrl",
 	zh: "Hans",

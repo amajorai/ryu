@@ -1,22 +1,17 @@
 name: release
 
-# ─────────────────────────────────────────────────────────────────────────────
-# THERE ARE TWO `release.yml` FILES. THIS IS THE PUBLIC-MIRROR ONE, AND IT IS NOT
-# THE PIPELINE A REAL RELEASE GOES THROUGH.
+# THIS WORKFLOW BUILDS THE PUBLIC STABLE RELEASES. A `v*` tag pushed in the
+# release procedure reaches the public repo in the same second as the private
+# one and starts this workflow. A manual dispatch starts it too. It built the
+# stable releases v0.5.0 and v0.5.1, and `promote` made them stable.
 #
-#   this file  → published into public `amajorai/ryu`; fires only on a `v*` tag
-#                pushed DIRECTLY to the public repo (rare), or a manual dispatch.
-#                Builds cli/tui, desktop, island, core, gateway.
-#   private `.github/workflows/release.yml` (ryu-closed) → the authoritative
-#                producer; `mirror-releases.yml` copies its hub assets here.
+# Core and Desktop are not built without the release signing public key; see
+# .github/scripts/release-signing-key-gate.mjs.
 #
-# They are NOT copies and must not be kept in sync job-for-job: this repo lacks
-# `apps/ghost`, `apps/shadow` and `apps-store/*`, so a tag pushed here yields no
-# app sidecar bins. Do not copy the private `binaries` job here. Tag the private
-# repo for the complete train. Asset naming, the standalone-manifest build, and
-# the rest of the rationale: .github/scripts/README.md ("Two release.yml files")
-# and docs/RELEASING.md §2 in the private repo.
-# ─────────────────────────────────────────────────────────────────────────────
+# The private monorepo's `release.yml` is NOT a copy and must not be kept in
+# sync job-for-job: this repo lacks `apps/ghost`, `apps/shadow` and
+# `apps-store/*`, so no app sidecar bins are built here. Do not copy the private
+# `binaries` job. More in .github/scripts/README.md ("Two release.yml files").
 
 on:
   push:
@@ -33,7 +28,7 @@ permissions:
   id-token: write          # OIDC token for artifact attestation
   attestations: write      # gh attestation
 
-# A mirror push and a manual dispatch for the same tag used to leave two full
+# A tag push and a manual dispatch for the same tag used to leave two full
 # release matrices competing for the tiny public macOS pool. Keep one authoritative
 # run per tag; a newer dispatch cancels the stale queued matrix instead of making a
 # release wait hours behind work that can no longer publish anything useful.
@@ -99,7 +94,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.4
+          bun-version: 1.4.5
       - run: bun install --frozen-lockfile
       - name: Compile
         shell: bash
@@ -143,9 +138,15 @@ jobs:
             rust_targets: ""
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # No key, no build: a Core or Desktop without the release signing public
+      # key skips the signed SHA256SUMS check, and `promote` would make it stable.
+      - name: Release signing public key must be set
+        env:
+          RYU_RELEASE_SIGNING_PUBKEY: ${{ vars.RYU_RELEASE_SIGNING_PUBKEY }}
+        run: node .github/scripts/release-signing-key-gate.mjs
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.4
+          bun-version: 1.4.5
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.rust_targets }}
@@ -180,6 +181,8 @@ jobs:
           VITE_POSTHOG_KEY: ${{ vars.VITE_POSTHOG_KEY }}
           VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
           SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+          # Compiled in: the key that verifies SHA256SUMS.sig.
+          RYU_RELEASE_SIGNING_PUBKEY: ${{ vars.RYU_RELEASE_SIGNING_PUBKEY }}
         with:
           projectPath: apps/desktop
           # NO tagName/releaseName: those make tauri-action publish to the release
@@ -198,8 +201,7 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: dist-desktop/*
-      # gh release upload (assets endpoint), NOT softprops; an empty dist-desktop/
-      # fails the job. See .github/scripts/upload-release-assets.sh.
+      # As in the tui job; see .github/scripts/upload-release-assets.sh.
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -223,7 +225,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.4
+          bun-version: 1.4.5
       # uiohook-napi compiles libuiohook from source on Linux and needs the X11
       # headers; how the set was derived is in .github/scripts/README.md.
       - name: Linux build deps
@@ -239,8 +241,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The full renderer bundle peaks above Node's default heap on macOS.
           NODE_OPTIONS: --max-old-space-size=8192
-          # Matches the windows-2022 image pinned above. On the default
-          # windows-latest (VS2026) node-gyp finds no 2022 toolchain and fails.
+          # Matches the windows-2022 image pinned in the matrix above.
           GYP_MSVS_VERSION: "2022"
           npm_config_msvs_version: "2022"
         run: bun run dist -- --publish never
@@ -251,8 +252,7 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: dist-island/*
-      # gh release upload (assets endpoint), NOT softprops; an empty dist-island/
-      # fails the job. See .github/scripts/upload-release-assets.sh.
+      # As in the tui job; see .github/scripts/upload-release-assets.sh.
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -263,7 +263,8 @@ jobs:
   build:
     needs: notes
     name: ${{ matrix.target.asset }} (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    # Only the macOS ryu-core leg uses macos-15-xlarge (37 to 71 min on the standard one).
+    runs-on: ${{ matrix.os == 'macos-15' && matrix.target.asset == 'ryu-core' && 'macos-15-xlarge' || matrix.os }}
     # Guard for vendored CMake builds, as in .cargo/config.toml: CMake >= 4.0
     # (current runner images) refuses a project whose cmake_minimum_required is
     # below 3.5 unless this is set. Opus no longer needs it: opus 0.4 builds its
@@ -283,6 +284,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref }}
+      # The same gate as the desktop job.
+      - name: Release signing public key must be set
+        env:
+          RYU_RELEASE_SIGNING_PUBKEY: ${{ vars.RYU_RELEASE_SIGNING_PUBKEY }}
+        run: node .github/scripts/release-signing-key-gate.mjs
 
       # pkg-config + libssl-dev for openssl-sys, libdbus-1-dev / dbus for
       # libdbus-sys. No system libopus: opus 0.4 (opusic-sys, default `bundled`)
@@ -315,6 +321,7 @@ jobs:
         env:
           TARGET_DIR: ${{ matrix.target.dir }}
           FEATURES: ${{ matrix.target.features }}
+          RYU_RELEASE_SIGNING_PUBKEY: ${{ vars.RYU_RELEASE_SIGNING_PUBKEY }}
         run: bash .github/scripts/build-cargo-target.sh
 
       # Feature-set gate: asserts what cargo actually BUILT, read from the
@@ -344,8 +351,7 @@ jobs:
         with:
           subject-path: dist/ryu-*
 
-      # gh release upload (assets endpoint), NOT softprops; an empty dist/ fails
-      # the job. See .github/scripts/upload-release-assets.sh.
+      # As in the tui job; see .github/scripts/upload-release-assets.sh.
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

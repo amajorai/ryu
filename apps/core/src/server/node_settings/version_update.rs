@@ -223,6 +223,9 @@ pub(in crate::server) async fn get_update_schedule() -> axum::response::Response
         Json(json!({
             "pending": pending,
             "timeZone": crate::update::schedule::local_timezone(),
+            // Whether an installed update is waiting for agent runs to finish
+            // before Core restarts, and how many are running.
+            "restart": crate::update::schedule::restart_gate::status(),
         })),
     )
         .into_response()
@@ -301,4 +304,46 @@ pub(in crate::server) async fn update_apply(
         )
             .into_response(),
     }
+}
+
+/// `POST /api/update/restart-now` — restart onto an installed update without
+/// waiting for running agent work.
+///
+/// The restart that follows a deferred update waits until no agent run is
+/// active (`update/restart_gate.rs`). This is the override: the caller accepts
+/// that running work stops. It only releases a restart that is already
+/// waiting and never starts one, so it cannot take down a node that has
+/// nothing installed. Answers `409` when no restart is waiting.
+pub(in crate::server) async fn update_restart_now(
+    State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> axum::response::Response {
+    if let Err(status) = enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::NODES_MANAGE,
+    )
+    .await
+    {
+        return (
+            status,
+            Json(json!({ "error": "Node management permission is required for updates" })),
+        )
+            .into_response();
+    }
+
+    let restarting = crate::update::schedule::restart_gate::restart_now();
+    let code = if restarting {
+        StatusCode::OK
+    } else {
+        StatusCode::CONFLICT
+    };
+    (
+        code,
+        Json(json!({
+            "restarting": restarting,
+            "restart": crate::update::schedule::restart_gate::status(),
+        })),
+    )
+        .into_response()
 }

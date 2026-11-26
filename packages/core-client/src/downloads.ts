@@ -21,6 +21,7 @@ import {
 	makeHeaders,
 	request,
 } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
 /** Lifecycle state of a single download (mirrors Core's `DownloadState`). */
 export type DownloadState =
@@ -208,7 +209,7 @@ export async function listDownloads(
 const control = (id: string, action: string) => (target: ApiTarget) =>
 	request(
 		target,
-		`/api/downloads/${id}/${action}`,
+		`/api/downloads/${encodePathId(id)}/${action}`,
 		{
 			method: "POST",
 		},
@@ -228,7 +229,7 @@ export const cancelDownload = (target: ApiTarget, id: string) =>
 export const clearDownload = (target: ApiTarget, id: string) =>
 	request(
 		target,
-		`/api/downloads/${id}`,
+		`/api/downloads/${encodePathId(id)}`,
 		{
 			method: "DELETE",
 		},

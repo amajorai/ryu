@@ -41,11 +41,15 @@ pub(in crate::server) async fn start_pi_provider_login(
     .await
     {
         Ok(session_id) => Json(json!({ "sessionId": session_id })).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => match crate::server::plan_limits::AccountLimitReached::from_error(&e) {
+            // A full provider: 409 `provider_account_limit`, before any browser opens.
+            Some(refusal) => refusal.response().into_response(),
+            None => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        },
     }
 }
 

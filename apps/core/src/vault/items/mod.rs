@@ -45,6 +45,7 @@ use crate::plugin_secrets::PluginSecretStore;
 
 mod add_field;
 pub mod cards;
+pub mod login_import;
 mod model;
 mod normalize;
 mod put;

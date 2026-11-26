@@ -2,6 +2,12 @@
 <html lang="en" class="dark">
 	<head>
 		<meta charset="UTF-8">
+		<!-- App and widget frames are mounted from srcdoc and inherit this policy on
+		     top of their own. It keeps every script element and module import, in the
+		     page and in those frames, inline or from the Island's own origin, so a
+		     frame cannot load script from another host. The frames need inline script
+		     elements, so 'unsafe-inline' stays. Pinned by outer-script-policy.test.ts. -->
+		<meta http-equiv="Content-Security-Policy" content="script-src-elem 'self' 'unsafe-inline'">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<title>Ryu Island</title>
 	</head>

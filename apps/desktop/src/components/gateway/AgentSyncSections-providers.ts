@@ -1,4 +1,5 @@
 import type { SvglSpec } from "@ryu/blocks/web/svgl-icon.tsx";
+import { hermesHomeName, joinHome } from "@/src/lib/agent-migration.ts";
 import type {
 	AgentSyncProfile,
 	SyncProvider,
@@ -70,8 +71,15 @@ export function providerLabel(provider: SyncProvider): string {
 	return PROVIDERS.find((entry) => entry.value === provider)?.label ?? provider;
 }
 
-export function pathSeparator(path: string): string {
-	return path.includes("\\") ? "\\" : "/";
+/** A provider's home folder under the node's home, in the node's path style. */
+export function providerHomePath(
+	home: string,
+	provider: ProviderOption & { home: string }
+): string {
+	return joinHome(
+		home,
+		provider.value === "hermes" ? hermesHomeName(home) : provider.home
+	);
 }
 
 export function profileKey(profile: AgentSyncProfile): string {

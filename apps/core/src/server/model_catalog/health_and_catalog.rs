@@ -32,6 +32,11 @@ pub(in crate::server) async fn health() -> Json<serde_json::Value> {
         // ignores it, and no existing field changed.
         "channel": crate::update::channel_of(crate::capabilities::version()),
         "capabilities": crate::capabilities::CAPABILITIES,
+        // The oldest and newest protocol this Core speaks (`ryu-protocol`),
+        // separate from the release version above. A client picks the highest
+        // number both sides share; a Core without this field counts as
+        // protocol 0.
+        "protocol": ryu_protocol::ProtocolRange::CURRENT,
     }))
 }
 
@@ -163,4 +168,23 @@ pub(in crate::server) fn composio_toolkit_categories(value: &serde_json::Value) 
             None
         })
         .collect()
+}
+
+#[cfg(test)]
+mod protocol_tests {
+    #[tokio::test]
+    async fn health_reports_the_protocol_range_with_version_and_capabilities() {
+        let axum::Json(body) = super::health().await;
+        assert_eq!(body["protocol"]["min"], ryu_protocol::PROTOCOL_MIN);
+        assert_eq!(body["protocol"]["max"], ryu_protocol::PROTOCOL_MAX);
+        assert_eq!(
+            ryu_protocol::ProtocolRange::from_health(&body),
+            ryu_protocol::ProtocolRange::CURRENT
+        );
+        // The release version and the capability flags stay beside it.
+        assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+        assert!(body["capabilities"]
+            .as_array()
+            .is_some_and(|flags| flags.iter().any(|flag| flag == "chat")));
+    }
 }

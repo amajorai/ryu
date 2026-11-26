@@ -5,7 +5,8 @@
 use super::IMPORT_AGENT_SYNC_CURSOR_HISTORY_WARNING_MESSAGE;
 use crate::i18n::Message;
 
-const AGENT_SYNC_SOURCE: &str = include_str!("../../server/agent_sync.rs");
+// The scan route lives in the `routes` part of the `server::agent_sync` module.
+const AGENT_SYNC_SOURCE: &str = include_str!("../../server/agent_sync/routes.rs");
 
 fn cursor_notice() -> String {
     crate::import::english(&Message::new(
@@ -32,6 +33,6 @@ fn agent_sync_cursor_scan_sends_the_catalogued_sentence() {
     let pushed = format!("\"{}\".to_owned()", cursor_notice());
     assert!(
         AGENT_SYNC_SOURCE.contains(&pushed),
-        "agent_sync.rs no longer pushes {pushed}"
+        "agent_sync/routes.rs no longer pushes {pushed}"
     );
 }

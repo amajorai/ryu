@@ -22,6 +22,7 @@ const LIKELY_SCRIPTS: &[(&str, &str)] = &[
     ("it", "Latn"),
     ("ja", "Jpan"),
     ("ko", "Kore"),
+    ("pl", "Latn"),
     ("pt", "Latn"),
     ("ru", "Cyrl"),
     ("zh", "Hans"),

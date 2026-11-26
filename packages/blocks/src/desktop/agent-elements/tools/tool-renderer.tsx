@@ -35,6 +35,7 @@ import {
 import { BashTool } from "./bash-tool.tsx";
 import { ConsentTool, consentRequestKind } from "./consent-tool.tsx";
 import { EditTool } from "./edit-tool.tsx";
+import { FeedbackTool, isFeedbackDraftPart } from "./feedback-tool.tsx";
 import { GenericTool } from "./generic-tool.tsx";
 import { McpTool } from "./mcp-tool.tsx";
 import { PlanTool } from "./plan-tool.tsx";
@@ -188,6 +189,13 @@ const ToolRendererInner = memo(function ToolRendererInner({
 				part={part}
 			/>
 		);
+	}
+
+	// Feedback draft (feedback.draft): an idea or bug report about Ryu that the
+	// user reviews on an inline card. Nothing is sent before their click; the
+	// choice goes back to the agent as their next message.
+	if (isFeedbackDraftPart(partType, part.toolName)) {
+		return <FeedbackTool onFollowUp={onAgentUiSubmit} part={part} />;
 	}
 
 	// Suggested next task (tasks.suggest): the actionable card lives above the

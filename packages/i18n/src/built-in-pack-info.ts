@@ -93,6 +93,13 @@ export const BUILT_IN_LANGUAGE_PACK_INFO: readonly LanguagePackInfo[] = [
 	{
 		baseLocale: "en",
 		direction: "ltr",
+		id: "official/pl",
+		locale: "pl",
+		name: "Polski",
+	},
+	{
+		baseLocale: "en",
+		direction: "ltr",
 		id: "en-x-ryu-online",
 		locale: "en",
 		name: "English (chronically online)",

@@ -31,6 +31,7 @@ function entryFor(
 		group: "",
 		id: `probe.${dialog}.${section}`,
 		label: ROW_LABEL,
+		level: dialog === "app" ? "app" : "computer",
 		section,
 	};
 }

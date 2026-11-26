@@ -55,6 +55,13 @@ pub fn parse_persona(root: &Path, anchor: &Path) -> Option<CodexSubagent> {
         return None;
     }
     let framework = detect(root).unwrap_or(Framework::Persona);
+    // A Hermes bot (`profiles/<name>/`) is named by its `profile.yaml`, a bot
+    // of an export archive by the archive's manifest.
+    let profile = match framework {
+        Framework::Hermes => hermes_profile(dir),
+        Framework::GrokBot => archive_bot_profile(root, dir),
+        _ => None,
+    };
     let identity = read_bounded(&dir.join("IDENTITY.md"), MAX_FRAMEWORK_FILE_BYTES);
     let workspace_suffix = dir
         .file_name()
@@ -64,18 +71,24 @@ pub fn parse_persona(root: &Path, anchor: &Path) -> Option<CodexSubagent> {
     let name = identity
         .as_deref()
         .and_then(identity_name)
+        .or_else(|| profile.as_ref().map(|p| p.name.clone()))
         .or_else(|| workspace_suffix.map(|s| format!("{}-{s}", framework.id())))
         .unwrap_or_else(|| framework.id().to_string());
+    let migrated = format!(
+        "Migrated from {} ({}).",
+        framework.label(),
+        dir.to_string_lossy()
+    );
+    let (description, model) = match profile {
+        Some(profile) => (profile.description.unwrap_or(migrated), profile.model),
+        None => (migrated, persona_model(root, framework)),
+    };
     Some(CodexSubagent {
         name,
-        description: Some(format!(
-            "Migrated from {} ({}).",
-            framework.label(),
-            dir.to_string_lossy()
-        )),
+        description: Some(description),
         system_prompt: sections.join("\n\n"),
         tools: Vec::new(),
-        model: persona_model(root, framework),
+        model,
     })
 }
 

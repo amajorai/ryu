@@ -1,0 +1,40 @@
+/**
+ * The Polish row of the base sense table in `en-messages-senses.ts`, kept in
+ * its own file so that one stays under the source line limit. That table's
+ * type checks the ids. Same contract: no value repeats the English word.
+ */
+export const POLISH_SENSE_MESSAGES_BASE = {
+	"agentStats.steps": "Kroki",
+	"calendar.weekdayPicker": "Dzień tygodnia",
+	"cardTable.layoutTable": "Stół",
+	"departures.destination": "Dokąd",
+	"departures.origin": "Skąd",
+	"farm.crop": "Uprawa",
+	"hardware.deviceDesk": "Wyświetlacz biurkowy",
+	"hardware.deviceNecklace": "Naszyjnik",
+	"hardware.devicePhone": "Telefon",
+	"hardware.deviceWatch": "Zegarek",
+	"kitchen.orderTickets": "Bony",
+	"lists.item": "Pozycja",
+	"lobby.claimReward": "Odbierz",
+	"lobby.play": "Graj",
+	"mail.recipientTo": "Do",
+	"places.bookingWhen": "Kiedy",
+	"places.tripPlanTab": "Plan podróży",
+	"plans.paidTier": "Płatny",
+	"plans.trialTier": "Okres próbny",
+	"policies.resolveEffective": "Oblicz",
+	"profile.unlockPoints": "Za punkty",
+	"qa.question": "Pytanie",
+	"quiz.contestantOut": "Odpada",
+	"schedule.rangeFrom": "Od",
+	"social.composePost": "Napisz",
+	"status.online": "Połączono",
+	"status.open": "Otwarte",
+	"threads.readState": "Przeczytane",
+	"ticker.sortChange": "Zmiana",
+	"tools.readDone": "Odczytano",
+	"ugc.postColumn": "Wpis",
+	"view.display": "Wyświetlanie",
+	"wiki.talkTab": "Dyskusja",
+};

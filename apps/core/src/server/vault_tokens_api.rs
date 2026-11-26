@@ -138,6 +138,10 @@ pub fn routes() -> axum::Router<ServerState> {
             post(sys_lease_revoke_prefix).layer(limit()),
         )
         .route(
+            "/api/vault/sys/leases/force-revoke/:id",
+            post(sys_lease_force_revoke).layer(limit()),
+        )
+        .route(
             "/api/vault/sys/leases/tidy",
             post(sys_lease_tidy).layer(limit()),
         )

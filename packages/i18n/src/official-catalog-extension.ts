@@ -1,14 +1,15 @@
-import arCatalog from "../locales/extension/ar.json";
-import deCatalog from "../locales/extension/de.json";
-import esCatalog from "../locales/extension/es.json";
-import frCatalog from "../locales/extension/fr.json";
-import hiCatalog from "../locales/extension/hi.json";
-import itCatalog from "../locales/extension/it.json";
-import jaCatalog from "../locales/extension/ja.json";
-import koCatalog from "../locales/extension/ko.json";
-import ptBRCatalog from "../locales/extension/pt-BR.json";
-import ruCatalog from "../locales/extension/ru.json";
-import zhCNCatalog from "../locales/extension/zh-CN.json";
+import arCatalog from "../locales/extension/ar.json" with { type: "json" };
+import deCatalog from "../locales/extension/de.json" with { type: "json" };
+import esCatalog from "../locales/extension/es.json" with { type: "json" };
+import frCatalog from "../locales/extension/fr.json" with { type: "json" };
+import hiCatalog from "../locales/extension/hi.json" with { type: "json" };
+import itCatalog from "../locales/extension/it.json" with { type: "json" };
+import jaCatalog from "../locales/extension/ja.json" with { type: "json" };
+import koCatalog from "../locales/extension/ko.json" with { type: "json" };
+import plCatalog from "../locales/extension/pl.json" with { type: "json" };
+import ptBRCatalog from "../locales/extension/pt-BR.json" with { type: "json" };
+import ruCatalog from "../locales/extension/ru.json" with { type: "json" };
+import zhCNCatalog from "../locales/extension/zh-CN.json" with { type: "json" };
 import { officialCatalogLocale } from "./catalog-locale.ts";
 import {
 	type LiteralCatalog,
@@ -29,6 +30,7 @@ const OFFICIAL_EXTENSION_CATALOGS: Readonly<Record<string, LiteralCatalog>> = {
 	it: itCatalog,
 	ja: jaCatalog,
 	ko: koCatalog,
+	pl: plCatalog,
 	"pt-BR": ptBRCatalog,
 	ru: ruCatalog,
 	"zh-CN": zhCNCatalog,

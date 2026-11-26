@@ -8,6 +8,14 @@
 //! `permission_tx` its bridge holds) and agent id; the bridge gets the sender
 //! only when all three match. The guard clears the entry at turn end, and only
 //! if it is still that turn's entry. Modelled on `device_tools::turn_context`.
+//!
+//! A turn's sender is not enough for a tool that asks who a call acts for: the
+//! bridge outlives a turn, so an engine that keeps working for an earlier turn
+//! (a background task, a sub-agent) would borrow the sender of the next one.
+//! Each instance therefore also remembers, for as long as its bridge lives,
+//! every sender it has served and whether it ever served a turn with none.
+//! That record is matched like the live sender, by the instance's bridge
+//! channel and agent id, and its guard removes it when the instance ends.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,6 +25,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use super::AcpEvent;
 use crate::identity_verify::VerifiedCaller;
+use crate::sidecar::mcp::search_conversations::InstanceSenders;
 
 struct TurnSender {
     registration: u64,
@@ -90,6 +99,115 @@ pub(crate) fn turn_sender_for(
     let entry = map.get(conversation_id)?;
     (entry.agent_id == agent_id && entry.instance.same_channel(instance))
         .then(|| Arc::clone(&entry.sender))
+}
+
+/// What one instance has served since its bridge was built.
+struct InstanceMemory {
+    id: u64,
+    instance: UnboundedSender<AcpEvent>,
+    agent_id: String,
+    senders: Vec<Arc<VerifiedCaller>>,
+    served_without_sender: bool,
+}
+
+fn memories() -> &'static Mutex<HashMap<String, Vec<InstanceMemory>>> {
+    static MEMORIES: OnceLock<Mutex<HashMap<String, Vec<InstanceMemory>>>> = OnceLock::new();
+    MEMORIES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Held by an instance for as long as its bridge lives. Dropping it removes
+/// that instance's record and no other.
+pub(crate) struct InstanceMemoryGuard {
+    conversation_id: String,
+    id: u64,
+}
+
+impl InstanceMemoryGuard {
+    /// Note the turn the instance is about to serve: its verified sender, or
+    /// that it has none. Written before the prompt goes out, so the first tool
+    /// call of the turn already sees it. A person is kept once, with the
+    /// claims of their latest turn.
+    pub(crate) fn remember_turn(&self, sender: Option<&Arc<VerifiedCaller>>) {
+        let Ok(mut map) = memories().lock() else {
+            return;
+        };
+        let Some(memory) = map
+            .get_mut(&self.conversation_id)
+            .and_then(|records| records.iter_mut().find(|record| record.id == self.id))
+        else {
+            return;
+        };
+        match sender {
+            Some(sender) => {
+                memory
+                    .senders
+                    .retain(|known| known.user_id != sender.user_id);
+                memory.senders.push(Arc::clone(sender));
+            }
+            None => memory.served_without_sender = true,
+        }
+    }
+}
+
+impl Drop for InstanceMemoryGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = memories().lock() {
+            if let Some(records) = map.get_mut(&self.conversation_id) {
+                records.retain(|record| record.id != self.id);
+                if records.is_empty() {
+                    map.remove(&self.conversation_id);
+                }
+            }
+        }
+    }
+}
+
+/// Start the record of `instance` (its bridge channel) and `agent_id` in
+/// `conversation_id`. The instance keeps the guard until it ends.
+pub(crate) fn remember_instance(
+    conversation_id: &str,
+    instance: &UnboundedSender<AcpEvent>,
+    agent_id: &str,
+) -> InstanceMemoryGuard {
+    let id = next_registration();
+    if let Ok(mut map) = memories().lock() {
+        map.entry(conversation_id.to_owned())
+            .or_default()
+            .push(InstanceMemory {
+                id,
+                instance: instance.clone(),
+                agent_id: agent_id.to_owned(),
+                senders: Vec::new(),
+                served_without_sender: false,
+            });
+    }
+    InstanceMemoryGuard {
+        conversation_id: conversation_id.to_owned(),
+        id,
+    }
+}
+
+/// Everyone the instance has served, for its own bridge: only the instance
+/// (same bridge channel) and agent that started the record in this
+/// conversation get it. `None` when there is no such record.
+pub(crate) fn remembered_senders_for(
+    conversation_id: &str,
+    instance: &UnboundedSender<AcpEvent>,
+    agent_id: &str,
+) -> Option<InstanceSenders> {
+    let map = memories().lock().ok()?;
+    let memory = map
+        .get(conversation_id)?
+        .iter()
+        .find(|record| record.agent_id == agent_id && record.instance.same_channel(instance))?;
+    Some(InstanceSenders {
+        senders: memory
+            .senders
+            .iter()
+            .map(|sender| sender.as_ref().clone())
+            .collect(),
+        served_without_sender: memory.served_without_sender,
+    })
 }
 
 #[cfg(test)]

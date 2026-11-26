@@ -123,6 +123,14 @@ pub(super) async fn serve_acp_instance(
                 let ((mut session, _bridge_guard), resumed) =
                     ((opened.session, opened.bridge_guard), opened.resumed);
                 let startup_banner = opened.startup_banner;
+                // Everyone this instance serves a turn for, remembered for as
+                // long as its bridge lives and cleared when the instance ends
+                // (`acp::turn_sender`).
+                let instance_memory = super::turn_sender::remember_instance(
+                    &instance_conversation,
+                    &_instance_tx,
+                    &widget_agent_id,
+                );
 
                 // Serve every turn for this chat on the ONE session. The first turn
                 // is already in hand (peeked above); subsequent turns block on the
@@ -199,6 +207,12 @@ pub(super) async fn serve_acp_instance(
                                 &widget_agent_id,
                             )
                         });
+                    // The instance remembers this turn before its prompt goes
+                    // out: its sender when one was registered just above, else
+                    // that it served a turn whose sender is not known.
+                    instance_memory.remember_turn(
+                        turn.turn_sender.as_ref().filter(|_| _turn_sender.is_some()),
+                    );
 
                     if let Some(notice) = sandbox_notice.take() {
                         let _ = tx.send(AcpEvent::ConfigWarning {

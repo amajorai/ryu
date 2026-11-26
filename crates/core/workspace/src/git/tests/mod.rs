@@ -107,7 +107,7 @@ fn commit_action_creates_an_initial_commit_for_an_empty_repository() {
         &["config", "user.email", "ryu-test@example.com"],
     );
 
-    let outcome = run_git_action(path, "Initial commit", "commit", true).unwrap();
+    let outcome = run_git_action(path, "Initial commit", "commit", true, false).unwrap();
     assert!(outcome.success);
     assert!(outcome.committed);
     assert!(!outcome.pushed);

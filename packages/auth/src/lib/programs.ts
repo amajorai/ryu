@@ -1,12 +1,17 @@
 /**
  * Free-licence programs: Ryu for Students and Ryu for Startups.
  *
- * Both programs grant the SAME thing — a non-renewing window of the one-time
- * desktop licence (`desktop-license` in `plans.ts`): the desktop app with the
- * user's own provider keys (BYOK). Neither grants managed inference, an included
- * credit pool, Marketplace access, or a Ryu Cloud node. That boundary is enforced
+ * Both programs grant the SAME thing, a dated window of the one-time desktop
+ * licence (`desktop-license` in `plans.ts`): the desktop app with the user's own
+ * provider keys (BYOK). Neither grants managed inference, an included credit
+ * pool, Marketplace access, or a Ryu Cloud node. That boundary is enforced
  * where the window is overlaid on an entitlement (`packages/api/src/lib/programs.ts`),
  * not by copy on a page.
+ *
+ * A startup window does not renew. A student window lasts while the school
+ * email still verifies: the same address is confirmed again with a new code
+ * every `STUDENT_PROGRAM_MONTHS`, and each confirmation sets the end date to
+ * that many months from the confirmation itself (never from the old end date).
  *
  * Verification follows the usual industry split (Notion, GitHub Education,
  * JetBrains, Figma):
@@ -28,8 +33,27 @@ export type ProgramId = (typeof PROGRAM_IDS)[number];
 /** The plan every program window grants: desktop app + BYOK only. */
 export const PROGRAM_GRANT_PLAN = "desktop-license" as const;
 
-/** Students get one calendar year from the day the school email is confirmed. */
+/**
+ * Students get one calendar year from the day the school email is confirmed,
+ * and the same again from each later confirmation of that address (a renewal).
+ */
 export const STUDENT_PROGRAM_MONTHS = 12;
+
+/**
+ * Whether an approved window has ended. "Lapsed" is never stored: it is this
+ * comparison, made by the server where access is decided and by a page only to
+ * choose its wording. A window without an end date has not lapsed.
+ */
+export function programWindowLapsed(
+	endsAt: Date | string | null | undefined,
+	nowMs: number = Date.now()
+): boolean {
+	if (!endsAt) {
+		return false;
+	}
+	const endMs = new Date(endsAt).getTime();
+	return Number.isFinite(endMs) && endMs <= nowMs;
+}
 
 /** Startups approved by an admin after review. */
 export const STARTUP_PROGRAM_MONTHS = 6;

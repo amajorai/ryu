@@ -13,6 +13,7 @@ import {
 	type PromptCacheConfirmation,
 	PromptCacheConfirmDialog,
 } from "@/src/components/chat/PromptCacheConfirmDialog.tsx";
+import { recordDeclaredUseFromSetup } from "@/src/hooks/useDeclaredUse.ts";
 import type {
 	NodeSetupKind,
 	SaveNodeOnboardingStateInput,
@@ -73,6 +74,9 @@ export function NodePersonalizationStep({
 	const canContinue = canConfigure && setupKind !== null;
 
 	function submit(kind: NodeSetupKind) {
+		// The answer is also the person's own declaration of personal or work
+		// use on this computer. Settings shows it and lets them change it.
+		recordDeclaredUseFromSetup(kind);
 		onContinue({
 			companyContext,
 			companyKnowledgeEnabled: kind === "team",

@@ -1,6 +1,7 @@
 // Typed vault items (logins, cards and custom items) in one environment,
-// each with its history. Listings carry metadata only; values stay on the
-// item and are revealed elsewhere, never here.
+// each with its history, and the import of logins from a password export.
+// Listings carry metadata only; values stay on the item and are revealed
+// elsewhere, never here.
 
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
@@ -20,6 +21,7 @@ import {
 import { formatDateTime } from "@/src/lib/timezone.ts";
 import { VaultItemHistoryDialog } from "./VaultItemHistoryDialog.tsx";
 import { VaultListRow } from "./VaultListRow.tsx";
+import { VaultLoginImportDialog } from "./VaultLoginImportDialog.tsx";
 import { vaultErrorMessage } from "./vault-errors.ts";
 import { timestampMillis } from "./vault-ttl.ts";
 
@@ -32,6 +34,7 @@ export function VaultItemsPanel({
 }) {
 	const tl = useLiteralMessages();
 	const [history, setHistory] = useState<VaultItemSummary | null>(null);
+	const [importing, setImporting] = useState(false);
 	const itemsQuery = useQuery({
 		queryKey: ["vault", "items", "list", target.url, environment],
 		queryFn: () => listVaultItems(target, { environment }),
@@ -44,6 +47,11 @@ export function VaultItemsPanel({
 				"Logins, cards and other typed items in {environment}. History shows what changed and who revealed a field.",
 				{ environment }
 			)}
+			headerAction={
+				<Button onClick={() => setImporting(true)} size="sm" variant="ghost">
+					Import logins
+				</Button>
+			}
 			title="Items"
 		>
 			<SettingsCard className="p-0">
@@ -105,6 +113,12 @@ export function VaultItemsPanel({
 						setHistory(null);
 					}
 				}}
+				target={target}
+			/>
+			<VaultLoginImportDialog
+				environment={environment}
+				onOpenChange={setImporting}
+				open={importing}
 				target={target}
 			/>
 		</SettingsSection>

@@ -3,14 +3,19 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
 
-// Toast titles render outside the panel that raised them, so each one must go
-// through the component's `tl`; a bare literal (or a lookup table read without
-// `tl`) shows English in every locale when the DOM localizer is off or late.
-// This guard parses every non-test source file in the vault folder, finds each
-// `sileo.<kind>({ ... })` (or `toast(...)`) call and checks its `title`. Other
-// `title` props (section headings, list rows) are JSX text the localizer owns.
+// Toasts render outside the panel that raised them, so each title and
+// description must go through the component's `tl`; a bare literal (or a lookup
+// table read without `tl`) shows English when the DOM localizer is off or
+// late. This guard parses every non-test source file in the vault
+// folder and the Vault page, finds each `sileo.<kind>({ ... })` (or
+// `toast(...)`) call and checks its `title` and `description`, including the
+// fallback a `vaultErrorMessage` call returns when the error has no message.
+// Other `title` props (section headings, list rows) are JSX text the localizer
+// owns.
 
 const VAULT_DIR = import.meta.dir;
+const PAGES_DIR = join(VAULT_DIR, "..", "..", "pages");
+const TOAST_FIELDS = new Set(["title", "description"]);
 
 function sourceFiles(dir: string): string[] {
 	const files: string[] = [];
@@ -120,6 +125,16 @@ function untranslated(
 	if (ts.isElementAccessExpression(expr)) {
 		return "table lookup";
 	}
+	// `vaultErrorMessage(error, fallback, tl)` returns its fallback verbatim.
+	if (
+		ts.isCallExpression(expr) &&
+		ts.isIdentifier(expr.expression) &&
+		expr.expression.text === "vaultErrorMessage"
+	) {
+		const fallback = expr.arguments[1];
+		const reason = fallback ? untranslated(fallback, lookup, seen) : null;
+		return reason ? `vaultErrorMessage fallback is a ${reason}` : null;
+	}
 	// `TOASTS.saved`: a property of a literal object table.
 	if (
 		ts.isPropertyAccessExpression(expr) &&
@@ -146,10 +161,13 @@ function titleReason(
 	prop: ts.ObjectLiteralElementLike,
 	lookup: Lookup
 ): string | null {
-	if (ts.isShorthandPropertyAssignment(prop) && prop.name.text === "title") {
+	if (
+		ts.isShorthandPropertyAssignment(prop) &&
+		TOAST_FIELDS.has(prop.name.text)
+	) {
 		return untranslated(prop.name, lookup);
 	}
-	if (ts.isPropertyAssignment(prop) && prop.name.getText() === "title") {
+	if (ts.isPropertyAssignment(prop) && TOAST_FIELDS.has(prop.name.getText())) {
 		return untranslated(prop.initializer, lookup);
 	}
 	return null;
@@ -192,8 +210,12 @@ function untranslatedToastTitles(
 	return offenders;
 }
 
-test("every vault toast title goes through tl", () => {
-	const files = sourceFiles(VAULT_DIR);
+test("every vault toast title and description goes through tl", () => {
+	const pages = sourceFiles(PAGES_DIR).filter((path) =>
+		/[\\/]VaultPage[^\\/]*$/.test(path)
+	);
+	expect(pages.length).toBeGreaterThan(3);
+	const files = [...sourceFiles(VAULT_DIR), ...pages];
 	expect(files.length).toBeGreaterThan(40);
 	const offenders = files.flatMap((path) =>
 		untranslatedToastTitles(
@@ -202,6 +224,40 @@ test("every vault toast title goes through tl", () => {
 		)
 	);
 	expect(offenders).toEqual([]);
+});
+
+test("the guard flags literal descriptions and vaultErrorMessage fallbacks", () => {
+	expect(
+		untranslatedToastTitles(
+			'sileo.error({ title: tl("Could not seal"), description: "Try again." });'
+		)
+	).toHaveLength(1);
+	expect(
+		untranslatedToastTitles(
+			'sileo.error({ title: tl("No"), description: vaultErrorMessage(error, "Try again.", tl) });'
+		)
+	).toHaveLength(1);
+	expect(
+		untranslatedToastTitles(
+			'const description = vaultErrorMessage(error, "Try again.", tl);\nsileo.error({ title: tl("No"), description });'
+		)
+	).toHaveLength(1);
+	expect(
+		untranslatedToastTitles(
+			'sileo.error({ title: vaultErrorMessage(error, "Could not seal.", tl) });'
+		)
+	).toHaveLength(1);
+	expect(
+		untranslatedToastTitles(
+			'sileo.error({ title: tl("No"), description: vaultErrorMessage(error, tl("Try again."), tl) });\nsileo.success({ title: tl("Deleted"), description: name });'
+		)
+	).toEqual([]);
+	// Outside a toast the fallback renders as page text the localizer owns.
+	expect(
+		untranslatedToastTitles(
+			'setProblem(vaultErrorMessage(caught, "Could not issue.", tl));'
+		)
+	).toEqual([]);
 });
 
 test("the guard flags a literal title", () => {

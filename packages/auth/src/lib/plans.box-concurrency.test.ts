@@ -177,10 +177,10 @@ describe("ryu_limits claim", () => {
 			return { plan: "teams", seats: 7 };
 		});
 		const claim = await resolveCoreLimitsClaim("org-1");
-		expect(claim).toEqual({ boxConcurrency: 10 });
+		expect(claim).toEqual({ accountsPerProvider: 50, boxConcurrency: 10 });
 		expect(seen).toEqual(["org-1"]);
 		expect(withCoreLimitsClaim({ sub: "user-1" }, claim)).toEqual({
-			[CORE_LIMITS_CLAIM]: { boxConcurrency: 10 },
+			[CORE_LIMITS_CLAIM]: { accountsPerProvider: 50, boxConcurrency: 10 },
 			sub: "user-1",
 		});
 	});
@@ -199,15 +199,15 @@ describe("ryu_limits claim", () => {
 				plan: plan as keyof typeof expected,
 				seats: 12,
 			}));
-			expect(await resolveCoreLimitsClaim("org-1")).toEqual({
-				boxConcurrency: cap,
-			});
+			const claim = await resolveCoreLimitsClaim("org-1");
+			expect(claim?.boxConcurrency).toBe(cap);
 		}
 	});
 
 	it("is the trial cap for an org with no plan", async () => {
 		registerCoreLimitsPlanResolver(async () => ({ plan: null, seats: 0 }));
 		expect(await resolveCoreLimitsClaim("org-free")).toEqual({
+			accountsPerProvider: 10,
 			boxConcurrency: 1,
 		});
 	});

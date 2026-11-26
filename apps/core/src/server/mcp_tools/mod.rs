@@ -12,3 +12,6 @@ mod host_conversation;
 pub(crate) use host_conversation::*;
 mod mcp_tool_call;
 pub(in crate::server) use mcp_tool_call::*;
+
+#[cfg(test)]
+mod node_user_route_tests;

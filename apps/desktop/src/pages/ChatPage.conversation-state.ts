@@ -9,6 +9,7 @@ import { useAgentUsage } from "@/src/hooks/useAgentUsage.ts";
 import { useCloudTaskSelection } from "@/src/hooks/useCloudTaskSelection.ts";
 import { useFeatureFlag } from "@/src/hooks/useFeatureFlag.ts";
 import { useMergedAgentThreads } from "@/src/hooks/useMergedAgentThreads.ts";
+import { usePaidKeyNotice } from "@/src/hooks/usePaidKeyNotice.ts";
 import {
 	useConversationProviderAccount,
 	useProviderAccountUsage,
@@ -197,6 +198,9 @@ export function useChatConversationState({
 	// the local `convId`, not this shared mirror, so background tabs never fight
 	// over it (e.g. tab-strip switching shows each tab's own thread).
 	const isActiveTab = useIsActiveTab();
+	// One toast per conversation when a paid API key takes over from the
+	// subscription accounts. Asks nothing while that setting is off.
+	usePaidKeyNotice(convId ?? null, isActiveTab);
 	// Stats strip usage. When Core knows which Ryu subscription account this
 	// conversation runs on, show that account's reading; otherwise the agent's.
 	// `source` says how sure Core is: `active` is the account the next turn would

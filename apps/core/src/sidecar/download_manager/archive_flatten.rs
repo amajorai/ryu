@@ -1,11 +1,17 @@
 //! Flattening extraction for release archives whose binary needs the shared
 //! libraries shipped beside it (`@loader_path` / `$ORIGIN` / Windows DLLs).
+//!
+//! Every file lands directly in `dest_dir` under the last segment of its entry
+//! name. That segment goes through `extract_guard::append_confined`, so a leaf
+//! such as `C:x.dll` (a drive-relative path on Windows) fails the extraction
+//! and names the entry, instead of being written outside `dest_dir`.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
 use super::DEFAULT_EXTRACT_CAP_BYTES;
+use crate::sidecar::extract_guard::{append_confined, check_entry_component};
 
 /// Extract **every** file entry from a `.zip` archive into `dest_dir`, flattening
 /// any directory prefix (e.g. `Release/whisper-server.exe` → `whisper-server.exe`).
@@ -71,7 +77,7 @@ pub(crate) fn extract_all_to_dir_from(
         }
         total_bytes += bytes.len() as u64;
 
-        let dest = dest_dir.join(&file_name);
+        let dest = append_confined(dest_dir, &file_name)?;
         let tmp = dest.with_extension("download-tmp");
         std::fs::write(&tmp, &bytes).with_context(|| format!("writing {}", tmp.display()))?;
         std::fs::rename(&tmp, &dest)
@@ -104,7 +110,7 @@ fn is_shared_library(file_name: &str) -> bool {
 
 /// Write `bytes` to `dest_dir/file_name` via a temp file + atomic rename.
 fn write_flattened(dest_dir: &Path, file_name: &str, bytes: &[u8]) -> anyhow::Result<PathBuf> {
-    let dest = dest_dir.join(file_name);
+    let dest = append_confined(dest_dir, file_name)?;
     let tmp = dest.with_extension("download-tmp");
     std::fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
     std::fs::rename(&tmp, &dest)
@@ -127,8 +133,10 @@ fn write_symlink_flattened(
     link_name: &str,
     target: &str,
 ) -> anyhow::Result<PathBuf> {
-    let dest = dest_dir.join(link_name);
+    let dest = append_confined(dest_dir, link_name)?;
     let target_basename = archive_basename(target).to_string();
+    // The link target is a name from the archive as well.
+    check_entry_component(std::ffi::OsStr::new(&target_basename))?;
     // Replace any stale entry (e.g. a previous broken 0-byte extraction).
     if std::fs::symlink_metadata(&dest).is_ok() {
         std::fs::remove_file(&dest).ok();
@@ -141,7 +149,7 @@ fn write_symlink_flattened(
     #[cfg(not(unix))]
     {
         // Windows assets ship DLLs (no symlinks); copy the target if present.
-        let src = dest_dir.join(&target_basename);
+        let src = append_confined(dest_dir, &target_basename)?;
         if src.exists() {
             std::fs::copy(&src, &dest)
                 .with_context(|| format!("copy {} -> {}", src.display(), dest.display()))?;

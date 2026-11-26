@@ -220,6 +220,22 @@ async fn authorize(state: &ServerState, headers: &HeaderMap) -> Result<(), Respo
     Ok(())
 }
 
+/// [`authorize`] for the recorder, plus the node-user rule. Recording taps the
+/// input of the user the node runs as, through a helper Core starts itself, so
+/// the registry's dispatch core never sees it. On a node that bounds its
+/// members the callback is refused unless it carries a verified person who
+/// may use such tools there. Replay needs no line here: it goes through the
+/// registry, where the same rule decides.
+async fn authorize_recorder(state: &ServerState, headers: &HeaderMap) -> Result<(), Response> {
+    authorize(state, headers).await?;
+    let caller = crate::server::verified_caller_from_headers(headers).await;
+    crate::sidecar::mcp::enforce_node_user_recorder_access(&state.client, caller.as_ref())
+        .await
+        .map_err(|refusal| {
+            (StatusCode::FORBIDDEN, Json(json!({ "error": refusal }))).into_response()
+        })
+}
+
 /// `POST /api/host/capability/ghost.replay` — replay a recipe through the live Ghost MCP
 /// registry. Body `{ recipe, params }`; returns the RAW ghost MCP `tools/call`
 /// envelope (the sidecar's `run()` wrapper unwraps it with `extract_mcp_json`).
@@ -257,7 +273,7 @@ pub(crate) async fn host_recipes_record_start(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Err(resp) = authorize(&state, &headers).await {
+    if let Err(resp) = authorize_recorder(&state, &headers).await {
         return resp;
     }
     let task = body.get("task").and_then(Value::as_str).unwrap_or("");
@@ -277,7 +293,7 @@ pub(crate) async fn host_recipes_record_status(
     State(state): State<ServerState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(resp) = authorize(&state, &headers).await {
+    if let Err(resp) = authorize_recorder(&state, &headers).await {
         return resp;
     }
     match CoreRecipesHost.recorder_status().await {
@@ -296,7 +312,7 @@ pub(crate) async fn host_recipes_record_stop(
     State(state): State<ServerState>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(resp) = authorize(&state, &headers).await {
+    if let Err(resp) = authorize_recorder(&state, &headers).await {
         return resp;
     }
     match CoreRecipesHost.recorder_stop().await {

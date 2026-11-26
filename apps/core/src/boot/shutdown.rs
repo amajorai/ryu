@@ -7,8 +7,9 @@ pub(super) async fn wait_for_shutdown_signal() {
     // ACP agents run in their own process groups (agent-client-protocol 3.x), so
     // the desktop's group kill of Core (about 1 s after SIGTERM) no longer reaches
     // them; on an external terminate/Ctrl-C, stop them now, before the graceful
-    // drain. A restart-for-update keeps its 20 s drain so in-flight turns can
-    // finish; `core_main` aborts the instance tasks after `serve` returns.
+    // drain. A restart-for-update first waits until no agent run is active
+    // (`update/restart_gate.rs`) and then keeps its 20 s drain; `core_main`
+    // aborts the instance tasks after `serve` returns.
     if reason == ShutdownReason::Signal {
         crate::sidecar::adapters::acp_instance_tasks::abort_all();
     }
@@ -19,7 +20,7 @@ pub(super) async fn wait_for_shutdown_signal() {
 enum ShutdownReason {
     /// Ctrl-C or SIGTERM from outside Core.
     Signal,
-    /// Core's own restart-for-update request.
+    /// Core's own restart-for-update request, once it may go ahead.
     Restart,
 }
 
@@ -31,14 +32,14 @@ async fn wait_for_shutdown_request() -> ShutdownReason {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => ShutdownReason::Signal,
                     _ = terminate.recv() => ShutdownReason::Signal,
-                    () = crate::update::restart_requested() => ShutdownReason::Restart,
+                    () = crate::update::schedule::restart_gate::restart_ready() => ShutdownReason::Restart,
                 }
             }
             Err(error) => {
                 tracing::warn!(error = %error, "could not install SIGTERM handler; waiting for Ctrl-C");
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => ShutdownReason::Signal,
-                    () = crate::update::restart_requested() => ShutdownReason::Restart,
+                    () = crate::update::schedule::restart_gate::restart_ready() => ShutdownReason::Restart,
                 }
             }
         }
@@ -47,7 +48,7 @@ async fn wait_for_shutdown_request() -> ShutdownReason {
     {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => ShutdownReason::Signal,
-            () = crate::update::restart_requested() => ShutdownReason::Restart,
+            () = crate::update::schedule::restart_gate::restart_ready() => ShutdownReason::Restart,
         }
     }
 }

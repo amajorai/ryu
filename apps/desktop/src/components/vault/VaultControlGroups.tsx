@@ -53,7 +53,7 @@ export function VaultControlGroups({
 		onError: (error) => {
 			sileo.error({
 				title: tl("Could not approve the request"),
-				description: vaultErrorMessage(error, "Try again.", tl),
+				description: vaultErrorMessage(error, tl("Try again."), tl),
 			});
 		},
 	});

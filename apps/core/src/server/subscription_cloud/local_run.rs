@@ -34,11 +34,18 @@ use super::cli::{self, CliFailure, CliOutput, Invocation, Streaming};
 use super::redact;
 use super::store::{self, RunRecord};
 use super::{runner, unix_now, Provider};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
+
+mod events;
+mod worktree;
+
+pub(crate) use events::{parse_event, Event};
+#[cfg(test)]
+pub(crate) use worktree::set_worktree_root_for_test;
+pub(crate) use worktree::{diff, ensure_worktree, LocalDiff};
 
 /// How much of the run's own words (assistant text and tool names) Ryu keeps.
 const OUTPUT_TAIL_BYTES: usize = 8 * 1024;
@@ -53,10 +60,6 @@ const FIRST_TURN_WAIT: Duration = Duration::from_secs(10);
 const RUN_TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
 /// How often a running task's record is written while it prints.
 const SAVE_EVERY: Duration = Duration::from_secs(2);
-const MAX_DIFF_BYTES: usize = 512 * 1024;
-
-static SESSION_ID: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^[A-Za-z0-9_\-]{8,64}$").expect("static pattern"));
 
 /// The runs in progress, by conversation, so Ryu can stop them.
 static RUNNING: LazyLock<Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>> =
@@ -177,154 +180,6 @@ fn codex_invocation(workspace: &Path, resume: Option<&str>, text: &str) -> Invoc
         timeout: RUN_TIMEOUT,
         stop_when: None,
         account_dir: None,
-    }
-}
-
-// ── The stream ───────────────────────────────────────────────────────────────
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Event {
-    Init {
-        session_id: String,
-    },
-    /// Words for the run log: assistant text, or `→ Tool` for a tool call.
-    Log(String),
-    /// An agent message that is also the run's answer so far (Codex reports no result
-    /// text, so its last message is the summary).
-    Reply(String),
-    Result {
-        is_error: bool,
-        text: Option<String>,
-    },
-    /// An error the CLI may still recover from (Codex retries a dropped stream). Only a
-    /// failed turn or a failed exit makes it the run's error.
-    StreamError(Option<String>),
-    Other,
-}
-
-/// One line of the run's output. Anything Ryu does not recognize is ignored, so a newer
-/// CLI that adds event types keeps working.
-pub(crate) fn parse_event(provider: Provider, line: &str) -> Event {
-    match provider {
-        Provider::Anthropic => parse_claude_event(line),
-        Provider::Openai => parse_codex_event(line),
-    }
-}
-
-/// One line of `claude -p --output-format stream-json`.
-fn parse_claude_event(line: &str) -> Event {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
-        return Event::Other;
-    };
-    match value.get("type").and_then(|kind| kind.as_str()) {
-        Some("system") if value.get("subtype").and_then(|kind| kind.as_str()) == Some("init") => {
-            match value.get("session_id").and_then(|id| id.as_str()) {
-                Some(id) if SESSION_ID.is_match(id) => Event::Init {
-                    session_id: id.to_owned(),
-                },
-                _ => Event::Other,
-            }
-        }
-        Some("assistant") => {
-            let mut words = Vec::new();
-            let content = value
-                .pointer("/message/content")
-                .and_then(|content| content.as_array());
-            for block in content.into_iter().flatten() {
-                match block.get("type").and_then(|kind| kind.as_str()) {
-                    Some("text") => {
-                        if let Some(text) = block.get("text").and_then(|text| text.as_str()) {
-                            words.push(text.trim().to_owned());
-                        }
-                    }
-                    Some("tool_use") => {
-                        if let Some(name) = block.get("name").and_then(|name| name.as_str()) {
-                            words.push(format!("→ {name}"));
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if words.is_empty() {
-                Event::Other
-            } else {
-                Event::Log(words.join("\n"))
-            }
-        }
-        Some("result") => Event::Result {
-            is_error: value
-                .get("is_error")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
-            text: value
-                .get("result")
-                .and_then(|text| text.as_str())
-                .map(str::to_owned),
-        },
-        _ => Event::Other,
-    }
-}
-
-/// One line of `codex exec --json` (`codex-rs/exec/src/exec_events.rs`):
-/// `thread.started {thread_id}`, `item.completed {item: {type, …}}`,
-/// `turn.completed`, `turn.failed {error: {message}}` and `error {message}`.
-fn parse_codex_event(line: &str) -> Event {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
-        return Event::Other;
-    };
-    let text_at = |pointer: &str| {
-        value
-            .pointer(pointer)
-            .and_then(|text| text.as_str())
-            .map(|text| text.trim().to_owned())
-    };
-    match value.get("type").and_then(|kind| kind.as_str()) {
-        Some("thread.started") => match value.get("thread_id").and_then(|id| id.as_str()) {
-            Some(id) if SESSION_ID.is_match(id) => Event::Init {
-                session_id: id.to_owned(),
-            },
-            _ => Event::Other,
-        },
-        Some("item.completed") => {
-            let Some(item) = value.get("item") else {
-                return Event::Other;
-            };
-            // Only the item kind and the agent's own words: never a command line, its
-            // output or a file's contents.
-            match item.get("type").and_then(|kind| kind.as_str()) {
-                Some("agent_message") => text_at("/item/text")
-                    .filter(|text| !text.is_empty())
-                    .map_or(Event::Other, Event::Reply),
-                Some("command_execution") => Event::Log("→ shell".into()),
-                Some("file_change") => Event::Log("→ edit".into()),
-                Some("web_search") => Event::Log("→ web search".into()),
-                Some("mcp_tool_call") => {
-                    let tool = text_at("/item/tool").filter(|tool| {
-                        !tool.is_empty()
-                            && tool.len() <= 64
-                            && tool
-                                .chars()
-                                .all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
-                    });
-                    Event::Log(format!("→ {}", tool.as_deref().unwrap_or("tool")))
-                }
-                Some("error") => text_at("/item/message")
-                    .filter(|text| !text.is_empty())
-                    .map_or(Event::Other, |text| Event::Log(format!("! {text}"))),
-                _ => Event::Other,
-            }
-        }
-        Some("turn.completed") => Event::Result {
-            is_error: false,
-            text: None,
-        },
-        Some("turn.failed") => Event::Result {
-            is_error: true,
-            text: text_at("/error/message"),
-        },
-        // Not the end of the turn: `turn.failed` repeats a fatal one.
-        Some("error") => Event::StreamError(text_at("/message")),
-        _ => Event::Other,
     }
 }
 
@@ -585,130 +440,4 @@ fn save_if_present(record: &RunRecord) {
     if store::run(&record.conversation_id).is_some() {
         store::save_run(record.clone());
     }
-}
-
-// ── The worktree ─────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-static WORKTREE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
-
-#[cfg(test)]
-pub(crate) fn set_worktree_root_for_test(root: Option<PathBuf>) {
-    *WORKTREE_ROOT
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = root;
-}
-
-fn task_key(conversation_id: &str) -> String {
-    let digest = Sha256::digest(conversation_id.as_bytes());
-    digest[..6]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-fn worktree_dir(conversation_id: &str) -> PathBuf {
-    let name = format!("cloud-task-worktrees/{}", task_key(conversation_id));
-    #[cfg(test)]
-    if let Some(root) = WORKTREE_ROOT
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
-    {
-        return root.join(name);
-    }
-    crate::paths::files_path(&name)
-}
-
-async fn git(cwd: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .env_clear()
-        .envs(cli::child_env(std::env::vars()))
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .output()
-        .await
-        .map_err(|_| "git could not be run".to_owned())
-}
-
-/// The conversation's worktree and branch, created from the checkout's current `HEAD`
-/// the first time.
-pub(crate) async fn ensure_worktree(
-    checkout: &Path,
-    conversation_id: &str,
-) -> Result<(PathBuf, String), String> {
-    let dir = worktree_dir(conversation_id);
-    let branch = format!("ryu/task-{}", task_key(conversation_id));
-    if dir.join(".git").exists() {
-        return Ok((dir, branch));
-    }
-    if let Some(parent) = dir.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|_| "the task folder could not be made".to_owned())?;
-    }
-    let target = dir.to_string_lossy().into_owned();
-    let created = git(
-        checkout,
-        &["worktree", "add", "-b", &branch, &target, "HEAD"],
-    )
-    .await?;
-    if created.status.success() {
-        return Ok((dir, branch));
-    }
-    // The branch survives a removed worktree: reuse it.
-    let reused = git(checkout, &["worktree", "add", &target, &branch]).await?;
-    if reused.status.success() {
-        Ok((dir, branch))
-    } else {
-        Err(redact::scrub(
-            String::from_utf8_lossy(&created.stderr).trim(),
-        ))
-    }
-}
-
-/// What changed in the task's worktree since it started: the status and the patch
-/// against the commit it started from, new files included.
-#[derive(serde::Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct LocalDiff {
-    pub(crate) branch: Option<String>,
-    /// `git status --porcelain` lines.
-    pub(crate) files: Vec<String>,
-    pub(crate) patch: String,
-    /// The patch was cut at 512 KiB.
-    pub(crate) truncated: bool,
-}
-
-pub(crate) async fn diff(record: &RunRecord) -> Result<LocalDiff, String> {
-    let workspace = PathBuf::from(
-        record
-            .workspace
-            .clone()
-            .ok_or_else(|| "this run has no worktree".to_owned())?,
-    );
-    // Mark new files so they show in the patch; this touches only the task's own index.
-    git(&workspace, &["add", "--intent-to-add", "--all"]).await?;
-    let status = git(&workspace, &["status", "--porcelain"]).await?;
-    let patch = git(&workspace, &["diff", "HEAD"]).await?;
-    if !patch.status.success() {
-        return Err("git could not read the changes".into());
-    }
-    let patch = String::from_utf8_lossy(&patch.stdout);
-    let truncated = patch.len() > MAX_DIFF_BYTES;
-    Ok(LocalDiff {
-        branch: record.branch.clone(),
-        files: String::from_utf8_lossy(&status.stdout)
-            .lines()
-            .take(2000)
-            .map(str::to_owned)
-            .collect(),
-        patch: if truncated {
-            keep_head(&patch, MAX_DIFF_BYTES)
-        } else {
-            patch.into_owned()
-        },
-        truncated,
-    })
 }

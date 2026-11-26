@@ -33,6 +33,7 @@ import * as seal from "./seal.ts";
 import * as shared from "./shared.ts";
 import * as shares from "./shares.ts";
 import * as ssh from "./ssh.ts";
+import * as sshOtp from "./ssh-otp.ts";
 import * as tokens from "./tokens.ts";
 import * as totp from "./totp.ts";
 import * as transfer from "./transfer.ts";
@@ -69,6 +70,7 @@ const areaModules = {
 	shared,
 	shares,
 	ssh,
+	sshOtp,
 	tokens,
 	totp,
 	transfer,

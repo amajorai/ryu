@@ -273,6 +273,7 @@ pub(in crate::server) fn vault_routes() -> Router<ServerState> {
         .merge(vault_external_api::routes())
         .merge(vault_pm_api::routes())
         .merge(vault_items_api::routes())
+        .merge(kv::login_import::routes())
         .merge(vault_agent_accounts_api::routes())
         .merge(vault_seal_dynamic_api::routes())
         .merge(vault_tokens_api::routes())

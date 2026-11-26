@@ -399,7 +399,7 @@ impl PluginSecretStore {
     }
 }
 
-fn lease_locked(conn: &Connection, id: &str) -> Result<LeaseInfo> {
+pub(super) fn lease_locked(conn: &Connection, id: &str) -> Result<LeaseInfo> {
     conn.query_row(
         &format!("SELECT {COLUMNS} FROM vault_leases WHERE id = ?1"),
         params![id],

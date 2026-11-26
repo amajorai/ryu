@@ -1,0 +1,11 @@
+{
+  "New submission to review": "Nowe zgłoszenie do sprawdzenia",
+  "Ryu's managed Composio provider is not configured for this node — record metrics manually": "Zarządzany dostawca Composio Ryu nie jest skonfigurowany dla tego węzła. Zapisz metryki ręcznie",
+  "Submitted by {creator} on {platform}": "Wysłane przez {creator} na {platform}",
+  "approve this payout before marking it paid": "zatwierdź tę wypłatę, zanim oznaczysz ją jako zapłaconą",
+  "curated action '{slug}' is not a safe action slug": "wybrana akcja „{slug}” nie jest bezpiecznym slugiem akcji",
+  "no Composio metric source is curated for platform '{platform}' — record metrics manually": "brak wybranego źródła metryk Composio dla platformy „{platform}”: zapisz metryki ręcznie",
+  "this payout has already been paid": "ta wypłata została już zrealizowana",
+  "this post has already been submitted to this campaign": "ten post został już zgłoszony do tej kampanii",
+  "this submission's payout is already paid; deleting it would corrupt the campaign's spend": "wypłata za to zgłoszenie została już zrealizowana; jego usunięcie zafałszowałoby wydatki kampanii"
+}

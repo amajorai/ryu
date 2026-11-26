@@ -31,7 +31,7 @@ pub(in crate::server) async fn persist_installed_plugin(
     }
     let allow_core_routes = crate::plugins::builtins::tier_for_manifest(&manifest)
         == crate::plugin_manifest::PluginTier::Core;
-    if let Err(error) = manifest.validate_declarative_http_policy(allow_core_routes) {
+    if let Err(error) = manifest.validate_declarative_http_authority(allow_core_routes) {
         return Err((StatusCode::UNPROCESSABLE_ENTITY, error));
     }
     if crate::fleet::is_artifact_blocked(&manifest.id) {

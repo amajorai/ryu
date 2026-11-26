@@ -31,6 +31,9 @@ pub const AGENT_VIEW: &str = "agent.view";
 pub const AGENT_RUN: &str = "agent.run";
 pub const AGENT_EDIT: &str = "agent.edit";
 pub const AGENT_DELETE: &str = "agent.delete";
+/// Every level of the kernel kind `agent`. An app route that names one of them
+/// and captures an agent id is checked on that agent (the ext-proxy agent lane).
+pub const AGENT_LEVELS: &[&str] = &[AGENT_VIEW, AGENT_RUN, AGENT_EDIT, AGENT_DELETE];
 pub const CHANNEL_MANAGE: &str = "channel.manage";
 pub const CHANNEL_DELETE: &str = "channel.delete";
 pub const TOOL_EXEC: &str = "tool.exec";

@@ -76,5 +76,6 @@ mod decision;
 mod defaults;
 mod mapping;
 mod response;
+mod secret_prefs;
 mod shipped;
 mod shipped_layers;

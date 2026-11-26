@@ -228,7 +228,7 @@ pub(crate) fn log_loaded_configuration(config: &GatewayConfig, bind_addr: &str) 
 }
 
 /// Housekeeping loops: stale rate-limit buckets every 5 minutes, expired
-/// exact, semantic and embedding cache entries every minute.
+/// exact, semantic, embedding and token resolve cache entries every minute.
 pub(crate) fn spawn_eviction_loops(state: &Arc<AppState>) {
     // Background: evict stale rate-limit buckets every 5 minutes
     {
@@ -256,6 +256,11 @@ pub(crate) fn spawn_eviction_loops(state: &Arc<AppState>) {
                 }
                 if let Some(embeddings) = &s.embedding_cache {
                     embeddings.evict_expired();
+                }
+                // Token resolve lookups test only their own key; release the
+                // expired and superseded entries nobody asked for here.
+                if let Some(resolve) = &s.resolve_cache {
+                    resolve.evict_expired();
                 }
             }
         });

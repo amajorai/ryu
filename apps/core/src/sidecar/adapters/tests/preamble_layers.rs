@@ -173,6 +173,60 @@ fn safe_mode_suppresses_the_ryu_docs_hint() {
     );
 }
 
+// Self-check hint (standing preamble layer). `route_chat_stream` merges
+// `ryu_self_check_hint()` behind the docs hint, so both stay at the tail of
+// the block, and Safe Mode drops both.
+
+#[test]
+fn ryu_self_check_hint_names_the_diagnostics_tools() {
+    use crate::sidecar::mcp::builtin_servers::diagnostics::{
+        RECENT_ERRORS_TOOL_ID, SNAPSHOT_TOOL_ID,
+    };
+    let hint = ryu_self_check_hint_when(false).expect("present outside Safe Mode");
+    assert_eq!(hint, RYU_SELF_CHECK_HINT);
+    // The ids in the hint are the ids Core dispatches.
+    assert!(hint.contains(&format!("`{SNAPSHOT_TOOL_ID}`")), "{hint}");
+    assert!(
+        hint.contains(&format!("`{RECENT_ERRORS_TOOL_ID}`")),
+        "{hint}"
+    );
+    // A heading and two lines: it is paid for on every turn.
+    assert_eq!(hint.lines().count(), 3, "{hint}");
+    assert!(hint.len() < 600, "{} bytes", hint.len());
+}
+
+#[test]
+fn ryu_self_check_hint_follows_the_docs_hint_at_the_tail() {
+    let standing = merge_system_prompt(ryu_self_check_hint_when(false), ryu_docs_hint_when(false))
+        .expect("two hints make a block");
+    assert!(standing.starts_with(RYU_DOCS_HINT), "{standing}");
+    assert!(standing.ends_with(RYU_SELF_CHECK_HINT), "{standing}");
+
+    let long_term_system = Some("Your name is Ada.".to_owned());
+    let merged = merge_system_prompt(Some(standing), long_term_system).unwrap();
+    assert!(
+        merged.starts_with("Your name is Ada."),
+        "persona still leads the block: {merged}"
+    );
+    assert!(merged.ends_with(RYU_SELF_CHECK_HINT), "{merged}");
+}
+
+#[test]
+fn safe_mode_suppresses_the_ryu_self_check_hint() {
+    assert!(
+        ryu_self_check_hint_when(true).is_none(),
+        "safe mode ships a baseline turn with nothing extra in the prompt"
+    );
+    let standing = merge_system_prompt(ryu_self_check_hint_when(true), ryu_docs_hint_when(true));
+    assert!(standing.is_none());
+    // And suppression must leave the rest of the block untouched.
+    let long_term_system = Some("Just the memory block.".to_owned());
+    assert_eq!(
+        merge_system_prompt(standing, long_term_system.clone()),
+        long_term_system
+    );
+}
+
 // ── Project instructions (AGENTS.md / CLAUDE.md) ───────────────────────────
 // `route_chat_stream` merges `project_instructions_hint()` (when a workspace
 // folder is active) as the SECOND argument so it LEADS the assembled block,
@@ -236,4 +290,77 @@ fn team_nodes_do_not_receive_personalization() {
         Some(crate::sidecar::control_plane::NodeScope::Personal),
         true
     ));
+}
+
+// ── Commit credit hint (standing preamble layer) ────────────────────────────
+// `assemble_turn_system` merges `ryu_commit_credit_hint()` right after the docs
+// hint. These pin the gate, the text, and where the layer lands.
+
+#[test]
+fn commit_credit_hint_needs_the_setting_a_repository_and_no_safe_mode() {
+    assert_eq!(
+        ryu_commit_credit_hint_when(true, true, false).as_deref(),
+        Some(RYU_COMMIT_CREDIT_HINT)
+    );
+    assert!(
+        ryu_commit_credit_hint_when(false, true, false).is_none(),
+        "the setting is off"
+    );
+    assert!(
+        ryu_commit_credit_hint_when(true, false, false).is_none(),
+        "the working directory is not a repository"
+    );
+    assert!(
+        ryu_commit_credit_hint_when(true, true, true).is_none(),
+        "safe mode ships a baseline turn with nothing extra in the prompt"
+    );
+}
+
+#[test]
+fn commit_credit_hint_names_the_trailer_core_adds_exactly_once() {
+    let trailer = ryu_workspace::git::RYU_COAUTHOR_TRAILER;
+    assert!(RYU_COMMIT_CREDIT_HINT.ends_with(&format!("\n{trailer}")));
+    assert_eq!(RYU_COMMIT_CREDIT_HINT.matches("Co-authored-by").count(), 1);
+    assert!(RYU_COMMIT_CREDIT_HINT.contains("do not add it twice"));
+}
+
+#[test]
+fn commit_credit_hint_lands_after_user_configured_layers() {
+    let long_term_system = Some("You are helpful.".to_owned());
+    let merged = merge_system_prompt(
+        ryu_commit_credit_hint_when(true, true, false),
+        long_term_system.clone(),
+    )
+    .unwrap();
+    assert!(merged.starts_with("You are helpful."), "{merged}");
+    assert!(merged.ends_with(ryu_workspace::git::RYU_COAUTHOR_TRAILER));
+    // With the setting off the rest of the block is untouched.
+    assert_eq!(
+        merge_system_prompt(
+            ryu_commit_credit_hint_when(false, true, false),
+            long_term_system.clone()
+        ),
+        long_term_system
+    );
+}
+
+#[test]
+fn a_working_directory_is_a_repository_when_an_ancestor_holds_dot_git() {
+    let root = tempfile::tempdir().unwrap();
+    let nested = root.path().join("src").join("deep");
+    std::fs::create_dir_all(&nested).unwrap();
+
+    // A normal checkout: `.git` is a directory at the root.
+    std::fs::create_dir(root.path().join(".git")).unwrap();
+    assert!(is_inside_git_repository(root.path()));
+    assert!(is_inside_git_repository(&nested));
+
+    // A linked worktree or a submodule: `.git` is a file.
+    let linked = tempfile::tempdir().unwrap();
+    std::fs::write(linked.path().join(".git"), "gitdir: elsewhere\n").unwrap();
+    assert!(is_inside_git_repository(linked.path()));
+
+    // A relative path would be resolved against Core's own working directory.
+    assert!(!is_inside_git_repository(std::path::Path::new("")));
+    assert!(!is_inside_git_repository(std::path::Path::new("src")));
 }

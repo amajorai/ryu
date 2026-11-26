@@ -80,17 +80,6 @@ ignore = [
 	# those persisted user configs are parsed and re-emitted. Keep this visible
 	# until that YAML editing moves to a maintained parser.
 	"RUSTSEC-2024-0449",
-	# `zip` 8.x: SUID/SGID preservation, symlink targets and permission
-	# handling in `ZipArchive::extract` / `ZipStreamReader::extract`. Ryu's own
-	# crates are on zip 9 and never call either (backups and Core read entries
-	# one by one and write paths they validate themselves), and the desktop
-	# updater is on `tauri-plugin-updater` 2.14.1 (zip 9). The old major that
-	# remains is pinned by `anydoc` 0.2.4 (`zip ^8.6.0`, no release on zip 9),
-	# which reads entries in memory and never extracts. Re-check this reasoning
-	# before adding any `extract` call.
-	"RUSTSEC-2026-0367",
-	"RUSTSEC-2026-0368",
-	"RUSTSEC-2026-0369",
 	# `crypto-bigint` 0.5 constant-time lapses: reached only through
 	# `elliptic-curve` 0.13 (`p256`/`p384`/`p521` 0.13) from `ssh-key` 0.6.7,
 	# which Core uses to parse and validate public keys the SSH CA is asked to
@@ -102,12 +91,6 @@ ignore = [
 	# release candidate). Used only by the authenticated vault transit engine
 	# (`apps/core/src/vault/transit.rs`). Revisit when rsa 0.10 is stable.
 	"RUSTSEC-2023-0071",
-	# `zip` < 9 `ZipArchive::extract()` aborts on a symlink entry with a huge
-	# declared size. The only < 9 copy is zip 8.6 from `anydoc` 0.2.4 (latest,
-	# requires `zip ^8.6`), used by the ryu-anydoc backend; anydoc only opens
-	# archives and reads named entries and never calls `extract()`. Core and the
-	# backup crate already use the patched zip 9. Revisit when anydoc moves to 9.
-	"RUSTSEC-2026-0429",
 	# Unmaintained (no vulnerability), transitive through the Tauri/GTK stack and
 	# zbus (`proc-macro-error`, `zbus_names`, `zvariant*`) and UniFFI 0.28
 	# (`basic-toml`). No compatible upgrade removes them without moving those
@@ -120,6 +103,19 @@ ignore = [
 	"RUSTSEC-2026-0370",
 	"RUSTSEC-2026-0372",
 	"RUSTSEC-2026-0374",
+	# Unmaintained notices of 14 Sep 2026 with no vulnerability and no patched
+	# release (`patched = []`): `chrono` (RUSTSEC-2026-0543), `chrono-tz`
+	# (RUSTSEC-2026-0555) and `humantime` (RUSTSEC-2026-0542, listed because it
+	# wraps chrono). chrono is a direct dependency of 53 of the 126 workspace
+	# packages, chrono-tz of Core and five apps-store backends, humantime of
+	# Core, vault, passport and four apps-store backends; humantime also arrives
+	# through `env_logger` and `object_store`. Leaving them means a date and time
+	# migration (to `jiff` or `time`) across the workspace, not a version bump.
+	# Keep these visible here until that migration is planned; remove an id as
+	# soon as its crate is gone from the lock.
+	"RUSTSEC-2026-0543",
+	"RUSTSEC-2026-0555",
+	"RUSTSEC-2026-0542",
 ]
 
 [sources]

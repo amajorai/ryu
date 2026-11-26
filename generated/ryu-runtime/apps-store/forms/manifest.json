@@ -88,6 +88,7 @@
       "http": {
         "mount": "/api/forms",
         "public_mount": "/forms",
+        "forward_caller_rate_subject": true,
         "max_body_bytes": 131072,
         "routes": [
           { "path": "/status", "method": "GET", "permission": "forms.view" },
@@ -130,6 +131,16 @@
             "path": "/admin/forms/:id/responses",
             "method": "GET",
             "permission": "forms.view"
+          },
+          {
+            "path": "/admin/forms/:id/responses",
+            "method": "DELETE",
+            "permission": "forms.manage"
+          },
+          {
+            "path": "/admin/forms/:id/responses/:responseId",
+            "method": "DELETE",
+            "permission": "forms.manage"
           },
           {
             "path": "/admin/forms/:id/export",

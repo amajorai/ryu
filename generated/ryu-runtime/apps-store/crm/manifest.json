@@ -1,6 +1,9 @@
 {
   "tags": ["crm", "contacts", "pipeline", "deals", "sales"],
-  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "author": {
+    "name": "Ryu",
+    "url": "https://ryuhq.com"
+  },
   "repository": "https://github.com/amajorai/ryu-crm",
   "homepage": "https://github.com/amajorai/ryu-crm",
   "privacyPolicyUrl": "https://ryuhq.com/privacy",
@@ -14,16 +17,36 @@
   "tagline": "Your pipeline, your schema, your machine",
   "keywords": ["crm", "contacts", "pipeline", "deals", "sales"],
   "icon": "user-group",
-  "iconDither": { "from": 205, "to": "transparent", "direction": "down" },
+  "iconDither": {
+    "from": 205,
+    "to": "transparent",
+    "direction": "down"
+  },
   "surfaces": {
-    "gateway": { "support": "none" },
-    "core": { "support": "full" },
-    "desktop": { "support": "full" },
-    "island": { "support": "limited" },
-    "mobile": { "support": "limited" },
-    "extension": { "support": "none" },
-    "web": { "support": "full" },
-    "cli": { "support": "list" }
+    "gateway": {
+      "support": "none"
+    },
+    "core": {
+      "support": "full"
+    },
+    "desktop": {
+      "support": "full"
+    },
+    "island": {
+      "support": "limited"
+    },
+    "mobile": {
+      "support": "limited"
+    },
+    "extension": {
+      "support": "none"
+    },
+    "web": {
+      "support": "full"
+    },
+    "cli": {
+      "support": "list"
+    }
   },
   "engines": {
     "ryu": ">=0.1.0"
@@ -38,7 +61,9 @@
         "backend": "http",
         "method": "POST",
         "url": "core:/api/ext/@ryu/crm/tools/search",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Full-text search across every CRM record on this node. Use it when you know roughly what you are looking for but not which object it lives on — it ranks hits across companies, people, deals and any custom object at once, and each hit names the field that matched with a snippet. Returns `{ok, hits:[{record_id, object, title, field, snippet}]}`. To look a record up by an exact field value instead (an email address, a domain), use `crm.find_record` — it is exact and this one is fuzzy.",
@@ -46,7 +71,10 @@
           "type": "object",
           "required": ["query"],
           "properties": {
-            "query": { "type": "string", "description": "What to search for." },
+            "query": {
+              "type": "string",
+              "description": "What to search for."
+            },
             "object": {
               "type": "string",
               "description": "Optional object slug to scope the search to, e.g. `company`, `person`, `deal`. Omit to search everything."
@@ -68,7 +96,9 @@
         "backend": "http",
         "method": "POST",
         "url": "core:/api/ext/@ryu/crm/tools/find_record",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Look records up by an EXACT field value on one object — the tool to reach for before creating anything, so you update the existing company instead of making a second one. With no `field` it matches against the object's title field. Returns `{ok, records:[…]}`, empty when nothing matches; an empty result is a normal answer, not an error.",
@@ -105,7 +135,9 @@
         "backend": "http",
         "method": "POST",
         "url": "core:/api/ext/@ryu/crm/tools/get_record",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Read one record in full by id: every field value as the store normalized it, plus its related records and recent timeline. Values come back normalized rather than as they were written, so this is also how you check what an update actually stored.",
@@ -130,7 +162,9 @@
         "backend": "http",
         "method": "POST",
         "url": "core:/api/ext/@ryu/crm/tools/create_record",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Create a record on an object. `values` is keyed by field slug and goes through the SAME validator the UI form uses, so a bad value is rejected rather than stored loosely — and every rejected field is reported at once, so one retry can fix them all instead of discovering them one at a time. Check for an existing record with `crm.find_record` first; this tool does not deduplicate for you. Returns `{ok:false, errors:{field: reason}}` on rejection.",
@@ -160,7 +194,9 @@
         "backend": "http",
         "method": "POST",
         "url": "core:/api/ext/@ryu/crm/tools/update_record",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Merge new values into an existing record — fields you do not name are left alone, so this is safe to call with a partial set. The response names only the fields that actually CHANGED, so re-sending a value the record already had reports no change rather than pretending to have done something. Moving a status field through this tool raises the same stage-changed event a human dragging the card would.",
@@ -190,7 +226,9 @@
         "backend": "http",
         "method": "POST",
         "url": "core:/api/ext/@ryu/crm/tools/log_activity",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Append a note, call, or meeting to a record's timeline — how you write down what happened after a conversation so the next person reading the record sees it. Use `crm.create_task` for something still to be DONE; this is for something already done.",
@@ -236,7 +274,9 @@
         "backend": "http",
         "method": "POST",
         "url": "core:/api/ext/@ryu/crm/tools/create_task",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Create a follow-up task, optionally attached to a record. A task with a `due_at` is swept when it comes due and raises `task.due` exactly once, which is what makes it reachable by an automation — a task with no due time is just a to-do line and will never announce itself.",
@@ -244,13 +284,22 @@
           "type": "object",
           "required": ["title"],
           "properties": {
-            "title": { "type": "string", "description": "What needs doing." },
+            "title": {
+              "type": "string",
+              "description": "What needs doing."
+            },
             "record_id": {
               "type": "string",
               "description": "Optional record to hang the task off. Omit for a standalone to-do."
             },
-            "body": { "type": "string", "description": "Optional detail." },
-            "assignee": { "type": "string", "description": "Who owns it." },
+            "body": {
+              "type": "string",
+              "description": "Optional detail."
+            },
+            "assignee": {
+              "type": "string",
+              "description": "Who owns it."
+            },
             "due_at": {
               "type": "string",
               "description": "RFC-3339 timestamp. Required if you want the task to raise `task.due` when it comes due."
@@ -268,7 +317,9 @@
         "backend": "http",
         "method": "POST",
         "url": "core:/api/ext/@ryu/crm/tools/pipeline",
-        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
         "fail_open": true,
         "unwrap_body": true,
         "description": "Summarize a pipeline: record count and summed value per stage of a status field, with win rate and average age in stage. Defaults to the `deal` object and its own status and currency fields, so calling it with no arguments answers \"how is the pipeline doing\". Point `object_id` at any object that has a status field to get the same shape for it.",
@@ -307,21 +358,63 @@
       },
       "port": 8009,
       "health_path": "/health",
-      "host_api": { "grants": ["crypto:seal"] },
+      "host_api": {
+        "grants": ["crypto:seal"]
+      },
       "http": {
         "mount": "/api/crm",
         "public_mount": "/api/crm",
         "routes": [
-          { "path": "/health" },
-          { "path": "/schema", "permission": "crm.admin" },
-          { "path": "/objects", "permission": "crm.view" },
-          { "path": "/objects/:object", "permission": "crm.view" },
-          { "path": "/objects/:object/fields", "permission": "crm.view" },
+          {
+            "path": "/health"
+          },
+          {
+            "path": "/schema",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/objects",
+            "method": "GET",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/objects",
+            "method": "POST",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/objects/:object",
+            "method": "GET",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/objects/:object",
+            "method": "PATCH",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/objects/:object",
+            "method": "DELETE",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/objects/:object/fields",
+            "method": "GET",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/objects/:object/fields",
+            "method": "POST",
+            "permission": "crm.admin"
+          },
           {
             "path": "/objects/:object/fields/reorder",
             "permission": "crm.admin"
           },
-          { "path": "/fields/:field_id", "permission": "crm.admin" },
+          {
+            "path": "/fields/:field_id",
+            "permission": "crm.admin"
+          },
           {
             "path": "/objects/:object/records",
             "method": "GET",
@@ -334,13 +427,18 @@
           },
           {
             "path": "/objects/:object/records/query",
+            "method": "POST",
             "permission": "crm.view"
           },
           {
             "path": "/objects/:object/records/validate",
             "permission": "crm.edit"
           },
-          { "path": "/objects/:object/duplicates", "permission": "crm.view" },
+          {
+            "path": "/objects/:object/duplicates",
+            "method": "POST",
+            "permission": "crm.view"
+          },
           {
             "path": "/records/:record_id",
             "method": "GET",
@@ -351,56 +449,187 @@
             "method": "PATCH",
             "permission": "crm.edit"
           },
-          { "path": "/records/:record_id/restore", "permission": "crm.edit" },
-          { "path": "/records/:record_id/links", "permission": "crm.edit" },
-          { "path": "/records/:record_id/unlink", "permission": "crm.edit" },
-          { "path": "/records/:record_id/related", "permission": "crm.view" },
-          { "path": "/merge/preview", "permission": "crm.admin" },
-          { "path": "/merge", "permission": "crm.admin" },
-          { "path": "/objects/:object/views", "permission": "crm.edit" },
-          { "path": "/views/:view_id", "permission": "crm.edit" },
-          { "path": "/views/:view_id/default", "permission": "crm.edit" },
-          { "path": "/views/:view_id/run", "permission": "crm.view" },
-          { "path": "/lists", "permission": "crm.edit" },
-          { "path": "/lists/:list_id", "permission": "crm.edit" },
-          { "path": "/lists/:list_id/fields", "permission": "crm.edit" },
-          { "path": "/lists/:list_id/entries", "permission": "crm.edit" },
-          { "path": "/lists/:list_id/entries/query", "permission": "crm.view" },
+          {
+            "path": "/records/:record_id",
+            "method": "DELETE",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/records/:record_id/restore",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/records/:record_id/links",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/records/:record_id/unlink",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/records/:record_id/related",
+            "method": "GET",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/merge/preview",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/merge",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/objects/:object/views",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/views/:view_id",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/views/:view_id/default",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/views/:view_id/run",
+            "method": "POST",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/lists",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/lists/:list_id",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/lists/:list_id/fields",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/lists/:list_id/entries",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/lists/:list_id/entries/query",
+            "method": "POST",
+            "permission": "crm.view"
+          },
           {
             "path": "/lists/:list_id/entries/reorder",
             "permission": "crm.edit"
           },
-          { "path": "/list-entries/:entry_id", "permission": "crm.edit" },
+          {
+            "path": "/list-entries/:entry_id",
+            "permission": "crm.edit"
+          },
           {
             "path": "/records/:record_id/activities",
             "permission": "crm.edit"
           },
-          { "path": "/activities", "permission": "crm.edit" },
-          { "path": "/activities/:activity_id", "permission": "crm.edit" },
+          {
+            "path": "/activities",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/activities/:activity_id",
+            "permission": "crm.edit"
+          },
           {
             "path": "/activities/:activity_id/complete",
             "permission": "crm.edit"
           },
-          { "path": "/tasks", "permission": "crm.edit" },
-          { "path": "/imports", "permission": "crm.admin" },
-          { "path": "/imports/:import_id", "permission": "crm.admin" },
-          { "path": "/imports/:import_id/mapping", "permission": "crm.admin" },
-          { "path": "/imports/:import_id/preview", "permission": "crm.admin" },
-          { "path": "/imports/:import_id/apply", "permission": "crm.admin" },
-          { "path": "/exports/views/:view_id", "permission": "crm.view" },
-          { "path": "/search", "permission": "crm.view" },
-          { "path": "/summary", "permission": "crm.view" },
-          { "path": "/reindex", "permission": "crm.admin" },
-          { "path": "/reports/pipeline", "permission": "crm.view" },
-          { "path": "/reports/funnel", "permission": "crm.view" },
-          { "path": "/tools/search", "permission": "crm.view" },
-          { "path": "/tools/find_record", "permission": "crm.view" },
-          { "path": "/tools/get_record", "permission": "crm.view" },
-          { "path": "/tools/create_record", "permission": "crm.edit" },
-          { "path": "/tools/update_record", "permission": "crm.edit" },
-          { "path": "/tools/log_activity", "permission": "crm.edit" },
-          { "path": "/tools/create_task", "permission": "crm.edit" },
-          { "path": "/tools/pipeline", "permission": "crm.view" }
+          {
+            "path": "/tasks",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/imports",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/imports/:import_id",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/imports/:import_id/mapping",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/imports/:import_id/preview",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/imports/:import_id/apply",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/exports/views/:view_id",
+            "method": "GET",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/search",
+            "method": "GET",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/summary",
+            "method": "GET",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/reindex",
+            "permission": "crm.admin"
+          },
+          {
+            "path": "/reports/pipeline",
+            "method": "POST",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/reports/funnel",
+            "method": "POST",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/tools/search",
+            "method": "POST",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/tools/find_record",
+            "method": "POST",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/tools/get_record",
+            "method": "POST",
+            "permission": "crm.view"
+          },
+          {
+            "path": "/tools/create_record",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/tools/update_record",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/tools/log_activity",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/tools/create_task",
+            "permission": "crm.edit"
+          },
+          {
+            "path": "/tools/pipeline",
+            "method": "POST",
+            "permission": "crm.view"
+          }
         ]
       }
     }
@@ -509,7 +738,10 @@
         "order": 62,
         "spec": {
           "source": {
-            "http": { "method": "GET", "path": "/api/crm/tasks?window=today" },
+            "http": {
+              "method": "GET",
+              "path": "/api/crm/tasks?window=today"
+            },
             "items": "tasks",
             "limit": 8,
             "refreshMs": 120000,

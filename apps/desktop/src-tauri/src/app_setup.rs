@@ -200,7 +200,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
                 return;
             }
             let mut process = RyuCoreProcess::new_for_app(&handle, binary);
-            if let Err(e) = process.start().await {
+            if let Err(e) = crate::core_lifecycle::start_core_checked(&mut process).await {
                 tracing::error!("Failed to auto-start Ryu Core: {}", e);
             } else {
                 // Store the process in state after successful start

@@ -173,17 +173,7 @@ impl RyuMcpHandler {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
-                let caller: Arc<dyn tool_exec::ToolCaller> = self.mcp.clone();
-                let invoker = std::sync::Arc::new(
-                    tool_exec::SandboxToolInvoker::registry_with_identity_and_conversation(
-                        caller,
-                        self.agent_id.clone(),
-                        self.allowlist.clone(),
-                        None,
-                        self.current_identity_profiles().await?,
-                        self.permission_scope_id.clone(),
-                    ),
-                );
+                let invoker = self.program_invoker().await?;
                 let outcome = tool_exec::execute_code(code, invoker, &self.agent_id).await;
                 serde_json::to_value(outcome).map_err(|e| {
                     McpError::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
@@ -247,6 +237,12 @@ impl RyuMcpHandler {
                     self.conversation_scope.as_deref(),
                     configure_approved,
                 );
+                // Everyone this bridge's instance has served rides along, for
+                // the tools that ask who a call acts for (`acp::turn_sender`).
+                let call = crate::sidecar::mcp::search_conversations::with_instance_senders(
+                    self.instance_senders(),
+                    call,
+                );
                 // Awaited in this task so the registry's tools see the sender.
                 let outcome = match self.live_turn_sender() {
                     Some(sender) => {
@@ -295,6 +291,25 @@ impl RyuMcpHandler {
         // the ACP model are untrusted (poisoned web/tool output can impersonate
         // the transcript). See `neutralize_external_result`.
         Ok(neutralize_external_result(tool_id, text))
+    }
+
+    /// The invoker for an `execute` program this bridge starts now. A program
+    /// started after a device read inherits it, so its own egress is held too
+    /// (`tool_exec::inherited_read`).
+    pub(super) async fn program_invoker(
+        &self,
+    ) -> Result<Arc<tool_exec::SandboxToolInvoker>, McpError> {
+        let caller = tool_exec::inheriting_current_read(self.mcp.clone());
+        Ok(Arc::new(
+            tool_exec::SandboxToolInvoker::registry_with_identity_and_conversation(
+                caller,
+                self.agent_id.clone(),
+                self.allowlist.clone(),
+                None,
+                self.current_identity_profiles().await?,
+                self.permission_scope_id.clone(),
+            ),
+        ))
     }
 }
 

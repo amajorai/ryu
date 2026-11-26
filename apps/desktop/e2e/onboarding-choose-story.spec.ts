@@ -1,4 +1,4 @@
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 const STORY_URL = "/onboarding-choose-story.html?choose-only";
 
@@ -73,6 +73,104 @@ test.describe("onboarding choose step — game-lobby runtime choices", () => {
 		expect(boxes[1].x + boxes[1].width).toBeLessThan(boxes[2].x);
 	});
 });
+
+test.describe("onboarding choose step: language control", () => {
+	const LANGUAGE_URL = "/onboarding-choose-story.html?language&surface=web";
+
+	test("a language chosen here re-renders the step, and Arabic flips it", async ({
+		page,
+	}) => {
+		await page.goto(LANGUAGE_URL);
+		const trigger = page.getByTestId("onboarding-language-trigger");
+		// The step title is not asserted here: the shared shell morphs it in word
+		// segments, which translate one by one. A card heading is plain text.
+		const localHeading = (name: string) =>
+			page
+				.getByTestId("onboarding-local-choice")
+				.getByRole("heading", { name, exact: true });
+		await expect(trigger).toHaveText("English");
+		await expect(localHeading("Set it up yourself")).toBeVisible();
+		const width = page.viewportSize()?.width ?? 0;
+		const ltr = await requiredBox(trigger);
+		expect(ltr.x + ltr.width).toBeCloseTo(width - 24, 0);
+
+		await chooseLanguage(page, "日本語");
+		await expect(trigger).toHaveText("日本語");
+		await expect(localHeading("自分でセットアップ")).toBeVisible();
+		await expect(page.locator("html")).toHaveAttribute("lang", "ja");
+
+		await chooseLanguage(page, "العربية");
+		await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+		await expect(localHeading("إعداده بنفسك")).toBeVisible();
+		expect((await requiredBox(trigger)).x).toBeCloseTo(24, 0);
+
+		// Back to following the system, which is English in this browser.
+		await trigger.click();
+		await page.getByRole("menuitemradio").first().click();
+		await expect(localHeading("Set it up yourself")).toBeVisible();
+		await expect(trigger).toHaveText("English");
+		expect(
+			await page.evaluate(() => [
+				localStorage.getItem("ryu:language-mode"),
+				localStorage.getItem("ryu:language-pack"),
+			])
+		).toEqual(["auto", null]);
+	});
+
+	for (const viewport of [
+		{ name: "desktop", width: 1280, height: 720 },
+		{ name: "phone", width: 390, height: 844 },
+	]) {
+		test(`the control covers none of the step at ${viewport.name} width`, async ({
+			page,
+		}) => {
+			await page.setViewportSize(viewport);
+			await page.goto(LANGUAGE_URL);
+			const control = await requiredBox(
+				page.getByTestId("onboarding-language-trigger")
+			);
+			const frame = page.getByTestId("choose-with-language");
+			for (const part of [
+				frame.getByRole("heading", { level: 1 }),
+				frame.getByTestId("onboarding-cloud-choice"),
+			]) {
+				const box = await requiredBox(part);
+				const apart =
+					box.x >= control.x + control.width ||
+					box.x + box.width <= control.x ||
+					box.y >= control.y + control.height ||
+					box.y + box.height <= control.y;
+				expect(apart, `${JSON.stringify(box)} is under the control`).toBe(true);
+			}
+		});
+	}
+
+	test("the desktop window keeps it beside the caption buttons", async ({
+		page,
+	}) => {
+		await page.goto("/onboarding-choose-story.html?language");
+		const width = page.viewportSize()?.width ?? 0;
+		const box = await requiredBox(
+			page.getByTestId("onboarding-language-trigger")
+		);
+		// This browser reports Windows: a top bar reserves 12rem at the right.
+		expect(box.x + box.width).toBeLessThanOrEqual(width - 192);
+	});
+});
+
+async function chooseLanguage(page: Page, name: string) {
+	await page.getByTestId("onboarding-language-trigger").click();
+	await page.getByRole("menuitemradio", { name, exact: true }).click();
+	await expect(page.getByTestId("onboarding-language-menu")).toBeHidden();
+}
+
+async function requiredBox(locator: Locator) {
+	const box = await locator.boundingBox();
+	if (box === null) {
+		throw new Error("An element of the choose step did not render.");
+	}
+	return box;
+}
 
 async function cardBoxes(column: Locator) {
 	const boxes = await Promise.all(

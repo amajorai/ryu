@@ -87,6 +87,7 @@ mod search;
 mod sessions;
 mod side_chats;
 mod store;
+mod strict_parts;
 mod summary_types;
 mod sync_messages;
 mod tenancy;

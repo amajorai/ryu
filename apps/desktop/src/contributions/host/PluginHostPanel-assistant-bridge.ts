@@ -29,11 +29,16 @@ export function usePluginAssistantBridge(assistantOwner: string) {
 	}, [assistantOwner]);
 	useEffect(() => {
 		const assistant = useAssistantStore.getState();
+		// The model context (`ui.updateModelContext`) follows the same rule: a tab
+		// that is not in front keeps its entry held, where no turn carries it and
+		// no chip shows it, and gets it back when focus returns.
 		if (!isActiveTab) {
+			useModelContextStore.getState().hold(assistantOwner);
 			assistant.clearContextOwner(assistantOwner);
 			assistant.clearBuilder(assistantOwner);
 			return;
 		}
+		useModelContextStore.getState().release(assistantOwner);
 		if (assistantContextRef.current.length > 0) {
 			assistant.publishContext(assistantOwner, assistantContextRef.current);
 		}

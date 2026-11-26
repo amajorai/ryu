@@ -243,6 +243,18 @@ pub(super) fn finish(
     }
 }
 
+impl ExportConversation {
+    /// A conversation that has one branch only, from a source other than a
+    /// ChatGPT or Claude export. Messages are cut to the same limits.
+    pub fn linear(id: String, title: String, mut messages: Vec<ImportedMessage>) -> Self {
+        for message in &mut messages {
+            message.content = clamp(&message.content);
+        }
+        messages.retain(|message| !message.content.is_empty());
+        finish(id, title, messages, Vec::new())
+    }
+}
+
 pub(super) fn epoch_seconds_to_ms(value: Option<&Value>) -> Option<i64> {
     let seconds = value?.as_f64()?;
     (seconds.is_finite() && seconds > 0.0).then(|| (seconds * 1000.0) as i64)

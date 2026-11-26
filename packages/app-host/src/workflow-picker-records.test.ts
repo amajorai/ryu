@@ -11,7 +11,7 @@ import {
 } from "./workflow-picker-records.ts";
 
 describe("workflow picker reply owners", () => {
-	test("preserves complete installed skills, roster and hook event rows", () => {
+	test("reduces skills, the roster and hook events to their listed fields", () => {
 		const skills = [
 			{
 				allowedTools: ["files.read"],
@@ -23,7 +23,13 @@ describe("workflow picker reply owners", () => {
 			},
 		];
 		const users = [
-			{ email: null, id: "user", image: null, name: "User", role: null },
+			{
+				email: "user@example.test",
+				id: "user",
+				image: null,
+				name: "User",
+				role: "admin",
+			},
 		];
 		const events = [
 			{
@@ -32,16 +38,36 @@ describe("workflow picker reply owners", () => {
 				payload_example: { nested: [null, 1] },
 				plugin: "app",
 				description: undefined,
+				handlerPath: "/internal/handler",
 			},
 		];
-		expect(workflowSkillsRecordsSchema.parse(skills)).toBe(skills);
-		expect(workflowNotifyTargetsRecordsSchema.parse(users)).toBe(users);
-		expect(workflowHookEventsRecordsSchema.parse(events)).toBe(events);
+		const pickedSkills = workflowSkillsRecordsSchema.parse(skills);
+		expect(pickedSkills).toEqual([
+			{ description: null, enabled: false, id: "skill", name: "Skill" },
+		]);
+		expect(pickedSkills).not.toBe(skills);
+		expect(JSON.stringify(pickedSkills)).not.toContain("files.read");
+		expect(JSON.stringify(pickedSkills)).not.toContain("future");
+		// `email` and `role` stay as keys for shipped Workflows bundles, always null.
+		expect(workflowNotifyTargetsRecordsSchema.parse(users)).toEqual([
+			{ email: null, id: "user", image: null, name: "User", role: null },
+		]);
+		const pickedEvents = workflowHookEventsRecordsSchema.parse(events);
+		expect(pickedEvents).toEqual([
+			{
+				id: "app#changed",
+				title: "Changed",
+				payload_example: { nested: [null, 1] },
+				plugin: "app",
+			},
+		]);
+		expect(pickedEvents).not.toBe(events);
+		expect(JSON.stringify(pickedEvents)).not.toContain("/internal/handler");
 		expect(
 			workflowSkillsRecordsSchema.safeParse([{ id: "skill" }]).success
 		).toBe(false);
 		expect(
-			workflowNotifyTargetsRecordsSchema.safeParse([{ ...users[0], email: 4 }])
+			workflowNotifyTargetsRecordsSchema.safeParse([{ ...users[0], image: 4 }])
 				.success
 		).toBe(false);
 		expect(
@@ -50,9 +76,9 @@ describe("workflow picker reply owners", () => {
 			]).success
 		).toBe(false);
 	});
-	test("preserves both native and desktop MCP normalization including optional meta", () => {
+	test("reduces native and desktop MCP rows to the same picker fields", () => {
 		const server = {
-			args: [],
+			args: ["--api-key", "sk-test"],
 			available: null,
 			command: "server",
 			description: null,
@@ -67,6 +93,12 @@ describe("workflow picker reply owners", () => {
 			server: "local",
 			meta: undefined,
 		};
+		const pickedTool = {
+			description: null,
+			id: "local.read",
+			name: "read",
+			server: "local",
+		};
 		const native = { servers: [server], tools: [tool] };
 		const desktop = {
 			servers: [
@@ -80,29 +112,51 @@ describe("workflow picker reply owners", () => {
 					ownerPluginId: null,
 					ownerServerName: null,
 					transport: "future",
-					url: null,
+					url: "https://h/x?key=abc",
 				},
 			],
 			tools: [{ ...tool, meta: { annotations: { readOnly: true } } }],
 		};
-		expect(Object.is(workflowMcpRecordSchema.parse(native), native)).toBe(true);
-		expect(Object.is(workflowMcpRecordSchema.parse(desktop), desktop)).toBe(
-			true
-		);
+		const pickedNative = workflowMcpRecordSchema.parse(native);
+		expect(pickedNative).toEqual({
+			servers: [
+				{ available: null, description: null, enabled: true, name: "local" },
+			],
+			tools: [pickedTool],
+		});
+		expect(pickedNative).not.toBe(native);
+		const pickedDesktop = workflowMcpRecordSchema.parse(desktop);
+		expect(pickedDesktop).toEqual({
+			servers: [
+				{
+					available: null,
+					description: null,
+					enabled: true,
+					name: "local",
+					ownerPluginId: null,
+					transport: "future",
+				},
+			],
+			tools: [pickedTool],
+		});
+		expect(JSON.stringify(pickedDesktop)).not.toContain("sk-test");
+		expect(JSON.stringify(pickedDesktop)).not.toContain("key=abc");
+		// A picked row parses again to an equal row (host service, then dispatcher).
+		expect(workflowMcpRecordSchema.parse(pickedDesktop)).toEqual(pickedDesktop);
 		expect(
 			workflowMcpRecordSchema.safeParse({
-				servers: [{ ...server, args: [1] }],
+				servers: [{ ...server, enabled: "yes" }],
 				tools: [],
 			}).success
 		).toBe(false);
 		expect(
 			workflowMcpRecordSchema.safeParse({
 				servers: [],
-				tools: [{ ...tool, inputSchema: () => null }],
+				tools: [{ ...tool, server: 5 }],
 			}).success
 		).toBe(false);
 	});
-	test("retains optional undefined, timezone and execution fields without normalizing jobs", () => {
+	test("reduces jobs to id, name, state and schedule without target or history", () => {
 		const base = {
 			createdAt: "",
 			enabled: true,
@@ -112,6 +166,13 @@ describe("workflow picker reply owners", () => {
 			lastRunAt: null,
 			name: "Job",
 			updatedAt: "",
+		};
+		const picked = {
+			enabled: true,
+			id: "job",
+			lastOutcome: null,
+			lastRunAt: null,
+			name: "Job",
 		};
 		const native = [
 			{
@@ -131,12 +192,12 @@ describe("workflow picker reply owners", () => {
 					type: "agent",
 					agentId: "agent",
 					model: null,
-					conversationId: null,
-					prompt: "",
+					conversationId: "conversation-1",
+					prompt: "the scheduled prompt",
 				},
 				history: [
 					{
-						error: null,
+						error: "the run error",
 						finishedAt: "",
 						outcome: "failure",
 						runId: null,
@@ -145,12 +206,21 @@ describe("workflow picker reply owners", () => {
 				],
 			},
 		];
-		expect(
-			Object.is(workflowSchedulesRecordsSchema.parse(native), native)
-		).toBe(true);
-		expect(
-			Object.is(workflowSchedulesRecordsSchema.parse(desktop), desktop)
-		).toBe(true);
+		expect(workflowSchedulesRecordsSchema.parse(native)).toEqual([
+			{ ...picked, schedule: { kind: "every", interval: "5m" } },
+		]);
+		const pickedDesktop = workflowSchedulesRecordsSchema.parse(desktop);
+		expect(pickedDesktop).toEqual([
+			{
+				...picked,
+				schedule: { kind: "cron", expr: "0 * * * *", tz: "Europe/Lisbon" },
+			},
+		]);
+		expect(pickedDesktop).not.toBe(desktop);
+		const text = JSON.stringify(pickedDesktop);
+		expect(text).not.toContain("the scheduled prompt");
+		expect(text).not.toContain("conversation-1");
+		expect(text).not.toContain("the run error");
 		expect(
 			workflowSchedulesRecordsSchema.safeParse([
 				{
@@ -160,23 +230,22 @@ describe("workflow picker reply owners", () => {
 				},
 			]).success
 		).toBe(false);
-		const invalidMap = JSON.parse('{"__proto__":4}');
 		expect(
 			workflowSchedulesRecordsSchema.safeParse([
-				{
-					...base,
-					schedule: { kind: "every", interval: "1m" },
-					target: { type: "workflow", workflowId: "flow", input: invalidMap },
-				},
+				{ ...base, schedule: { kind: "weekly", day: "mon" } },
 			]).success
 		).toBe(false);
 	});
 });
 
-test("Composio response decoding follows the requested family and retains future status", () => {
-	const status = { baseUrl: "", configured: false, executionOwner: "connect" };
+test("Composio response decoding follows the requested family and keeps listed fields only", () => {
+	const status = {
+		baseUrl: "https://connect.internal.test",
+		configured: false,
+		executionOwner: "connect",
+	};
 	const toolkit = [
-		{ description: null, logo: null, name: "Mail", slug: "mail" },
+		{ description: null, logo: null, name: "Mail", slug: "mail", later: "x1" },
 	];
 	const triggers = [
 		{
@@ -185,6 +254,7 @@ test("Composio response decoding follows the requested family and retains future
 			name: "new",
 			toolkit: "mail",
 			config: { properties: { field: { default: [null, 1] } } },
+			later: "x2",
 		},
 	];
 	const connections = [
@@ -194,18 +264,39 @@ test("Composio response decoding follows the requested family and retains future
 			id: "account",
 			status: "FUTURE_STATE",
 			toolkit: "mail",
+			later: "x3",
 		},
 	];
-	for (const [kind, value] of [
-		["status", status],
-		["toolkits", toolkit],
-		["triggers", triggers],
-		["connections", connections],
-	] as const) {
-		expect(
-			Object.is(workflowComposioResponseSchema(kind).parse(value), value)
-		).toBe(true);
-	}
+	expect(workflowComposioResponseSchema("status").parse(status)).toEqual({
+		configured: false,
+		executionOwner: "connect",
+	});
+	expect(workflowComposioResponseSchema("toolkits").parse(toolkit)).toEqual([
+		{ description: null, logo: null, name: "Mail", slug: "mail" },
+	]);
+	expect(workflowComposioResponseSchema("triggers").parse(triggers)).toEqual([
+		{
+			description: null,
+			displayName: "New",
+			name: "new",
+			toolkit: "mail",
+			config: { properties: { field: { default: [null, 1] } } },
+		},
+	]);
+	expect(
+		workflowComposioResponseSchema("connections").parse(connections)
+	).toEqual([
+		{
+			accessLevel: "risk_based",
+			active: false,
+			id: "account",
+			status: "FUTURE_STATE",
+			toolkit: "mail",
+		},
+	]);
+	expect(workflowComposioResponseSchema("toolkits").parse(toolkit)).not.toBe(
+		toolkit
+	);
 	expect(
 		workflowComposioResponseSchema("triggers").safeParse(toolkit).success
 	).toBe(false);
@@ -216,7 +307,7 @@ test("Composio response decoding follows the requested family and retains future
 	).toBe(false);
 });
 
-test("Agent catalog retains both platforms and all normalized avatar descriptors", () => {
+test("Agent catalog reduces both platforms to picker fields without the system prompt", () => {
 	const native = {
 		builtIn: false,
 		createdAt: null,
@@ -229,62 +320,45 @@ test("Agent catalog retains both platforms and all normalized avatar descriptors
 		locked: false,
 		model: null,
 		name: "Agent",
-		systemPrompt: null,
+		systemPrompt: "the system prompt",
 		title: "",
 		transport: null,
 		version: null,
 	};
-	const glyphs = [
-		null,
-		{ kind: "avatar", dataUrl: "data:image/png;base64,..." },
-		{
-			kind: "icon",
-			id: "lucide:mail",
-			dither: { direction: "up", from: "green", to: null },
-		},
-		{ kind: "emoji", emoji: "🌿" },
-		{ kind: "dicebear", seed: "agent", style: "notionists" },
-		{
-			kind: "dither",
-			dither: { direction: "right", from: "blue", to: "purple" },
-		},
-		{
-			kind: "expressive",
-			expression: "curious",
-			variant: undefined,
-			colors: { c1: "#000000" },
-			animation: "random",
-		},
-	];
+	const picked = {
+		description: null,
+		engine: null,
+		id: "agent",
+		installed: null,
+		model: null,
+		name: "Agent",
+		title: "",
+		transport: null,
+	};
+	const desktop = {
+		...native,
+		avatarGlyph: { kind: "avatar", dataUrl: "data:image/png;base64,..." },
+		avatarUrl: null,
+		latestVersion: null,
+		lifecycleStatus: "active",
+		recommended: false,
+		safetyProfile: "autonomous",
+		versionStatus: "future-version-state",
+	};
+	const rows = [native, desktop];
+	const pickedRows = workflowAgentsRecordsSchema.parse(rows);
+	expect(pickedRows).toEqual([picked, picked]);
+	expect(pickedRows).not.toBe(rows);
+	expect(JSON.stringify(pickedRows)).not.toContain("the system prompt");
 	expect(
-		Object.is(workflowAgentsRecordsSchema.parse([native])[0], native)
-	).toBe(true);
-	for (const avatarGlyph of glyphs) {
-		const rows = [
-			{
-				...native,
-				avatarGlyph,
-				avatarUrl: null,
-				latestVersion: null,
-				lifecycleStatus: "active",
-				recommended: false,
-				safetyProfile: "autonomous",
-				versionStatus: "future-version-state",
-			},
-		];
-		expect(Object.is(workflowAgentsRecordsSchema.parse(rows), rows)).toBe(true);
-	}
-	expect(
-		workflowAgentsRecordsSchema.safeParse([
-			{ ...native, avatarGlyph: { kind: "avatar", dataUrl: 5 } },
-		]).success
+		workflowAgentsRecordsSchema.safeParse([{ ...native, title: 5 }]).success
 	).toBe(false);
 	expect(workflowAgentsRecordsSchema.safeParse([{ id: "agent" }]).success).toBe(
 		false
 	);
 });
 
-test("App catalogs preserve lifecycle, capabilities and both platforms' presentation metadata", () => {
+test("App catalogs reduce both platforms to id, name, state and runnable labels", () => {
 	const native = {
 		builtIn: false,
 		commands: [{ method: "POST", name: "sync", path: "/sync", summary: null }],
@@ -295,7 +369,7 @@ test("App catalogs preserve lifecycle, capabilities and both platforms' presenta
 		installedVersion: "1",
 		localOnly: false,
 		name: "App",
-		permissionGrants: [],
+		permissionGrants: ["mail:send"],
 		requires: { apps: [{ id: "dep", minVersion: null }], grants: [] },
 		runnables: [
 			{
@@ -311,62 +385,51 @@ test("App catalogs preserve lifecycle, capabilities and both platforms' presenta
 		version: "2",
 		windowsFirst: false,
 	};
+	const picked = {
+		enabled: false,
+		id: "app",
+		installed: true,
+		name: "App",
+		runnables: [{ id: "run", kind: "future-kind", name: "Run" }],
+	};
 	const desktop = {
 		...native,
 		accentColor: null,
-		approvedGrants: [],
+		approvedGrants: ["mail:send"],
 		category: null,
 		channel: "canary",
 		description: null,
 		external: false,
 		icon: null,
-		iconBackground: null,
-		iconDither: { direction: "future", from: 0, to: null },
-		iconPadding: null,
-		iconUrl: null,
-		layers: [
-			{
-				capability: "capability",
-				target: undefined,
-				title: null,
-				verbs: ["read"],
-			},
-		],
 		mandatory: false,
 		mcpOAuthServers: [
-			{ clientId: null, name: "remote", resource: "https://example.invalid" },
+			{
+				clientId: "client-1",
+				name: "remote",
+				resource: "https://example.invalid",
+			},
 		],
 		optionalPermissionGrants: [],
-		stability: null,
-		suppressedBySafeMode: false,
-		tagline: null,
 		tier: "community",
 	};
-	expect(Object.is(workflowAppsRecordsSchema.parse([native])[0], native)).toBe(
-		true
-	);
-	const unknownSurface = [{ ...native, targets: ["unknown"] }];
+	const pickedNative = workflowAppsRecordsSchema.parse([native]);
+	expect(pickedNative).toEqual([picked]);
+	expect(pickedNative).not.toContain(native);
+	const pickedDesktop = workflowAppsRecordsSchema.parse([desktop]);
+	expect(pickedDesktop).toEqual([{ ...picked, description: null }]);
+	const text = JSON.stringify(pickedDesktop);
+	expect(text).not.toContain("mail:send");
+	expect(text).not.toContain("client-1");
+	expect(text).not.toContain("/sync");
 	expect(
-		Object.is(workflowAppsRecordsSchema.parse(unknownSurface), unknownSurface)
-	).toBe(true);
-	expect(
-		Object.is(workflowAppsRecordsSchema.parse([desktop])[0], desktop)
-	).toBe(true);
-	expect(
-		workflowAppsRecordsSchema.safeParse([
-			{
-				...native,
-				requires: { apps: [{ id: "dep", minVersion: 7 }], grants: [] },
-			},
-		]).success
+		workflowAppsRecordsSchema.safeParse([{ ...native, installed: "yes" }])
+			.success
 	).toBe(false);
 	expect(
 		workflowAppsRecordsSchema.safeParse([
 			{
 				...native,
-				runnables: [
-					{ config: () => null, id: "run", kind: "tool", name: "Run" },
-				],
+				runnables: [{ config: null, id: "run", kind: 5, name: "Run" }],
 			},
 		]).success
 	).toBe(false);

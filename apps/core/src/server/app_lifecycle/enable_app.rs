@@ -3,6 +3,8 @@
 
 use crate::server::*;
 
+mod enable_caller;
+
 /// `POST /api/apps/:id/enable` — validate grants via Gateway, then enable.
 ///
 /// Fails closed: if the Gateway is unreachable the app stays disabled and a
@@ -31,8 +33,9 @@ pub(in crate::server) async fn enable_app_handler(
     headers: axum::http::HeaderMap,
     body: Option<Json<LifecycleDryRunBody>>,
 ) -> axum::response::Response {
-    use crate::plugins::lifecycle::{enable_app, plan_enable_app, EnableError};
+    use crate::plugins::lifecycle::EnableError;
     use crate::sidecar::gateway::{gateway_token, gateway_url};
+    use enable_caller::{CallerEnable, EnableCaller, GrantGate};
 
     if let Err(response) = enforce_app_lifecycle_permission(
         &state,
@@ -100,28 +103,27 @@ pub(in crate::server) async fn enable_app_handler(
         state.app_manifests.read().await.clone();
 
     let dry_run = body.is_some_and(|body| body.0.dry_run);
-    let outcome = match if dry_run {
-        plan_enable_app(
-            &state.app_store,
-            &manifest,
-            &all_manifests,
-            &gw_url,
-            gw_token.as_deref(),
-            &state.client,
-        )
-        .await
-    } else {
-        enable_app(
-            &state.app_store,
-            &manifest,
-            &all_manifests,
-            &gw_url,
-            gw_token.as_deref(),
-            &state.client,
-        )
-        .await
-    } {
-        Ok(outcome) => outcome,
+    // An agent's self-API call may switch an app on, but never approves a
+    // permission: an app that is on keeps its stored set, and an enable that
+    // would approve one is left to the person (see `enable_caller`).
+    let (outcome, permissions_notice) = match enable_caller::enable_for_caller(
+        EnableCaller::of(&headers),
+        dry_run,
+        &state.app_store,
+        &manifest,
+        &all_manifests,
+        GrantGate {
+            url: &gw_url,
+            token: gw_token.as_deref(),
+            client: &state.client,
+        },
+    )
+    .await
+    {
+        Ok(CallerEnable::Enabled { outcome, notice }) => (outcome, notice),
+        Ok(CallerEnable::NeedsThePerson(unapproved)) => {
+            return enable_caller::needs_the_person_response(&id, &unapproved);
+        }
         Err(EnableError::GrantsDenied { plugin, denied }) => {
             return (
                 StatusCode::FORBIDDEN,
@@ -266,6 +268,9 @@ pub(in crate::server) async fn enable_app_handler(
     // of silently reporting a security control as ON. Only emitted when a gateway
     // policy was actually touched, to avoid noise on ordinary enables.
     attach_gateway_policy_notice(&mut body, policy_outcome);
+    if let (Some(notice), Some(object)) = (permissions_notice, body.as_object_mut()) {
+        object.insert("permissions_notice".to_owned(), json!(notice));
+    }
     Json(body).into_response()
 }
 

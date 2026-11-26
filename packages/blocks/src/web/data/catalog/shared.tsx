@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { MinimalCard, Node, Terminal, Wire } from "../../mockups.tsx";
 import { MockCard, StatusRow } from "../../product-row-visuals.tsx";
 import type { CtaLink } from "../../sections.tsx";
-import { readTheDocsCta } from "../resources.tsx";
+import { EARLY_ACCESS_CTA, readTheDocsCta } from "../resources.tsx";
 
 /* Shared CTAs and the small page-specific visuals the catalogue entries use. The
    visuals render outside a hook scope (server pages and client islands alike), so
@@ -20,11 +20,7 @@ import { readTheDocsCta } from "../resources.tsx";
  */
 export const catalogCopy = (source: string): string => source;
 
-export const EARLY_ACCESS: CtaLink = {
-	label: "Get early access",
-	href: "https://j14.notion.site/2940023f0e838023810ce36edf2e3893?pvs=105",
-	external: true,
-};
+export const EARLY_ACCESS: CtaLink = EARLY_ACCESS_CTA;
 export const BOOK_DEMO: CtaLink = {
 	label: "Book a demo",
 	href: "https://cal.com/amajor/ryu-demo",

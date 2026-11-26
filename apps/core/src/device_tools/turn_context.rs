@@ -8,7 +8,8 @@
 //! registers it when it admits that turn, together with its own bridge
 //! channel (the `permission_tx` its bridge holds) and agent id; the bridge
 //! gets the offer only when both match. The guard clears the entry at turn
-//! end (only if it is still that turn's entry).
+//! end (only if it is still that turn's entry) and remembers a device read
+//! the turn made (`conversation_taint`).
 //!
 //! Listing is separate: agents cache `tools/list`, so a bridge lists device
 //! tools for the whole session once a turn of this conversation and agent was
@@ -43,19 +44,25 @@ fn listings() -> &'static Mutex<HashSet<(String, String)>> {
 }
 
 pub(crate) struct TurnContextGuard {
-    conversation_id: String,
-    turn_id: String,
+    offer: Arc<DeviceOffer>,
 }
 
 impl Drop for TurnContextGuard {
     fn drop(&mut self) {
+        let conversation_id = &self.offer.conversation_id;
         if let Ok(mut map) = contexts().lock() {
             if map
-                .get(&self.conversation_id)
-                .is_some_and(|context| context.offer.turn_id == self.turn_id)
+                .get(conversation_id)
+                .is_some_and(|context| context.offer.turn_id == self.offer.turn_id)
             {
-                map.remove(&self.conversation_id);
+                map.remove(conversation_id);
             }
+        }
+        // A read in this turn may not be in the stored history yet: remember
+        // it, so the guards outside the turn still see it
+        // (`conversation_taint`).
+        if let Some(source) = super::taint::private_read_source(&self.offer) {
+            super::conversation_taint::remember_private_read(conversation_id, &source);
         }
     }
 }
@@ -74,8 +81,7 @@ pub(crate) fn register_turn_context(
     }
     allow_device_listing(&offer.conversation_id, agent_id);
     let guard = TurnContextGuard {
-        conversation_id: offer.conversation_id.clone(),
-        turn_id: offer.turn_id.clone(),
+        offer: Arc::clone(&offer),
     };
     if let Ok(mut map) = contexts().lock() {
         map.insert(

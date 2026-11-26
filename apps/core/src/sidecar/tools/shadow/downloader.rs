@@ -13,6 +13,8 @@ use anyhow::Result;
 use super::super::satellite_downloader::{SatelliteBinary, SatelliteDownloader};
 use crate::sidecar::download_manager::ProgressCallback;
 
+mod consent_gate;
+
 fn bin_path() -> PathBuf {
     let name = if cfg!(target_os = "windows") {
         "shadow.exe"
@@ -54,12 +56,15 @@ impl ShadowDownloader {
         Self(self.0.with_progress(cb))
     }
 
-    /// Ensure the Shadow binary is installed at `<data dir>/bin/shadow`.
+    /// Ensure the Shadow binary is installed at `<data dir>/bin/shadow` and has
+    /// the capture consent gate. This runs before every spawn, so Core never
+    /// starts a Shadow that opens capture devices without asking.
     pub async fn ensure_installed(
         &self,
         downloads: &crate::downloads::DownloadCenter,
     ) -> Result<()> {
-        self.0.ensure_installed(downloads).await
+        self.0.ensure_installed(downloads).await?;
+        consent_gate::require_gate(&bin_path()).await
     }
 }
 

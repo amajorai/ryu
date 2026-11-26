@@ -193,9 +193,40 @@ pub struct PullRequestOutcome {
     pub title: Option<String>,
 }
 
+/// Commit whatever is staged in `cwd` before a pull request is opened, using
+/// the pull request title as the message. Does nothing when nothing is staged.
+/// When `credit` is set, the commit carries [`RYU_COAUTHOR_TRAILER`].
+pub(super) fn commit_staged_for_pull_request(
+    cwd: &str,
+    title: Option<&str>,
+    credit: bool,
+) -> Result<(), String> {
+    let staged = run_git(cwd, &["diff", "--cached", "--name-only"])
+        .map(|value| value.lines().any(|line| !line.trim().is_empty()))
+        .unwrap_or(false);
+    if !staged {
+        return Ok(());
+    }
+    let message = title
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Update via Ryu");
+    let commit_args = ["commit", "--no-verify", "-m", message];
+    let commit = git_without_hooks(&credited_commit_args(&commit_args, credit))
+        .current_dir(cwd)
+        .no_window()
+        .output()
+        .map_err(|_| "could not start git commit".to_string())?;
+    if !commit.status.success() {
+        return Err(git_mutation_failed("commit"));
+    }
+    Ok(())
+}
+
 /// Optionally commit local changes, push the current branch, and create a pull
 /// request through the authenticated GitHub CLI. Arguments are passed directly
-/// to `git`/`gh` — no shell interpolation is used.
+/// to `git`/`gh` — no shell interpolation is used. When `credit` is set, the
+/// commit made here carries [`RYU_COAUTHOR_TRAILER`].
 pub fn create_pull_request(
     cwd: &str,
     title: Option<&str>,
@@ -203,6 +234,7 @@ pub fn create_pull_request(
     base: Option<&str>,
     draft: bool,
     include_unstaged: bool,
+    credit: bool,
 ) -> Result<PullRequestOutcome, String> {
     let branch = current_branch(cwd).ok_or_else(|| "not a git repository".to_string())?;
     if branch == "HEAD" {
@@ -242,23 +274,7 @@ pub fn create_pull_request(
         }
     }
 
-    let staged = run_git(cwd, &["diff", "--cached", "--name-only"])
-        .map(|value| value.lines().any(|line| !line.trim().is_empty()))
-        .unwrap_or(false);
-    if staged {
-        let message = title
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("Update via Ryu");
-        let commit = git_without_hooks(&["commit", "--no-verify", "-m", message])
-            .current_dir(cwd)
-            .no_window()
-            .output()
-            .map_err(|_| "could not start git commit".to_string())?;
-        if !commit.status.success() {
-            return Err(git_mutation_failed("commit"));
-        }
-    }
+    commit_staged_for_pull_request(cwd, title, credit)?;
 
     let has_upstream = run_git(
         cwd,

@@ -421,7 +421,7 @@ function sourceFile(relative: string): string {
 	}
 }
 
-const SPACES_TS = "packages/core-client/src/spaces.ts";
+const SPACES_TS = "packages/core-client/src/spaces-search.ts";
 const SPACES_RS = "crates/core/spaces/src/lib.rs";
 const SPACES_RETRIEVAL_RS = "crates/core/spaces/src/retrieval.rs";
 

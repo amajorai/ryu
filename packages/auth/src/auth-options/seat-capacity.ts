@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { APIError } from "better-auth/api";
+import { isSelfHostedDeployment } from "../lib/deployment-mode.ts";
 import {
 	type OrganizationSeatCopy,
 	organizationSeatCopy,
@@ -20,11 +21,30 @@ import {
 	resolveProductId,
 } from "../lib/plans.ts";
 import { resolveOrganizationPolarCustomerId } from "../lib/polar-customer-identity.ts";
+import {
+	type SelfHostedSeatAllowance,
+	selfHostedSeatCopy,
+} from "../lib/self-hosted-member-limit.ts";
 
 import { polarPageItems } from "./schemas.ts";
+import { selfHostedInstallAllowance } from "./self-hosted-seats.ts";
 
 // Organization seat capacity: how many seats a Teams or family organization
-// may hold, from its Polar subscriptions and entitlements.
+// may hold, from its Polar subscriptions and entitlements, or from the
+// install's member allowance when the control plane is explicitly self-hosted.
+
+/** The admitting capacity of one organization and what it was resolved from. */
+export interface OrganizationSeatCapacity {
+	kind: OrganizationKind | null;
+	seatCapacity: number | null;
+	/**
+	 * Present only when `RYU_DEPLOYMENT_MODE=self-hosted` and the organization
+	 * is not a family: the capacity is the install's member allowance, not a
+	 * paid plan. Absent (not even `undefined`) on the hosted cloud, so the cloud
+	 * result has exactly the two fields it always had.
+	 */
+	selfHosted?: SelfHostedSeatAllowance;
+}
 
 const ORGANIZATION_PRODUCT_IDS = (): Set<string> =>
 	new Set(
@@ -46,6 +66,9 @@ const ORGANIZATION_PRODUCT_IDS = (): Set<string> =>
  *   people when the owner's plan and the rollout flag allow it, else null). It
  *   never reads a Polar seat quantity or bonus seats: a family's plan is the
  *   owner's personal Max subscription, not a seat contract.
+ * - self-hosted install (`RYU_DEPLOYMENT_MODE=self-hosted`, and only then):
+ *   the install's member allowance, three people or the seat count of its
+ *   license. Polar is not read. See `self-hosted-member-limit.ts`.
  * - otherwise: the live Teams seat quantity. A missing active Teams
  *   subscription returns null (shared membership has no paid capacity).
  *
@@ -55,10 +78,7 @@ const ORGANIZATION_PRODUCT_IDS = (): Set<string> =>
  */
 export async function activeOrganizationSeatCapacity(
 	organizationId: string
-): Promise<{
-	kind: OrganizationKind | null;
-	seatCapacity: number | null;
-}> {
+): Promise<OrganizationSeatCapacity> {
 	try {
 		const kind = await readOrganizationKind(organizationId);
 		if (kind === FAMILY_ORGANIZATION_KIND) {
@@ -66,6 +86,10 @@ export async function activeOrganizationSeatCapacity(
 				kind,
 				seatCapacity: await familySharingCapacity(organizationId),
 			};
+		}
+		if (isSelfHostedDeployment()) {
+			const selfHosted = await selfHostedInstallAllowance();
+			return { kind, seatCapacity: selfHosted.limit, selfHosted };
 		}
 		const customerId = await resolveOrganizationPolarCustomerId(organizationId);
 		if (!customerId) {
@@ -120,11 +144,17 @@ export async function activeOrganizationSeatCapacity(
 	}
 }
 
-/** The live admitting capacity alone; see {@link activeOrganizationSeatCapacity}. */
+/**
+ * The live PAID capacity alone (Teams seats or family capacity); see
+ * {@link activeOrganizationSeatCapacity}. Organization deletion reads it to
+ * refuse while a plan is active. A self-hosted install's member allowance is
+ * not a plan, so it reports null here and never blocks a deletion.
+ */
 export async function activeTeamsSeatCount(
 	organizationId: string
 ): Promise<number | null> {
-	return (await activeOrganizationSeatCapacity(organizationId)).seatCapacity;
+	const capacity = await activeOrganizationSeatCapacity(organizationId);
+	return capacity.selfHosted ? null : capacity.seatCapacity;
 }
 
 export const SEAT_CLAIM_TTL_MS = 2 * 60 * 1000;
@@ -143,14 +173,38 @@ export const pendingInvitationClaimId = (
 export const directMemberClaimId = (userId: string): string =>
 	`${DIRECT_MEMBER_CLAIM_PREFIX}${userId}`;
 
+/** Seat refusal copy; the self-hosted copy also carries a stable code. */
+export type SeatRefusalCopy = OrganizationSeatCopy & {
+	readonly code?: string;
+};
+
+/**
+ * The body of a seat refusal: the sentence, plus the stable code when the copy
+ * has one. Teams and family copy have none, so their body is `{ message }`
+ * exactly as before.
+ */
+export const seatRefusal = (
+	copy: SeatRefusalCopy,
+	message: string
+): { code?: string; message: string } =>
+	copy.code ? { code: copy.code, message } : { message };
+
 export async function requireActiveOrganizationSeatCapacity(
 	organizationId: string
-): Promise<{ copy: OrganizationSeatCopy; seatCapacity: number }> {
-	const { kind, seatCapacity } =
+): Promise<{
+	copy: SeatRefusalCopy;
+	seatCapacity: number;
+	selfHosted?: SelfHostedSeatAllowance;
+}> {
+	const { kind, seatCapacity, selfHosted } =
 		await activeOrganizationSeatCapacity(organizationId);
-	const copy = organizationSeatCopy(kind);
+	const copy: SeatRefusalCopy = selfHosted
+		? selfHostedSeatCopy(selfHosted)
+		: organizationSeatCopy(kind);
 	if (seatCapacity === null) {
-		throw new APIError("FORBIDDEN", { message: copy.noCapacity });
+		throw new APIError("FORBIDDEN", seatRefusal(copy, copy.noCapacity));
 	}
-	return { copy, seatCapacity };
+	return selfHosted
+		? { copy, seatCapacity, selfHosted }
+		: { copy, seatCapacity };
 }

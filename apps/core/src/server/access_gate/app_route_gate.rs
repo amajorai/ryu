@@ -168,6 +168,12 @@ pub(crate) async fn verified_caller_with_expiry_from_token(
 ) -> Option<(crate::identity_verify::VerifiedCaller, i64)> {
     match crate::identity_verify::verify_jwt_with_expiry(token).await {
         Ok((claims, expires_at)) => {
+            // The plan's account limit rides in the same signed token.
+            crate::server::plan_limits::note_verified_token(
+                &claims.user_id,
+                claims.feature_flags_org.as_deref(),
+                token,
+            );
             // This node's org binding (managed-node registration result). When the
             // node is unbound (local/dev), fall back to the user's sole membership
             // if they have exactly one — a single-org user has no ambiguity. With

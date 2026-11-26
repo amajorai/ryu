@@ -62,13 +62,22 @@ impl McpRegistry {
                 crate::tool_exec::restrict_backend_env_sources(manifest, &mut backend);
                 let grants = effective_tool_grants(manifest, approved_grants);
                 let owns_namespace = self.plugin_owns_tool_namespace(manifest, namespace);
+                // `permissions.run` opens host programs, so it is gated on tier
+                // or an approved `tool:command:<name>` grant, never taken as declared.
+                let permissions = gate_manifest_run_names(manifest, &grants);
                 let resolved = ResolvedAppTool {
                     backend,
                     grants,
                     plugin_id: manifest.id.clone(),
-                    permissions: manifest.permissions.clone(),
+                    permissions,
                     timeout_secs: cfg.timeout_secs,
                     needs_approval: cfg.needs_approval.unwrap_or(false),
+                    returns_credential: entry
+                        .config
+                        .as_ref()
+                        .and_then(|config| config.get("returns_credential"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
                     owns_namespace,
                 };
                 if owns_namespace {

@@ -3,6 +3,11 @@
 
 use crate::server::*;
 
+mod install_target;
+pub(in crate::server) use install_target::*;
+#[cfg(test)]
+mod forced_install_test;
+
 /// Create the plugin lifecycle record + on-disk manifest for a freshly-installed
 /// MCP server, so the ONE plugin model governs it (requires / targets / grants /
 /// AppGate / disable / uninstall) rather than a parallel registry.
@@ -104,41 +109,71 @@ pub(in crate::server) async fn persist_mcp_plugin_record(
 ///
 /// `enabled` is still forced to `false` here, not trusted from the caller, so the
 /// "an install never auto-launches" guarantee survives the signature change.
+///
+/// A catalog entry's remote URL must be `https`
+/// ([`catalog_remote_url_refusal`]); a plain `http` one is refused and nothing
+/// is written.
+///
+/// Returns `true` when a forced install replaced an entry that pointed at
+/// another target, so the entry was written disabled and without the old
+/// entry's keys (see `force`).
 pub(in crate::server) async fn write_mcp_entry(
     name: &str,
     mut new_cfg: crate::sidecar::mcp::McpServerConfig,
     // When true, overwrite an existing entry (used by the update flow) instead of
-    // refusing on a name collision — preserving its `enabled`, `env`, `headers`,
-    // `auth` and owner.
+    // refusing on a name collision. The existing `enabled`, `env`, `headers`,
+    // `auth` and owner are kept only while the entry still points at the target
+    // they were saved for ([`same_install_target`]). Otherwise they are dropped
+    // and the entry lands disabled, like a first install.
     force: bool,
-) -> Result<(), (StatusCode, String)> {
+) -> Result<bool, (StatusCode, String)> {
     let name = name.to_string();
     // Installed disabled — never auto-launch on install, whatever the caller set.
     new_cfg.enabled = false;
+    if let Some(reason) = new_cfg.url.as_deref().and_then(|url| {
+        catalog_remote_url_refusal(url, crate::server::agent_egress_allow_hosts().as_deref())
+    }) {
+        return Err((StatusCode::BAD_REQUEST, reason));
+    }
     crate::sidecar::mcp::McpConfigStore::mutate(
         crate::sidecar::mcp::McpRegistry::config_path(),
         move |document| {
             let servers = crate::sidecar::mcp::McpConfigStore::servers_mut(document)?;
+            let mut target_changed = false;
             if let Some(existing) = servers.get(&name) {
                 if force {
                     let existing: crate::sidecar::mcp::McpServerConfig =
                         serde_json::from_value(existing.clone()).map_err(|error| {
                             format!("bad_request: invalid MCP server entry: {error}")
                         })?;
-                    new_cfg.enabled = existing.enabled;
-                    new_cfg.env = existing.env;
-                    // An update must not log the user out: the catalog entry
-                    // carries no secrets, so a hosted server's API-key headers
-                    // and OAuth config come from the existing entry (its values
-                    // win over any placeholder the new entry declares), and so
-                    // does the owning plugin.
-                    new_cfg.headers.extend(existing.headers);
-                    if new_cfg.auth.is_none() {
-                        new_cfg.auth = existing.auth;
-                    }
-                    if new_cfg.owner_plugin_id.is_none() {
-                        new_cfg.owner_plugin_id = existing.owner_plugin_id;
-                        new_cfg.owner_server_name = existing.owner_server_name;
+                    if same_install_target(&existing, &new_cfg) {
+                        new_cfg.enabled = existing.enabled;
+                        new_cfg.env = existing.env;
+                        // An update must not log the user out: the catalog entry
+                        // carries no secrets, so a hosted server's API-key headers
+                        // and OAuth config come from the existing entry (its values
+                        // win over any placeholder the new entry declares), and so
+                        // does the owning plugin.
+                        new_cfg.headers.extend(existing.headers);
+                        if new_cfg.auth.is_none() {
+                            new_cfg.auth = existing.auth;
+                        }
+                        if new_cfg.owner_plugin_id.is_none() {
+                            new_cfg.owner_plugin_id = existing.owner_plugin_id;
+                            new_cfg.owner_server_name = existing.owner_server_name;
+                        }
+                    } else {
+                        // Another target under the old name is another server.
+                        // The saved keys were entered for the old one, so none of
+                        // the old entry rides along, its unknown fields included,
+                        // and the entry stays disabled until the user enables it.
+                        target_changed = true;
+                        servers.remove(&name);
+                        tracing::warn!(
+                            server = %name,
+                            "MCP install: forced install changes the server's target; saved \
+                             headers, env and auth declaration dropped, entry written disabled"
+                        );
                     }
                 } else {
                     return Err(format!(
@@ -147,7 +182,7 @@ pub(in crate::server) async fn write_mcp_entry(
                 }
             }
             crate::sidecar::mcp::McpConfigStore::replace_server(servers, name, &new_cfg)?;
-            Ok((true, ()))
+            Ok((true, target_changed))
         },
     )
     .await

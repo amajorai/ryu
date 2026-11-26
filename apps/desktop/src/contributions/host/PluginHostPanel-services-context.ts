@@ -1,3 +1,4 @@
+import type { OpenExternalAsk } from "@ryu/app-host/open-external-gate";
 import type { OpenedFileAccess } from "@ryu/app-host/opened-file";
 import type { createScopedToastHost } from "@ryu/app-host/toast-host";
 import type { LiteralMessage, useI18n } from "@ryu/i18n/react";
@@ -27,6 +28,8 @@ type TabsContextValue = NonNullable<ContextType<typeof TabsContext>>;
 /** Everything the `PluginHostPanel` host-service builders close over. */
 export interface PluginHostServicesContext {
 	approvedGrantList: string[];
+	/** The shell's own "open this link?" prompt in front of `ui.openExternal`. */
+	askOpenExternal: OpenExternalAsk;
 	assistantContextRef: RefObject<PageContextItem[]>;
 	assistantOwner: string;
 	assistantSurfaceRef: RefObject<AssistantBuilderSession | null>;

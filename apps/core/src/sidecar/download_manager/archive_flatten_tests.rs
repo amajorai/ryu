@@ -1,6 +1,6 @@
 //! Tests for [`super`].
 
-use super::super::archive::tests::{make_tar_gz, make_zip};
+use super::super::archive::tests::{make_tar_gz, make_zip, unused_drive_letter};
 use super::*;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -186,4 +186,54 @@ fn write_symlink_flattened_replaces_stale_entry() {
         .unwrap()
         .file_type()
         .is_symlink());
+}
+
+// ── A leaf that holds `:` (`bin/C:x.dll`) ───────────────────────────────
+//
+// On Windows `dest` joined with the leaf `C:x.dll` is `C:x.dll`, a path
+// outside `dest`. The drive letter here is one that is NOT in use on this PC
+// (see `unused_drive_letter`), so code that fails to refuse the leaf can
+// create nothing outside the temp folder.
+
+/// The extraction fails, the error names the leaf, and nothing was written.
+fn assert_leaf_refused<T: std::fmt::Debug>(result: anyhow::Result<T>, dest: &Path) {
+    println!("TCW1 flatten: {result:?}");
+    let err = result.expect_err("a leaf that holds ':' must fail the extraction");
+    assert!(
+        format!("{err:#}").contains("x.dll' is refused: it holds ':'"),
+        "{err:#}"
+    );
+    assert_eq!(std::fs::read_dir(dest).unwrap().count(), 0);
+}
+
+#[test]
+fn extract_all_refuses_a_leaf_with_a_drive_name() {
+    let leaf = format!("Release/{}:x.dll", unused_drive_letter());
+    let data = make_zip(&["Release/"], &[(leaf.as_str(), b"lib")]);
+    let tmp = tempfile::tempdir().unwrap();
+    assert_leaf_refused(extract_all_to_dir(&data, tmp.path()), tmp.path());
+}
+
+#[test]
+fn binary_with_libs_zip_refuses_a_leaf_with_a_drive_name() {
+    let leaf = format!("bin/{}:x.dll", unused_drive_letter());
+    let data = make_zip(
+        &[],
+        &[(leaf.as_str(), b"lib"), ("bin/llama-server.exe", b"server")],
+    );
+    let tmp = tempfile::tempdir().unwrap();
+    let result = extract_binary_with_libs(&data, "llama-server", tmp.path(), true);
+    assert_leaf_refused(result, tmp.path());
+}
+
+#[test]
+fn binary_with_libs_tar_gz_refuses_a_leaf_with_a_drive_name() {
+    let leaf = format!("build/bin/{}:x.dll", unused_drive_letter());
+    let data = make_tar_gz(&[
+        (leaf.as_str(), b"lib"),
+        ("build/bin/llama-server", b"server"),
+    ]);
+    let tmp = tempfile::tempdir().unwrap();
+    let result = extract_binary_with_libs(&data, "llama-server", tmp.path(), false);
+    assert_leaf_refused(result, tmp.path());
 }

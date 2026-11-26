@@ -66,7 +66,7 @@ export function BrokerSessions({
 		onError: (error) => {
 			sileo.error({
 				title: tl("Could not revoke the session"),
-				description: vaultErrorMessage(error, "Try again.", tl),
+				description: vaultErrorMessage(error, tl("Try again."), tl),
 			});
 		},
 	});

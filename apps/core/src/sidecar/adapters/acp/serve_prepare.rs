@@ -64,7 +64,7 @@ pub(super) async fn prepare_instance(
     // Trust is read once per instance: it also picks the OS sandbox profile at
     // spawn, and it is part of the pool key, so a trust change respawns.
     let workspace_autonomy =
-        WorkspaceAutonomy::evaluate(&cwd, &additional_directories, is_claude_code);
+        WorkspaceAutonomy::for_this_node(&cwd, &additional_directories, is_claude_code);
     // Which road (if any) Ryu's tools can take to this agent. Recorded once per
     // pooled instance — i.e. once per chat's subprocess — because until now the
     // `None` case was completely silent: an agent that structurally cannot reach a

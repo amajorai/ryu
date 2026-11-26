@@ -2,6 +2,10 @@ import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	isOnboardingLanguageEvent,
+	OnboardingLanguageControl,
+} from "@/src/components/onboarding/OnboardingLanguageControl.tsx";
 import { useRyuOnboardingPersona } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import { useMotionAllowed } from "@/src/hooks/useSeasonalEffects.ts";
 
@@ -48,13 +52,17 @@ interface WelcomeStepProps {
  * Ryu", each fading into the next, then straight into setup.
  * Skip (or Enter or Escape) goes straight to setup. With motion off (the app's
  * animations setting or the system's reduced-motion preference) it shows only
- * the welcome line.
+ * the welcome line. The language control in the top corner holds the welcome
+ * still while its menu is open, and keeps its own Enter and Escape.
  */
 export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 	const tl = useLiteralMessages();
 	const reducedMotion = !useMotionAllowed();
 	const { name } = useRyuOnboardingPersona();
 	const [index, setIndex] = useState(0);
+	const [languageOpen, setLanguageOpen] = useState(false);
+	const languageOpenRef = useRef(languageOpen);
+	languageOpenRef.current = languageOpen;
 	const onContinueRef = useRef(onContinue);
 	onContinueRef.current = onContinue;
 	const finishedRef = useRef(false);
@@ -83,6 +91,11 @@ export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 	}, []);
 
 	useEffect(() => {
+		// Choosing a language takes longer than a beat: the beat starts over
+		// once the menu closes, so the welcome is never missed behind it.
+		if (languageOpen) {
+			return;
+		}
 		const timeout = window.setTimeout(() => {
 			if (isLast) {
 				finish();
@@ -91,17 +104,25 @@ export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 			}
 		}, duration);
 		return () => window.clearTimeout(timeout);
-	}, [beatIndex, isLast, duration, finish]);
+	}, [beatIndex, isLast, duration, finish, languageOpen]);
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Enter" || event.key === "Escape") {
-				event.preventDefault();
-				finish();
+			if (event.key !== "Enter" && event.key !== "Escape") {
+				return;
 			}
+			// In the language control these keys open the menu, choose a
+			// language or close the menu. They are not a skip.
+			if (languageOpenRef.current || isOnboardingLanguageEvent(event.target)) {
+				return;
+			}
+			event.preventDefault();
+			finish();
 		};
-		window.addEventListener("keydown", onKeyDown);
-		return () => window.removeEventListener("keydown", onKeyDown);
+		// Capture: the key that closes the menu is seen here while the menu
+		// still counts as open, before the menu handles it.
+		window.addEventListener("keydown", onKeyDown, true);
+		return () => window.removeEventListener("keydown", onKeyDown, true);
 	}, [finish]);
 
 	return (
@@ -147,6 +168,7 @@ export function WelcomeStep({ onContinue }: WelcomeStepProps) {
 					</motion.div>
 				</AnimatePresence>
 			</div>
+			<OnboardingLanguageControl onOpenChange={setLanguageOpen} />
 			<Button
 				aria-label="Skip the introduction"
 				className="absolute end-6 bottom-6 h-10 px-4"

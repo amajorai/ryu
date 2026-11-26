@@ -146,6 +146,9 @@ fn refusal(error: NativeAccountError) -> Response {
 }
 /// A failed operation: its coded sentence, or the generic one (detail logged).
 fn failure(error: &anyhow::Error) -> Response {
+    if let Some(full) = crate::server::plan_limits::AccountLimitReached::from_error(error) {
+        return full.response().into_response();
+    }
     refusal(NativeAccountError::of(error))
 }
 

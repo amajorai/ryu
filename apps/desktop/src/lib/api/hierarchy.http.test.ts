@@ -10,6 +10,7 @@ import {
 	fetchProjects,
 	fetchScopeDefaults,
 	fetchThreadSessions,
+	fetchThreadTree,
 	findMainThread,
 	rekeyProjectMemory,
 	saveProjectDefaults,
@@ -434,4 +435,57 @@ test("scope writes and resets preserve legal identifier punctuation on the wire"
 	expect(mismatches).toEqual([]);
 	expect(expected).toEqual([]);
 	expect(received).toHaveLength(2);
+});
+
+test("the session tree keeps parent links, defaults a missing truncation flag and propagates a refusal", async () => {
+	const row = (id: string) => ({
+		id,
+		title: `Title ${id}`,
+		agent_id: null,
+		run_status: null,
+		message_count: 0,
+		updated_at: 7,
+	});
+	expected.push(
+		{
+			path: "/api/hierarchy/threads/leaf%2F1/tree",
+			method: "GET",
+			response: {
+				nodes: [
+					{ parent_id: null, conversation: row("root") },
+					{ parent_id: "root", conversation: row("leaf/1") },
+				],
+				truncated: true,
+			},
+		},
+		{
+			path: "/api/hierarchy/threads/alone/tree",
+			method: "GET",
+			response: { nodes: [{ conversation: row("alone") }] },
+		},
+		{
+			path: "/api/hierarchy/threads/hidden/tree",
+			method: "GET",
+			response: { error: "forbidden" },
+			status: 403,
+		}
+	);
+	expect(await fetchThreadTree(target, "leaf/1")).toEqual({
+		nodes: [
+			{ parent_id: null, conversation: row("root") },
+			{ parent_id: "root", conversation: row("leaf/1") },
+		],
+		truncated: true,
+	});
+	expect(await fetchThreadTree(target, "alone")).toEqual({
+		nodes: [{ conversation: row("alone") }],
+		truncated: false,
+	});
+	await expect(fetchThreadTree(target, "hidden")).rejects.toMatchObject({
+		status: 403,
+		serverMessage: "forbidden",
+	});
+	expect(mismatches).toEqual([]);
+	expect(expected).toEqual([]);
+	expect(received).toHaveLength(3);
 });

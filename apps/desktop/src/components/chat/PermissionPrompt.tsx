@@ -6,9 +6,13 @@ import {
 	type ToolApprovalChoice,
 	ToolApprovalCode,
 } from "@ryu/ui/components/agents/tool-approval.tsx";
-import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { memo, useMemo } from "react";
+import {
+	ENDPOINT_ROW_ID,
+	standingChoice,
+	summarizePermissionCall,
+} from "./permission-call-summary.ts";
 import { readPermissionToolFields } from "./permission-contract.ts";
 import { type PermissionI18n, readPermissionI18n } from "./permission-i18n.ts";
 
@@ -29,36 +33,6 @@ export interface PermissionPromptProps {
 	permission: ActivePermission;
 	/** Show raw tool input for technical interface levels. */
 	showTechnicalDetails?: boolean;
-}
-
-/** The shell command an exec-kind call wants to run, if it named one. */
-function toolCommand(
-	fields: ReturnType<typeof readPermissionToolFields>
-): string | null {
-	const raw = fields.rawInput;
-	if (!raw) {
-		return null;
-	}
-	for (const key of ["command", "cmd", "script"]) {
-		const value = raw[key];
-		if (isNativeText(value) && value.trim()) {
-			return value;
-		}
-	}
-	return null;
-}
-
-const HIDDEN_PARAMETER_KEYS = new Set(["command", "cmd", "script"]);
-const MAX_PARAMETER_LENGTH = 200;
-
-function formatParameterValue<TValue>(value: TValue): string {
-	const text = isNativeText(value) ? value : JSON.stringify(value);
-	if (!text) {
-		return "";
-	}
-	return text.length > MAX_PARAMETER_LENGTH
-		? `${text.slice(0, MAX_PARAMETER_LENGTH)}…`
-		: text;
 }
 
 const ALLOW_KINDS = new Set(["allow_once", "allow_always"]);
@@ -175,29 +149,14 @@ export const PermissionPrompt = memo(function PermissionPrompt({
 		[permission.toolCall, tl]
 	);
 	const copy = promptCopy(i18n, fields, showTechnicalDetails, tl);
-	const command = useMemo(() => toolCommand(fields), [fields]);
-
-	const parameters = useMemo(() => {
-		const endpoint =
-			showTechnicalDetails && i18n?.detail
-				? [{ id: "ryu-endpoint", label: tl("Endpoint"), value: i18n.detail }]
-				: [];
-		const raw = fields.rawInput;
-		if (!raw) {
-			return endpoint;
-		}
-		return [
-			...endpoint,
-			...Object.entries(raw)
-				.filter(([key]) => !HIDDEN_PARAMETER_KEYS.has(key))
-				.map(([key, value]) => ({
-					id: key,
-					label: key,
-					value: formatParameterValue(value),
-				}))
-				.filter((row) => row.value !== ""),
-		];
-	}, [fields, i18n, showTechnicalDetails, tl]);
+	// What the call is: the endpoint and the fields that decide what it does are
+	// always on the card, at every interface level (permission-call-summary.ts).
+	const summary = useMemo(
+		() => summarizePermissionCall(i18n?.detail ?? null, fields.rawInput),
+		[fields, i18n]
+	);
+	const { command } = summary;
+	const standing = standingChoice(summary, permission.options);
 
 	const choices = useMemo<ToolApprovalChoice[]>(
 		() =>
@@ -221,7 +180,7 @@ export const PermissionPrompt = memo(function PermissionPrompt({
 			<ToolApproval
 				choices={choices}
 				description={copy.description}
-				parameters={parameters}
+				parameters={summary.details}
 				question={copy.question}
 				status="pending"
 				title={
@@ -231,9 +190,43 @@ export const PermissionPrompt = memo(function PermissionPrompt({
 				}
 				tool={copy.tool}
 			>
-				{/* Always show the command: it is what the user is approving, and the
-				    title/description above are agent-supplied text. */}
-				{command ? <ToolApprovalCode code={command} language="bash" /> : null}
+				{command || summary.call.length > 0 ? (
+					<div className="grid gap-2">
+						{/* Always show the command: it is what the user is approving, and the
+						    title/description above are agent-supplied text. */}
+						{command ? (
+							<ToolApprovalCode code={command} language="bash" />
+						) : null}
+						{summary.call.length > 0 ? (
+							<dl
+								className="grid gap-2 rounded-lg bg-muted p-3"
+								data-permission-call=""
+							>
+								{summary.call.map((row) => (
+									<div
+										className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] items-start gap-3 text-xs"
+										key={row.id}
+									>
+										<dt className="text-muted-foreground">
+											{row.id === ENDPOINT_ROW_ID ? tl("Endpoint") : row.label}
+										</dt>
+										<dd className="max-h-24 min-w-0 overflow-y-auto break-words font-mono text-foreground">
+											{row.value}
+										</dd>
+									</div>
+								))}
+							</dl>
+						) : null}
+						{standing ? (
+							<p className="text-status-warning text-xs leading-5">
+								{tl(
+									"“{choice}” also allows every later call to this endpoint in this chat, with any arguments and without asking again.",
+									{ choice: optionLabel(standing, i18n, tl) }
+								)}
+							</p>
+						) : null}
+					</div>
+				) : null}
 			</ToolApproval>
 		</div>
 	);

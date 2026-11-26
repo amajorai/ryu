@@ -307,7 +307,7 @@ async fn network_configuration_checks_target_acl_and_preserves_interactive_autho
         assert_eq!(agent_id.as_deref(), Some("ryu"));
         assert_eq!(arguments["agent_id"], serde_json::json!(target.id));
         assert!(*configure_approved);
-        engine.decide(&approval.id, true, None).await.unwrap();
+        engine.decide(&approval.id, true, None, None).await.unwrap();
     }
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {

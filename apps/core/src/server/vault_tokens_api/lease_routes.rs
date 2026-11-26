@@ -1,6 +1,7 @@
 //! Lease administration and quota routes.
 
 use super::*;
+use crate::vault::dynamic::ForceRevoke;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +128,51 @@ pub async fn sys_lease_revoke_prefix(
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ForceRevokeBody {
+    /// The caller's acknowledgement that the credential may still be live at
+    /// the provider (nothing is revoked there).
+    #[serde(default)]
+    acknowledge_credential_may_be_live: bool,
+}
+
+/// POST /api/vault/sys/leases/force-revoke/{id}.
+#[utoipa::path(post, path = "/api/vault/sys/leases/force-revoke/{id}", tag = "Vault",
+    summary = "Mark a retry lease revoked without calling its provider (configuration manager; the credential may still be live)",
+    params(("id" = String, Path, description = "Retry lease id")),
+    request_body = serde_json::Value,
+    responses((status = 200, description = "Lease", body = serde_json::Value)))]
+pub async fn sys_lease_force_revoke(
+    State(state): State<ServerState>,
+    Extension(caller): Extension<Option<VerifiedCaller>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    body: Option<Json<ForceRevokeBody>>,
+) -> Response {
+    let who = who!(human(&state, caller, &headers).await);
+    let body = body.map(|Json(body)| body).unwrap_or_default();
+    force_revoke_op(&who, &id, body).await
+}
+
+/// [`sys_lease_force_revoke`] for a resolved caller: `admin` on the lease's
+/// role, then the store's guards (configuration manager only, the
+/// acknowledgement, retry leases only).
+pub(super) async fn force_revoke_op(who: &Who, id: &str, body: ForceRevokeBody) -> Response {
+    let lease = match who.store().lease_get(id).await {
+        Ok(lease) => lease,
+        Err(error) => return vault_error(error),
+    };
+    check!(who.require(&format!("sys/dynamic/{}", lease.role), Capability::Admin));
+    let actor = who.actor();
+    let request = ForceRevoke {
+        manager: matches!(who, Who::Human(ctx) if ctx.manager),
+        acknowledged: body.acknowledge_credential_may_be_live,
+        actor: &actor,
+    };
+    ok_or(who.store().lease_force_revoke(id, request).await, "lease")
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TidyBody {
     #[serde(default)]
     older_than_secs: Option<i64>,
@@ -212,3 +258,7 @@ pub async fn sys_quota_delete(
         "deleted",
     )
 }
+
+#[cfg(test)]
+#[path = "lease_force_revoke_test.rs"]
+mod force_revoke_test;

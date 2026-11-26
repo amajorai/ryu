@@ -115,6 +115,10 @@ export const systemHealthResponseSchema = systemResponse(
 		updateRuntimeNonce: systemOptionalText,
 		channel: systemText.optional(),
 		capabilities: z.array(systemText).optional(),
+		// The protocol range (`{ min, max }`). Left unvalidated on purpose: a
+		// malformed value must count as "no range", not fail the health read
+		// (`reportedProtocolRange` in node-protocol.ts).
+		protocol: z.unknown().optional(),
 	})
 );
 export const systemInfoResponseSchema = systemResponse(

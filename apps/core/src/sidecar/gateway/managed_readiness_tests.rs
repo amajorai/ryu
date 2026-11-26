@@ -11,8 +11,32 @@ use std::sync::{
     Arc,
 };
 
+/// The Gateway build a readiness fixture pretends to be.
+#[derive(Clone, Copy)]
+struct GatewayBuild {
+    version: &'static str,
+    /// `None` signs the way a Gateway that predates the protocol number does.
+    range: Option<ryu_protocol::ProtocolRange>,
+}
+
+impl GatewayBuild {
+    /// The Gateway that ships with this Core.
+    const CURRENT: Self = Self {
+        version: env!("CARGO_PKG_VERSION"),
+        range: Some(ryu_protocol::ProtocolRange::CURRENT),
+    };
+    const OTHER_RELEASE: &'static str = "0.0.1-another-release";
+}
+
 async fn readiness_fixture(
     forged_address: bool,
+) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+    readiness_fixture_for(forged_address, GatewayBuild::CURRENT).await
+}
+
+async fn readiness_fixture_for(
+    forged_address: bool,
+    gateway: GatewayBuild,
 ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -42,18 +66,21 @@ async fn readiness_fixture(
                     if forged_address {
                         proof_address.set_port(address.port().saturating_add(1));
                     }
-                    let proof = ryu_gw_credentials::ReadinessProof::sign(
-                        ryu_gw_credentials::Readiness {
-                            protocol: "ryu-gateway-readiness-v1".into(),
-                            version: env!("CARGO_PKG_VERSION").into(),
-                            nonce: nonce.into(),
-                            listener: proof_address,
-                            require_auth: true,
-                            inference_keys: vec![ryu_gw_credentials::fingerprint("relay")],
-                            core_keys: vec![ryu_gw_credentials::fingerprint("core")],
-                        },
-                        "admin",
-                    )
+                    let readiness = ryu_gw_credentials::Readiness {
+                        protocol: "ryu-gateway-readiness-v1".into(),
+                        version: gateway.version.into(),
+                        nonce: nonce.into(),
+                        listener: proof_address,
+                        require_auth: true,
+                        inference_keys: vec![ryu_gw_credentials::fingerprint("relay")],
+                        core_keys: vec![ryu_gw_credentials::fingerprint("core")],
+                    };
+                    let proof = match gateway.range {
+                        Some(range) => ryu_gw_credentials::ReadinessProof::sign_with_range(
+                            readiness, "admin", range,
+                        ),
+                        None => ryu_gw_credentials::ReadinessProof::sign_legacy(readiness, "admin"),
+                    }
                     .unwrap();
                     json(serde_json::to_value(proof).unwrap())
                 }
@@ -98,6 +125,62 @@ async fn managed_readiness_rejects_forwarded_or_fake_proof_before_sending_bearer
     );
     task.abort();
     assert_eq!(bearers.load(Ordering::SeqCst), 0);
+}
+
+/// Core used to refuse any Gateway whose release version was not identical to
+/// its own. A Gateway of another release that speaks a shared protocol passes.
+#[tokio::test]
+async fn managed_readiness_accepts_another_release_on_a_shared_protocol() {
+    let other_release = GatewayBuild {
+        version: GatewayBuild::OTHER_RELEASE,
+        range: Some(ryu_protocol::ProtocolRange::CURRENT),
+    };
+    // A Gateway that predates the protocol number passes only as the identical release.
+    let legacy_same_release = GatewayBuild {
+        version: env!("CARGO_PKG_VERSION"),
+        range: None,
+    };
+    for gateway in [other_release, legacy_same_release] {
+        let (url, bearers, task) = readiness_fixture_for(false, gateway).await;
+        let result = verify_managed_gateway(&url, "admin", "relay", "core").await;
+        task.abort();
+        result.unwrap();
+        assert_eq!(bearers.load(Ordering::SeqCst), 4);
+    }
+}
+
+#[tokio::test]
+async fn managed_readiness_refuses_no_shared_protocol_and_names_the_side_to_update() {
+    let newest = ryu_protocol::PROTOCOL_MAX;
+    let cases = [
+        // An older Gateway.
+        (
+            Some(ryu_protocol::ProtocolRange::LEGACY),
+            "update the Gateway",
+        ),
+        // A newer Gateway that dropped every protocol this Core speaks.
+        (
+            Some(ryu_protocol::ProtocolRange::new(newest + 1, newest + 2)),
+            "update Core",
+        ),
+        // Another release that reports no range at all.
+        (None, "update the Gateway"),
+    ];
+    for (range, side_to_update) in cases {
+        let gateway = GatewayBuild {
+            version: GatewayBuild::OTHER_RELEASE,
+            range,
+        };
+        let (url, bearers, task) = readiness_fixture_for(false, gateway).await;
+        let error = verify_managed_gateway(&url, "admin", "relay", "core")
+            .await
+            .unwrap_err()
+            .to_string();
+        task.abort();
+        assert!(error.ends_with(side_to_update), "{error}");
+        // Refused before any credential was sent to the listener.
+        assert_eq!(bearers.load(Ordering::SeqCst), 0);
+    }
 }
 
 #[test]

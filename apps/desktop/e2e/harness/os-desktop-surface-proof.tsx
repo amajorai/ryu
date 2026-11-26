@@ -20,7 +20,7 @@ import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx"
 import { SystemStatusProvider } from "../../src/contexts/SystemStatusContext.tsx";
 import { TabsProvider } from "../../src/contexts/TabsContext.tsx";
 import { DESKTOP_HOTKEYS } from "../../src/lib/hotkeys/actions.ts";
-import { MIN_CORE_VERSION } from "../../src/lib/node-compat.ts";
+import { CORE_PROTOCOL_RANGE } from "../../src/lib/node-compat.ts";
 import {
 	setProductMode,
 	useProductModeStore,
@@ -197,7 +197,8 @@ window.fetch = (input) => {
 		return Promise.resolve(
 			Response.json({
 				status: "ok",
-				version: MIN_CORE_VERSION,
+				version: "0.0.1",
+				protocol: CORE_PROTOCOL_RANGE,
 				capabilities: [],
 			})
 		);

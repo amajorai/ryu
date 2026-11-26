@@ -180,3 +180,45 @@ fn signed_but_malformed_or_ambiguous_manifests_are_refused() {
         );
     }
 }
+
+// TC-1: with a key compiled in, a release whose signature is missing or made
+// by another key never falls back to GitHub's digest.
+#[test]
+fn with_a_key_a_release_without_a_signature_is_refused() {
+    let key = signing_key(7).verifying_key();
+    let text = manifest("v0.5.1");
+    let not_found = Err(anyhow!(
+        "downloading SHA256SUMS.sig: HTTP status client error (404 Not Found)"
+    ));
+    let error = format!(
+        "{:#}",
+        verify_fetched(&key, "v0.5.1", text.as_bytes(), not_found).unwrap_err()
+    );
+    assert!(error.contains("refusing an unsigned update"), "{error}");
+    assert!(verify_fetched(&key, "v0.5.1", text.as_bytes(), Ok(Vec::new())).is_err());
+}
+
+#[test]
+fn with_a_key_a_signature_by_another_key_is_refused() {
+    let key = signing_key(7);
+    let text = manifest("v0.5.1");
+    let foreign = sign(&signing_key(9), &text);
+    let error = format!(
+        "{:#}",
+        verify_fetched(&key.verifying_key(), "v0.5.1", text.as_bytes(), Ok(foreign)).unwrap_err()
+    );
+    assert!(
+        error.contains("not signed by the release signing key"),
+        "{error}"
+    );
+    let genuine = sign(&key, &text);
+    let sums = verify_fetched(&key.verifying_key(), "v0.5.1", text.as_bytes(), Ok(genuine))
+        .expect("a genuine signature verifies");
+    assert_eq!(sums.digest_for("ryu-core-linux-x86_64").unwrap(), CORE_HASH);
+}
+
+#[test]
+fn a_build_without_a_key_says_at_run_time_that_the_check_is_off() {
+    assert!(SIGNATURE_CHECK_OFF.contains("check is OFF"));
+    assert!(SIGNATURE_CHECK_OFF.contains("RYU_RELEASE_SIGNING_PUBKEY"));
+}

@@ -246,10 +246,11 @@ pub(in crate::server) async fn worktree_apply_handler(
     let message = body.message.trim().to_string();
     let base = body.base.as_deref().map(str::to_string);
     guard.suspend_managed_pruning();
+    let credit = crate::server::git::git_credit_enabled(&state.preferences).await;
 
     // Apply is synchronous git I/O; run it on the blocking thread pool.
     let result = tokio::task::spawn_blocking(move || {
-        let result = worktree::apply_worktree(&guard, mode, &message, base.as_deref());
+        let result = worktree::apply_worktree(&guard, mode, &message, base.as_deref(), credit);
         (guard, result)
     })
     .await;

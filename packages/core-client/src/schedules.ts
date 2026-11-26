@@ -22,6 +22,7 @@ import {
 	makeHeaders,
 	request,
 } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
 /** How a job is scheduled: a cron expression or a fixed interval. */
 export type Schedule =
@@ -421,7 +422,7 @@ export async function createJob(
 export async function deleteJob(target: ApiTarget, id: string): Promise<void> {
 	await request(
 		target,
-		`/heartbeat/jobs/${id}`,
+		`/heartbeat/jobs/${encodePathId(id)}`,
 		{ method: "DELETE" },
 		scheduledDeleteResponseSchema
 	);

@@ -1,0 +1,14 @@
+{
+  "Failed to send": "Nie udało się wysłać",
+  "Send failed": "Wysyłanie nie powiodło się",
+  "Send was interrupted; review and resend": "Wysyłanie przerwane, przejrzyj i wyślij ponownie",
+  "Sending at a set time": "Wysyłanie o ustalonej godzinie",
+  "Sending at {when}": "Wysyłanie: {when}",
+  "Waiting for agents to start, then finish": "Oczekiwanie na uruchomienie i zakończenie agentów",
+  "Waiting for every agent to finish": "Oczekiwanie na zakończenie pracy wszystkich agentów",
+  "Waiting for fewer than {limit} runs": "Oczekiwanie na mniej niż {limit} uruchomień",
+  "Waiting for nothing to be running": "Oczekiwanie, aż nic nie będzie uruchomione",
+  "Waiting for {agentId} to drop under {belowPercent}% used": "Oczekiwanie, aż {agentId} spadnie poniżej {belowPercent}% wykorzystania",
+  "draft is already being sent": "szkic jest już wysyłany",
+  "no such draft": "nie ma takiego szkicu"
+}

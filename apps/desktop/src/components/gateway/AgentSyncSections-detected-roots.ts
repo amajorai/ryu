@@ -4,7 +4,7 @@ import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { listDirectory } from "@/src/lib/api/workspace.ts";
 import {
 	HOME_PROVIDERS,
-	pathSeparator,
+	providerHomePath,
 } from "./AgentSyncSections-providers.ts";
 
 /** This node's home directory and which provider homes under it scan cleanly. */
@@ -26,9 +26,8 @@ export function useDetectedAgentRoots(target: ApiTarget) {
 					return;
 				}
 				setHome(listing.home);
-				const separator = pathSeparator(listing.home);
 				const candidates = HOME_PROVIDERS.map((entry) => ({
-					path: `${listing.home}${separator}${entry.home}`,
+					path: providerHomePath(listing.home, entry),
 					provider: entry.value,
 				}));
 				const results = await Promise.allSettled(

@@ -11,7 +11,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
-import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { sileo } from "sileo";
@@ -30,6 +29,8 @@ import {
 	hasReadableAccountWindows,
 	subscriptionQueryKeys,
 } from "@/src/lib/api/usage.ts";
+import { applyOrder, reorderChangesStrategy } from "./credential-order.ts";
+import { AccountOrderList } from "./OAuthAccountPoolControls-account-list.tsx";
 import { AccountRoutingHeader } from "./OAuthAccountPoolControls-routing-header.tsx";
 
 const STRATEGIES: { label: string; value: OAuthAccountStrategy }[] = [
@@ -43,6 +44,8 @@ const STRATEGIES: { label: string; value: OAuthAccountStrategy }[] = [
 interface Props {
 	accounts: PiAccount[];
 	capabilities: NonNullable<PiProvider["accountRouting"]>;
+	/** Last characters of each API key, by account id. */
+	hints?: Record<string, string>;
 	providerId: string;
 }
 
@@ -69,6 +72,7 @@ export function OAuthAccountPoolControls(props: Props) {
 function ScopedOAuthAccountPoolControls({
 	accounts,
 	capabilities,
+	hints,
 	providerId,
 	target,
 	scope,
@@ -90,6 +94,7 @@ function ScopedOAuthAccountPoolControls({
 	});
 	const [draft, setDraft] = useState<OAuthAccountPoolPolicy | null>(null);
 	const [saving, setSaving] = useState(false);
+	const [orderChangedStrategy, setOrderChangedStrategy] = useState(false);
 	const previousPolicy = useRef<OAuthAccountPoolPolicy | null>(null);
 	const policyScope = scope;
 	const pendingSave = useRef(false);
@@ -217,6 +222,16 @@ function ScopedOAuthAccountPoolControls({
 			};
 		});
 	};
+	// The order on screen is saved as each account's priority. Manual ignores
+	// priorities, so a new order moves the draft to a strategy that uses them.
+	const reorder = (order: string[]) => {
+		if (reorderChangesStrategy(draft.strategy, capabilities.strategies)) {
+			setOrderChangedStrategy(true);
+		}
+		setDraft((current) =>
+			current ? applyOrder(current, order, capabilities.strategies) : current
+		);
+	};
 	const valid =
 		Number.isInteger(draft.drainThresholdPercent) &&
 		draft.drainThresholdPercent >= 1 &&
@@ -250,6 +265,7 @@ function ScopedOAuthAccountPoolControls({
 			invalidateUsageViews(target, providerId);
 			if (mounted.current) {
 				setDraft(saved);
+				setOrderChangedStrategy(false);
 				sileo.success({ title: "Account routing saved" });
 			}
 		} catch (error) {
@@ -377,112 +393,28 @@ function ScopedOAuthAccountPoolControls({
 					</div>
 				) : null}
 			</div>
-			{accounts.length > 0 ? (
-				<div>
-					<p className="font-medium text-sm">Accounts</p>
-					{accounts.map((account) => {
-						const rule = draft.accounts[account.accountId] ?? {
-							enabled: true,
-							priority: 0,
-						};
-						const names = { label: account.label, provider: providerId };
-						return (
-							<div
-								className="flex flex-wrap items-center gap-2 border-border border-b py-2 last:border-b-0"
-								key={account.accountId}
-							>
-								<span
-									className="min-w-24 flex-1 truncate text-sm"
-									title={account.label}
-								>
-									{account.label}
-								</span>
-								<Label
-									htmlFor={`oauth-enabled-${account.accountId}`}
-									id={`oauth-enabled-label-${account.accountId}`}
-									size="compact"
-								>
-									Use
-									<span className="sr-only">
-										{" "}
-										{tl("{label} for {provider}", names)}
-									</span>
-								</Label>
-								<Switch
-									aria-labelledby={`oauth-enabled-label-${account.accountId}`}
-									checked={rule.enabled}
-									id={`oauth-enabled-${account.accountId}`}
-									onCheckedChange={(enabled) =>
-										updateAccount(account.accountId, { enabled })
-									}
-								/>
-								<Label
-									htmlFor={`oauth-priority-${account.accountId}`}
-									size="compact"
-								>
-									Priority
-								</Label>
-								<Input
-									aria-label={tl("Priority for {label} on {provider}", names)}
-									className="w-16"
-									id={`oauth-priority-${account.accountId}`}
-									max={100}
-									min={0}
-									onChange={(event) =>
-										updateAccount(account.accountId, {
-											priority: Number(event.target.value),
-										})
-									}
-									type="number"
-									value={rule.priority}
-								/>
-								{capabilities.quotaObservations ? (
-									<div className="space-y-1">
-										<Label
-											htmlFor={`oauth-account-drain-${account.accountId}`}
-											size="compact"
-										>
-											Drain override (%)
-										</Label>
-										<Input
-											aria-label={tl(
-												"Drain override for {label} on {providerId}",
-												{
-													label: account.label,
-													providerId,
-												}
-											)}
-											className="w-36"
-											disabled={saving}
-											id={`oauth-account-drain-${account.accountId}`}
-											max={100}
-											min={0}
-											onChange={(event) =>
-												updateAccount(account.accountId, {
-													drainThresholdPercent:
-														event.target.value === ""
-															? null
-															: Number(event.target.value),
-												})
-											}
-											placeholder="Provider default"
-											step={1}
-											type="number"
-											value={rule.drainThresholdPercent ?? ""}
-										/>
-									</div>
-								) : null}
-							</div>
-						);
-					})}
-					<p className="mt-2 text-detail text-muted-foreground">
-						{capabilities.quotaObservations
-							? tl(
-									"Lower priority numbers are tried first. Blank inherits the provider drain point; 0 disables proactive drain. Fully exhausted accounts remain unavailable."
-								)
-							: tl("Lower priority numbers are tried first.")}
-					</p>
-				</div>
+			{/* A newly saved policy starts the list from its priorities again. */}
+			<AccountOrderList
+				accounts={accounts}
+				capabilities={capabilities}
+				hints={hints}
+				key={JSON.stringify(query.data?.accounts ?? {})}
+				onOrder={reorder}
+				onRule={updateAccount}
+				providerId={providerId}
+				rules={draft.accounts}
+				saving={saving}
+			/>
+			{orderChangedStrategy ? (
+				<p
+					aria-live="polite"
+					className="text-detail text-muted-foreground"
+					data-slot="order-strategy-note"
+				>
+					{tl(
+						"The strategy above changed so the new order is used. Manual only uses the account you picked."
+					)}
+				</p>
 			) : null}
 			<div className="flex justify-end">
 				<Button

@@ -94,6 +94,23 @@ export function comparisonPlans(
 	return ids.map((id) => ({ id, name: PLAN_NAMES[id] }));
 }
 
+/**
+ * The column the table marks as recommended: the card the shelf itself
+ * highlights. That is Pro for one person, and for organizations Business up to
+ * the seat maximum, then Enterprise (`PricingPlanGrid`).
+ */
+export function recommendedComparisonPlan(
+	options: ComparisonOptions
+): ComparisonPlanId {
+	if (options.audience === "individual") {
+		return "pro";
+	}
+	return normalizeTeamsSeatCount(options.seats ?? TEAMS_MIN_SEATS) >
+		TEAMS_MAX_SEATS
+		? "enterprise"
+		: "business";
+}
+
 /** The seat count the organization columns are priced at (cards clamp at 50). */
 export function comparisonSeats(seats: number | undefined): number {
 	return Math.min(
@@ -154,6 +171,7 @@ export function comparisonSections(
 				{
 					id: "always-on-server",
 					label: "Always-on Ryu server",
+					hint: "Agents and automations keep running while your device is asleep",
 					values: catalogRow(hasManagedServer, CONTRACTED),
 				},
 				{
@@ -256,6 +274,7 @@ export function comparisonSections(
 				{
 					id: "bring-your-own-keys",
 					label: "Bring your own API keys",
+					hint: "The provider bills your account directly",
 					values: catalogRow(() => true, true),
 				},
 				{

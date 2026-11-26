@@ -324,6 +324,9 @@ fn cloud_box_clean_room_scripts_push_with_real_git() {
     assert!(String::from_utf8_lossy(&refs.stdout).contains("refs/heads/ryu/test"));
 }
 
+#[path = "commit_credit_tests.rs"]
+mod commit_credit_tests;
+
 #[path = "pull_request_tests.rs"]
 mod pull_request_tests;
 

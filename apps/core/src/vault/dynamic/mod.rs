@@ -44,6 +44,7 @@
 pub mod aws;
 pub mod aws_iam;
 pub mod azure;
+mod force_revoke;
 pub mod gcp;
 pub(crate) mod http;
 pub mod kubernetes;
@@ -81,6 +82,7 @@ use super::{now_millis, VaultError};
 use crate::plugin_secrets::kv::Charset;
 use crate::plugin_secrets::{Generator, PluginSecretStore};
 
+pub use force_revoke::ForceRevoke;
 pub use providers::ProviderConfig;
 
 fn random_generator(length: u16, charset: Charset) -> Generator {

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { sileo } from "sileo";
 import { modelMenuItem } from "@/components/agent-elements/input/model-router.ts";
 import { useProviderCommandNavigation } from "@/components/agent-elements/input/provider-command-dialog.tsx";
+import { accountLimitToast } from "@/src/components/billing/account-limit-copy.ts";
 import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
 import { useLlmProviders } from "@/src/hooks/useLlmProviders.ts";
 import type {
@@ -10,6 +11,7 @@ import type {
 	DiscoveredModel,
 	PiLoginEvent,
 } from "@/src/lib/api/pi-config.ts";
+import { accountLimitRefusal } from "@/src/lib/gating/accountLimit.ts";
 import { providerAccountHandlers } from "./LlmProvidersSettings-provider-card-accounts.ts";
 import {
 	DIRECT,
@@ -70,7 +72,7 @@ export function useProviderCardState({
 	// Retail Ryu inference is available from an included managed-plan pool or
 	// an unrestricted prepaid wallet balance. Provider-restricted donated credits
 	// only unlock their matching pool-backed provider rows.
-	const { verdict } = useEntitlementContext();
+	const { requestUpgrade, verdict } = useEntitlementContext();
 	const isPoolBacked = Boolean(
 		provider.creditPool && provider.creditPool !== RETAIL_CREDIT_POOL
 	);
@@ -252,10 +254,15 @@ export function useProviderCardState({
 				title: tl("{label} credential saved", { label: provider.label }),
 			});
 		} catch (e) {
-			sileo.error({
-				title: "Could not save credential",
-				description: errMessage(e, "Core rejected the request."),
-			});
+			const refusal = accountLimitRefusal(e);
+			sileo.error(
+				refusal
+					? accountLimitToast(refusal, tl, requestUpgrade)
+					: {
+							title: "Could not save credential",
+							description: errMessage(e, "Core rejected the request."),
+						}
+			);
 		} finally {
 			setSavingKey(false);
 		}

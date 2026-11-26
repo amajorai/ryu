@@ -31,9 +31,8 @@ pub(super) struct KernelCapability {
     /// [`ext_token`] (each handler re-runs [`authenticate_sidecar`]), and a `None` row
     /// carries its own tighter gate instead: ownership (`events.emit`), the active
     /// user's own inbox, or `notifications:send-to-user` for any other recipient
-    /// (`notify.deliver`, checked in the handler), Core-derived tenancy
-    /// (`billing.recordToolCharge` takes the organization from the registered node,
-    /// never the body), or an app pin (`notify.fanout`).
+    /// (`notify.deliver`, checked in the handler), or an app pin (`notify.fanout`).
+    /// A row that moves money is never `None` (`billing.recordToolCharge`).
     ///
     /// A `Some(grant)` row is not proof that the grant covers the handler's whole
     /// operation. Some handlers ALSO pin their calling app because the grant is
@@ -125,9 +124,15 @@ pub(super) const KERNEL_CAPABILITIES: &[KernelCapability] = &[
     // Record a provider-neutral external-tool charge. The handler derives the
     // organization from the registered node and forwards the report to Gateway;
     // a sidecar may describe work, but it cannot choose a wallet.
+    //
+    // The row debits the organization wallet, so it needs a reviewed grant like
+    // every other row that spends or reaches out (`providers.call` rides the same
+    // `tools.invoke`). The handler also refuses a report above its per-report cost
+    // ceiling (`server::app_tool_usage`), so even an approved app cannot name an
+    // arbitrary amount.
     KernelCapability {
         cap: "billing.recordToolCharge",
-        grant: None,
+        grant: Some("tools.invoke"),
     },
     // Route an app's provider-neutral operation through Core's managed Gateway.
     // The sidecar supplies no provider credential; Gateway resolves it from the

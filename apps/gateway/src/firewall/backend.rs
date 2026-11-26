@@ -32,6 +32,13 @@ pub trait FirewallBackend: Send + Sync {
     /// keep the stream's field separator (`\n\0\n`) byte for byte, as must
     /// `redact_outbound`; a rewrite that consumes it masks the frames instead.
     fn sanitize(&self, text: &str) -> String;
+    /// [`Self::sanitize`] for a caller that only acts on a change: `None`
+    /// when the text comes back unchanged. A backend that can tell without
+    /// building the copy overrides it.
+    fn sanitize_changed(&self, text: &str) -> Option<String> {
+        let sanitized = self.sanitize(text);
+        (sanitized != text).then_some(sanitized)
+    }
     /// Redact outbound text, returning the redacted string + the hit pattern
     /// names. The string must be a pure function of `text`, like `sanitize`.
     fn redact_outbound(&self, text: &str) -> (String, Vec<&'static str>);
@@ -110,6 +117,9 @@ impl FirewallBackend for FirewallScanner {
     fn sanitize(&self, text: &str) -> String {
         FirewallScanner::sanitize(self, text)
     }
+    fn sanitize_changed(&self, text: &str) -> Option<String> {
+        FirewallScanner::sanitize_changed(self, text)
+    }
     fn redact_outbound(&self, text: &str) -> (String, Vec<&'static str>) {
         FirewallScanner::redact_outbound(self, text)
     }
@@ -172,6 +182,9 @@ impl FirewallBackend for OperatorExcerptGuard {
     }
     fn sanitize(&self, text: &str) -> String {
         self.inner.sanitize(text)
+    }
+    fn sanitize_changed(&self, text: &str) -> Option<String> {
+        self.inner.sanitize_changed(text)
     }
     fn redact_outbound(&self, text: &str) -> (String, Vec<&'static str>) {
         self.inner.redact_outbound(text)

@@ -90,8 +90,14 @@ fn commit_push_action_skips_hooks_in_the_git_dir() {
     assert_hooks_are_live(&repo, &marker);
 
     std::fs::write(repo.join("a.txt"), "two\n").unwrap();
-    let outcome = run_git_action(repo.to_str().unwrap(), "hooked change", "commit-push", true)
-        .expect("commit-push succeeds despite failing hooks");
+    let outcome = run_git_action(
+        repo.to_str().unwrap(),
+        "hooked change",
+        "commit-push",
+        true,
+        true,
+    )
+    .expect("commit-push succeeds despite failing hooks");
     assert!(outcome.success && outcome.committed && outcome.pushed);
     assert!(
         !marker.exists(),
@@ -125,7 +131,7 @@ fn commit_action_ignores_a_local_core_hooks_path() {
     assert_hooks_are_live(&repo, &marker);
 
     std::fs::write(repo.join("b.txt"), "hello\n").unwrap();
-    let outcome = run_git_action(repo.to_str().unwrap(), "first", "commit", true)
+    let outcome = run_git_action(repo.to_str().unwrap(), "first", "commit", true, true)
         .expect("commit succeeds despite failing hooks");
     assert!(outcome.success && outcome.committed && !outcome.pushed);
     assert!(

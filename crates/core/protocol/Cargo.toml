@@ -1,0 +1,11 @@
+[package]
+name = "ryu-protocol"
+version = "0.5.1"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "The protocol number the desktop, Core and the Gateway speak to each other, with a minimum and a maximum per side"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -201,7 +201,7 @@ pub(super) fn extend_spawn_security_key(
     // posture at spawn, so trusting or untrusting the folder must start a new
     // instance rather than reuse one launched under the other posture.
     security_key.push_str(
-        if WorkspaceAutonomy::evaluate(cwd, additional_directories, false).trusted {
+        if WorkspaceAutonomy::for_this_node(cwd, additional_directories, false).trusted {
             "\u{1}workspace-trusted"
         } else {
             "\u{1}workspace-untrusted"

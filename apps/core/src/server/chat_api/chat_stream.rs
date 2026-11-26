@@ -131,6 +131,12 @@ pub(in crate::server) async fn run_chat_stream_request(
             return response;
         }
     }
+    // On a shared node every folder a turn names must lie in the node's member
+    // folders. Checked before the claim below, so a refused turn records nothing.
+    if let Err(message) = chat_checkpoints::turn_folders::bound_request_before_claim(&mut req).await
+    {
+        return json_error(StatusCode::FORBIDDEN, message.to_owned());
+    }
     // Per-resource ACL. `conversation_id` is CLIENT-supplied, so without this gate
     // user B could POST another user's conversation id and have that thread's
     // history loaded as context, streamed back, and their own turn appended into it
@@ -357,6 +363,18 @@ pub(in crate::server) async fn run_chat_stream_request(
         if let Err(response) = enforce_team_agents_runnable(&state, &caller, &team).await {
             return response;
         }
+        // A thread can name one owner and can be stopped (`teams.thread`).
+        let (team, thread) = match crate::sidecar::adapters::open_team_thread_turn(
+            &capabilities,
+            team,
+            &req,
+            &state.agent_store,
+        )
+        .await
+        {
+            Ok(opened) => opened,
+            Err(refusal) => return crate::sidecar::adapters::error_stream(refusal),
+        };
         if req.agent_resource_authorization.is_none() && req.verified_caller.is_some() {
             req.agent_resource_authorization = Some(Arc::new(
                 crate::sidecar::adapters::AgentResourceAuthorization {
@@ -383,6 +401,7 @@ pub(in crate::server) async fn run_chat_stream_request(
                 Arc::clone(&state.mcp),
                 state.skills.clone(),
                 state.traces.clone(),
+                thread,
             ),
         )
         .await;

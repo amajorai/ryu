@@ -34,8 +34,8 @@ uuid = { version = "1", features = ["v4"] }
 # configured (no `Config::cache`), and it is the only path that links zstd 0.13,
 # whose zstd-safe 7 carries RUSTSEC-2026-0391/0398/0403 with no wasmtime release on
 # zstd 0.14. Keep this list in sync across gateway, sandbox and tool-exec.
-wasmtime = { version = "48.0.8", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"], optional = true }
-wasmtime-wasi = { version = "48.0.8", features = ["p1"], optional = true }
+wasmtime = { version = "48.0.10", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"], optional = true }
+wasmtime-wasi = { version = "48.0.10", features = ["p1"], optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }
 
 [target.'cfg(unix)'.dependencies]

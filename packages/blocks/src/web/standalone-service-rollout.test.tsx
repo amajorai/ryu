@@ -149,8 +149,10 @@ test("the standalone pricing catalog renders only rolled-out cards", () => {
 		expect(closed).not.toContain(`>${entry.name}</div>`);
 	}
 	expect(closed).toContain('data-testid="standalone-pricing-early-access"');
-	// The marketplace and credit fee disclosure stays on the page.
-	expect(closed).toContain("Marketplace and credit fees");
+	// The marketplace and credit fees have their own section on the page
+	// (`PricingFeesSection`), so the empty catalog holds no fee disclosure.
+	expect(closed).not.toContain("<details");
+	expect(closed).not.toContain("Marketplace and credit fees");
 
 	const someOpen = renderToStaticMarkup(
 		createElement(StandaloneProductPricingCatalog, {

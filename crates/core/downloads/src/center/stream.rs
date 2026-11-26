@@ -4,7 +4,9 @@ use super::*;
 
 /// The egress policy for every download hop: HTTPS only, so model weights and
 /// archives are never fetched in cleartext where an on-path attacker could swap
-/// unpinned bytes or read a host credential.
+/// unpinned bytes or read a host credential. A transfer reads only the host
+/// screen and the redirect bound from it: the body is capped by
+/// `cap::TransferCap`, not by `max_body_bytes`.
 pub(super) fn download_policy() -> ryu_egress::GuardedFetchPolicy {
     ryu_egress::GuardedFetchPolicy {
         allow_http: false,
@@ -66,12 +68,8 @@ pub(super) async fn stream_once(
         .await
         .map(|m| m.len())
         .unwrap_or(0);
-    if existing > MAX_TRANSFER_BYTES {
-        return Err(StreamErr::Io(format!(
-            "partial download exceeds the {}-byte transfer cap",
-            MAX_TRANSFER_BYTES
-        )));
-    }
+    let limit = cap::TransferCap::of(spec);
+    limit.check_part(&part, existing).await?;
     let etag = {
         let tasks = inner.tasks.read().await;
         tasks.get(id).and_then(|t| t.etag.clone())
@@ -191,12 +189,7 @@ pub(super) async fn stream_once(
         (false, Some(len)) => Some(len),
         _ => None,
     };
-    if total.is_some_and(|bytes| bytes > MAX_TRANSFER_BYTES) {
-        return Err(StreamErr::Io(format!(
-            "download exceeds the {}-byte transfer cap",
-            MAX_TRANSFER_BYTES
-        )));
-    }
+    limit.check_announced(&part, total).await?;
     // Disk preflight, before any byte is written: what is still to come must fit
     // on the destination volume with the reserve left over. A resume only needs
     // the remainder; a restart truncates the stale `.part`, so its bytes count
@@ -272,11 +265,8 @@ pub(super) async fn stream_once(
                         return Err(StreamErr::Network(format!("stream error: {e}")));
                     }
                     Some(Ok(bytes)) => {
-                        if received.saturating_add(bytes.len() as u64) > MAX_TRANSFER_BYTES {
-                            return Err(StreamErr::Io(format!(
-                                "download exceeds the {}-byte transfer cap",
-                                MAX_TRANSFER_BYTES
-                            )));
+                        if limit.passed_by(received, bytes.len()) {
+                            return Err(limit.refuse_stream(file, &part).await);
                         }
                         file.write_all(&bytes)
                             .await
@@ -495,5 +485,6 @@ pub(super) async fn sha256_file(path: &Path) -> Result<String> {
     .await?
 }
 
+mod cap;
 #[cfg(test)]
 mod redirect_tests;

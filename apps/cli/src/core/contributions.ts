@@ -50,6 +50,10 @@ import {
  *  Mirrors Core's `ViewContribution` plus the `plugin` field the contributions
  *  endpoint injects. `spec` is opaque to Core; the renderer interprets it. */
 export interface ContributedView {
+	/** The HTTP authority Core stamped on the view. `"core"` only for an exact
+	 *  first-party manifest. Absent or `"owner"` confines the view's declarative
+	 *  HTTP to the owning app's own `/api/ext/<plugin id>` mount. */
+	httpPolicy?: "core" | "owner";
 	id: string;
 	/** Owning plugin id (e.g. `com.acme.tracker`). Empty when Core did not tag it. */
 	plugin: string;
@@ -101,6 +105,7 @@ export interface ContributedContent {
 
 const nonEmptyTextSchema = z.string().trim().min(1);
 const viewWireSchema = z.object({
+	http_policy: z.enum(["core", "owner"]).optional().catch(undefined),
 	id: z.string().min(1),
 	plugin: z.string().catch(""),
 	spec: z.json().optional().catch(undefined),
@@ -193,6 +198,8 @@ function toContributedView(
 		title: wire.title,
 		view: kind,
 		spec,
+		// Left out when Core did not stamp it, so the gate falls back to "owner".
+		...(wire.http_policy ? { httpPolicy: wire.http_policy } : {}),
 	};
 }
 

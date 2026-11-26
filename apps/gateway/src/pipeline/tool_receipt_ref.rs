@@ -5,6 +5,24 @@
 //! as already settled. Only a charge the Gateway priced itself from
 //! provider-verified `composioUsage` may therefore claim that namespace; a bare
 //! caller-stated total would otherwise pre-claim a receipt at any price.
+//!
+//! The usage on this route is stated by the caller, and a tenant holds root
+//! on its managed node, so the control plane also treats the Connect receipt
+//! as the authority on price and debits any shortfall. Receipts that only
+//! hosted Connect settlement charges never get the namespace here at all.
+
+/// Receipt ids no Core reports: an operator-key vendor call (`rvx_`) and a
+/// composed tool's maker fee (`rcx_`). Only hosted Connect settlement charges
+/// them, at the price Connect recorded.
+const SETTLEMENT_ONLY_PREFIXES: [&str; 2] = ["rvx_", "rcx_"];
+
+fn settlement_only(transaction_id: &str) -> bool {
+    let id = transaction_id.trim_start();
+    SETTLEMENT_ONLY_PREFIXES.iter().any(|prefix| {
+        id.get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+    })
+}
 
 /// The transaction id to key a reported external tool charge on, or `None` to
 /// fall back to the request-scoped `<request>:<provider>` reference.
@@ -13,10 +31,13 @@ pub(crate) fn ledger_transaction_id<'a>(
     gateway_priced: bool,
     transaction_id: Option<&'a str>,
 ) -> Option<&'a str> {
-    if provider == "composio" && !gateway_priced {
+    if provider != "composio" {
+        return transaction_id;
+    }
+    if !gateway_priced {
         return None;
     }
-    transaction_id
+    transaction_id.filter(|id| !settlement_only(id))
 }
 
 #[cfg(test)]
@@ -41,6 +62,16 @@ mod tests {
     #[test]
     fn a_gateway_priced_composio_receipt_keeps_its_settlement_reference() {
         assert_eq!(ref_id("composio", true, "rnx_x"), "composio:rnx_x");
+    }
+
+    #[test]
+    fn a_settlement_only_receipt_cannot_be_claimed_with_stated_usage() {
+        assert_eq!(ref_id("composio", true, "rvx_call"), "req-1:composio");
+        assert_eq!(ref_id("composio", true, "rcx_run"), "req-1:composio");
+        assert_eq!(ref_id("composio", true, " RVX_call"), "req-1:composio");
+        // Receipts a Core does report keep the settlement reference.
+        assert_eq!(ref_id("composio", true, "log_1"), "composio:log_1");
+        assert_eq!(ref_id("composio", true, "rv"), "composio:rv");
     }
 
     #[test]

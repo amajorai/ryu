@@ -2,8 +2,8 @@
 
 use super::accounts::{self, PlanAccount, ProviderId, DEFAULT_ACCOUNT};
 use super::api::{
-    account_label, api_error, bad_request, owner_with_plans, respond, sign_in, sign_in_slot_free,
-    ApiError,
+    account_label, account_limit_error, api_error, bad_request, owner_with_plans, respond, sign_in,
+    sign_in_slot_free, ApiError,
 };
 use super::cli::{self, SignIn};
 use super::{local_run, runner, store, unix_now, Provider};
@@ -203,7 +203,7 @@ fn start_sign_in(provider: Provider, id: &str) -> Result<(), ApiError> {
         })
 }
 
-#[utoipa::path(post,path="/api/cloud-task-backends/accounts",operation_id="add_cloud_task_plan_account",tag="Cloud environments",security(("bearerAuth"=[])),request_body=NewAccount,description="Link another Claude or ChatGPT account on this node. Ryu makes a new, owner-only CLI config folder for it and starts the CLI's own sign-in with that folder (`claude auth login` with `CLAUDE_CONFIG_DIR`, `codex login` with `CODEX_HOME`), which opens the provider's page in the browser. The CLI writes its sign-in into the folder itself; Ryu never reads, copies or stores it. Poll `GET /api/cloud-task-backends/accounts` for the result. Up to 8 accounts per provider. Node owner only.",responses((status=202,body=PlanAccount),(status=400,description="invalid_request"),(status=403,description="subscription_backend_owner_only or cloud_environment_feature_unavailable"),(status=409,description="subscription_account_limit"),(status=503,description="subscription_cli_missing")))]
+#[utoipa::path(post,path="/api/cloud-task-backends/accounts",operation_id="add_cloud_task_plan_account",tag="Cloud environments",security(("bearerAuth"=[])),request_body=NewAccount,description="Link another Claude or ChatGPT account on this node. Ryu makes a new, owner-only CLI config folder for it and starts the CLI's own sign-in with that folder (`claude auth login` with `CLAUDE_CONFIG_DIR`, `codex login` with `CODEX_HOME`), which opens the provider's page in the browser. The CLI writes its sign-in into the folder itself; Ryu never reads, copies or stores it. Poll `GET /api/cloud-task-backends/accounts` for the result. The plan limits accounts per provider. Node owner only.",responses((status=202,body=PlanAccount),(status=400,description="invalid_request"),(status=403,description="subscription_backend_owner_only or cloud_environment_feature_unavailable"),(status=409,description="provider_account_limit"),(status=503,description="subscription_cli_missing")))]
 pub(crate) async fn add_account(
     Extension(auth): Extension<ResolvedAuthorization>,
     body: axum::body::Bytes,
@@ -235,13 +235,9 @@ pub(crate) async fn add_account(
                 "Ryu could not make the account's folder.",
             )
         })?;
-        if store::add_account(&owner, account.clone()).is_err() {
+        if let Err(refusal) = store::add_account(&owner, account.clone()) {
             let _ = accounts::remove_dir(provider, &account.id);
-            return Err(api_error(
-                StatusCode::CONFLICT,
-                "subscription_account_limit",
-                "This node already has the most accounts allowed for this provider (8).",
-            ));
+            return Err(account_limit_error(&refusal));
         }
         start_sign_in(provider, &account.id)?;
         Ok(account)

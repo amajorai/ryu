@@ -5,12 +5,12 @@ use super::*;
 use crate::plugin_secrets::PluginSecretStore;
 use crate::vault::broker::{proposals, sessions};
 
-fn vault() -> &'static PluginSecretStore {
+pub(super) fn vault() -> &'static PluginSecretStore {
     crate::plugin_secrets::set_global(PluginSecretStore::in_memory().unwrap());
     crate::plugin_secrets::global().unwrap()
 }
 
-fn unique(prefix: &str) -> String {
+pub(super) fn unique(prefix: &str) -> String {
     format!(
         "{prefix}{}",
         &uuid::Uuid::new_v4().simple().to_string()[..12]
@@ -18,7 +18,7 @@ fn unique(prefix: &str) -> String {
 }
 
 /// A broker session like the one an ACP run's lease mints: `(token, id)`.
-async fn mint() -> (String, String) {
+pub(super) async fn mint() -> (String, String) {
     let conn = vault().conn.lock().await;
     let (token, session) = sessions::mint(
         &conn,
@@ -76,14 +76,14 @@ async fn broker_tool_names(handler: &BrokeredHandler) -> Vec<String> {
         .collect()
 }
 
-fn text(result: &CallToolResult) -> String {
+pub(super) fn text(result: &CallToolResult) -> String {
     serde_json::to_value(result).unwrap()["content"][0]["text"]
         .as_str()
         .unwrap_or_default()
         .to_owned()
 }
 
-fn failed(result: &CallToolResult) -> bool {
+pub(super) fn failed(result: &CallToolResult) -> bool {
     result.is_error == Some(true)
 }
 
@@ -112,7 +112,10 @@ async fn a_run_without_a_broker_session_is_offered_none() {
         .iter()
         .map(|tool| tool.name.to_string())
         .collect();
-    assert!(names.iter().all(|name| !name.starts_with("ryu_broker_")), "{names:?}");
+    assert!(
+        names.iter().all(|name| !name.starts_with("ryu_broker_")),
+        "{names:?}"
+    );
     assert!(names.iter().any(|name| name == "tool_search"));
 }
 
@@ -409,7 +412,11 @@ async fn each_run_has_its_own_rate_quota_bucket() {
     // Another run is not in this run's bucket: it reaches the route (which
     // refuses another session's proposal) instead of the quota.
     let other_run = poll(&stranger, &id).await;
-    assert!(text(&other_run).contains("HTTP 404"), "{}", text(&other_run));
+    assert!(
+        text(&other_run).contains("HTTP 404"),
+        "{}",
+        text(&other_run)
+    );
 }
 
 #[tokio::test]
@@ -421,7 +428,10 @@ async fn describe_answers_for_offered_broker_tools_only() {
         .await
         .expect("an offered broker tool is described");
     assert!(described.contains("credentials"), "{described}");
-    assert!(handler.describe(&json!({ "id": "tool_search" })).await.is_none());
+    assert!(handler
+        .describe(&json!({ "id": "tool_search" }))
+        .await
+        .is_none());
     let narrow = bridge(Some(vec![hosted_mcp::DISCOVER.to_owned()]), Some(&token))
         .await
         .unwrap();
@@ -460,11 +470,17 @@ async fn a_device_read_in_another_instance_of_the_conversation_blocks_a_proposal
     );
     crate::device_tools::taint::mark_device_read(&offer, "device.contacts.search");
 
-    let seen = handler.device_offer().expect("the conversation's live turn");
+    let seen = handler
+        .device_offer()
+        .expect("the conversation's live turn");
     let refused = handler
         .broker_call(hosted_mcp::PROPOSE, json!({ "message": "x" }), Some(&seen))
         .await
         .unwrap();
     assert!(failed(&refused));
-    assert!(text(&refused).contains("device.contacts.search"), "{}", text(&refused));
+    assert!(
+        text(&refused).contains("device.contacts.search"),
+        "{}",
+        text(&refused)
+    );
 }

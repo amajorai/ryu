@@ -22,7 +22,7 @@ describe("offerLifetimeAccess", () => {
 		).toBe(false);
 	});
 
-	test("hides Lifetime during beta and from someone who already owns it", () => {
+	test("hides Lifetime from a free desktop and from someone who already owns it", () => {
 		expect(
 			offerLifetimeAccess({
 				individualPlansEnabled: true,

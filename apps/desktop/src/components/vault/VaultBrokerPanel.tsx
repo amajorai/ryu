@@ -85,7 +85,7 @@ function CardApprovals({ target }: { target: ApiTarget }) {
 		onError: (error) => {
 			sileo.error({
 				title: tl("Could not update the card approval"),
-				description: vaultErrorMessage(error, "Try again.", tl),
+				description: vaultErrorMessage(error, tl("Try again."), tl),
 			});
 		},
 	});

@@ -86,6 +86,15 @@ impl Channel for TelegramChannel {
         Ok(ids)
     }
 
+    async fn send_approval_prompt(
+        &self,
+        chat_id: &str,
+        prompt: &crate::approvals::ApprovalPrompt,
+        locale: &str,
+    ) -> anyhow::Result<bool> {
+        self.post_approval_prompt(chat_id, prompt, locale).await
+    }
+
     /// Rich-text reply: `sendRichMessage` with `rich_message = { markdown }`.
     ///
     /// Agent replies are already markdown, so this is the cheap correct mapping.

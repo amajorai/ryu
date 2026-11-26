@@ -28,6 +28,7 @@ import {
 	timelineJournalRecordSchema,
 	warmupDetectionSchema,
 } from "@ryu/app-host/rpc";
+import { gateQuests } from "@ryu/app-host/rpc-quests-gate";
 import { z } from "zod";
 import { listActivity } from "@/src/lib/api/activity.ts";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
@@ -126,7 +127,9 @@ export function buildPluginHostAppServices({
 	openGateway,
 	openTab,
 }: PluginHostServicesContext): Partial<HostServices> {
-	return {
+	// The quest verbs go to the Quests app only, and three of them, with reduced
+	// rows, to the inbox app. A grant alone does not open the board.
+	return gateQuests(companion.pluginId, {
 		// Quests — the @ryu/quests companion drives Core's `/api/quests/*`
 		// auto-detecting-todo orchestration. Host-direct (the monitors pattern): the
 		// host holds the node token and calls the existing `/api/quests/*` client,
@@ -432,5 +435,5 @@ export function buildPluginHostAppServices({
 				initialPrompt: prompt,
 				title: "Chat",
 			}),
-	};
+	});
 }

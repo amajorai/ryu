@@ -1,6 +1,10 @@
 "use client";
 
 import {
+	gateOpenExternal,
+	type OpenExternalAsk,
+} from "@ryu/app-host/open-external-gate";
+import {
 	CodedRpcError,
 	createI18nHostServices,
 	type HostServices,
@@ -28,6 +32,7 @@ import type {
 
 /** Per-instance HostServices for one widget mount (see app-widget.tsx). */
 export function useWidgetHostServices({
+	askOpenExternal,
 	data,
 	fileAccess,
 	globalsRef,
@@ -42,6 +47,8 @@ export function useWidgetHostServices({
 	stateStore,
 	toastHost,
 }: {
+	/** The shell's own "open this link?" prompt. Without it no link opens. */
+	askOpenExternal: OpenExternalAsk | undefined;
 	data: WidgetAvailableData | null;
 	fileAccess: WidgetHostServices["fileAccess"];
 	globalsRef: MutableRefObject<WidgetInitialGlobals | null>;
@@ -208,12 +215,14 @@ export function useWidgetHostServices({
 			// Governed `window.openai.openExternal`: the arg is already vetted to an
 			// http(s) URL by the rpc gate; open it in the user's real browser via the
 			// desktop shell — NEVER inside the sandboxed frame.
-			openExternal: async ({ href }) => {
+			// The call needs no grant, so the shell asks the person first
+			// (`askOpenExternal`) and the opener runs only after a yes.
+			openExternal: gateOpenExternal(askOpenExternal, async ({ href }) => {
 				if (!openExternalShell) {
 					throw new CodedRpcError("server_error", "widget host unavailable");
 				}
 				await openExternalShell(href);
-			},
+			}),
 			sendFollowUpMessage: async ({ prompt }) => {
 				if (!services) {
 					throw new CodedRpcError("server_error", "widget host unavailable");
@@ -244,6 +253,7 @@ export function useWidgetHostServices({
 		};
 	}, [
 		services,
+		askOpenExternal,
 		openExternalShell,
 		data,
 		i18n,

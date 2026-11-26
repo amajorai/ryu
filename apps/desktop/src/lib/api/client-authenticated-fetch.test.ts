@@ -20,6 +20,9 @@ const { fetchSidecarStatus, fetchSystemInfo, fetchSystemStatus } = await import(
 	"./system.ts"
 );
 const { uploadUserFile } = await import("./uploads.ts");
+const { clearLinkAddedNode, markLinkAddedNode } = await import(
+	"@/src/lib/link-added-nodes.ts"
+);
 
 const originalFetch = globalThis.fetch;
 interface FetchCall {
@@ -295,6 +298,26 @@ describe("requestHeaders over cleartext HTTP", () => {
 		);
 
 		expect(lastHeaders().get(USER_JWT_HEADER)).toBe("verified-user-jwt");
+	});
+
+	test("withholds the account JWT from a node saved from a link", async () => {
+		// A `ryu://nodes/connect` link supplies the address and the token, so a
+		// token over https says nothing about whose server it is.
+		const linked = { token: "link-token", url: "https://linked.example/" };
+		markLinkAddedNode("https://linked.example");
+
+		expect(await accountJwtForTarget(linked)).toBeNull();
+		expect(await realtimeJwtForTarget(linked)).toBeNull();
+		await authenticatedFetch(linked, "/api/config");
+		expect(lastHeaders().get("Authorization")).toBe("Bearer link-token");
+		expect(lastHeaders().has(USER_JWT_HEADER)).toBe(false);
+		expect(getRealtimeJwt).not.toHaveBeenCalled();
+		// Another server keeps it.
+		expect(await accountJwtForTarget(TARGET)).toBe("verified-user-jwt");
+
+		// Adding the same server by hand makes it eligible again.
+		clearLinkAddedNode("https://linked.example");
+		expect(await accountJwtForTarget(linked)).toBe("verified-user-jwt");
 	});
 
 	test("a managed delegation is still sent; the account JWT is not minted", async () => {

@@ -36,9 +36,36 @@ features="${FEATURES-}"
 # fingerprint first: cargo re-links that single unit and writes a fresh record,
 # which is what assert-feature-set.sh grades. Without this the assert could pass
 # on a stale artifact, and an assertion that might be reading last week's build
-# is not an assertion.
-find "$dir/target/release/.fingerprint" -name bin-ryu-core.json -delete 2>/dev/null || true
+# is not an assertion. Cargo keeps the record in one of two places (old and new
+# build directory layout, see assert-feature-set.sh), so both are cleared.
+#
+# Two files go, not one. `bin-ryu-core.json` is the record the assert reads;
+# `bin-ryu-core` beside it is the hash cargo compares to decide whether the unit
+# is fresh. With only the JSON gone, cargo (1.95 and 1.100 both, tried on a
+# small crate) calls an unchanged unit fresh and writes no new JSON, so the
+# assert would find nothing. From 1.100 on it matters more: each feature set has
+# its own unit folder, so a restored featureless unit and the featured one sit
+# side by side and both can be fresh. Removing the hash as well makes cargo link
+# the bin again and write the record for exactly the unit this run built.
+release="$dir/target/release"
+find "$release/.fingerprint" "$release/build" -path '*fingerprint/*' \
+  \( -name bin-ryu-core.json -o -name bin-ryu-core \) -delete 2>/dev/null || true
 if [ -n "$features" ]; then
+  # WORKAROUND for ort-sys 2.0.0-rc.12 on Windows under cargo >= 1.100.0.
+  # `voice-parakeet` and `voice-vad` pull ONNX Runtime through transcribe-rs,
+  # which pins `ort = "=2.0.0-rc.12"` with its default `copy-dylibs` feature.
+  # That build script takes the third ancestor of OUT_DIR as "the target
+  # directory" and links the runtime's DLLs into it and into its `examples` and
+  # `deps` folders. Cargo 1.100.0 put OUT_DIR one level deeper
+  # (`build/<package>/<hash>/out`, was `build/<package>-<hash>/out`), so the
+  # script now lands on `target/release/build`, where those two folders do not
+  # exist, and panics at `build/dynamic_link.rs:42` with "The system cannot find
+  # the path specified". Only the Windows package ships a DLL (DirectML.dll),
+  # which is why Linux and macOS build. Creating the two folders lets the script
+  # finish; the links it writes there are unused, and package-binary.sh ships
+  # only the executable, as before. ort-sys 2.0.0-rc.14 resolves the directory
+  # for both layouts: remove this once transcribe-rs allows ort >= 2.0.0-rc.14.
+  mkdir -p "$release/build/examples" "$release/build/deps"
   cargo build --release --manifest-path "$dir/Cargo.toml" --features "$features"
 else
   cargo build --release --manifest-path "$dir/Cargo.toml"

@@ -149,6 +149,8 @@ mac:
       to: ja.lproj/InfoPlist.strings
     - from: resources/locales/ko.lproj/InfoPlist.strings
       to: ko.lproj/InfoPlist.strings
+    - from: resources/locales/pl.lproj/InfoPlist.strings
+      to: pl.lproj/InfoPlist.strings
     - from: resources/locales/pt_BR.lproj/InfoPlist.strings
       to: pt_BR.lproj/InfoPlist.strings
     - from: resources/locales/ru.lproj/InfoPlist.strings

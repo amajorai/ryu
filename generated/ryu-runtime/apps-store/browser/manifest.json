@@ -1039,6 +1039,46 @@
       }
     },
     {
+      "id": "tool-browser-request-takeover",
+      "name": "Request Browser Takeover",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.request_takeover",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "POST",
+        "url": "core:/api/ext/@ryu/browser/takeover",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Ask the user to take over one of your browser tabs when a step needs a person: a sign-in, a captcha, a payment or identity confirmation. The user sees your reason next to the live view of that tab (Desktop Browser dock, Agents) and can take control, finish with Done, or decline. Say in your reply that you are waiting for them there. Each call waits up to 25 seconds and returns `{status}` with one of four values - `waiting` (call again with the same `tab_id` to keep waiting; that joins the open request and does not start a second one), `done` (the user finished; take a new snapshot and continue), `declined`, or `timed_out`. While the user has control your other browser tools are refused, and you never see what the user typed. Use this instead of asking for a password or a code in chat.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "tab_id": {
+              "type": "string",
+              "description": "The tab of your own session the user should act in."
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 300,
+              "description": "One short sentence the user reads before deciding, for example `Sign in to example.com`."
+            },
+            "timeout_seconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 1800,
+              "default": 600,
+              "description": "How long the request stays open. It restarts when the user takes control and each time they act in the tab."
+            }
+          },
+          "required": ["tab_id", "reason"]
+        }
+      }
+    },
+    {
       "id": "tool-browser-list-downloads",
       "name": "List Browser Downloads",
       "kind": "tool",
@@ -1304,7 +1344,13 @@
         "routes": [
           {
             "path": "/",
+            "method": "GET",
             "permission": "browser.view"
+          },
+          {
+            "path": "/",
+            "method": "POST",
+            "permission": "browser.control"
           },
           {
             "path": "/health"
@@ -1340,6 +1386,7 @@
           },
           {
             "path": "/tabs/:id/screenshot",
+            "method": "POST",
             "permission": "browser.view"
           },
           {
@@ -1348,14 +1395,17 @@
           },
           {
             "path": "/tabs/:id/snapshot",
+            "method": "POST",
             "permission": "browser.view"
           },
           {
             "path": "/tabs/:id/title",
+            "method": "GET",
             "permission": "browser.view"
           },
           {
             "path": "/tabs/:id/context",
+            "method": "POST",
             "permission": "browser.view"
           },
           {
@@ -1438,6 +1488,21 @@
             "path": "/lanes/:agent/tabs/:tab/screencast",
             "method": "DELETE",
             "permission": "browser.view"
+          },
+          {
+            "path": "/lanes/:agent/tabs/:tab/takeover",
+            "method": "POST",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/lanes/:agent/tabs/:tab/input",
+            "method": "POST",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/takeover",
+            "method": "POST",
+            "permission": "browser.control"
           },
           {
             "path": "/profiles",

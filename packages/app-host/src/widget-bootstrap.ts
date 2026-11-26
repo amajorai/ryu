@@ -7,11 +7,11 @@
 //
 //   D2 — one delivery model: the widget's own `<script type="module">` runs
 //        natively. There is NO `unsafe-eval`. Before that module runs, a trusted
-//        inline bootstrap (also nonce'd) installs `window.ryu`/`window.openai`
+//        inline bootstrap (admitted by hash, as the module is) installs `window.ryu`/`window.openai`
 //        SYNCHRONOUSLY with the initial globals, because real Apps-SDK components
 //        read `window.openai.toolOutput` at module top-level.
 //   D3 — the CSP keeps the GOVERNED-EGRESS LOCK but matches ChatGPT's rendering:
-//        `default-src 'none'; script-src 'nonce-<n>'; style-src 'unsafe-inline';
+//        `default-src 'none'; script-src 'sha256-<h>'...; style-src 'unsafe-inline';
 //        img-src data: <proxy>; font-src data: <proxy>; media-src data: <proxy>;
 //        connect-src 'none'`. `connect-src 'none'` is NEVER widened — all
 //        widget->host RPC (incl. `callTool`) goes over the transferred MessagePort,
@@ -25,7 +25,7 @@
 //
 // The security boundary is still the null-origin `sandbox="allow-scripts"` iframe
 // (ExtensionHost) plus the host-side capability gate (rpc.ts); this file adds the
-// content-level defenses (nonce-only scripts, no eval, pinned CSP, proxied egress).
+// content-level defenses (hash-only scripts, no eval, pinned CSP, proxied egress).
 //
 // FILE LAYOUT: the CSP lives in `widget-csp.ts` and the governed asset rewrite in
 // `widget-assets.ts`; both are re-exported here so `@ryu/app-host/widget-bootstrap`
@@ -40,7 +40,12 @@ import {
 	rewriteWidgetAssets,
 	type WidgetAssetProxy,
 } from "./widget-assets.ts";
-import { buildWidgetCsp, sanitizeProxyOrigin } from "./widget-csp.ts";
+import {
+	buildWidgetCsp,
+	sanitizeProxyOrigin,
+	WIDGET_SCRIPT_ELEMENT_CSP,
+} from "./widget-csp.ts";
+import { admitWidgetScripts, scriptHashSource } from "./widget-script-hash.ts";
 
 export type { WidgetAssetProxy } from "./widget-assets.ts";
 export {
@@ -301,15 +306,17 @@ ${widgetRpcResultSettleScript()}
  * Turn a widget's self-contained HTML (base64) into the srcdoc the host mounts.
  *
  * Uses `DOMParser` (a real browser API in the Tauri webview) rather than string
- * surgery so a literal `<script` inside the bundled JS never gets a stray nonce:
+ * surgery so a literal `<script` inside the bundled JS is never taken for a tag:
  *   1. strip any CSP the widget shipped (ours is authoritative),
- *   2. nonce EVERY `<script>` (the bundle's module + our bootstrap) — under the
- *      D3 CSP a non-nonced script is refused, so a CDN-referencing widget fails
- *      closed,
- *   3. prepend the hard-pinned CSP meta and the synchronous bridge to `<head>`,
+ *   2. remove every `<script>` that names an address and hash the text of every
+ *      other one (the bundle's module) and of our bootstrap. The D3 CSP admits a
+ *      script by those hashes only, so a CDN-referencing widget fails closed and
+ *      running widget script cannot admit new script (`widget-script-hash.ts`),
+ *   3. prepend the hard-pinned CSP metas and the synchronous bridge to `<head>`,
  *      before the module script.
  *
  * @param nonce         Host-generated per-mount nonce (never widget/user input).
+ *                      Used for the postMessage handshake ONLY; it admits no script.
  * @param htmlBase64    The widget's single-file HTML document, base64-encoded.
  * @param serverId      The origin MCP server (exposed to the frame as read-only).
  * @param initialGlobals The globals to install synchronously (spec §1.3).
@@ -355,11 +362,9 @@ export function widgetBootstrapSrcdoc(
 		meta.remove();
 	}
 
-	// (2) Nonce every script element (module bundle + any others). Under the D3
-	// CSP a script without this nonce is refused execution.
-	for (const script of Array.from(doc.querySelectorAll("script"))) {
-		script.setAttribute("nonce", nonce);
-	}
+	// (2) Drop script elements that name an address and collect the hash of every
+	// inline one. Under the D3 CSP a script whose hash is not listed is refused.
+	const scriptHashes = admitWidgetScripts(doc);
 
 	// (2b) Rewrite declared remote asset URLs through the Core proxy. The CSP is the
 	// real boundary (a non-rewritten remote host is simply blocked by img-src); this
@@ -380,20 +385,26 @@ export function widgetBootstrapSrcdoc(
 		head.insertBefore(themeLayout, head.firstChild);
 	}
 
-	// (3) The synchronous bridge, then the CSP meta, inserted at the TOP of <head>
-	// so both precede the widget's module script (which sits at the end of <body>).
+	// (3) The synchronous bridge, then the CSP metas, inserted at the TOP of <head>
+	// so all precede the widget's module script (which sits at the end of <body>).
+	// Both policies apply; the second refuses every script that names an address.
 	const bridge = doc.createElement("script");
-	bridge.setAttribute("nonce", nonce);
-	bridge.textContent = bridgeSource(nonce, serverId, initialGlobals);
+	const bridgeText = bridgeSource(nonce, serverId, initialGlobals);
+	bridge.textContent = bridgeText;
 	head.insertBefore(bridge, head.firstChild);
 
-	const cspMeta = doc.createElement("meta");
-	cspMeta.setAttribute("http-equiv", "Content-Security-Policy");
-	cspMeta.setAttribute(
-		"content",
-		buildWidgetCsp(nonce, proxyPlan?.origin ?? null)
-	);
-	head.insertBefore(cspMeta, head.firstChild);
+	for (const policy of [
+		WIDGET_SCRIPT_ELEMENT_CSP,
+		buildWidgetCsp(
+			[scriptHashSource(bridgeText), ...scriptHashes],
+			proxyPlan?.origin ?? null
+		),
+	]) {
+		const cspMeta = doc.createElement("meta");
+		cspMeta.setAttribute("http-equiv", "Content-Security-Policy");
+		cspMeta.setAttribute("content", policy);
+		head.insertBefore(cspMeta, head.firstChild);
+	}
 
 	return `<!doctype html>\n${doc.documentElement.outerHTML}`;
 }

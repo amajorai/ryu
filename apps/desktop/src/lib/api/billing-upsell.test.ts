@@ -9,7 +9,6 @@ import { TOKEN_KEY } from "@/lib/auth-client.ts";
 import type { SubscriptionStatus } from "./billing.ts";
 import {
 	createCheckout,
-	ensureTrialAnchorMs,
 	fetchEntitlementSnapshot,
 	fetchEntitlementStatus,
 	validateLicenseKey,
@@ -116,7 +115,6 @@ it("keeps signed-out checks separate from a successful un-entitled reply", async
 		plan: null,
 		subscription: null,
 	});
-	expect(await ensureTrialAnchorMs()).toBeNull();
 	expect(await fetchUpsellState()).toBeNull();
 	expect(await fetchUpsellPitch()).toEqual([]);
 	await markUpsellShown(["investment"]);
@@ -233,17 +231,6 @@ it("keeps checkout input/auth and a fresh idempotency key on each attempt", asyn
 	responseStatus = 503;
 	await expect(createCheckout("max-yearly")).rejects.toThrow("not available");
 });
-it("posts the trial anchor and retains missing/invalid timestamp fallback", async () => {
-	storage.setItem(TOKEN_KEY, "billing-session");
-	response = { firstLaunchAt: "2026-10-06T00:00:00Z" };
-	expect(await ensureTrialAnchorMs()).toBe(Date.parse("2026-10-06T00:00:00Z"));
-	expect(calls[0]?.method).toBe("POST");
-	expect(calls[0]?.body).toBeNull();
-	response = {};
-	expect(await ensureTrialAnchorMs()).toBeNull();
-	response = { firstLaunchAt: "not-a-date" };
-	expect(await ensureTrialAnchorMs()).toBeNull();
-});
 it("validates the complete license reply and keeps future Polar status strings", async () => {
 	storage.setItem(TOKEN_KEY, "billing-session");
 	const licenseReply = {
@@ -327,7 +314,6 @@ it("preserves network-failure classification and best-effort marketing events", 
 		{ preconnect: nativeFetch.preconnect }
 	);
 	expect(await fetchEntitlementSnapshot()).toBeNull();
-	expect(await ensureTrialAnchorMs()).toBeNull();
 	await expect(createCheckout("pro-monthly")).rejects.toThrow(
 		"Could not reach the checkout server"
 	);

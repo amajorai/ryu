@@ -48,13 +48,15 @@ pub(crate) const DEFAULT_EXTRACT_CAP_BYTES: u64 = 500 * 1024 * 1024;
 /// Checking for `..` and `is_absolute()` is not enough on Windows, where a
 /// rooted path without a drive (`\Windows\x`) and a drive-relative one (`C:x`)
 /// are not "absolute" yet still make `dest_dir.join(rel)` discard `dest_dir`.
+///
+/// A plain name is not enough either: a LATER component such as `C:x` is a
+/// plain name to `components()`, yet joining it drops everything before it.
+/// So every name also passes the shared rule of `extract_guard` (no `:` on any
+/// OS; no device name or trailing dot or space on Windows), the same rule the
+/// guards apply when they build the path. An entry refused here is skipped
+/// whole, so not even its leading directories are created.
 fn is_safe_archive_entry_path(rel: &std::path::Path) -> bool {
-    rel.components().all(|component| {
-        matches!(
-            component,
-            std::path::Component::Normal(_) | std::path::Component::CurDir
-        )
-    })
+    crate::sidecar::extract_guard::join_confined(Path::new(""), rel).is_ok()
 }
 
 /// Extract **every** file entry from a `.tar.gz` archive into `dest_dir`,
@@ -79,6 +81,7 @@ pub(crate) fn extract_tar_gz_to_dir(
     use std::io::Read;
     use tar::Archive;
 
+    crate::sidecar::extract_guard::check_destination(dest_dir)?;
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("creating {}", dest_dir.display()))?;
 
@@ -101,7 +104,8 @@ pub(crate) fn extract_tar_gz_to_dir(
         let mut entry = entry.context("reading tar entry")?;
         let rel = entry.path().context("getting entry path")?.into_owned();
 
-        // Reject path traversal: skip any component that is `..` or absolute.
+        // Reject path traversal: skip an entry with a component that is `..`,
+        // absolute, or refused by the shared name rule (a `:` in the name).
         if !is_safe_archive_entry_path(&rel) {
             tracing::warn!("skipping unsafe tar entry path: {}", rel.display());
             continue;
@@ -141,6 +145,7 @@ pub(crate) fn extract_tar_bz2_to_dir(
     use std::io::Read;
     use tar::Archive;
 
+    crate::sidecar::extract_guard::check_destination(dest_dir)?;
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("creating {}", dest_dir.display()))?;
 
@@ -200,6 +205,7 @@ pub(crate) fn extract_zip_to_dir(
     use std::io::{Cursor, Read};
     use zip::ZipArchive;
 
+    crate::sidecar::extract_guard::check_destination(dest_dir)?;
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("creating {}", dest_dir.display()))?;
 
@@ -227,6 +233,7 @@ pub(crate) fn extract_zip_to_dir(
             // `create_dir_all` outside the sandbox (`PathBuf::join` semantics).
             // Mirror the file branch below, which already guards both.
             if !is_safe_archive_entry_path(&rel) {
+                tracing::warn!("skipping unsafe zip entry path: {entry_name}");
                 continue;
             }
             crate::sidecar::extract_guard::create_dir_confined(dest_dir, rel)?;

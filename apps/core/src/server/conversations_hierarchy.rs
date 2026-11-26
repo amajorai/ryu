@@ -276,6 +276,10 @@ pub use defaults::*;
 #[path = "conversations_hierarchy_store.rs"]
 mod store;
 
+#[path = "conversations_hierarchy_tree.rs"]
+mod tree;
+pub use tree::{ThreadTreeLink, ThreadTreeLinks, MAX_TREE_LEVELS, MAX_TREE_NODES};
+
 #[cfg(test)]
 #[path = "conversations_hierarchy_tests.rs"]
 mod tests;

@@ -104,8 +104,12 @@ pub fn parse_agent_item(root: &Path, path: &Path, index: Option<usize>) -> Optio
             model: agent.model,
         });
     }
-    if let Some(sub) = parse_codex_subagent(path) {
-        return Some(sub);
+    // A bot of an export archive is always a persona: front matter in its
+    // instructions is text, never a name, a model or a tool list.
+    if !bot_archive::is_staged_root(root) {
+        if let Some(sub) = parse_codex_subagent(path) {
+            return Some(sub);
+        }
     }
     let name = path.file_name()?.to_str()?;
     if name.eq_ignore_ascii_case("SOUL.md") || name.eq_ignore_ascii_case("IDENTITY.md") {

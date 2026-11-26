@@ -106,6 +106,15 @@ pub(in crate::server) async fn chat_retry(
         );
     }
 
+    // On a shared node a retry runs the stored folders again, so they must still
+    // lie in the node's member folders. Checked before the claim below.
+    if let Some(message) = crate::server::chat_checkpoints::turn_folders::stored_turn_refusal(
+        summary.folder_path.as_deref(),
+        summary.worktree_path.as_deref(),
+    ) {
+        return json_error(StatusCode::FORBIDDEN, message.to_owned());
+    }
+
     // The conditional update closes the two-window race between the summary read
     // and starting the background stream. Only one reconnecting desktop can win.
     match state

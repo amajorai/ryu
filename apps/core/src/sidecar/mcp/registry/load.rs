@@ -303,6 +303,7 @@ impl McpRegistry {
             || name == device_tool::SERVER_NAME
             || name == artifact_tool::SERVER_NAME
             || name == consent_tool::SERVER_NAME
+            || name == feedback_tool::SERVER_NAME
             || name == tasks_tool::SERVER_NAME
             || name == spaces_tool::SERVER_NAME
             || name == working_memory_tool::SERVER_NAME
@@ -316,6 +317,7 @@ impl McpRegistry {
             || name == skills_tool::SERVER_NAME
             || name == ui_tool::SERVER_NAME
             || name == usage_tool::SERVER_NAME
+            || name == builtin_servers::diagnostics::SERVER_NAME
             || name == treg_tool::SERVER_NAME
             || name == challenges_tool::SERVER_NAME
             || name == marketplace_tool::SERVER_NAME

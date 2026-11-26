@@ -86,6 +86,8 @@ pub(super) async fn source_summary(
 }
 
 /// The folder the thread works in: its worktree when it has one, else its folder.
+/// On a shared node a stored folder outside the member folders does not count,
+/// whoever stored it.
 pub(super) fn thread_folder(
     summary: &crate::server::conversations::ConversationSummary,
 ) -> Result<PathBuf, Response> {
@@ -96,7 +98,9 @@ pub(super) fn thread_folder(
     .into_iter()
     .flatten()
     .map(PathBuf::from)
-    .find(|path| path.is_dir())
+    .find(|path| {
+        path.is_dir() && crate::server::chat_checkpoints::turn_folders::stored_folder_allowed(path)
+    })
     .ok_or_else(|| {
         coded_error(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -135,3 +139,7 @@ pub(super) fn repo_wire(inspection: &handoff::WorkspaceInspection) -> RnpWorkspa
         upstream_ref: inspection.upstream_ref.clone(),
     }
 }
+
+#[cfg(test)]
+#[path = "routes_folder_tests.rs"]
+mod routes_folder_tests;

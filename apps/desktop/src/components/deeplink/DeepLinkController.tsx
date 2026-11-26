@@ -1,3 +1,12 @@
+import { Button } from "@ryu/ui/components/button.tsx";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@ryu/ui/components/dialog.tsx";
 import { completeComposioConnection } from "@ryuhq/core-client/composio.ts";
 import {
 	normalizeRnpNodeUrl,
@@ -23,8 +32,15 @@ import { isMainWindow } from "@/src/lib/window-routing.ts";
 import { useDeepLinkStore } from "@/src/store/useDeepLinkStore.ts";
 import { type Node, useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
+import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 import { ConnectCallbackDialog } from "./ConnectCallbackDialog.tsx";
 import { DeepLinkConfirmDialog } from "./DeepLinkConfirmDialog.tsx";
+import {
+	type ChatIntent,
+	keepFirstPending,
+	newChatTabOptions,
+	planNewChatLink,
+} from "./deep-link-chat.ts";
 
 type OpenTab = ReturnType<typeof useTabsContext>["openTab"];
 type HandoffIntent = Extract<DeepLinkIntent, { kind: "handoff" }>;
@@ -45,13 +61,25 @@ interface PendingHandoff {
 // the same set. An unknown key is ignored here exactly as before — a malicious or
 // stale link can't navigate somewhere unexpected.
 
+/** A new-chat link whose folder waits for the user's confirm. */
+interface PendingProjectChat {
+	intent: ChatIntent;
+	project: string;
+}
+
 /**
  * Act on a navigation intent (page or chat) by opening the right tab. Returns
  * true when the intent was navigation (no confirm needed); false for an action
  * intent (model/skill/node) that must go through the confirm dialog. Navigation
  * has no side effect — a chat prompt only PRE-SEEDS the composer, never sends.
+ * A chat link's folder is the exception: one the user does not already have is
+ * handed to `askProject` instead of opening (finding DT-1).
  */
-function navigateForIntent(intent: DeepLinkIntent, openTab: OpenTab): boolean {
+function navigateForIntent(
+	intent: DeepLinkIntent,
+	openTab: OpenTab,
+	askProject: (pending: PendingProjectChat) => void
+): boolean {
 	if (intent.kind === "plugin-app") {
 		openTab(
 			`/plugin/${encodeURIComponent(`mcp__${intent.pluginId}.${intent.toolName}`)}`,
@@ -78,17 +106,56 @@ function navigateForIntent(intent: DeepLinkIntent, openTab: OpenTab): boolean {
 		if (intent.conversationId) {
 			openTab("/chat", { conversationId: intent.conversationId });
 		} else {
-			openTab("/chat", {
-				forceNew: true,
-				title: "New chat",
-				initialPrompt: intent.prompt ?? undefined,
-				initialAgent: intent.agent ?? undefined,
-				initialProject: intent.project ?? undefined,
-			});
+			const plan = planNewChatLink(intent, useWorkspaceStore.getState());
+			if (plan.confirmProject) {
+				askProject({ intent, project: plan.confirmProject });
+			} else {
+				openTab("/chat", plan.options);
+			}
 		}
 		return true;
 	}
 	return false;
+}
+
+/**
+ * Asks before a link's folder becomes the project of a new chat. The full path
+ * is shown as the link spelled it, because that exact string is what Core is
+ * asked to open.
+ */
+function DeepLinkProjectDialog({
+	onCancel,
+	onConfirm,
+	path,
+}: {
+	onCancel: () => void;
+	onConfirm: () => void;
+	path: string;
+}) {
+	return (
+		<Dialog onOpenChange={(open) => (open ? undefined : onCancel())} open>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>Open a chat in this folder?</DialogTitle>
+					<DialogDescription>
+						A link wants this folder as the project of a new chat. Ryu will read
+						the folder and run git in it. Continue only if you trust the link.
+					</DialogDescription>
+				</DialogHeader>
+				<p className="break-all rounded-md bg-muted px-3 py-2 font-mono text-sm">
+					{path}
+				</p>
+				<DialogFooter>
+					<Button onClick={onCancel} type="button" variant="ghost">
+						Cancel
+					</Button>
+					<Button onClick={onConfirm} type="button" variant="mono">
+						Use this folder
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
 }
 
 /**
@@ -113,6 +180,8 @@ export function DeepLinkController() {
 	const [pendingHandoff, setPendingHandoff] = useState<PendingHandoff | null>(
 		null
 	);
+	const [pendingProjectChat, setPendingProjectChat] =
+		useState<PendingProjectChat | null>(null);
 
 	useEffect(() => {
 		if (!isMainWindow()) {
@@ -168,7 +237,12 @@ export function DeepLinkController() {
 				// Navigation intents act immediately (no side effect). Action intents
 				// open the relevant catalog tab for context, then route to the confirm
 				// dialog — the security boundary before any install/connect.
-				if (navigateForIntent(intent, openTab)) {
+				// A folder question that is already open stays: see `keepFirstPending`.
+				const askProject = (pending: PendingProjectChat) =>
+					setPendingProjectChat((current) =>
+						keepFirstPending(current, pending)
+					);
+				if (navigateForIntent(intent, openTab, askProject)) {
 					continue;
 				}
 				if (intent.kind === "model") {
@@ -222,6 +296,22 @@ export function DeepLinkController() {
 	return (
 		<>
 			<DeepLinkConfirmDialog />
+			{pendingProjectChat ? (
+				<DeepLinkProjectDialog
+					onCancel={() => setPendingProjectChat(null)}
+					onConfirm={() => {
+						openTab(
+							"/chat",
+							newChatTabOptions(
+								pendingProjectChat.intent,
+								pendingProjectChat.project
+							)
+						);
+						setPendingProjectChat(null);
+					}}
+					path={pendingProjectChat.project}
+				/>
+			) : null}
 			{pendingCallback ? (
 				<ConnectCallbackDialog
 					nodes={nodes}

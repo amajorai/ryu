@@ -32,6 +32,7 @@ export const OFFICIAL_NATIVE_MENU_MESSAGES: Readonly<
 	it: { "nativeMenu.edit": "Composizione", "nativeMenu.zoom": "Zoom" },
 	ja: { "nativeMenu.edit": "編集", "nativeMenu.zoom": "拡大/縮小" },
 	ko: { "nativeMenu.edit": "편집", "nativeMenu.zoom": "확대/축소" },
+	pl: { "nativeMenu.edit": "Edycja", "nativeMenu.zoom": "Powiększ" },
 	"pt-BR": { "nativeMenu.edit": "Editar", "nativeMenu.zoom": "Zoom" },
 	ru: { "nativeMenu.edit": "Правка", "nativeMenu.zoom": "Изменить масштаб" },
 	"zh-CN": { "nativeMenu.edit": "编辑", "nativeMenu.zoom": "缩放" },

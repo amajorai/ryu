@@ -1,7 +1,8 @@
 // Shared client↔node compatibility. Both rules under test are deliberate:
-// WARN-NEVER-BLOCK (every verdict is advisory) and FAIL-SOFT (anything unknown
-// resolves to "fine"). A node that predates a field must never be reported as
-// broken for not answering a question nobody used to ask.
+// WARN-NEVER-BLOCK (every version and channel verdict is advisory) and FAIL-SOFT
+// (anything unknown resolves to "fine"). A node that predates a field must never
+// be reported as broken for not answering a question nobody used to ask. The one
+// hard answer is the protocol range, tested in node-protocol.test.ts.
 
 import { describe, expect, it } from "bun:test";
 import {
@@ -9,9 +10,14 @@ import {
 	channelOf,
 	compareSemver,
 	hasCapability,
-	isNodeCompatible,
-	MIN_CORE_VERSION,
 } from "./node-compat.ts";
+import {
+	CLIENT_ACCEPTED_RANGE,
+	CORE_PROTOCOL_RANGE,
+	LEGACY_PROTOCOL,
+	LEGACY_PROTOCOL_RANGE,
+	PROTOCOL_MAX,
+} from "./node-protocol.ts";
 
 describe("channelOf", () => {
 	it("derives the channel from the version alone", () => {
@@ -61,24 +67,61 @@ describe("assessNode", () => {
 		// an error: a prompt that some node features may not render here.
 		const v = assessNode("0.0.18", { status: "ok", version: "0.1.0" });
 		expect(v.nodeIsNewer).toBe(true);
-		expect(v.belowFloor).toBe(false);
+		expect(v.protocol.compatible).toBe(true);
 		expect(v.ok).toBe(false);
 	});
 
 	it("is silent when client and node agree", () => {
-		const v = assessNode("0.0.18", { status: "ok", version: "0.0.18" });
+		const v = assessNode("0.0.18", {
+			protocol: CORE_PROTOCOL_RANGE,
+			status: "ok",
+			version: "0.0.18",
+		});
 		expect(v).toEqual({
-			belowFloor: false,
 			channelMismatch: null,
 			nodeIsNewer: false,
 			ok: true,
+			protocol: {
+				client: CLIENT_ACCEPTED_RANGE,
+				compatible: true,
+				node: CORE_PROTOCOL_RANGE,
+				protocol: PROTOCOL_MAX,
+			},
 		});
 	});
 
-	it("an older node is not 'newer', and clears the floor", () => {
+	it("an older node is not newer, and a node without a range is protocol 0", () => {
 		const v = assessNode("0.1.0", { status: "ok", version: "0.0.18" });
 		expect(v.nodeIsNewer).toBe(false);
-		expect(v.belowFloor).toBe(false);
+		expect(v.ok).toBe(true);
+		expect(v.protocol).toEqual({
+			client: CLIENT_ACCEPTED_RANGE,
+			compatible: true,
+			node: LEGACY_PROTOCOL_RANGE,
+			protocol: LEGACY_PROTOCOL,
+		});
+	});
+
+	it("names the side to update when the two share no protocol", () => {
+		// A node that dropped every protocol this client speaks. Same release
+		// version and channel, so only the protocol range can see it.
+		const node = { max: PROTOCOL_MAX + 2, min: PROTOCOL_MAX + 1 };
+		const v = assessNode("0.0.18", {
+			protocol: node,
+			status: "ok",
+			version: "0.0.18",
+		});
+		expect(v.ok).toBe(false);
+		expect(v.protocol).toEqual({
+			client: CLIENT_ACCEPTED_RANGE,
+			compatible: false,
+			node,
+			update: "client",
+		});
+		// It is also reported for a node that sends no version at all.
+		expect(assessNode("0.0.18", { protocol: node, status: "ok" }).ok).toBe(
+			false
+		);
 	});
 
 	it("fails soft when either side has no version", () => {
@@ -88,13 +131,7 @@ describe("assessNode", () => {
 	});
 });
 
-describe("floor and capabilities", () => {
-	it("treats an unknown version as compatible", () => {
-		expect(isNodeCompatible(null)).toBe(true);
-		expect(isNodeCompatible("garbage")).toBe(true);
-		expect(isNodeCompatible(MIN_CORE_VERSION)).toBe(true);
-	});
-
+describe("capabilities", () => {
 	it("treats a node with no capability list as having everything", () => {
 		// Otherwise upgrading the client would silently hide features that work.
 		expect(hasCapability(undefined, "spaces")).toBe(true);

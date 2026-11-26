@@ -14,6 +14,7 @@
 //! emitted for languages that validate manifests without a Rust FFI binding.
 
 pub mod avatar;
+pub mod declarative_http_path;
 pub mod host_api;
 pub mod interface_color_theme;
 pub mod manifest;

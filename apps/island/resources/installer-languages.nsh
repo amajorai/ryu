@@ -63,6 +63,7 @@
   LangString decompressionFailed 1042 "파일 압축을 풀지 못했습니다. 설치 프로그램을 다시 실행해 보세요." ; ko_KR
   LangString uninstallFailed 1042 "이전 애플리케이션 파일을 제거하지 못했습니다. 설치 프로그램을 다시 실행해 보세요." ; ko_KR
   LangString appClosing 1042 "실행 중인 ${PRODUCT_NAME}을(를) 닫는 중..." ; ko_KR
+  LangString appClosing 1045 "Zamykanie uruchomionego ${PRODUCT_NAME}..." ; pl_PL
   LangString appClosing 1046 "Fechando ${PRODUCT_NAME} em execução..." ; pt_BR
   LangString appClosing 1049 "Закрытие запущенного ${PRODUCT_NAME}..." ; ru_RU
   LangString decompressionFailed 2052 "解压文件失败。请尝试重新运行安装程序。" ; zh_CN

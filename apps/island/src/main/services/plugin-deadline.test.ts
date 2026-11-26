@@ -69,6 +69,7 @@ test("plugin probes and invokes keep their deadlines through response consumptio
 		);
 		for (const name of [
 			"plugin-host.ts",
+			"plugin-core-http.ts",
 			"plugin-host-contract.ts",
 			"response-deadline.ts",
 			"sse.ts",
@@ -86,7 +87,7 @@ test("plugin probes and invokes keep their deadlines through response consumptio
 		);
 		await writeFile(
 			join(root, "run.ts"),
-			'import * as host from "./plugin-host.ts"; const normal = await Promise.all([host.pluginContributions(), host.pluginUiBundle("fixture"), host.pluginUiBundle("missing"), host.pluginHostInvoke("fixture", "storage.get", {}), host.pluginHostInvoke("denied", "storage.get", {}), host.pluginCoreHttp({ method: "GET", path: "/api/okay" })]); const began = performance.now(); const stalled = await Promise.all([host.pluginContributions(), host.pluginUiBundle("slow"), host.pluginHostInvoke("slow", "storage.get", {}), host.pluginCoreHttp({ method: "GET", path: "/api/slow" })]); process.stdout.write(JSON.stringify({ normal, stalled, elapsedMs: performance.now() - began }));'
+			'import * as host from "./plugin-host.ts"; const normal = await Promise.all([host.pluginContributions(), host.pluginUiBundle("fixture"), host.pluginUiBundle("missing"), host.pluginHostInvoke("fixture", "storage.get", {}), host.pluginHostInvoke("denied", "storage.get", {}), host.pluginCoreHttp({ method: "GET", owner: { kind: "contribution", plugin: "fixture", http_policy: "owner" }, path: "/api/ext/fixture/okay" })]); const began = performance.now(); const stalled = await Promise.all([host.pluginContributions(), host.pluginUiBundle("slow"), host.pluginHostInvoke("slow", "storage.get", {}), host.pluginCoreHttp({ method: "GET", owner: { kind: "contribution", plugin: "fixture", http_policy: "owner" }, path: "/api/ext/fixture/slow" })]); process.stdout.write(JSON.stringify({ normal, stalled, elapsedMs: performance.now() - began }));'
 		);
 		const child = Bun.spawn([process.execPath, join(root, "run.ts")], {
 			stdout: "pipe",

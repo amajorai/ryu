@@ -1,4 +1,5 @@
 //! Core edits the same canonical SDK account configuration Gateway loads.
+use crate::server::plan_limits::AccountLimitReached;
 use ryu_gw_credentials::{
     sdk_provider_by_id, sdk_provider_by_kind, GenAiProviderConfig, SdkAuthKind, SdkEndpointConfig,
     SdkProviderDescriptor,
@@ -78,6 +79,9 @@ pub(super) fn mutate(
                 return Err("account index is not used when adding".into());
             }
             if !keys.iter().any(|old| old == key) {
+                // Only a new credential is refused; set, replace and remove pass.
+                AccountLimitReached::check(scope, keys.len())
+                    .map_err(AccountLimitReached::noted)?;
                 keys.push(key.to_owned());
             }
         }

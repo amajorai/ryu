@@ -48,7 +48,6 @@ import {
 	asRpcRequest,
 	assertGranted,
 	CodedRpcError,
-	dispatchRpc,
 	type RpcChunk,
 	type RpcResponse,
 	STREAMING_METHODS,
@@ -97,6 +96,7 @@ export type { ExtensionHostProps } from "./extension-host-props.ts";
 
 import { createCallBudget } from "./call-budget.ts";
 import type { ExtensionHostProps } from "./extension-host-props.ts";
+import { dispatchFrameRpc } from "./frame-rpc.ts";
 import { createMcpAppBridge } from "./mcp-app-bridge.ts";
 import {
 	armNavigationTeardown,
@@ -313,7 +313,7 @@ export function ExtensionHost({
 				);
 				return;
 			}
-			dispatchRpc(
+			dispatchFrameRpc(
 				req.method,
 				req.args,
 				granted,

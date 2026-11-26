@@ -63,7 +63,7 @@ export function VaultMachinesPanel({ target }: { target: ApiTarget }) {
 	const failed = (error: unknown) =>
 		sileo.error({
 			title: tl("That did not work"),
-			description: vaultErrorMessage(error, "Try again.", tl),
+			description: vaultErrorMessage(error, tl("Try again."), tl),
 		});
 	const refresh = () =>
 		queryClient.invalidateQueries({ queryKey: ["vault", "machines"] });

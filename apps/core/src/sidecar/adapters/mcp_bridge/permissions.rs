@@ -112,9 +112,10 @@ pub(super) async fn require_agent_builder_configure_permission(
 
 /// Whether `gate_id` changes settings that are approved one call at a time:
 /// Gateway or routing configuration, preferences (approval mode, the command
-/// scan, trusted workspaces) and workspace trust. "Allow for this chat" covers
-/// every later call to the tool whatever its arguments, so one approved edit
-/// would let a later, injected edit run without asking. See
+/// scan, trusted workspaces), workspace trust, and adding or installing an MCP
+/// server. "Allow for this chat" covers every later call to the tool whatever
+/// its arguments, so one approved edit would let a later, injected edit run
+/// without asking. See
 /// [`crate::approvals::chat_grants::requires_per_call_consent`].
 pub(super) fn requires_per_call_consent(gate_id: &str) -> bool {
     crate::approvals::chat_grants::requires_per_call_consent(gate_id)
@@ -241,6 +242,14 @@ mod tests {
         ));
         assert!(offers_allow_for_this_chat(
             "ryu_api.put_api_models_id_launch_config"
+        ));
+    }
+
+    #[test]
+    fn mcp_server_writes_are_offered_allow_once_only() {
+        assert!(!offers_allow_for_this_chat("ryu_api.post_api_mcp_servers"));
+        assert!(!offers_allow_for_this_chat(
+            "ryu_api.post_api_mcp_catalog_install"
         ));
     }
 

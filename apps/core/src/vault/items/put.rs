@@ -3,6 +3,17 @@
 
 use super::*;
 
+/// A new item to insert: where it lives, its schema and its values.
+pub(super) struct NewItem<'a> {
+    pub(super) coords: &'a ItemCoords,
+    pub(super) kind: &'a str,
+    pub(super) description: Option<&'a str>,
+    pub(super) fields: &'a [FieldDef],
+    pub(super) values: &'a BTreeMap<String, String>,
+    /// The merchant allowlist of a `card` item; `None` for any other kind.
+    pub(super) card_merchants: Option<&'a [String]>,
+}
+
 impl PluginSecretStore {
     /// Idempotent upsert. Creates the item (`Created`), or, when an item with
     /// the same kind, description, and field schema exists and every supplied
@@ -151,52 +162,81 @@ impl PluginSecretStore {
             return Ok((PutOutcome::Unchanged, view));
         }
 
-        let id = random_token("itm_");
-        let now = now_millis();
-        let present: BTreeSet<String> = values.keys().cloned().collect();
-        let status = status_for(&fields, &present);
-        tx.execute(
-            "INSERT INTO vault_items (id, environment, path, item_key, kind, description, fields,
-                 version, status, created_by, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?10)",
-            params![
-                id,
-                coords.environment,
-                coords.path,
-                coords.key,
+        self.insert_item_locked(
+            &tx,
+            &NewItem {
+                coords: &coords,
                 kind,
-                description,
-                serde_json::to_string(&fields)?,
-                status.as_str(),
-                actor.id,
-                now
-            ],
-        )?;
-        for (name, value) in &values {
-            self.put_value(&tx, &id, name, value)?;
-        }
-        if is_card {
-            self.card_refresh_meta_locked(&tx, &id, &coords, Some(&merchants))?;
-        }
-        let set: Vec<&String> = values.keys().collect();
-        append_event(
-            &tx,
-            &id,
-            &coords,
-            "created",
-            1,
+                description: description.as_deref(),
+                fields: &fields,
+                values: &values,
+                card_merchants: is_card.then_some(merchants.as_slice()),
+            },
             actor,
-            &json!({ "kind": kind, "fieldsSet": set, "status": status.as_str() }),
         )?;
-        self.audit_locked(
-            &tx,
-            &audit_entry(actor, "item.create", &coords, json!({ "fieldsSet": set })),
-        );
         let row = find_item(&tx, &coords)?.ok_or_else(|| not_found(&coords))?;
         let view = self.item_view_locked(&tx, &coords, &row, false)?;
         tx.commit()?;
         self.flush_audit(&conn);
         notify_events();
         Ok((PutOutcome::Created, view))
+    }
+
+    /// Insert a new item with its values, its `created` event and its audit
+    /// row. The caller holds the connection, has checked that nothing lives
+    /// at the coordinates, and commits.
+    pub(super) fn insert_item_locked(
+        &self,
+        conn: &Connection,
+        item: &NewItem<'_>,
+        actor: &AuditActor,
+    ) -> Result<()> {
+        let id = random_token("itm_");
+        let now = now_millis();
+        let present: BTreeSet<String> = item.values.keys().cloned().collect();
+        let status = status_for(item.fields, &present);
+        conn.execute(
+            "INSERT INTO vault_items (id, environment, path, item_key, kind, description, fields,
+                 version, status, created_by, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?10)",
+            params![
+                id,
+                item.coords.environment,
+                item.coords.path,
+                item.coords.key,
+                item.kind,
+                item.description,
+                serde_json::to_string(item.fields)?,
+                status.as_str(),
+                actor.id,
+                now
+            ],
+        )?;
+        for (name, value) in item.values {
+            self.put_value(conn, &id, name, value)?;
+        }
+        if let Some(merchants) = item.card_merchants {
+            self.card_refresh_meta_locked(conn, &id, item.coords, Some(merchants))?;
+        }
+        let set: Vec<&String> = item.values.keys().collect();
+        append_event(
+            conn,
+            &id,
+            item.coords,
+            "created",
+            1,
+            actor,
+            &json!({ "kind": item.kind, "fieldsSet": set, "status": status.as_str() }),
+        )?;
+        self.audit_locked(
+            conn,
+            &audit_entry(
+                actor,
+                "item.create",
+                item.coords,
+                json!({ "fieldsSet": set }),
+            ),
+        );
+        Ok(())
     }
 }

@@ -2,6 +2,7 @@ import {
 	type AppResponseValue,
 	appResponseValueSchema,
 } from "@ryuhq/core-client/app-request-json";
+import { mayAttachAccountJwt as sharedMayAttachAccountJwt } from "@ryuhq/protocol/account-jwt-gate";
 import type { z } from "zod";
 // apps/desktop/src/lib/api/client.ts
 //
@@ -16,12 +17,12 @@ import {
 	normalizePath,
 	recordHttpSample,
 } from "@/src/lib/dev-metrics.ts";
+import { isLinkAddedNode } from "@/src/lib/link-added-nodes.ts";
 import { getRealtimeJwt } from "@/src/lib/realtime/jwt.ts";
 import type { Node } from "@/src/store/useNodeStore.ts";
 import { ApiError, appDisabledFromBody } from "./client-api-error.ts";
 import { parseApiErrorBody } from "./client-errors.ts";
 import { identityHeaders } from "./client-identity.ts";
-import { hasConfidentialTransport } from "./client-transport.ts";
 
 export { ApiError, AppDisabledError } from "./client-api-error.ts";
 export { currentClientId, identityHeaders } from "./client-identity.ts";
@@ -51,14 +52,23 @@ export function maySendUserIdentity(target: ApiTarget): boolean {
  * the token and replay it. A managed delegation in `target.userJwt` is a
  * separate, node-bound credential that this check does not govern.
  *
- * Residual: this cannot tell an attacker's node from the user's own. A node
- * saved with any token, including one a `ryu://nodes/connect` link supplied,
- * still receives the account JWT over `https:`, and Core still admits that JWT
- * as a bearer on the user's managed nodes. Closing that needs a node-audience
- * bound credential checked by Core.
+ * A node saved from a `ryu://nodes/connect` link never qualifies
+ * (`link-added-nodes.ts`): the link supplied its address and its token, so
+ * neither says whose server it is. The rule itself is the shared
+ * `@ryuhq/protocol/account-jwt-gate`, the one mobile and the extension use.
+ *
+ * Residual: a node the user added by hand over `https:` still receives the
+ * account JWT, whoever runs it, and Core still admits that JWT as a bearer on
+ * the user's managed nodes. Closing that needs a node-audience bound
+ * credential checked by Core.
  */
 export function mayAttachAccountJwt(target: ApiTarget): boolean {
-	return maySendUserIdentity(target) && hasConfidentialTransport(target.url);
+	return sharedMayAttachAccountJwt({
+		addedByLink: isLinkAddedNode(target.url),
+		delegation: target.userJwt,
+		token: target.token,
+		url: target.url,
+	});
 }
 
 /**

@@ -1,4 +1,4 @@
-//! Plans, Core self-API and derived ext-API loopback arms.
+//! Plans, Core self-API, derived ext-API and self-diagnostics loopback arms.
 
 use super::Dispatch;
 use crate::sidecar::mcp::*;
@@ -101,7 +101,44 @@ impl McpRegistry {
                 return Err(anyhow!("{reason}"));
             }
         }
+        // Switching on an MCP server that came from a registry starts a program
+        // as the user. That stays with the person, whatever was approved in chat.
+        if let Some(reason) = self.agent_mcp_enable_refusal(tool_id, &arguments).await {
+            return Err(anyhow!("{reason}"));
+        }
         crate::self_api::dispatch(&self.http, tool_id, arguments, acting_user.as_deref()).await
+    }
+
+    /// Why this self-API call is refused because it would switch on an MCP
+    /// server installed from a registry; `None` for every other call. See
+    /// [`crate::self_api::mcp_server_enable_refusal`]. Fails closed: an app
+    /// enable call is refused when the installed apps cannot be read.
+    async fn agent_mcp_enable_refusal(&self, tool_id: &str, arguments: &Value) -> Option<String> {
+        crate::self_api::app_enable_target(tool_id, arguments)?;
+        let (Some(manifests), Some(store)) = (
+            self.self_build_manifests.as_ref(),
+            self.self_build_app_store.as_ref(),
+        ) else {
+            return crate::self_api::app_enable_unchecked_refusal(tool_id, arguments);
+        };
+        let Ok(records) = store.list_all_records().await else {
+            return crate::self_api::app_enable_unchecked_refusal(tool_id, arguments);
+        };
+        // The installed set and the raw enabled bits, as the lifecycle reads
+        // them when it resolves the enable order.
+        let installed: Vec<crate::plugin_manifest::PluginManifest> = manifests
+            .read()
+            .await
+            .iter()
+            .filter(|manifest| records.iter().any(|record| record.id == manifest.id))
+            .cloned()
+            .collect();
+        let enabled: std::collections::HashSet<String> = records
+            .iter()
+            .filter(|record| record.enabled)
+            .map(|record| record.id.clone())
+            .collect();
+        crate::self_api::mcp_server_enable_refusal(tool_id, arguments, &installed, &enabled)
     }
 
     // Derived ext-API tool (`crate::ext_api`): an installed app's OWN HTTP
@@ -244,6 +281,135 @@ impl McpRegistry {
         .map_err(|e| anyhow!(e))
     }
 
+    // Built-in self diagnostics (`builtin_servers::diagnostics`): two read-only
+    // tools that report Ryu's own state from Core's documented read routes,
+    // over this same loopback. Only `GET` is sent.
+    //
+    // TENANCY: on an unbound/personal node the node token is the boundary, as
+    // for the self-API arm. On an org-bound node the loopback always carries
+    // the acting-user proof, so every route applies the role and conversation
+    // access of the person in the chat, and node status is read only for the
+    // node owner or a member who manages nodes, in a private chat. Everyone
+    // else, and every agent with a restricted account policy, gets the host
+    // conversation only. No principal means no report.
+    pub(super) async fn dispatch_diagnostics(
+        &self,
+        call: Dispatch<'_>,
+        server: &str,
+        tool: &str,
+    ) -> Result<Value> {
+        use crate::sidecar::mcp::builtin_servers::diagnostics;
+        let Dispatch {
+            tool_id,
+            arguments,
+            allowlist,
+            host_conversation_id,
+            account_policy,
+            ..
+        } = call;
+        if let Some(list) = allowlist {
+            let candidate = RegistryTool::candidate(tool_id, server, tool);
+            if !tool_allowed(&candidate, list) {
+                return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+            }
+        }
+        let principal =
+            ToolPrincipal::resolve_optional(self.conversations.as_ref(), host_conversation_id)
+                .await;
+        let (scope, acting_user) = match principal {
+            ToolPrincipal::Unrestricted => {
+                if let Some(reason) =
+                    crate::server::tool_ingress_authority::owner_loopback_refusal(tool_id)
+                {
+                    return Err(anyhow!("{reason}"));
+                }
+                (diagnostics::Scope::Node, None)
+            }
+            ToolPrincipal::Owned { user_id, org_id } => {
+                let Some(node) = crate::sidecar::control_plane::registered_node() else {
+                    return Err(diagnostics_without_a_person(tool_id));
+                };
+                let scope = self
+                    .diagnostics_scope_for(&node, &user_id, org_id.as_deref(), host_conversation_id)
+                    .await;
+                (scope, Some(user_id))
+            }
+            ToolPrincipal::Unresolved => return Err(diagnostics_without_a_person(tool_id)),
+        };
+        let restricted = account_policy
+            .as_ref()
+            .is_some_and(|policy| !policy.is_unrestricted());
+        let scope = diagnostics::narrow_for_restricted_agent(scope, restricted);
+        let loopback = diagnostics::Loopback::for_this_node(&self.http, acting_user);
+        diagnostics::dispatch(tool, arguments, &loopback, scope, host_conversation_id).await
+    }
+
+    /// How far a `diagnostics.*` call may look for the person an agent acts for
+    /// on an org-bound node. See `builtin_servers::diagnostics::shared_node_scope`.
+    async fn diagnostics_scope_for(
+        &self,
+        node: &crate::sidecar::control_plane::RegisteredNode,
+        user_id: &str,
+        org_id: Option<&str>,
+        host_conversation_id: Option<&str>,
+    ) -> crate::sidecar::mcp::builtin_servers::diagnostics::Scope {
+        use crate::sidecar::mcp::builtin_servers::diagnostics::{
+            shared_node_scope, SharedNodeCaller,
+        };
+        let private_conversation = self
+            .host_conversation_is_private(host_conversation_id)
+            .await;
+        let node_owner = if node.scope == crate::sidecar::control_plane::NodeScope::Personal {
+            node.owner_user_id.as_deref()
+        } else {
+            None
+        };
+        // The role lookup asks the control plane, so it is skipped whenever it
+        // cannot change the answer.
+        let role_decides = private_conversation
+            && org_id == Some(node.org.id.as_str())
+            && node_owner != Some(user_id);
+        let manages_nodes = if role_decides {
+            Box::pin(crate::sidecar::control_plane::resolve_permission_context(
+                &self.http, user_id,
+            ))
+            .await
+            .permissions
+            .contains(crate::identity_verify::permissions::NODES_MANAGE)
+        } else {
+            false
+        };
+        shared_node_scope(&SharedNodeCaller {
+            user_id,
+            org_id,
+            node_org: &node.org.id,
+            node_owner,
+            manages_nodes,
+            private_conversation,
+        })
+    }
+
+    /// Whether the call was asked for by one person alone. A verified non-chat
+    /// caller asked directly; nobody else could have. In a chat, only a private
+    /// conversation with no collaborators counts.
+    async fn host_conversation_is_private(&self, host_conversation_id: Option<&str>) -> bool {
+        if authenticated_scope::current_principal().is_some() {
+            return true;
+        }
+        match (
+            self.conversations.as_ref(),
+            host_conversation_id.filter(|id| !id.is_empty()),
+        ) {
+            (Some(store), Some(id)) => store
+                .get_access_meta(id)
+                .await
+                .ok()
+                .flatten()
+                .is_some_and(|meta| meta.visibility == "private" && meta.collaborators.is_empty()),
+            _ => false,
+        }
+    }
+
     /// Check that the person an agent acts for on an org-bound node may call this
     /// self-API route. See [`crate::self_api::acting_user_refusal`].
     async fn authorize_self_api_for(
@@ -256,26 +422,9 @@ impl McpRegistry {
     ) -> Result<()> {
         let route = crate::self_api::route_for(tool_id)
             .ok_or_else(|| anyhow!("unknown core-api tool '{tool_id}'"))?;
-        // A verified non-chat caller asked directly; nobody else could have.
-        // In a chat, only a private conversation with no collaborators counts.
-        let private_conversation = if authenticated_scope::current_principal().is_some() {
-            true
-        } else {
-            match (
-                self.conversations.as_ref(),
-                host_conversation_id.filter(|id| !id.is_empty()),
-            ) {
-                (Some(store), Some(id)) => store
-                    .get_access_meta(id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .is_some_and(|meta| {
-                        meta.visibility == "private" && meta.collaborators.is_empty()
-                    }),
-                _ => false,
-            }
-        };
+        let private_conversation = self
+            .host_conversation_is_private(host_conversation_id)
+            .await;
         let node_owner = (node.scope == crate::sidecar::control_plane::NodeScope::Personal)
             .then_some(node.owner_user_id.as_deref())
             .flatten();
@@ -306,6 +455,20 @@ impl McpRegistry {
     }
 }
 
+/// The refusal for a diagnostics call on an org-bound node that no person can
+/// be named for (a workflow, a monitor, an untenanted conversation). Without a
+/// person there is nobody whose access the read could be held to.
+fn diagnostics_without_a_person(tool_id: &str) -> anyhow::Error {
+    anyhow!(
+        "`{tool_id}` reads Ryu's state as the person in the chat, and on this shared node \
+         this call has no such person. Call it from a chat."
+    )
+}
+
 #[cfg(test)]
 #[path = "../tests/dispatch_loopback.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/dispatch_mcp_enable.rs"]
+mod mcp_enable_tests;

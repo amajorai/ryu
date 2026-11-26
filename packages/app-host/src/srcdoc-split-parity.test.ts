@@ -39,6 +39,8 @@ function sha256(value: string): string {
 }
 
 const NONCE = "nonce-1234";
+// The hash source of the script text "abc" (script-src lists hashes, not the nonce).
+const SCRIPT_HASH = "'sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0='";
 const PLUGIN_ID = "@ryu/parity";
 const MOUNT_CONTEXT = { spaceId: "space-1", docId: "doc-</script>-1" };
 const THEME_TOKENS: Record<string, string> = {
@@ -281,9 +283,9 @@ function cases(): Record<string, string> {
 		)
 	);
 	out["rpc-args.script"] = RPC_ARGS_SCRIPT;
-	out["widget.csp"] = buildWidgetCsp(NONCE);
+	out["widget.csp"] = buildWidgetCsp([SCRIPT_HASH]);
 	out["widget.csp.proxy"] = buildWidgetCsp(
-		NONCE,
+		[SCRIPT_HASH],
 		"http://127.0.0.1:7980/ignored"
 	);
 	out["widget.proxy-origins"] = JSON.stringify(
@@ -330,7 +332,11 @@ function cases(): Record<string, string> {
 // Digests of the unsplit builders' output (sha256, hex). The plugin, html and
 // widget documents were recomputed on purpose for the app.request error relay:
 // their embedded RPC error decoder now copies `status` and `reason`, and
-// rejects an empty string error instead of resolving it.
+// rejects an empty string error instead of resolving it. The four widget
+// digests (both policies, both documents) were recomputed on purpose again
+// for script admission by hash: `script-src` lists sha256 hashes in place of
+// the nonce, no script element carries a nonce attribute, and the document
+// carries a second policy meta (`script-src-elem 'unsafe-inline'`).
 const EXPECTED: Record<string, string> = {
 	"plugin.minimal":
 		"d5b173c5a78f0cb58236116861612516d3c722ff81c2819ae7af0d6ed87dc5ac",
@@ -367,15 +373,15 @@ const EXPECTED: Record<string, string> = {
 	"rpc-args.script":
 		"d5d7fe354816139d400fddad95e78c3bd598a8eb838cfb5f193cf927d3ec1b41",
 	"widget.csp":
-		"fca0e98602851b4351cf112316138a740d9afcb99398b375b54939d5d917f053",
+		"466f9f181561519ea7fc161463eab85e6c8e874a1c07ed21aec90a6accd7f9b1",
 	"widget.csp.proxy":
-		"2e881e2e9050e566a58d2521c3d022219a0130caad4034a9df36b812d9313fca",
+		"4c887376a1d6337b6c6c4bc2bfa9602bae319dfdb7268348d122c9d8dce4382d",
 	"widget.proxy-origins":
 		"fb91e2c5029e67ff3dba2657870339c8dd6fff595912ab8940ac01ce399602eb",
 	"widget.srcdoc.plain":
-		"3ec897a3895c315038f944daf7cf2ece889d1d731c3ce3cf4f37d99a22bcc92e",
+		"8c3b15db2e80785b363f4e163d5cf6c1202e0710f8e28ce7c4a5f28be56d7eeb",
 	"widget.srcdoc.proxied":
-		"d08744d788fd8519451801f015d3d0b85d04ccf247a17648d23b89b2fca7680e",
+		"f4f86be636ed9d2d1a5844be93aafcd99ce829290ce426a7356c292cf8173543",
 };
 
 describe("srcdoc split parity", () => {

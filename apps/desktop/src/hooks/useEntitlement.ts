@@ -1,28 +1,21 @@
 // apps/desktop/src/hooks/useEntitlement.ts
 //
-// The desktop trial + paywall gate (epic #496, Unit C1).
+// The desktop access verdict. Personal use is free: every feature that runs on
+// the user's own computer is available with no trial clock, no paywall and no
+// cap, so nothing here can lock the app or pause local automations.
 //
-// Rollout: the whole trial + free-tier cap model sits behind the
-// `billing.desktop_trial` flag (default OFF for the waitlist phase). Off, the
-// verdict resolves as "beta" — free, uncapped, no trial clock, no paywall.
-//
-// Computes the access verdict at app entry from three inputs, in one PURE
-// decision (`decideDesktopAccess` in @ryu/auth/lib/plans):
-//   1. live entitlement   — GET /api/billing/subscription-status (bearer)
-//   2. trial anchor        — server-authoritative first-launch + local mirror
-//   3. license-key state   — a validated desktop license key (persisted)
+// Computes the verdict at app entry from two inputs, in one PURE decision
+// (`decideDesktopAccess` in @ryu/auth/lib/plans):
+//   1. live entitlement   - GET /api/billing/subscription-status (bearer)
+//   2. license-key state  - a validated desktop license key (persisted)
 // plus a cached last-good entitlement for the OFFLINE GRACE window so a paying
-// user is never falsely locked out by a flaky network.
+// user keeps their plan through a flaky network.
 //
-// SOFT paywall (three bands): a `paywalled` verdict (trial over, no active
-// subscription, no valid license key) means FREE band only — it never blocks the
-// app shell. Band 1 local chat stays usable; `canUse(capability)` gates Band 2
-// (pro / one-time Lifetime) and Band 3 (subscription-only) features, and the
-// dismissible PaywallModal upsells. Freemium (2026-07-11): plain post-trial Free
-// keeps its LOCAL autonomy running — Core autonomy is paused only on a genuine
-// hard lock (reason "locked"), not on trial-expiry; see `apps/core/src/entitlement.rs`.
+// `canUse(capability)` gates only the capabilities Ryu pays for per user
+// (managed inference, cloud sync, cloud nodes, hosted bots, team seats, agent
+// mail); they need an active subscription.
 //
-// A FOURTH thing resolves here and feeds NONE of the above: the lifetime
+// One more thing resolves here and feeds NONE of the above: the lifetime
 // "1 year of updates" window, mirrored into `src/lib/updates-window.ts` for the
 // UPDATER. It governs only which builds are OFFERED. A desktop licence is
 // perpetual, so the window never enters `decideDesktopAccess`, never reaches
@@ -31,29 +24,23 @@
 // `packages/api/src/routers/billing.ts`.
 //
 // Local persistence (offline fallback) is the Tauri store (entitlement.bin):
-//   - firstLaunchAt   mirror of the server anchor (survives a /trial outage)
 //   - lastGoodEnt     the most recent successful entitlement + when it was cached
 //   - licenseKey      the validated key, re-checked online on next launch
+// An older build may have left a `firstLaunchAtMs` trial anchor there. It is no
+// longer read or written, and it is left on disk.
 
-import {
-	DESKTOP_TRIAL_FLAG,
-	featureFlagFallback,
-} from "@ryu/auth/lib/feature-flags";
 import {
 	type CachedEntitlement,
 	capabilityTier,
 	type DesktopGateVerdict,
 	decideDesktopAccess,
-	desktopGateConfig,
 	type Entitlement,
 	type GatedCapability,
 	updatesWindowApplies,
 } from "@ryu/auth/lib/plans";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-	ensureTrialAnchorMs,
 	fetchEntitlementSnapshot,
-	hasBillingAuth,
 	type LicenseValidateResult,
 	validateLicenseKey,
 } from "@/src/lib/api/billing.ts";
@@ -65,14 +52,12 @@ import {
 import {
 	captureFeatureFlagScope,
 	publishFeatureFlags,
-	readFeatureFlag,
 } from "@/src/lib/feature-flags.ts";
 import { invokeWhenReady, isNoDesktopBackend } from "@/src/lib/tauri-ready.ts";
 import { setUpdatesWindow } from "@/src/lib/updates-window.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
 const STORE_FILE = "entitlement.bin";
-const KEY_FIRST_LAUNCH = "firstLaunchAtMs";
 const KEY_LAST_GOOD = "lastGoodEntitlement";
 /** Legacy plaintext location of the license key, read once to migrate it. */
 const KEY_LICENSE = "licenseKey";
@@ -111,7 +96,8 @@ async function writeStore<TValue>(key: string, value: TValue): Promise<void> {
 		await store.set(key, value);
 		await store.save();
 	} catch {
-		// Non-fatal: persistence is best-effort; the gate degrades to the trial.
+		// Non-fatal: persistence is best-effort; without a cache there is simply
+		// no offline grace.
 	}
 }
 
@@ -224,6 +210,24 @@ function toCached(ent: Entitlement): CachedEntitlement {
 	};
 }
 
+/**
+ * Whether a resolved verdict unlocks `capability`. Subscription-only
+ * capabilities (real recurring cost) need an active plan with managed access;
+ * anything else is a local feature and is free. False while unresolved. See
+ * CAPABILITY_TIERS in @ryu/auth/lib/plans.
+ */
+export function verdictAllows(
+	verdict: DesktopGateVerdict | null,
+	capability: GatedCapability
+): boolean {
+	if (!verdict) {
+		return false;
+	}
+	return capabilityTier(capability) === "subscription"
+		? verdict.managedInference
+		: verdict.proUnlocked;
+}
+
 export interface UseEntitlement {
 	/**
 	 * Validate + persist a license key, then re-resolve. Returns the validate
@@ -233,7 +237,7 @@ export interface UseEntitlement {
 	applyLicenseKey: (key: string) => Promise<LicenseValidateResult>;
 	/** Convenience: whether a given gated capability is unlocked. */
 	canUse: (capability: GatedCapability) => boolean;
-	/** False until the first resolution completes (avoid a paywall flash). */
+	/** False until the first resolution completes. */
 	ready: boolean;
 	/** Re-run the full resolution (after sign-in / purchase / key entry). */
 	refresh: () => Promise<void>;
@@ -242,9 +246,9 @@ export interface UseEntitlement {
 }
 
 /**
- * Resolve and watch the desktop access verdict. Reads the live entitlement +
- * trial anchor + license state, falls back to the local Tauri-store mirror when
- * the control plane is unreachable, and recomputes the verdict via the pure
+ * Resolve and watch the desktop access verdict. Reads the live entitlement and
+ * the license state, falls back to the local Tauri-store mirror when the
+ * control plane is unreachable, and recomputes the verdict via the pure
  * `decideDesktopAccess`.
  */
 export function useEntitlement(): UseEntitlement {
@@ -325,42 +329,12 @@ export function useEntitlement(): UseEntitlement {
 			);
 		}
 
-		// 2) Whether the trial + free-tier caps are rolled out at all. Off (the
-		//    waitlist-phase default) resolves as "free during beta": no trial
-		//    clock, no paywall, no caps; paid plans and licences still win. Read
-		//    from this reply first, then the last-good published map, then the
-		//    compiled-in default, so a failed check never flips the decision.
-		const trialEnabled =
-			snapshot?.features?.[DESKTOP_TRIAL_FLAG] ??
-			readFeatureFlag(DESKTOP_TRIAL_FLAG) ??
-			featureFlagFallback(DESKTOP_TRIAL_FLAG);
-
-		// 2b) The trial anchor: server-authoritative, mirrored locally so a /trial
-		//     outage (or no sign-in) still has a clock. Once we know the server
-		//     value we persist it; the local mirror is the offline fallback.
-		//     Skipped while the trial is off so the clock does not run out during
-		//     the beta and greet the user with an expired trial once it turns on.
-		let firstLaunchMs: number | null = null;
-		if (trialEnabled) {
-			const localFirstLaunch = await readStore<number>(KEY_FIRST_LAUNCH);
-			const serverFirstLaunch = await ensureTrialAnchorMs();
-			firstLaunchMs = serverFirstLaunch ?? localFirstLaunch;
-			if (serverFirstLaunch && serverFirstLaunch !== localFirstLaunch) {
-				await writeStore(KEY_FIRST_LAUNCH, serverFirstLaunch);
-			} else if (!(serverFirstLaunch || localFirstLaunch) && hasBillingAuth()) {
-				// First ever launch with no server answer: seed a local anchor so the
-				// trial clock starts now and is not perpetually "fresh".
-				const now = Date.now();
-				await writeStore(KEY_FIRST_LAUNCH, now);
-			}
-		}
-
 		if (liveEntitlement) {
 			await writeStore(KEY_LAST_GOOD, toCached(liveEntitlement));
 		}
 		const cached = await readStore<CachedEntitlement>(KEY_LAST_GOOD);
 
-		// 3) The license-key state: re-validate a stored key online; if the check
+		// 2) The license-key state: re-validate a stored key online; if the check
 		//    cannot run, keep trusting the last-known-active flag (offline grace
 		//    rides the lastGood cache instead).
 		const licenseRead = await readLicenseKey();
@@ -377,30 +351,26 @@ export function useEntitlement(): UseEntitlement {
 			}
 		}
 
-		// Exactly the inputs this decision has always taken. The updates window
-		// above is deliberately NOT one of them: a desktop licence is a perpetual
-		// one-time purchase, and a lapsed window means only that newer builds stop
-		// being offered — it must never revoke access. See the perpetual-licence
-		// note above `licenseView` in `packages/api/src/routers/billing.ts`.
+		// The updates window above is deliberately NOT an input: a desktop licence
+		// is a perpetual one-time purchase, and a lapsed window means only that
+		// newer builds stop being offered. It must never revoke access. See the
+		// perpetual-licence note above `licenseView` in
+		// `packages/api/src/routers/billing.ts`.
 		//
 		// A locked keychain is "unknown", not "no license": with a verdict already
-		// resolved, keep it rather than downgrade a licensed user to the trial or
-		// paywall. With none yet (first launch), decide from the other inputs (the
-		// cached last-good entitlement rides the grace window) and let the retry
-		// below correct it once the key can be read.
+		// resolved, keep it rather than show a licensed user as free. With none yet
+		// (first launch), decide from the other inputs (the cached last-good
+		// entitlement rides the grace window) and let the retry below correct it
+		// once the key can be read.
 		const next =
 			locked && verdictRef.current
 				? verdictRef.current
-				: decideDesktopAccess(
-						{
-							firstLaunchMs,
-							liveEntitlement,
-							licenseActive,
-							cached,
-							nowMs: Date.now(),
-						},
-						desktopGateConfig(trialEnabled)
-					);
+				: decideDesktopAccess({
+						liveEntitlement,
+						licenseActive,
+						cached,
+						nowMs: Date.now(),
+					});
 		verdictRef.current = next;
 		setVerdict(next);
 		setReady(true);
@@ -427,28 +397,22 @@ export function useEntitlement(): UseEntitlement {
 			lockedAttempts.current = 0;
 		}
 
-		// Push the node entitlement flag to Core so its scheduler pauses (or
-		// resumes) autonomous automation. Freemium (2026-07-11): trial-expiry now
-		// drops the user into the FREE tier, whose LOCAL automations must keep
-		// running — managed inference spend is separately gated at the gateway /
-		// balance layer, not the scheduler. So we only pause Core autonomy for a
-		// genuine hard lock (reason "locked"), never for plain post-trial Free
-		// (reason "trial-expired"). The verdict cannot distinguish a lapsed sub
-		// from plain Free, and the balance gate covers both, so this is the safe
-		// default; do NOT restore a `!paywalled` push here. Best-effort: an
-		// unreachable local Core keeps its last-seeded value (default-ON). See
-		// `apps/core/src/entitlement.rs`. Skipped once unmounted (see `mounted`):
-		// a mounted owner, or Core's next startup, re-seeds it.
+		// Push the node entitlement flag to Core. It is always on: personal use is
+		// free, so no verdict pauses local automations. Managed inference spend is
+		// gated separately (the flag below, the gateway and the balance layer).
+		// Best-effort: an unreachable local Core keeps its last-seeded value
+		// (default-ON). See `apps/core/src/entitlement.rs`. Skipped once unmounted
+		// (see `mounted`): a mounted owner, or Core's next startup, re-seeds it.
 		if (!mounted.current) {
 			return;
 		}
 		try {
 			const target = toTarget(useNodeStore.getState().getActiveNode());
-			await setEntitlementActive(target, next.reason !== "locked");
+			await setEntitlementActive(target, true);
 			await setManagedInferenceEntitled(target, Boolean(next.managedInference));
 		} catch {
-			// Non-fatal: Core sync is best-effort; the paywall UI already gated the
-			// shell, and Core re-reads the flag on its next startup regardless.
+			// Non-fatal: Core sync is best-effort, and Core re-reads the flag on its
+			// next startup regardless.
 		}
 	}, []);
 
@@ -493,17 +457,8 @@ export function useEntitlement(): UseEntitlement {
 	);
 
 	const canUse = useCallback(
-		(capability: GatedCapability): boolean => {
-			if (!verdict) {
-				return false;
-			}
-			// Band 3 (subscription-only, real recurring cost) needs an active plan;
-			// Band 2 (pro) unlocks with a one-time Lifetime license, any subscription,
-			// or the trial. See CAPABILITY_TIERS in @ryu/auth/lib/plans.
-			return capabilityTier(capability) === "subscription"
-				? verdict.managedInference
-				: verdict.proUnlocked;
-		},
+		(capability: GatedCapability): boolean =>
+			verdictAllows(verdict, capability),
 		[verdict]
 	);
 

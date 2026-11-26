@@ -13,6 +13,7 @@ import {
 } from "./app-request-json.ts";
 import type { ApprovalI18n } from "./approval-text.ts";
 import { type ApiTarget, request } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
 export type ApprovalKind =
 	| "tool_call"
@@ -233,7 +234,7 @@ export async function getApproval(
 ): Promise<ApprovalRequest | null> {
 	const json = await request(
 		target,
-		`/api/approvals/${id}`,
+		`/api/approvals/${encodePathId(id)}`,
 		{},
 		approvalItemResponseSchema
 	);
@@ -245,7 +246,11 @@ export async function approveApproval(
 	id: string,
 	note?: string
 ): Promise<ApprovalRequest> {
-	return await decide(target, `/api/approvals/${id}/approve`, note);
+	return await decide(
+		target,
+		`/api/approvals/${encodePathId(id)}/approve`,
+		note
+	);
 }
 
 export async function rejectApproval(
@@ -253,7 +258,11 @@ export async function rejectApproval(
 	id: string,
 	note?: string
 ): Promise<ApprovalRequest> {
-	return await decide(target, `/api/approvals/${id}/reject`, note);
+	return await decide(
+		target,
+		`/api/approvals/${encodePathId(id)}/reject`,
+		note
+	);
 }
 
 async function decide(

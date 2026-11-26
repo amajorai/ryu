@@ -58,16 +58,21 @@ pub(super) fn capture_with_vault_and_policy(
         {
             bail!("Pi conversation account binding is invalid");
         }
-        if explicit_identity.is_some_and(|identity| identity != captured.process_identity()) {
-            bail!("Pi conversation account changed; start a new conversation");
+        if policy.in_pool(&captured.account_id) {
+            if explicit_identity.is_some_and(|identity| identity != captured.process_identity()) {
+                bail!("Pi conversation account changed; start a new conversation");
+            }
+            if !policy.allowed(&captured.account_id) {
+                bail!("This conversation's Pi account is disabled; enable it again or start a new conversation");
+            }
+            if verify_account(vault, &scope, &captured.account_id)? != captured.credential_kind {
+                bail!("Captured Pi credential kind changed; start a new conversation");
+            }
+            return Ok(Some(captured));
         }
-        if !policy.allowed(&captured.account_id) {
-            bail!("This conversation's Pi account is disabled; enable it again or start a new conversation");
-        }
-        if verify_account(vault, &scope, &captured.account_id)? != captured.credential_kind {
-            bail!("Captured Pi credential kind changed; start a new conversation");
-        }
-        return Ok(Some(captured));
+        // The agent's custom account pool does not hold this account any
+        // more: release the conversation and choose again inside the pool.
+        vault.remove(AFFINITY_SCOPE, &captured.session_key)?;
     }
     let explicit_account = explicit_identity
         .map(|identity| {
@@ -80,7 +85,11 @@ pub(super) fn capture_with_vault_and_policy(
     let account_id = match explicit_account {
         Some(account) => account.to_owned(),
         None => {
-            if policy.strategy != Strategy::Manual {
+            // Inside a custom account pool even "manual" chooses among the
+            // pool's accounts: the active one when the pool holds it, else
+            // the first usable one.
+            let pooled = policy.pool.is_some();
+            if policy.strategy != Strategy::Manual || pooled {
                 let accounts = vault.list(&scope)?;
                 let kinds = super::super::sdk_account_routing::credential_kinds(provider_id);
                 let mut candidates = Vec::new();
@@ -113,9 +122,17 @@ pub(super) fn capture_with_vault_and_policy(
                         },
                     )
                     .collect();
+                let active = (policy.strategy == Strategy::Manual)
+                    .then(|| accounts.iter().find(|account| account.active))
+                    .flatten()
+                    .map(|account| account.account_id.as_str());
                 chooser
-                    .select_captured(provider_id, &captured, None, policy)?
-                    .context("No enabled SDK accounts have usable credentials")?
+                    .select_captured(provider_id, &captured, active, policy)?
+                    .context(if pooled {
+                        "No account in this agent's account pool has usable credentials"
+                    } else {
+                        "No enabled SDK accounts have usable credentials"
+                    })?
             } else {
                 let Some(active) = vault.active_info(&scope)? else {
                     return Ok(None);

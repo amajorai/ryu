@@ -16,6 +16,12 @@ export interface SelfHostedEnterpriseLicense {
 	licenseId: string | null;
 	organizationId: string;
 	plan: "enterprise" | "enterprise-plus" | "dedicated";
+	/**
+	 * People the whole install may hold, when the license states a count. Read
+	 * only by the self-hosted member limit (`self-hosted-member-limit.ts`); null
+	 * for a license without the claim, which leaves that limit unchanged.
+	 */
+	seats: number | null;
 }
 
 const headerSchema = z.object({
@@ -34,6 +40,9 @@ const payloadSchema = z.object({
 		z.array(z.enum(ENTERPRISE_CAPABILITIES))
 	),
 	licenseId: z.string().nullable().catch(null),
+	// Optional. A missing or malformed count is null: the license stays valid
+	// for its capabilities and simply does not raise the member limit.
+	seats: z.number().int().min(1).nullable().catch(null),
 });
 function decodeJson<S extends z.ZodType>(
 	value: string,
@@ -129,5 +138,6 @@ export function verifySelfHostedEnterpriseLicense(
 		licenseId: payload.licenseId,
 		organizationId,
 		plan,
+		seats: payload.seats,
 	};
 }

@@ -37,18 +37,6 @@ function isLoopbackTarget(url: string): boolean {
 	}
 }
 
-/** TLS to any host, or a Core on this machine. Cleartext to another host is not. */
-export function hasConfidentialTransport(url: string): boolean {
-	if (isLoopbackTarget(url)) {
-		return true;
-	}
-	try {
-		return new URL(url).protocol === "https:";
-	} catch {
-		return false;
-	}
-}
-
 /**
  * Build the buyer-token header from the signed-in control-plane session token,
  * but only for a loopback Core target. A remote or malformed target gets no

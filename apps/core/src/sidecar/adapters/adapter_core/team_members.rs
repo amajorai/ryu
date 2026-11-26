@@ -32,6 +32,9 @@ pub struct TeamRunDeps {
     /// The verified caller's exact-agent ACL, applied to each member's settled
     /// agent (including a Router/auto handoff). `None` for internal fan-out.
     pub agent_resource_authorization: Option<Arc<AgentResourceAuthorization>>,
+    /// The thread this turn runs in, when it has an ownership record (owner,
+    /// Stop). `None` keeps the turn exactly as it was before threads had owners.
+    pub thread: Option<Arc<TeamThreadTurn>>,
 }
 
 /// Run a single team member for one turn and return its final assistant text.
@@ -95,6 +98,12 @@ pub(crate) async fn run_member_text_with_flags(
         deps.acp_conversation_generation.clone()
     } else {
         Some(None)
+    };
+    // A side query (no conversation) is not part of the thread's task.
+    let in_thread = conversation_id.is_some();
+    let messages = match deps.thread.as_deref() {
+        Some(thread) if in_thread => thread.brief(member_id, messages),
+        _ => messages,
     };
     let req = ChatStreamRequest {
         fresh_session: false,
@@ -161,28 +170,35 @@ pub(crate) async fn run_member_text_with_flags(
     // Team members run with auto-recall OFF: a single user message is fanned out
     // to N members, so per-member recall would be N× redundant retrieval on the
     // same query. Recall is wired at the single-agent HTTP chat handler.
-    let response = route_chat_stream(
-        req,
-        Arc::clone(&deps.registry),
-        deps.conversations.clone(),
-        deps.agent_store.clone(),
-        Arc::clone(&deps.manager),
-        deps.memory.clone(),
-        Arc::clone(&deps.worktree_diffs),
-        Arc::clone(&deps.mcp),
-        deps.skills.clone(),
-        deps.traces.clone(),
-        None,
-        // Team member turns inherit engine overflow handling (see above).
-        None,
-        // Team members run with `persist = false` and the orchestrator writes one
-        // combined turn, so a per-member retry would have to be reconciled against
-        // a reply that has not been assembled yet. Left on the direct path.
-        crate::routing_policy::reactive::TurnWatch::off(),
-        None,
-    )
-    .await;
-    drain_text_reply(response).await
+    let run = async {
+        let response = route_chat_stream(
+            req,
+            Arc::clone(&deps.registry),
+            deps.conversations.clone(),
+            deps.agent_store.clone(),
+            Arc::clone(&deps.manager),
+            deps.memory.clone(),
+            Arc::clone(&deps.worktree_diffs),
+            Arc::clone(&deps.mcp),
+            deps.skills.clone(),
+            deps.traces.clone(),
+            None,
+            // Team member turns inherit engine overflow handling (see above).
+            None,
+            // Team members run with `persist = false` and the orchestrator writes one
+            // combined turn, so a per-member retry would have to be reconciled against
+            // a reply that has not been assembled yet. Left on the direct path.
+            crate::routing_policy::reactive::TurnWatch::off(),
+            None,
+        )
+        .await;
+        drain_text_reply(response).await
+    };
+    // A thread with an ownership record can be stopped while the member runs.
+    match deps.thread.as_deref() {
+        Some(thread) => thread.run(member_id, in_thread, run).await,
+        None => run.await,
+    }
 }
 
 /// Clone `original`, rewriting the last user message so `preamble` precedes its

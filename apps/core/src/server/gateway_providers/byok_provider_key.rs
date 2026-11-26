@@ -1,6 +1,7 @@
 //! BYOK provider-key vault (Unit U026).
 // test-exempt: moved verbatim out of server/mod.rs; tests in server/tests/.
 
+use crate::server::plan_limits::AccountLimitReached;
 use crate::server::*;
 
 // ── BYOK provider-key vault (Unit U026) ────────────────────────────────────
@@ -117,6 +118,24 @@ pub(in crate::server) fn clear_gateway_provider_keys(
     entries.remove(provider);
 }
 
+/// The answer to a refused account edit: `409` with the limit's fields when the
+/// provider is full, else `400` with the edit's own sentence.
+pub(in crate::server) fn account_edit_refusal(
+    error: String,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let refusal = crate::server::plan_limits::take_refusal()
+        .filter(|_| error == crate::server::plan_limits::ACCOUNT_LIMIT_MESSAGE);
+    let Some(refusal) = refusal else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "error": error })),
+        );
+    };
+    let (status, Json(mut body)) = refusal.response();
+    body["success"] = json!(false);
+    (status, Json(body))
+}
+
 /// Edit the provider's rotation set without returning any credential to the client.
 /// Indexes use the same deduplicated order that Gateway reports as api_key_count:
 /// the primary key first, followed by additional keys.
@@ -169,6 +188,8 @@ pub(in crate::server) fn patch_gateway_provider_accounts(
             if keys.iter().any(|existing| existing == key) {
                 return Err("this provider key is already connected".to_owned());
             }
+            // Only a new key is refused; replace and remove always pass.
+            AccountLimitReached::check(provider, keys.len()).map_err(AccountLimitReached::noted)?;
             keys.push(key.to_owned());
         }
         "remove" => {

@@ -26,18 +26,14 @@ import { translate as tl } from "@ryu/i18n/core";
 import { hasBillingAuth } from "@/src/lib/api/billing.ts";
 
 /**
- * The effective plan for numeric caps. Trial and one-time Lifetime (license)
- * users have `proUnlocked` true but no PURCHASED plan (`plan === null`); band
- * them into `"pro"` so they get the paid (uncapped) limits, matching the plan's
- * "Trial = Pro" and "Lifetime gets all pro" rules. A signed-in free / paywalled
- * user (`proUnlocked` false, `plan` null) keeps the FREE caps. `"pro"` is
- * equivalent to `"desktop-license"` for every count field this bridge enforces,
- * so we do not need to distinguish the two here. (Hosted Space storage differs
- * — Pro 10 GB, the license 20 GB — but it is not a desktop-enforced cap.)
+ * The effective plan for numeric caps: the resolved plan, or `null` for a free
+ * (personal use) desktop. The free row has no cap on any desktop count (tabs,
+ * remote nodes, agents, Spaces), so a free user is never prompted; only quotas
+ * that cost money per user keep finite numbers in `plan-quotas.ts`.
  *
  * A verdict that has not resolved yet is `undefined` (unknown), NOT `null`
- * (free): {@link capLimit} fails open on it so a payer is never capped at
- * startup while the entitlement check is still in flight.
+ * (free): {@link capLimit} fails open on it so nobody is capped at startup
+ * while the entitlement check is still in flight.
  */
 export function effectivePlan(
 	verdict: DesktopGateVerdict | null
@@ -45,7 +41,7 @@ export function effectivePlan(
 	if (!verdict) {
 		return undefined;
 	}
-	return verdict.plan ?? (verdict.proUnlocked ? "pro" : null);
+	return verdict.plan;
 }
 
 /**

@@ -46,6 +46,36 @@ pub const TURN_NO_PROVIDER_MESSAGE: Template = |arg| {
 };
 pub const NO_RESPONSE_MESSAGE: Template = |_| format!("The agent sent no response.");
 
+// ---- approval buttons (Telegram, Slack, Discord) -----------------------------
+
+/// First line of the message that asks a chat to approve a waiting tool call.
+pub const APPROVAL_REQUEST_MESSAGE: Template = |arg| {
+    format!(
+        "The agent {agent} wants to run {tool}.",
+        agent = arg("agent"),
+        tool = arg("tool")
+    )
+};
+/// The same line when the agent has no name to show.
+pub const APPROVAL_REQUEST_UNNAMED_MESSAGE: Template =
+    |arg| format!("An agent wants to run {tool}.", tool = arg("tool"));
+pub const APPROVAL_APPROVE_BUTTON_MESSAGE: Template = |_| format!("Approve request");
+pub const APPROVAL_DENY_BUTTON_MESSAGE: Template = |_| format!("Deny request");
+pub const APPROVAL_APPROVED_MESSAGE: Template = |_| format!("Approved. The action is running.");
+pub const APPROVAL_DENIED_MESSAGE: Template = |_| format!("Denied. The action was not run.");
+pub const APPROVAL_EXPIRED_MESSAGE: Template =
+    |_| format!("This request expired. The action was not run.");
+pub const APPROVAL_CANCELLED_MESSAGE: Template =
+    |_| format!("This request was cancelled. The action was not run.");
+/// The buttons are stale: the approval can only be decided in the app now.
+pub const APPROVAL_GONE_MESSAGE: Template =
+    |_| format!("These buttons no longer work. Open Ryu to decide this request.");
+/// Shown only to someone who pressed a button they may not use.
+pub const APPROVAL_NOT_ALLOWED_MESSAGE: Template =
+    |_| format!("You cannot decide this request here.");
+pub const APPROVAL_UNAVAILABLE_MESSAGE: Template =
+    |_| format!("Ryu could not record your choice. Try again, or open Ryu.");
+
 // ---- command help (WhatsApp, OpenWA and iMessage have no command menu) -------
 
 pub const NO_COMMANDS_MESSAGE: Template = |_| format!("No commands are available right now.");

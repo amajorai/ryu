@@ -17,6 +17,8 @@
 //! axum HTTP handlers that call these functions, the live `WorktreeDiffStore`
 //! run-state, and the ChatStreamRequest→cwd threading all stay in Core.
 
+mod git_command;
+pub use git_command::git_command_with_env;
 mod win_process;
 
 pub mod checkpoints;
@@ -29,13 +31,13 @@ pub mod worktree;
 // git ceiling before any test runs, so fixture `git` calls never reach a
 // surrounding checkout.
 #[cfg(test)]
-mod test_process_env;
-#[cfg(test)]
 #[path = "checkpoints/rewind_pin_tests.rs"]
 mod checkpoint_rewind_pin_tests;
 #[cfg(test)]
 #[path = "git/hooks_tests.rs"]
 mod git_hooks_tests;
+#[cfg(test)]
+mod test_process_env;
 #[cfg(test)]
 #[path = "worktree_branch_tests.rs"]
 mod worktree_branch_tests;

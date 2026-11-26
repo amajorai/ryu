@@ -29,6 +29,7 @@ use axum::Router;
 
 use crate::server::ServerState;
 
+mod capture_consent;
 mod computer_use_settings;
 
 /// Max request body Core buffers + forwards (mirrors the ext-proxy default).
@@ -67,6 +68,7 @@ const GET_ALLOWLIST: &[&str] = &[
     "activity/recent",
     "proactive",
     "capture/control",
+    "capture/consent",
     "computer-use/config",
     "agent/tools",
 ];
@@ -74,6 +76,7 @@ const POST_ALLOWLIST: &[&str] = &[
     "agent",
     "api/feedback",
     "capture/control",
+    "capture/consent",
     "computer-use/config",
     "computer-use/run",
 ];
@@ -143,6 +146,11 @@ async fn shadow_proxy(
 
     if sub_path == "computer-use/config" {
         return computer_use_settings::handle(&state, req).await;
+    }
+    // Capture consent is Core's own record, never forwarded: it must be
+    // readable and changeable while Shadow is stopped.
+    if sub_path == "capture/consent" {
+        return capture_consent::handle(&state, req).await;
     }
 
     // Shadow computer use drives the node's own display. A conversation whose
@@ -254,6 +262,9 @@ mod tests {
         assert!(is_allowed(&Method::GET, "capture/control"));
         assert!(is_allowed(&Method::GET, "computer-use/config"));
         assert!(is_allowed(&Method::POST, "capture/control"));
+        assert!(is_allowed(&Method::GET, "capture/consent"));
+        assert!(is_allowed(&Method::POST, "capture/consent"));
+        assert!(!is_allowed(&Method::DELETE, "capture/consent"));
         assert!(is_allowed(&Method::POST, "agent"));
         assert!(is_allowed(&Method::POST, "computer-use/config"));
         assert!(is_allowed(&Method::POST, "computer-use/run"));

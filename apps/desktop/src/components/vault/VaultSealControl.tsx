@@ -73,7 +73,7 @@ export function VaultSealControl({
 		} catch (caught) {
 			sileo.error({
 				title: tl("Could not seal"),
-				description: vaultErrorMessage(caught, "Try again.", tl),
+				description: vaultErrorMessage(caught, tl("Try again."), tl),
 			});
 		} finally {
 			setPending(false);

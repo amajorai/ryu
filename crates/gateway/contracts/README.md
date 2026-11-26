@@ -51,6 +51,12 @@ the extracted stages peers rather than a chain. Today it holds:
   list the same endpoint (`same_endpoint_key`: vendor and endpoint id) the `PricePrecedence`
   switch keeps one and orders the rest. Core's Integrations Store applies it
   (`RYU_TOOL_CATALOG_PRECEDENCE`, `apps/core/src/treg_catalog.rs`).
+- **Channel conversation ids.** `fixtures/channel-conversation-id-cases-v1.json` lists the Core
+  conversation id of each kind of channel chat, and which ids Core's rule accepts. No type lives
+  here for it. The Gateway's mapping (`crates/gateway/channels/src/runtime/conversation_id.rs`),
+  the cloud-bot's twin (`apps/cloud-bot/src/conversation-id.ts`) and Core's
+  `POST /api/channels/run` handler test all read the same file, so the senders and Core cannot
+  drift apart.
 
 ## How it is consumed
 

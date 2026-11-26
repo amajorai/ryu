@@ -18,8 +18,9 @@
 //!   mismatch means no grant, so the call falls back to the inbox.
 //! - **conversation**: this tool, any arguments, for the rest of the conversation
 //!   (in memory, cleared on restart). Never for a tool that changes the policy
-//!   that gates agents ([`requires_per_call_consent`]): those are allowed one
-//!   call at a time, whatever the bridge or a forged answer records.
+//!   that gates agents, or that writes the MCP server list
+//!   ([`requires_per_call_consent`]): those are allowed one call at a time,
+//!   whatever the bridge or a forged answer records.
 //!
 //! A transport without a permission channel (the network MCP route, PTC code,
 //! routines) never records a grant, so it keeps the inbox behaviour unchanged.
@@ -92,18 +93,42 @@ const PER_CALL_CONSENT_PREFIXES: &[&str] = &[
     "/api/workspace-trust/",
 ];
 
+/// Self-API routes that write the MCP server list (`mcp.json`) by registering
+/// a server or installing one from the catalog. What such a call does is
+/// decided by its arguments. A `command` is a program that runs as the user,
+/// and a `url` with headers says where a saved key is sent. "Allow for this
+/// chat" would let a later call through with arguments nobody saw.
+///
+/// An entry matches its own path and everything below it, and a sibling such
+/// as `/api/mcp/sandbox/enable` is not matched. Changing and removing a server
+/// (`/api/mcp/servers/{name}`) are not self-API tools, because they are not in
+/// the OpenAPI document; the entry covers that path as a guard for the day
+/// they are. Reads are never mutating, so listing the servers is unaffected.
+const PER_CALL_CONSENT_ROUTES: &[&str] = &["/api/mcp/servers", "/api/mcp/catalog/install"];
+
+/// Whether a write to the route at `path_template` is approved one call at a
+/// time (see [`PER_CALL_CONSENT_PREFIXES`] and [`PER_CALL_CONSENT_ROUTES`]).
+fn write_needs_per_call_consent(path_template: &str) -> bool {
+    PER_CALL_CONSENT_PREFIXES
+        .iter()
+        .any(|prefix| path_template.starts_with(prefix))
+        || PER_CALL_CONSENT_ROUTES.iter().any(|route| {
+            path_template
+                .strip_prefix(*route)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        })
+}
+
 /// Whether `tool_id` must be approved one call at a time. "Allow for this
 /// chat" covers every later call to the tool whatever its arguments, so one
 /// approved theme change would let a later, injected call switch approval mode
-/// or the command scan off without asking. These keep "Allow once" only.
+/// or the command scan off without asking, and one approved MCP server would
+/// let a later call add another. These keep "Allow once" only.
 pub fn requires_per_call_consent(tool_id: &str) -> bool {
     let id = canonical(tool_id);
     crate::self_api::is_mutating(&id)
-        && crate::self_api::route_for(&id).is_some_and(|route| {
-            PER_CALL_CONSENT_PREFIXES
-                .iter()
-                .any(|prefix| route.path_template.starts_with(prefix))
-        })
+        && crate::self_api::route_for(&id)
+            .is_some_and(|route| write_needs_per_call_consent(&route.path_template))
 }
 
 fn fingerprint(arguments: &Value) -> String {
@@ -273,6 +298,86 @@ mod tests {
         grant_once("conv-policy", PREFERENCES, &theme);
         assert!(take("conv-policy", PREFERENCES, &theme));
         assert!(!take("conv-policy", PREFERENCES, &theme));
+    }
+
+    const ADD_MCP_SERVER: &str = "ryu_api.post_api_mcp_servers";
+    const INSTALL_MCP_SERVER: &str = "ryu_api.post_api_mcp_catalog_install";
+
+    #[test]
+    fn mcp_server_writes_never_get_a_conversation_grant() {
+        for tool in [ADD_MCP_SERVER, INSTALL_MCP_SERVER] {
+            assert!(crate::self_api::route_for(tool).is_some(), "{tool}");
+            assert!(chat_confirmable(tool), "{tool}");
+            assert!(requires_per_call_consent(tool), "{tool}");
+
+            // "Allow for this chat" on one server must not let a later call in
+            // the same chat add another one with arguments nobody saw.
+            grant_for_conversation("conv-mcp", tool);
+            assert!(!allowed_for_conversation("conv-mcp", tool), "{tool}");
+            let second = json!({ "body": { "name": "other", "command": "other-program" } });
+            assert!(!take("conv-mcp", tool, &second), "{tool}");
+
+            // "Allow once" still covers the one call the person saw.
+            let seen = json!({ "body": { "name": "docs", "url": "https://example.com/mcp" } });
+            grant_once("conv-mcp", tool, &seen);
+            assert!(!take("conv-mcp", tool, &second), "{tool}");
+            assert!(take("conv-mcp", tool, &seen), "{tool}");
+            assert!(!take("conv-mcp", tool, &seen), "{tool}");
+        }
+    }
+
+    #[test]
+    fn listing_mcp_servers_and_neighbouring_mcp_tools_are_unchanged() {
+        // The read on the same path is a tool, is never gated, and has no card.
+        const LIST: &str = "ryu_api.get_api_mcp_servers";
+        assert!(crate::self_api::route_for(LIST).is_some());
+        assert!(!chat_confirmable(LIST));
+        assert!(!requires_per_call_consent(LIST));
+
+        // Other writes under `/api/mcp/` keep "Allow for this chat".
+        for tool in [
+            "ryu_api.post_api_mcp_sandbox_enable",
+            "ryu_api.post_api_mcp_resources_read",
+        ] {
+            assert!(crate::self_api::route_for(tool).is_some(), "{tool}");
+            assert!(!requires_per_call_consent(tool), "{tool}");
+            grant_for_conversation("conv-mcp-neighbour", tool);
+            assert!(
+                take("conv-mcp-neighbour", tool, &json!({ "a": 1 })),
+                "{tool}"
+            );
+            assert!(
+                take("conv-mcp-neighbour", tool, &json!({ "a": 2 })),
+                "{tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn changing_or_removing_an_mcp_server_is_covered_before_it_is_a_tool() {
+        // `PUT` and `DELETE /api/mcp/servers/{name}` are mounted but are not in
+        // the OpenAPI document, so the self-API has no tool for them. Documenting
+        // them makes them tools at once, so the route list covers them already.
+        for tool in [
+            "ryu_api.put_api_mcp_servers_name",
+            "ryu_api.delete_api_mcp_servers_name",
+        ] {
+            assert!(
+                crate::self_api::route_for(tool).is_none(),
+                "{tool} is now a self-API tool: check that it asks on every call, then update this test"
+            );
+        }
+        assert!(write_needs_per_call_consent("/api/mcp/servers"));
+        assert!(write_needs_per_call_consent("/api/mcp/servers/{name}"));
+        assert!(write_needs_per_call_consent("/api/mcp/catalog/install"));
+
+        // A match ends at a path segment, and the catalog reads stay out.
+        assert!(!write_needs_per_call_consent("/api/mcp/servers-preview"));
+        assert!(!write_needs_per_call_consent("/api/mcp/catalog"));
+        assert!(!write_needs_per_call_consent("/api/mcp/catalog/detail"));
+        assert!(!write_needs_per_call_consent("/api/mcp/sandbox/enable"));
+        // The older families still match by prefix.
+        assert!(write_needs_per_call_consent("/api/preferences/{key}"));
     }
 
     #[test]

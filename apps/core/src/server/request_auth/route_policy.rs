@@ -72,6 +72,13 @@ pub(in crate::server) fn route_policy(
     if path_has_prefix(path, "/api/pair") || path == "/api/node/token/rotate" {
         return RoutePolicy::OwnerOnly;
     }
+    // A chat button press is reported by the Gateway, which holds the node
+    // token. The report names the chat account that pressed, and Core cannot
+    // check that part itself, so a paired device or a member must never be
+    // able to send one.
+    if path_has_prefix(path, "/api/channels/approvals") {
+        return RoutePolicy::OwnerOnly;
+    }
     if path_has_prefix(path, "/api/chat")
         || path_has_prefix(path, "/api/device-tools")
         || path_has_prefix(path, "/api/conversations")
@@ -91,7 +98,7 @@ pub(in crate::server) fn route_policy(
         let segments: Vec<_> = suffix.split('/').collect();
         let capability = match segments.as_slice() {
             ["main-threads"] if read => Some(Capability::ChatRead),
-            ["threads", id] | ["threads", id, "sessions"] if read && !id.is_empty() => {
+            ["threads", id] | ["threads", id, "sessions" | "tree"] if read && !id.is_empty() => {
                 Some(Capability::ChatRead)
             }
             ["threads", id, "project" | "coordination"]

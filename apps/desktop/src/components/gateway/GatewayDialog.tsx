@@ -38,6 +38,7 @@ import { useSettingReveal } from "@/src/hooks/useSettingReveal.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { requestSettingReveal } from "@/src/lib/settings-focus.ts";
 import type { SettingsEntry } from "@/src/lib/settings-index.ts";
+import { canonicalGatewaySection } from "@/src/lib/settings-levels.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 import { GATEWAY_SECTIONS } from "./gateway-dialog/gateway-sections.ts";
@@ -50,11 +51,11 @@ export { RoutingCard } from "./gateway-dialog/routing-card.tsx";
 export { SmartRoutingCard } from "./gateway-dialog/smart-routing-card.tsx";
 
 /**
- * `access` is the legacy deep link for the Connections hub. It renders the same
- * pane, so it resolves to `connections` and its nav row lights up.
+ * Old section ids resolve to their canonical id (`access` is the legacy deep
+ * link for the Connections hub), so the nav row of the real pane lights up.
  */
 function canonicalSection(section: string): string {
-	return section === "access" ? "connections" : section;
+	return canonicalGatewaySection(section);
 }
 
 interface GatewayDialogProps {

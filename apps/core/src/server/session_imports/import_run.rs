@@ -49,10 +49,21 @@ pub(in crate::server) async fn scan_import_handler(
     }
 }
 
+mod operation;
+pub(crate) use operation::register_import_operation_runner;
+
 #[derive(serde::Deserialize)]
 pub(in crate::server) struct RunImportBody {
     pub(in crate::server) path: String,
     pub(in crate::server) items: Vec<crate::import::ImportSelection>,
+    /// `"async": true` starts the batch as a durable operation and answers at
+    /// once with its id; progress and results are read from `/api/operations`.
+    #[serde(default, rename = "async")]
+    pub(in crate::server) run_async: bool,
+    /// With `async`: a repeated request with the same key returns the
+    /// operation the first one started.
+    #[serde(default, rename = "idempotencyKey")]
+    pub(in crate::server) idempotency_key: Option<String>,
 }
 
 /// `POST /api/import/run { path, items: [{ kind, id }] }` — import the selected
@@ -79,24 +90,50 @@ pub(in crate::server) async fn run_import_handler(
     if body.items.is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "no items selected".to_string());
     }
+    if body.run_async {
+        // Off the request: the batch keeps running when the client goes away,
+        // and continues with the items that are left after a node restart.
+        return operation::start_on_node(&caller, &root, body.items, body.idempotency_key).await;
+    }
     let results = apply_import_selections(&state, &caller, &root, body.items).await;
-    let imported = results
-        .iter()
-        .filter(|outcome| outcome.status == "imported")
-        .count();
-    let skipped = results
-        .iter()
-        .filter(|outcome| outcome.status == "skipped")
-        .count();
-    let failed = results
-        .iter()
-        .filter(|outcome| outcome.status == "failed")
-        .count();
-    let source = root
-        .file_name()
+    let count = |status: &str| {
+        results
+            .iter()
+            .filter(|outcome| outcome.status == status)
+            .count()
+    };
+    announce_import_complete(
+        &root,
+        count("imported"),
+        count("skipped"),
+        count("failed"),
+        caller.as_ref().map(|verified| verified.user_id.clone()),
+    );
+    Json(json!({
+        "root": root.to_string_lossy(),
+        "results": results,
+    }))
+    .into_response()
+}
+
+/// The folder name an import is shown under.
+pub(in crate::server) fn import_source_name(root: &std::path::Path) -> &str {
+    root.file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
-        .unwrap_or("agent setup");
+        .unwrap_or("agent setup")
+}
+
+/// The one "Import complete" notification of a finished batch, the same for
+/// the request path and the durable operation.
+pub(in crate::server) fn announce_import_complete(
+    root: &std::path::Path,
+    imported: usize,
+    skipped: usize,
+    failed: usize,
+    user_id: Option<String>,
+) {
+    let source = import_source_name(root);
     let level = if failed > 0 {
         "warning"
     } else if imported > 0 {
@@ -108,13 +145,8 @@ pub(in crate::server) async fn run_import_handler(
         "Import complete",
         format!("{imported} imported, {skipped} already present, {failed} failed from {source}."),
         level,
-        caller.as_ref().map(|verified| verified.user_id.clone()),
+        user_id,
     );
-    Json(json!({
-        "root": root.to_string_lossy(),
-        "results": results,
-    }))
-    .into_response()
 }
 
 /// Apply a selected setup batch through the existing import store seams. The
@@ -127,18 +159,54 @@ pub(crate) async fn apply_import_selections(
     root: &std::path::Path,
     selections: Vec<crate::import::ImportSelection>,
 ) -> Vec<crate::import::ImportOutcome> {
-    let mut export_batch = read_chat_export_batch(caller, root, &selections).await;
+    let mut steps = ImportSteps::open(state, caller, root, &selections).await;
     let mut results = Vec::with_capacity(selections.len());
-    for selection in selections {
-        let outcome = match export_batch.as_mut() {
-            Some(batch) if selection.kind == crate::import::kind::CONVERSATIONS => {
-                import_chat_export_item(state, caller, root, &selection, Some(batch)).await
-            }
-            _ => import_setup_item(state, caller, root, &selection).await,
-        };
-        results.push(outcome);
+    for selection in &selections {
+        results.push(steps.apply(selection).await);
     }
     results
+}
+
+/// One import batch, taken item by item. The request path, agent sync and the
+/// durable import operation all step through this, so what an item does cannot
+/// differ between them.
+pub(in crate::server) struct ImportSteps<'a> {
+    state: &'a ServerState,
+    caller: &'a Option<crate::identity_verify::VerifiedCaller>,
+    root: &'a std::path::Path,
+    export_batch: Option<ChatExportBatch>,
+}
+
+impl<'a> ImportSteps<'a> {
+    /// Prepare a batch for `selections`: a chat export several of whose groups
+    /// are selected is read once here.
+    pub(in crate::server) async fn open(
+        state: &'a ServerState,
+        caller: &'a Option<crate::identity_verify::VerifiedCaller>,
+        root: &'a std::path::Path,
+        selections: &[crate::import::ImportSelection],
+    ) -> Self {
+        Self {
+            state,
+            caller,
+            root,
+            export_batch: read_chat_export_batch(caller, root, selections).await,
+        }
+    }
+
+    /// Import one item. An error becomes a `failed` outcome, never an abort.
+    pub(in crate::server) async fn apply(
+        &mut self,
+        selection: &crate::import::ImportSelection,
+    ) -> crate::import::ImportOutcome {
+        match self.export_batch.as_mut() {
+            Some(batch) if selection.kind == crate::import::kind::CONVERSATIONS => {
+                import_chat_export_item(self.state, self.caller, self.root, selection, Some(batch))
+                    .await
+            }
+            _ => import_setup_item(self.state, self.caller, self.root, selection).await,
+        }
+    }
 }
 
 /// The conversation groups and projects of a ChatGPT / Claude export, read in
@@ -207,6 +275,11 @@ pub(in crate::server) async fn import_setup_item(
         crate::import::kind::AGENT => import_agent_item(state, root, selection).await,
         crate::import::kind::SLASH_COMMAND => {
             import_slash_command_item(state, root, selection).await
+        }
+        // A staged bot export archive lists one item per bot for its files
+        // and chats; any other folder with this kind is a chat export.
+        crate::import::kind::CONVERSATIONS if crate::import::bot_archive::is_staged_root(root) => {
+            import_bot_archive_item(state, caller, root, selection).await
         }
         crate::import::kind::CONVERSATIONS => {
             import_chat_export_item(state, caller, root, selection, None).await
@@ -303,8 +376,22 @@ pub(in crate::server) async fn import_skill_item(
             );
         }
     };
+    // A skill from a bot export archive was written by a model in another
+    // product. It never replaces an installed skill, and it stays off until
+    // the user turns it on.
+    let from_archive = crate::import::bot_archive::is_staged_root(root);
+    if from_archive && crate::import::bot_archive::skill_is_installed(&dir) {
+        return crate::import::ImportOutcome::already(
+            crate::import::kind::SKILL,
+            &selection.id,
+            &selection.id,
+        );
+    }
     match crate::skills_catalog::from_source::install_from_dir(&dir, None) {
         Ok(result) => {
+            if from_archive {
+                ryu_skills::set_active(&result.slug, false);
+            }
             state.skills.reload();
             crate::import::ImportOutcome::ok(
                 crate::import::kind::SKILL,

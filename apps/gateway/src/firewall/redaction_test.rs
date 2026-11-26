@@ -263,3 +263,76 @@ fn redact_outbound_ignores_every_config_gate() {
     let both = format!("{} {}", secrets[0], secrets[1]);
     assert_eq!(gated.redact_outbound(&both).1, ["gh_pat", "gh_pat"]);
 }
+
+/// A curated scanner (it has `scan_set`) and the same scanner without it.
+fn curated_pair(redact_pii: bool, redact_secrets: bool) -> (FirewallScanner, FirewallScanner) {
+    let build = || {
+        FirewallScanner::new_scoped(FirewallConfig {
+            policy: FirewallPolicy::Sanitize,
+            redact_pii,
+            redact_secrets,
+            ..FirewallConfig::default()
+        })
+    };
+    let mut off = build();
+    off.scan_set = None;
+    (build(), off)
+}
+
+#[test]
+fn sanitize_matches_with_the_scan_set_on_and_off() {
+    let mut hays: Vec<String> = [
+        "",
+        "plain prose with no secrets at all",
+        "caf\u{E9} \u{1F600} \u{4F60}\u{597D}",
+        "ticket 4000 0000 0000 0000 open, mask 255.255.255.0",
+        "pay with 4111 1111 1111 1111 and host 8.8.8.8",
+        "\u{E000}123-45-6789\u{E001} and \u{F8FF}sk-abcdefghijklmnopqrstuvwxyz\u{F8FF}",
+        "123-45-678\u{663} and \u{212A}AKIAABCDEFGHIJKLMNOP",
+    ]
+    .iter()
+    .map(|text| (*text).to_owned())
+    .collect();
+    let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+    hays.extend((0..1500).map(|_| haystack(&mut rng)));
+    // Clean prose is the case the set skips; the generator makes dense PII.
+    hays.extend((0..200).map(|i| format!("message {i}: please review the draft, thanks")));
+    for (redact_pii, redact_secrets) in [(true, true), (true, false), (false, true), (false, false)]
+    {
+        let (on, off) = curated_pair(redact_pii, redact_secrets);
+        assert!(on.scan_set.is_some());
+        let (mut changed, mut kept) = (0, 0);
+        for text in &hays {
+            let sanitized = on.sanitize(text);
+            assert_eq!(sanitized, off.sanitize(text), "sanitize on {text:?}");
+            let delta = on.sanitize_changed(text);
+            assert_eq!(delta, off.sanitize_changed(text), "changed on {text:?}");
+            // `sanitize_changed` is `sanitize` minus the copy of unchanged text.
+            assert_eq!(delta.is_some(), sanitized != *text, "on {text:?}");
+            assert_eq!(
+                delta.as_deref().unwrap_or(text.as_str()),
+                sanitized,
+                "on {text:?}"
+            );
+            changed += usize::from(delta.is_some());
+            kept += usize::from(delta.is_none());
+        }
+        assert!(kept >= 200, "only {kept} unchanged");
+        if redact_pii || redact_secrets {
+            assert!(changed > 500, "only {changed} rewrites");
+        } else {
+            assert_eq!(changed, 0);
+        }
+    }
+}
+
+#[test]
+fn a_scanner_with_custom_patterns_sanitizes_without_the_set() {
+    let scanner = scanner();
+    assert!(scanner.scan_set.is_none());
+    assert_eq!(scanner.sanitize_changed("no match here"), None);
+    assert_eq!(
+        scanner.sanitize_changed("badge EMP-123456").as_deref(),
+        Some("badge [REDACTED:EMPLOYEE_ID]")
+    );
+}

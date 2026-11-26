@@ -132,6 +132,7 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
     let mut assistant_message_ids = Vec::new();
     let mut interactive_markup = None;
     let mut agent_reactions = Vec::new();
+    let mut approval_prompts = Vec::new();
     let reply = if runtime.routes_via_core() {
         match runtime
             .run_via_core(
@@ -147,12 +148,14 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
                 assistant_message_ids = result.assistant_message_ids;
                 interactive_markup = result.interactive_markup;
                 agent_reactions = result.agent_reactions;
+                approval_prompts = result.approval_prompts;
                 result.reply
             }
             Ok(result) => {
                 assistant_message_ids = result.assistant_message_ids;
                 interactive_markup = result.interactive_markup;
                 agent_reactions = result.agent_reactions;
+                approval_prompts = result.approval_prompts;
                 let locale = runtime.reply_locale(message.locale.as_deref()).await;
                 i18n::render(locale, i18n::messages::NO_RESPONSE_MESSAGE, &[])
             }
@@ -216,6 +219,13 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
                 &assistant_message_ids,
             )
             .await;
+    }
+
+    // Tool approvals the turn left waiting, each with Approve and Deny
+    // buttons, after the reply that explains them.
+    if !approval_prompts.is_empty() {
+        let locale = runtime.reply_locale(message.locale.as_deref()).await;
+        approvals::post_prompts(&*channel, &platform_target, &approval_prompts, locale).await;
     }
 
     if channel.caps().reactions {

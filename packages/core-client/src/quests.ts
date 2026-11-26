@@ -8,7 +8,22 @@
 import { z } from "zod";
 import { appResponseValueSchema } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
-import { encodePathId } from "./path-id.ts";
+import { encodeMountPathId } from "./path-id.ts";
+
+/**
+ * The one-segment static paths of `apps-store/quests/manifest.json`. A quest
+ * ID equal to one of them is refused: Core would serve the static route
+ * instead of the quest (`PUT /scratchpad` overwrites the scratchpad).
+ * `mount-path-id.test.ts` fails when the manifest and this list differ.
+ */
+export const QUEST_ROUTE_NAMES = [
+	"events",
+	"detection-config",
+	"capture",
+	"scratchpad",
+	"list",
+	"judge",
+] as const;
 
 export type QuestStatus = "open" | "done" | "dismissed";
 export type CompletionSource = "manual" | "detected";
@@ -173,7 +188,13 @@ export async function useQuest(
 	id: string,
 	complete = false
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/use`, { complete });
+	return await mutateQuest(
+		target,
+		`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}/use`,
+		{
+			complete,
+		}
+	);
 }
 
 /** Pin or unpin an item to the top of the board. */
@@ -182,7 +203,13 @@ export async function pinQuest(
 	id: string,
 	pinned: boolean
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/pin`, { pinned });
+	return await mutateQuest(
+		target,
+		`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}/pin`,
+		{
+			pinned,
+		}
+	);
 }
 
 /** The freeform brain-dump buffer. */
@@ -235,7 +262,7 @@ export async function updateQuest(
 ): Promise<Quest> {
 	const json = await request(
 		target,
-		`/api/quests/${id}`,
+		`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}`,
 		{ method: "PUT", body: data },
 		questEnvelopeResponse
 	);
@@ -251,7 +278,7 @@ export async function deleteQuest(
 ): Promise<void> {
 	await request(
 		target,
-		`/api/quests/${id}`,
+		`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}`,
 		{ method: "DELETE" },
 		questOkResponse
 	);
@@ -283,28 +310,40 @@ export async function completeQuest(
 	target: ApiTarget,
 	id: string
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/complete`);
+	return await mutateQuest(
+		target,
+		`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}/complete`
+	);
 }
 
 export async function dismissQuest(
 	target: ApiTarget,
 	id: string
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/dismiss`);
+	return await mutateQuest(
+		target,
+		`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}/dismiss`
+	);
 }
 
 export async function acceptSuggestion(
 	target: ApiTarget,
 	id: string
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/suggestion/accept`);
+	return await mutateQuest(
+		target,
+		`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}/suggestion/accept`
+	);
 }
 
 export async function dismissSuggestion(
 	target: ApiTarget,
 	id: string
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/suggestion/dismiss`);
+	return await mutateQuest(
+		target,
+		`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}/suggestion/dismiss`
+	);
 }
 
 const shadowEvidenceSchema = z.object({
@@ -325,7 +364,7 @@ async function questJudgeContext(
 	try {
 		const { quest } = await request(
 			target,
-			`/api/quests/${encodePathId(id)}`,
+			`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}`,
 			{ signal: controller.signal },
 			questEnvelopeResponse
 		);
@@ -377,7 +416,7 @@ export async function judgeQuest(
 	const context = await questJudgeContext(target, id);
 	return await request(
 		target,
-		`/api/quests/${encodePathId(id)}/judge`,
+		`/api/quests/${encodeMountPathId(id, QUEST_ROUTE_NAMES)}/judge`,
 		{
 			method: "POST",
 			body: context ? { context } : {},

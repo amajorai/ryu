@@ -5,6 +5,7 @@ use super::super::environments::GitPushCredential;
 use super::git::{compare_url, parse_diff_output, parse_numstat, push_error_code, redact};
 use super::pull_request::open_pull_request;
 use super::*;
+use ryu_workspace::git::RYU_COAUTHOR_TRAILER;
 
 /// Review the uncommitted and committed changes since setup.
 pub(in crate::server::cloud_tasks) async fn diff(
@@ -82,6 +83,24 @@ pub(super) fn push_env(
     ]
 }
 
+/// The env of the commit script. `RYU_COMMIT_TRAILER` carries the co-author
+/// line when the node's "Credit Ryu in git commits" setting is on and is empty
+/// when it is off.
+pub(super) fn commit_env(
+    repo_dir: &str,
+    base_sha: &str,
+    commit_message: &str,
+    credit: bool,
+) -> Vec<(String, String)> {
+    let trailer = if credit { RYU_COAUTHOR_TRAILER } else { "" };
+    vec![
+        ("RYU_REPO_DIR".to_owned(), repo_dir.to_owned()),
+        ("RYU_BASE_SHA".to_owned(), base_sha.to_owned()),
+        ("RYU_COMMIT_MESSAGE".to_owned(), commit_message.to_owned()),
+        ("RYU_COMMIT_TRAILER".to_owned(), trailer.to_owned()),
+    ]
+}
+
 /// Interrupt, commit, and optionally clean-room push. The summary's teardown
 /// is "kept"; the caller decides whether to destroy.
 pub(in crate::server::cloud_tasks) async fn finish(plan: FinishPlan) -> Result<FinishSummary> {
@@ -103,11 +122,8 @@ pub(in crate::server::cloud_tasks) async fn finish(plan: FinishPlan) -> Result<F
     let (Some(repo_dir), Some(base_sha)) = (&plan.repo_dir, &plan.base_sha) else {
         return Ok(summary);
     };
-    let commit_env = vec![
-        ("RYU_REPO_DIR".to_owned(), repo_dir.clone()),
-        ("RYU_BASE_SHA".to_owned(), base_sha.clone()),
-        ("RYU_COMMIT_MESSAGE".to_owned(), plan.commit_message.clone()),
-    ];
+    let credit = crate::server::git::git_credit_enabled_for_node().await;
+    let commit_env = commit_env(repo_dir, base_sha, &plan.commit_message, credit);
     let committed = client
         .exec_script(
             &plan.workspace,

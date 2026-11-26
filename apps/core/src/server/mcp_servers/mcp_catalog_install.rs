@@ -114,6 +114,19 @@ pub(in crate::server) async fn mcp_catalog_install(
         }
     };
 
+    // A catalog remote must be https, so the keys the user later saves on the
+    // entry are never sent in clear text. Checked before the preview too, so a
+    // dry run does not report an install that the write would refuse.
+    if let crate::mcp_catalog::McpEntryPlan::Remote { url } = &plan.entry {
+        if let Some(reason) = catalog_remote_url_refusal(url, agent_egress_allow_hosts().as_deref())
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "success": false, "error": reason })),
+            );
+        }
+    }
+
     // Reject a name collision with an already-registered server (built-ins
     // included) before writing — unless this is a forced update overwrite.
     if !body.force && state.mcp.contains_server(&plan.server_name) {
@@ -176,7 +189,7 @@ pub(in crate::server) async fn mcp_catalog_install(
     )
     .await
     {
-        Ok(()) => {
+        Ok(target_changed) => {
             // Hot-reload so the new server's tools are listable without a restart.
             state.mcp.reload();
             // ONE plugin model: an installed MCP server also carries a plugin
@@ -187,22 +200,26 @@ pub(in crate::server) async fn mcp_catalog_install(
             // executor (delegate); the record is additive governance metadata.
             // Best-effort: a failure here never fails the MCP install itself.
             persist_mcp_plugin_record(&state, &plan).await;
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "success": true,
-                    "server": {
-                        "name": plan.server_name,
-                        "command": resolved.command,
-                        "args": resolved.args,
-                        "transport": resolved.transport,
-                        "url": resolved.url,
-                        "description": plan.description,
-                        // Installed disabled: the user must explicitly enable/start it.
-                        "enabled": false,
-                    },
-                })),
-            )
+            let mut response = json!({
+                "success": true,
+                "server": {
+                    "name": plan.server_name,
+                    "command": resolved.command,
+                    "args": resolved.args,
+                    "transport": resolved.transport,
+                    "url": resolved.url,
+                    "description": plan.description,
+                    // Installed disabled: the user must explicitly enable/start it.
+                    "enabled": false,
+                },
+            });
+            if target_changed {
+                // A forced install replaced a server that pointed elsewhere: its
+                // saved keys were dropped and it is switched off. Present only
+                // then, so a client can tell the user to enter the key again.
+                response["targetChanged"] = json!(true);
+            }
+            (StatusCode::OK, Json(response))
         }
         Err((status, msg)) => (status, Json(json!({ "success": false, "error": msg }))),
     }

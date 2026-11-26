@@ -14,12 +14,18 @@ pub(super) async fn allocate_turn_worktree(
     let mut worktree_reused = false;
     let (effective_cwd, worktree_guard): (PathBuf, Option<WorktreeGuard>) =
         if matches!(route, AgentRoute::Acp { .. }) {
-            let base = req
-                .cwd
-                .as_deref()
-                .map(PathBuf::from)
-                .filter(|p| p.exists())
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            use crate::server::chat_checkpoints::turn_folders;
+            let requested = req.cwd.as_deref().map(PathBuf::from).filter(|p| p.exists());
+            let base = match requested {
+                Some(base) => base,
+                // A shared node never lends its own current directory to a turn.
+                None if turn_folders::node_bounds_turn_folders() => {
+                    return Err(error_stream(
+                        turn_folders::FOLDER_REQUIRED_MESSAGE.to_owned(),
+                    ));
+                }
+                None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            };
 
             if req.worktree_isolation && is_git_repo(&base) {
                 let repo_root = find_git_root(&base).unwrap_or_else(|| base.clone());
@@ -198,3 +204,7 @@ pub(super) async fn checkpoint_turn_workspace(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "chat_stream_worktree_tests.rs"]
+mod tests;

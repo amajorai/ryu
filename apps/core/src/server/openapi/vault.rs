@@ -208,6 +208,7 @@ use utoipa::OpenApi;
         crate::server::vault_tokens_api::sys_lease_count,
         crate::server::vault_tokens_api::sys_lease_lookup,
         crate::server::vault_tokens_api::sys_lease_revoke_prefix,
+        crate::server::vault_tokens_api::sys_lease_force_revoke,
         crate::server::vault_tokens_api::sys_lease_tidy,
         crate::server::vault_tokens_api::sys_quotas,
         crate::server::vault_tokens_api::sys_quota_put,

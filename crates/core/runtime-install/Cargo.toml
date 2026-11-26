@@ -12,7 +12,7 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
-sysinfo = { version = "0.33", features = ["system"] }
+sysinfo = { version = "0.37", features = ["system"] }
 sha2 = "0.10"
 fs4 = "0.8.4"
 tokio = { version = "1", features = ["process", "rt", "time", "io-util"], optional = true }

@@ -25,6 +25,15 @@
 
 use serde::{Deserialize, Serialize};
 
+mod thread;
+
+/// Per-thread task ownership: the [`TeamThread`] record and the pure helpers
+/// that decide who answers a turn in an owned thread.
+pub use thread::{
+    asked_brief, asked_by_owner, mentioned_members, owner_brief, plan_thread_turn, OpenThread,
+    OwnedTurn, TeamThread, ThreadRunState, ThreadTurn,
+};
+
 // ── Coordination strategy ───────────────────────────────────────────────────────
 
 /// How a team's members respond when the team is called. Stored per-team as a

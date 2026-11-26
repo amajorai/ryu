@@ -1,0 +1,339 @@
+{
+  "version": 1,
+  "ids": [
+    {
+      "name": "store bot, Telegram direct chat",
+      "channel_id": "bot-a",
+      "target": "123456789",
+      "expected": "channel__bot-a__123456789"
+    },
+    {
+      "name": "store bot, Telegram supergroup",
+      "channel_id": "bot-a",
+      "target": "-1001234567890",
+      "expected": "channel__bot-a__-1001234567890"
+    },
+    {
+      "name": "store bot, Telegram forum topic",
+      "channel_id": "bot-a",
+      "target": "-1001234567890:42",
+      "expected": "channel__bot-a__-1001234567890_3A42"
+    },
+    {
+      "name": "store bot with a database id, Slack thread",
+      "channel_id": "65f0c1d2e3a4b5c6d7e8f901",
+      "target": "C0123ABCD:1700000000.000100",
+      "expected": "channel__65f0c1d2e3a4b5c6d7e8f901__C0123ABCD_3A1700000000.000100"
+    },
+    {
+      "name": "store bot, Discord thread",
+      "channel_id": "bot-a",
+      "target": "111222333444555666:777888999000111222",
+      "expected": "channel__bot-a__111222333444555666_3A777888999000111222"
+    },
+    {
+      "name": "store bot, WhatsApp number with a plus sign",
+      "channel_id": "bot-a",
+      "target": "+15551234567",
+      "expected": "channel__bot-a___2B15551234567"
+    },
+    {
+      "name": "store bot, iMessage chat guid",
+      "channel_id": "bot-a",
+      "target": "iMessage;-;+15551234567",
+      "expected": "channel__bot-a__iMessage_3B-_3B_2B15551234567"
+    },
+    {
+      "name": "store bot, WhatsApp Web chat id",
+      "channel_id": "bot-a",
+      "target": "15551234567@c.us",
+      "expected": "channel__bot-a__15551234567_40c.us"
+    },
+    {
+      "name": "store bot, space and underscore",
+      "channel_id": "bot-a",
+      "target": "my chat_1",
+      "expected": "channel__bot-a__my_20chat_5F1"
+    },
+    {
+      "name": "store bot, accented letter",
+      "channel_id": "bot-a",
+      "target": "café",
+      "expected": "channel__bot-a__caf_C3_A9"
+    },
+    {
+      "name": "store bot, non-ASCII target",
+      "channel_id": "bot-a",
+      "target": "日本",
+      "expected": "channel__bot-a___E6_97_A5_E6_9C_AC"
+    },
+    {
+      "name": "store bot, control bytes",
+      "channel_id": "bot-a",
+      "target": "a\nb\u0000c",
+      "expected": "channel__bot-a__a_0Ab_00c"
+    },
+    {
+      "name": "store bot, empty target",
+      "channel_id": "bot-a",
+      "target": "",
+      "expected": "channel__bot-a__"
+    },
+    {
+      "name": "store id that needs escaping",
+      "channel_id": "team:bot_1",
+      "target": "42",
+      "expected": "channel__team_3Abot_5F1__42"
+    },
+    {
+      "name": "empty store id",
+      "channel_id": "",
+      "target": "42",
+      "expected": "channel____42"
+    },
+    {
+      "name": "separator moved left",
+      "channel_id": "a",
+      "target": "3Ab:",
+      "expected": "channel__a__3Ab_3A"
+    },
+    {
+      "name": "separator moved right",
+      "channel_id": "a:b",
+      "target": "3A",
+      "expected": "channel__a_3Ab__3A"
+    },
+    {
+      "name": "store bot, target that looks like an escape",
+      "channel_id": "bot-a",
+      "target": "a_3Ab",
+      "expected": "channel__bot-a__a_5F3Ab"
+    },
+    {
+      "name": "store bot, target that looks like the separator",
+      "channel_id": "bot-a",
+      "target": "a__b",
+      "expected": "channel__bot-a__a_5F_5Fb"
+    },
+    {
+      "name": "store bot, target of exactly the longest id",
+      "channel_id": "bot-a",
+      "target": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "expected": "channel__bot-a__tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    },
+    {
+      "name": "store bot, target one byte too long",
+      "channel_id": "bot-a",
+      "target": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "expected": "channel__bot-a_h11a64f867add7200220aabcc9519094edb72d633f656400210f86ad815a4d47e"
+    },
+    {
+      "name": "store bot, very long target",
+      "channel_id": "bot-a",
+      "target": "999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999:7777777777777777777777777777777777777777",
+      "expected": "channel__bot-a_hbf9fa7275bd2672599dfd449ddec7e8c0381562af27b117414581fb8e764deba"
+    },
+    {
+      "name": "longest store id that stays visible in a hashed id",
+      "channel_id": "ccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "target": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "expected": "channel__ccccccccccccccccccccccccccccccccccccccccccccccccccccc_h4ebf69fc23d39e0d68bb3c5bf803bf3537f612272aba5b7ba88901e7baf3bdcc"
+    },
+    {
+      "name": "store id too long to stay visible in a hashed id",
+      "channel_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "target": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "expected": "channel_h8738d1e6e0d6cd6c9179aa3199a0b208b10c7cff4912356b9fa62b97cde9a6e2"
+    },
+    {
+      "name": "no store id, Telegram direct chat",
+      "channel_id": null,
+      "target": "123456789",
+      "expected": "123456789"
+    },
+    {
+      "name": "no store id, Telegram supergroup",
+      "channel_id": null,
+      "target": "-1001234567890",
+      "expected": "-1001234567890"
+    },
+    {
+      "name": "no store id, Telegram forum topic",
+      "channel_id": null,
+      "target": "-1001234567890:42",
+      "expected": "-1001234567890_3A42"
+    },
+    {
+      "name": "no store id, Slack thread",
+      "channel_id": null,
+      "target": "C0123ABCD:1700000000.000100",
+      "expected": "C0123ABCD_3A1700000000.000100"
+    },
+    {
+      "name": "no store id, underscore",
+      "channel_id": null,
+      "target": "a_b",
+      "expected": "a_5Fb"
+    },
+    {
+      "name": "no store id, escaped look-alike of a colon target",
+      "channel_id": null,
+      "target": "a_3Ab",
+      "expected": "a_5F3Ab"
+    },
+    {
+      "name": "no store id, colon target",
+      "channel_id": null,
+      "target": "a:b",
+      "expected": "a_3Ab"
+    },
+    {
+      "name": "no store id, raw text of a store id",
+      "channel_id": null,
+      "target": "channel__bot-a__123456789",
+      "expected": "channel_5F_5Fbot-a_5F_5F123456789"
+    },
+    {
+      "name": "no store id, empty target",
+      "channel_id": null,
+      "target": "",
+      "expected": "target_he3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "no store id, target of exactly the longest id",
+      "channel_id": null,
+      "target": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "name": "no store id, target one byte too long",
+      "channel_id": null,
+      "target": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected": "target_h0ec9eb33e74510bcdd1f2ea55206e82f21649c5c2becbf2b433eb475b34c01bd"
+    },
+    {
+      "name": "no store id, long non-ASCII target",
+      "channel_id": null,
+      "target": "日日日日日日日日日日日日日日日日日日日日",
+      "expected": "target_hdf11e6d7a5e4ae1e908c2fdfb4d9197523ff335cc7646955fd8615f55f146022"
+    },
+    {
+      "name": "no store id, raw text of a hashed id",
+      "channel_id": null,
+      "target": "target_h0000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "target_5Fh0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "cloud bot, Telegram direct chat",
+      "channel_id": null,
+      "target": "telegram:123456789",
+      "expected": "telegram_3A123456789"
+    },
+    {
+      "name": "cloud bot, Telegram group topic",
+      "channel_id": null,
+      "target": "telegram:chat:-1001234567890:topic:7",
+      "expected": "telegram_3Achat_3A-1001234567890_3Atopic_3A7"
+    },
+    {
+      "name": "cloud bot, Slack thread",
+      "channel_id": null,
+      "target": "slack:channel:C1:1700000000.000100",
+      "expected": "slack_3Achannel_3AC1_3A1700000000.000100"
+    },
+    {
+      "name": "cloud bot, Discord channel",
+      "channel_id": null,
+      "target": "discord:channel:111222333444555666",
+      "expected": "discord_3Achannel_3A111222333444555666"
+    },
+    {
+      "name": "cloud bot, WhatsApp number",
+      "channel_id": null,
+      "target": "whatsapp:+15551234567",
+      "expected": "whatsapp_3A_2B15551234567"
+    }
+  ],
+  "rule": [
+    {
+      "id": "channel__bot-a__123456789",
+      "valid": true
+    },
+    {
+      "id": "-1001234567890",
+      "valid": true
+    },
+    {
+      "id": "conversation.v2",
+      "valid": true
+    },
+    {
+      "id": "conv_550e8400e29b41d4a716446655440000",
+      "valid": true
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "valid": true
+    },
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": true
+    },
+    {
+      "id": "",
+      "valid": false
+    },
+    {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "valid": false
+    },
+    {
+      "id": "channel:bot-a:123456789",
+      "valid": false
+    },
+    {
+      "id": "-1001234567890:42",
+      "valid": false
+    },
+    {
+      "id": "telegram:123456789",
+      "valid": false
+    },
+    {
+      "id": "+15551234567",
+      "valid": false
+    },
+    {
+      "id": "iMessage;-;+15551234567",
+      "valid": false
+    },
+    {
+      "id": "15551234567@c.us",
+      "valid": false
+    },
+    {
+      "id": "with space",
+      "valid": false
+    },
+    {
+      "id": "café",
+      "valid": false
+    },
+    {
+      "id": "x\nwhoami",
+      "valid": false
+    },
+    {
+      "id": "a/b",
+      "valid": false
+    },
+    {
+      "id": "a%3Ab",
+      "valid": false
+    },
+    {
+      "id": "$(whoami)",
+      "valid": false
+    }
+  ]
+}

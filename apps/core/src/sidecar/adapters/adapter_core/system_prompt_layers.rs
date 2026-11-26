@@ -128,6 +128,89 @@ pub(crate) fn ryu_docs_hint_when(safe_mode: bool) -> Option<String> {
     Some(RYU_DOCS_HINT.to_owned())
 }
 
+/// The standing instruction to check Ryu's own state before answering a
+/// complaint about Ryu, with the built-in `diagnostics` tools
+/// (`sidecar::mcp::builtin_servers::diagnostics`). A heading and two lines,
+/// because it is paid for on every turn. The tools are named conditionally:
+/// an agent whose allowlist leaves them out must not be told to call
+/// something it does not have.
+pub(crate) const RYU_SELF_CHECK_HINT: &str = "## When Ryu itself misbehaves\n\
+    When something in Ryu fails, hangs or is missing, or the user says Ryu is \
+    broken, look into it before you answer: if you have the diagnostics tools, \
+    call `diagnostics.snapshot`, and `diagnostics.recent_errors` when a step of \
+    this chat failed.\n\
+    Then tell the user in plain words what you checked, the likely cause and a \
+    workaround. Never state a cause you did not check, and offer to draft a bug \
+    report only after that, with what you found.";
+
+/// [`RYU_SELF_CHECK_HINT`], or `None` when Safe Mode is active, on the same
+/// rule as the docs hint: a baseline turn carries nothing extra.
+pub(crate) fn ryu_self_check_hint() -> Option<String> {
+    ryu_self_check_hint_when(crate::safe_mode::is_active())
+}
+
+/// The gate itself, Safe Mode as an argument so a test can pin both answers.
+pub(crate) fn ryu_self_check_hint_when(safe_mode: bool) -> Option<String> {
+    if safe_mode {
+        return None;
+    }
+    Some(RYU_SELF_CHECK_HINT.to_owned())
+}
+
+// ── Commit credit hint ────────────────────────────────────────────────────────
+//
+// Core adds the co-author trailer itself on every commit it runs (see
+// `ryu_workspace::git::credit`). A commit an engine makes from its own shell
+// tool never passes through Core, so the only lever there is this standing
+// instruction. It is best effort by nature: a model follows it most of the
+// time, not always, and the setting's help text says so.
+
+/// The standing instruction that asks the agent to credit Ryu on commits it
+/// makes itself. Kept to two lines because it is paid for on every turn that
+/// works in a repository. The trailer is spelled out as text here; a test pins
+/// it to `ryu_workspace::git::RYU_COAUTHOR_TRAILER`.
+pub(crate) const RYU_COMMIT_CREDIT_HINT: &str = "## Git commit credit\n\
+    When you create a git commit in this session, end the commit message with \
+    this trailer on its own line, and do not add it twice:\n\
+    Co-authored-by: Ryu <amajorhq@gmail.com>";
+
+/// [`RYU_COMMIT_CREDIT_HINT`] for a turn working in `cwd`, or `None` when the
+/// node turned "Credit Ryu in git commits" off, the working directory is not
+/// inside a git repository, or Safe Mode is active.
+pub(crate) async fn ryu_commit_credit_hint(cwd: Option<&str>) -> Option<String> {
+    // The cheap gates first: most turns have no repository, and those must not
+    // pay for a preference read.
+    let in_repository = cwd.is_some_and(|cwd| is_inside_git_repository(std::path::Path::new(cwd)));
+    if !in_repository || crate::safe_mode::is_active() {
+        return None;
+    }
+    let state = crate::learning::global_state()?;
+    let credit = crate::server::git::git_credit_enabled(&state.preferences).await;
+    ryu_commit_credit_hint_when(credit, in_repository, false)
+}
+
+/// The gate itself, with every input as an argument, so a test can pin each
+/// answer without touching the preference store or the process-wide Safe Mode.
+pub(crate) fn ryu_commit_credit_hint_when(
+    credit: bool,
+    cwd_is_repository: bool,
+    safe_mode: bool,
+) -> Option<String> {
+    if !credit || !cwd_is_repository || safe_mode {
+        return None;
+    }
+    Some(RYU_COMMIT_CREDIT_HINT.to_owned())
+}
+
+/// Whether `cwd` is inside a git working tree: it or one of its ancestors
+/// holds a `.git` entry (a directory, or a file in a linked worktree or a
+/// submodule). A filesystem check, because it runs on every turn and must not
+/// spawn `git`. A relative path is never a repository here: it would be
+/// resolved against Core's own working directory.
+pub(crate) fn is_inside_git_repository(cwd: &std::path::Path) -> bool {
+    cwd.is_absolute() && cwd.ancestors().any(|dir| dir.join(".git").exists())
+}
+
 // ── Project instructions (AGENTS.md / CLAUDE.md) ─────────────────────────────
 //
 // The runtime half of "import agent setup": an imported (or merely opened)

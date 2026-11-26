@@ -28,7 +28,12 @@ import { z } from "zod";
 // `ryu://nodes/connect?url=https://node.example.com&name=prod`.
 
 import { normalizeRnpNodeUrl } from "./continuity.ts";
+import type {
+	DeepLinkBuildInput,
+	DeepLinkIntent,
+} from "./deep-link-intents.ts";
 import profileSchemes from "./deep-link-profiles.json" with { type: "json" };
+import { parseLinkedNodeUrl } from "./node-url.ts";
 
 export const RYU_DEEP_LINK_SCHEMES = Object.freeze(profileSchemes);
 export type RyuDeepLinkProfile = keyof typeof profileSchemes;
@@ -73,92 +78,20 @@ export function ryuDeepLinkProfile(raw: string): RyuDeepLinkProfile | null {
 // the active node when it matches none — never auto-connect to a URL a link
 // supplied. Navigation has no side effect; a `chat` prompt only PRE-SEEDS the
 // composer — it is NEVER auto-sent, since the prompt is attacker-controllable.
+// A `chat` link's `project` is NOT navigation: a surface uses it only when it
+// names a folder the user already has, and otherwise asks first.
 //
 // The parser is intentionally written with plain string operations (no `URL`,
 // `URLSearchParams`, or `expo-linking`) so it behaves IDENTICALLY across Node,
 // browsers, the Tauri webview, and React Native/Hermes — environments whose
 // custom-scheme `URL` support historically differs.
 
-export type DeepLinkIntent =
-	| { kind: "plugin-app"; pluginId: string; toolName: string; appPath: string }
-	| { kind: "model"; source: string; id: string; node: string | null }
-	| { kind: "skill"; source: string; id: string; node: string | null }
-	| { kind: "app"; id: string; node: string | null }
-	| { kind: "bundle"; id: string; node: string | null }
-	| { kind: "node"; name: string; url: string; token: string | null }
-	| {
-			kind: "handoff";
-			version: 0;
-			conversationId: string;
-			sourceNodeUrl: string;
-	  }
-	| { kind: "page"; page: string }
-	| {
-			kind: "chat";
-			conversationId: string | null;
-			prompt: string | null;
-			agent: string | null;
-			project: string | null;
-	  };
-
-/**
- * Permissive input accepted by {@link buildRyuDeepLink}. The chat/node fields are
- * optional here (a caller often omits the ones it doesn't set) while the parser
- * always returns the strict {@link DeepLinkIntent} with every field present.
- */
-export type DeepLinkBuildInput =
-	| { kind: "plugin-app"; pluginId: string; toolName: string; appPath?: string }
-	| { kind: "model"; source: string; id: string; node?: string | null }
-	| { kind: "skill"; source: string; id: string; node?: string | null }
-	| { kind: "app"; id: string; node?: string | null }
-	| { kind: "bundle"; id: string; node?: string | null }
-	| { kind: "node"; name: string; url: string; token?: string | null }
-	| {
-			kind: "handoff";
-			version: 0;
-			conversationId: string;
-			sourceNodeUrl: string;
-	  }
-	| { kind: "page"; page: string }
-	| {
-			kind: "chat";
-			conversationId?: string | null;
-			prompt?: string | null;
-			agent?: string | null;
-			project?: string | null;
-	  };
-
-/**
- * The canonical, surface-agnostic page keys a `ryu://open/<page>` link may target.
- * Each surface maps these to its own route (desktop tabs, mobile Expo routes); an
- * unknown key is ignored rather than erroring.
- */
-export const DEEP_LINK_PAGES = [
-	"chat",
-	"agents",
-	"models",
-	"skills",
-	"tools",
-	"spaces",
-	"workflows",
-	"automations",
-	"monitors",
-	"marketplace",
-	"settings",
-	"channels",
-	"timeline",
-	"delegation",
-	"credits",
-	"fleet",
-	"extensions",
-	"apps",
-	"engines",
-	"store",
-	"calendar",
-	"services",
-] as const;
-
-export type DeepLinkPage = (typeof DEEP_LINK_PAGES)[number];
+export {
+	DEEP_LINK_PAGES,
+	type DeepLinkBuildInput,
+	type DeepLinkIntent,
+	type DeepLinkPage,
+} from "./deep-link-intents.ts";
 
 const SCHEME_PREFIX = new RegExp(
 	`^(?:${Object.values(profileSchemes).join("|")}):\\/\\/`,
@@ -231,9 +164,15 @@ function hasExactQueryKeys(
 	);
 }
 
-/** `ryu://nodes/connect?url=…` — the payload lives in the query string. */
+/**
+ * `ryu://nodes/connect?url=…`: the payload lives in the query string. The
+ * node address must be an `http(s)` URL `node-url.ts` can read without
+ * guessing: a URL with userinfo (`https://trusted@evil.tld`), an unencoded
+ * international host or any other scheme yields no intent at all, so no
+ * surface can show or save it. Scheme and host come back lower-cased.
+ */
 function parseNode(params: Map<string, string>): DeepLinkIntent | null {
-	const nodeUrl = params.get("url")?.trim();
+	const nodeUrl = parseLinkedNodeUrl(params.get("url") ?? "")?.url;
 	if (!nodeUrl) {
 		return null;
 	}
@@ -255,8 +194,20 @@ function parseChat(
 		conversationId,
 		prompt: trimmedOrNull("prompt"),
 		agent: trimmedOrNull("agent"),
-		project: trimmedOrNull("project"),
+		project: localProjectOrNull(trimmedOrNull("project")),
 	};
+}
+
+/**
+ * A value that starts with a backslash, or with two slashes of either kind, is
+ * a Windows network or device path (`\\host\share`, `//host/share`,
+ * `\??\UNC\...`). Opening one makes the machine authenticate to a host the
+ * link chose, so a link's `project` must not be one.
+ */
+const NON_LOCAL_PROJECT = /^(?:\\|[\\/]{2})/;
+
+function localProjectOrNull(project: string | null): string | null {
+	return project && NON_LOCAL_PROJECT.test(project) ? null : project;
 }
 
 /**

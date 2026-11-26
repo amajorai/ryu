@@ -57,6 +57,7 @@ pub(crate) mod egress_broker;
 mod env_secrets;
 mod http_request;
 mod http_tool;
+mod inherited_read;
 mod secret_headers;
 mod workspace_paths;
 pub use command_allowlist::*;
@@ -65,6 +66,7 @@ pub use command_tool::*;
 pub(crate) use env_secrets::*;
 pub use http_request::*;
 pub use http_tool::*;
+pub(crate) use inherited_read::inheriting_current_read;
 pub use secret_headers::*;
 pub(crate) use workspace_paths::*;
 
@@ -400,6 +402,8 @@ pub async fn resume_execution_opt(
     outcome
 }
 
+#[cfg(test)]
+mod inherited_read_tests;
 #[cfg(test)]
 mod split_modules_tests;
 #[cfg(test)]

@@ -20,6 +20,7 @@ import {
 	NativeSelectOption,
 } from "@ryu/ui/components/native-select.tsx";
 import { useCallback, useEffect, useState } from "react";
+import { ProviderAccountLimit } from "@/src/components/billing/AccountLimitNotice.tsx";
 import { PlanAccountRemoveDialog } from "@/src/components/gateway/PlanAccountRemoveDialog.tsx";
 import {
 	SettingsGroup,
@@ -251,6 +252,13 @@ export function PlanAccountsSettings({
 								/>
 							))}
 						</SettingsGroup>
+						{/* Core counts the linked accounts, not the CLI's own sign-in. */}
+						<ProviderAccountLimit
+							count={
+								own.filter((account) => account.id !== DEFAULT_ACCOUNT_ID)
+									.length
+							}
+						/>
 						{own.length > 1 ? (
 							<div className="space-y-1">
 								<p className="text-muted-foreground text-xs">

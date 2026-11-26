@@ -21,6 +21,20 @@ fn consent_calls_normalized_by_qualified_title_only() {
 }
 
 #[test]
+fn feedback_draft_normalized_by_qualified_title_only() {
+    let draft = serde_json::json!({ "kind": "bug", "title": "Crash", "body": "It crashed." });
+    assert_eq!(
+        acp_tool_ui_name("other", "mcp__ryu__feedback.draft", &draft),
+        ("feedback.draft".to_owned(), true)
+    );
+    // The same payload under another name keeps its own row.
+    assert_eq!(
+        acp_tool_ui_name("other", "File a ticket", &draft).0,
+        "File a ticket"
+    );
+}
+
+#[test]
 fn ordinary_tools_with_consent_like_fields_keep_their_rows() {
     // No payload shape turns a tool into a consent card, however close.
     let connect_like = serde_json::json!({ "app": "billing", "reason": "Deploy it" });

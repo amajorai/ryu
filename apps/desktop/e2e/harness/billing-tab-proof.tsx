@@ -1,4 +1,4 @@
-import { DESKTOP_TRIAL_FLAG } from "@ryu/auth/lib/feature-flag-keys";
+import { INDIVIDUAL_PLANS_FLAG } from "@ryu/auth/lib/feature-flag-keys";
 import { I18nProvider } from "@ryu/i18n/react";
 import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
@@ -64,7 +64,7 @@ const billingStateSchema = z.object({
 			url: z.string(),
 		})
 	),
-	scenario: z.enum(["paid", "trial"]),
+	scenario: z.enum(["paid", "free"]),
 	tauriCalls: z.array(
 		z.object({
 			args: z.record(z.string(), z.json()).nullable(),
@@ -125,7 +125,7 @@ interface BillingFixtureState {
 	portalCount: number;
 	preferences: Record<string, string>;
 	requests: CapturedRequest[];
-	scenario: "paid" | "trial";
+	scenario: "paid" | "free";
 	tauriCalls: { args: ProofJsonRecord | null; command: string }[];
 }
 
@@ -188,7 +188,7 @@ function readState(): BillingFixtureState {
 		portalCount: 0,
 		preferences: { "sandbox-default-run-budget-micro-usd": "15000000" },
 		requests: [],
-		scenario: scenario === "paid" ? "paid" : "trial",
+		scenario: scenario === "paid" ? "paid" : "free",
 		tauriCalls: [],
 	};
 	localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(state));
@@ -221,12 +221,11 @@ function parseBody(body: BodyInit | null | undefined) {
 }
 
 function subscriptionStatus(state: BillingFixtureState) {
-	if (state.scenario === "trial") {
+	if (state.scenario === "free") {
 		return {
+			// No plan and no license: the desktop resolves as free, with no trial
+			// clock and no paywall.
 			entitlement: null,
-			// The desktop trial is a rollout flag; off, the gate resolves as
-			// "Free during beta" with no trial clock and no paywall.
-			features: { [DESKTOP_TRIAL_FLAG]: true },
 			lifetime: null,
 			organizationId: FIXTURE_ORG_ID,
 			plan: null,
@@ -243,7 +242,9 @@ function subscriptionStatus(state: BillingFixtureState) {
 			plan: "pro",
 			seats: 1,
 		},
-		features: {},
+		// The Lifetime access row only renders while the individual plans rollout
+		// is on (#970), and the paid proof clicks its checkout button.
+		features: { [INDIVIDUAL_PLANS_FLAG]: true },
 		// The billing router always publishes these two fields; the settings
 		// client's subscription-status contract requires them.
 		hostedAgents: null,
@@ -384,14 +385,6 @@ window.fetch = async (input, init) => {
 	}
 	if (url.pathname === "/api/billing/subscription-status") {
 		return jsonResponse(subscriptionStatus(readState()));
-	}
-	if (url.pathname === "/api/billing/trial" && method === "POST") {
-		const state = readState();
-		const firstLaunchAt =
-			state.scenario === "trial"
-				? new Date(Date.now() - 60 * 86_400_000).toISOString()
-				: new Date(Date.now() - 2 * 86_400_000).toISOString();
-		return jsonResponse({ firstLaunchAt });
 	}
 	if (url.pathname === "/api/billing/invoices") {
 		return jsonResponse({ invoices: readState().invoices });

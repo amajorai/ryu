@@ -115,8 +115,7 @@ pub(super) fn git_path(path: &Path) -> String {
 }
 
 pub(super) fn path_has_staged_changes(root: &Path, relative: &Path) -> Result<bool, String> {
-    let status = Command::new("git")
-        .args(["diff", "--cached", "--quiet", "--"])
+    let status = git_command(&["diff", "--cached", "--quiet", "--"])
         .arg(relative)
         .current_dir(root)
         .no_window()
@@ -303,8 +302,7 @@ pub fn query_file_diff(cwd: &str, paths: &[String]) -> Result<GitFileDiff, Strin
     let mut tracked = Vec::new();
     let mut untracked = Vec::new();
     for (relative, absolute) in &resolved {
-        let status = Command::new("git")
-            .args(["ls-files", "--error-unmatch", "--"])
+        let status = git_command(&["ls-files", "--error-unmatch", "--"])
             .arg(relative)
             .current_dir(&repository.root)
             .no_window()
@@ -321,8 +319,7 @@ pub fn query_file_diff(cwd: &str, paths: &[String]) -> Result<GitFileDiff, Strin
 
     let mut patch = String::new();
     if !tracked.is_empty() {
-        let output = Command::new("git")
-            .args(["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"])
+        let output = git_command(&["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"])
             .args(&tracked)
             .current_dir(&repository.root)
             .no_window()

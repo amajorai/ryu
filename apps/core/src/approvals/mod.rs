@@ -29,6 +29,8 @@
 //! - **Tool-call** (slice 2): an `approval`-kind elicitation envelope at the tool
 //!   dispatch chokepoint, so PTC parks and chat/ACP surface it. Not in slice 1.
 
+pub mod channel_decisions;
+pub mod channel_settings;
 pub mod chat_grants;
 pub mod exfiltration_guard;
 pub mod policy;
@@ -57,6 +59,11 @@ use serde::{Deserialize, Serialize};
 use store::ApprovalStore;
 
 static ENGINE: OnceLock<ApprovalEngine> = OnceLock::new();
+
+/// Risk tag of a call held because the program that makes it read private
+/// data first ([`exfiltration_guard`]). Such an approval shows its arguments
+/// in the inbox and is never decided from a chat app.
+pub const HELD_EGRESS_TAG: &str = "held-egress";
 
 /// Publish the process-global approval engine (called once at startup) so the
 /// state-free scheduler + workflow executor can raise requests without threading

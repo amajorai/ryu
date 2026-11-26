@@ -29,7 +29,8 @@ import {
 } from "./ConnectionsTab.coverage.test-support.tsx";
 
 // Control-level coverage for the shipping ConnectionsTab: remote nodes through
-// the native nodes.json bridge, the plan cap, and connected-device presence.
+// the native nodes.json bridge, the absence of a plan cap on remote nodes, and
+// connected-device presence.
 // The harness (loopback Core and control plane, IPC bridge) is shared with the
 // SSH suite in ConnectionsTab.coverage.test-support.tsx.
 registerConnectionsCoverageHooks();
@@ -131,7 +132,7 @@ test("remote node fields gate Add, send a trimmed native payload, survive a refu
 	]);
 });
 
-test("a signed-in free plan refuses a second remote node before any native write and asks for an upgrade", async () => {
+test("a signed-in free plan adds a second and a third remote node with no plan refusal and no upgrade prompt", async () => {
 	harness.nativeNodes = [
 		{ name: "local", token: null, url: LOCAL_FALLBACK.url },
 		{
@@ -142,32 +143,49 @@ test("a signed-in free plan refuses a second remote node before any native write
 	];
 	await bootNodeStore();
 	let upgradeRequests = 0;
-	// Signed in with no purchased plan: the free tier's one-remote-node cap.
+	// Signed in with no purchased plan: remote nodes carry no plan cap.
 	syncPlanCapState(null, () => {
 		upgradeRequests += 1;
 	});
 	await mount();
 	await openTab("Control other devices", "Remote nodes");
-	await openRemoteDialog();
-	const fields = remoteFields();
-	await typeInto(fields.name, "second-remote");
-	await typeInto(fields.url, "https://second.example.test:7980");
-	await click(remoteFields().submit);
-	await settle(
-		() => remoteDialog().querySelector('[role="alert"]') !== null,
-		"plan refusal",
-		text
-	);
-	expect(remoteDialog().querySelector('[role="alert"]')?.textContent).toBe(
-		"Plan limit reached for maxRemoteNodes (1)."
-	);
-	expect(upgradeRequests).toBe(1);
-	expect(ipcCalls("add_node")).toEqual([]);
+	for (const name of ["second-remote", "third-remote"]) {
+		await openRemoteDialog();
+		const fields = remoteFields();
+		await typeInto(fields.name, name);
+		await typeInto(fields.url, `https://${name}.example.test:7980`);
+		await click(remoteFields().submit);
+		await settle(
+			() => dialogTitled("Add remote node") === null,
+			`${name} dialog closed`,
+			text
+		);
+		await settle(
+			() => settingsRow(name, harness.container) !== null,
+			`${name} row`,
+			text
+		);
+	}
+	expect(text()).not.toContain("Plan limit reached");
+	expect(upgradeRequests).toBe(0);
+	expect(ipcCalls("add_node")).toEqual([
+		{
+			name: "second-remote",
+			token: null,
+			url: "https://second-remote.example.test:7980",
+		},
+		{
+			name: "third-remote",
+			token: null,
+			url: "https://third-remote.example.test:7980",
+		},
+	]);
 	expect(harness.nativeNodes.map((candidate) => candidate.name)).toEqual([
 		"local",
 		"First remote",
+		"second-remote",
+		"third-remote",
 	]);
-	expect(remoteFields().name.value).toBe("second-remote");
 });
 
 test("connected-device presence recovers through Retry and marks only this client as This device", async () => {

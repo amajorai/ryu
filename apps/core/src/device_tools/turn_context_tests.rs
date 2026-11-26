@@ -63,29 +63,27 @@ fn a_device_read_in_history_starts_the_acp_turn_private() {
     );
 }
 
-#[test]
-fn agent_egress_is_held_only_after_a_device_read_on_the_live_turn() {
+#[tokio::test]
+async fn agent_egress_is_held_only_after_a_device_read_on_the_live_turn() {
     let conversation = conversation();
     let (instance, _rx) = tokio::sync::mpsc::unbounded_channel();
-    assert!(
-        agent_egress_hold(&conversation, "fetch").is_none(),
-        "no live turn"
-    );
+    let hold = |kind: &'static str| {
+        let conversation = conversation.clone();
+        async move { agent_egress_hold(None, &conversation, kind).await }
+    };
+    assert!(hold("fetch").await.is_none(), "no live turn");
     let turn = offer(&conversation, None);
     let _guard = register_turn_context(turn.clone(), &instance, "ryu");
-    assert!(
-        agent_egress_hold(&conversation, "fetch").is_none(),
-        "nothing read yet"
-    );
+    assert!(hold("fetch").await.is_none(), "nothing read yet");
     super::taint::mark_device_read(&turn, "device.location.current");
     for kind in ["fetch", "execute", "edit", "search", "other"] {
         assert!(agent_kind_can_egress(kind));
         assert_eq!(
-            agent_egress_hold(&conversation, kind).as_deref(),
+            hold(kind).await.as_deref(),
             Some("device.location.current"),
             "{kind}"
         );
     }
-    assert!(agent_egress_hold(&conversation, "read").is_none());
-    assert!(agent_egress_hold(&conversation, "think").is_none());
+    assert!(hold("read").await.is_none());
+    assert!(hold("think").await.is_none());
 }

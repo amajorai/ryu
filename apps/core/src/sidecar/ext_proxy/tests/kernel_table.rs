@@ -161,6 +161,29 @@ fn kernel_capability_grants_are_pinned() {
     }
 }
 
+/// The row that debits the organization wallet needs a reviewed grant, checked
+/// through the declared and approved intersection like every grant row. With
+/// `None` any enabled sidecar could record a charge (Security sweep finding RB-1).
+#[test]
+fn tool_charge_capability_needs_an_approved_grant() {
+    let row = kernel_capability("billing.recordToolCharge")
+        .expect("billing.recordToolCharge is a kernel capability");
+    assert_eq!(row.grant, Some("tools.invoke"));
+
+    // A sidecar that declares the grant but was never approved is refused, and so
+    // is an approval the sidecar never declared.
+    let manifest = fixture(include_str!(
+        "../../../../../../generated/ryu-runtime/apps-store/monitors/manifest.json"
+    ));
+    let approved: HashSet<String> = ["tools.invoke".to_owned()].into_iter().collect();
+    assert!(host_api_grant_usable(&manifest, &approved, "tools.invoke"));
+    assert!(!host_api_grant_usable(
+        &manifest,
+        &HashSet::new(),
+        "tools.invoke"
+    ));
+}
+
 /// The naming invariant that IS the point of this table: a kernel capability is
 /// named for the host primitive it exposes, never for the app that happens to call
 /// it. A row called `monitors.spider` would just be the retired per-app route with

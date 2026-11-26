@@ -232,10 +232,12 @@ describe("recipes request unwrapping", () => {
 	});
 
 	test("getRecipe URL-encodes the name and unwraps `recipe`", async () => {
-		const cap = stubFetch(JSON.stringify({ recipe: nativeRecipe("a/b") }));
-		const r = await getRecipe(target, "a/b");
-		expect(r).toEqual(expect.objectContaining({ name: "a/b" }));
-		expect(cap.url).toBe("http://127.0.0.1:7980/api/recipes/a%2Fb");
+		// A slash is refused before any request (recipes is a mount, see
+		// monitors-path-id.test.ts); the other path characters are encoded.
+		const cap = stubFetch(JSON.stringify({ recipe: nativeRecipe("a?b#c") }));
+		const r = await getRecipe(target, "a?b#c");
+		expect(r).toEqual(expect.objectContaining({ name: "a?b#c" }));
+		expect(cap.url).toBe("http://127.0.0.1:7980/api/recipes/a%3Fb%23c");
 	});
 
 	test("saveRecipe POSTs `{ recipe }` and returns the assigned name", async () => {

@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { appResponseValueSchema } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
 // Complete native persisted GoalState. Optional fields are omitted by serde
 // when there is no goal; readback canonicalizes persisted status to three values.
@@ -59,7 +60,7 @@ export function getGoal(
 ): Promise<GoalState> {
 	return request(
 		target,
-		`/api/conversations/${conversationId}/goal`,
+		`/api/conversations/${encodePathId(conversationId)}/goal`,
 		{},
 		goalStateResponseSchema
 	);
@@ -73,7 +74,7 @@ export function setGoal(
 ): Promise<GoalState> {
 	return request(
 		target,
-		`/api/conversations/${conversationId}/goal`,
+		`/api/conversations/${encodePathId(conversationId)}/goal`,
 		{ method: "PUT", body: { goal } },
 		goalStateResponseSchema
 	);
@@ -86,7 +87,7 @@ export async function clearGoal(
 ): Promise<void> {
 	await request(
 		target,
-		`/api/conversations/${conversationId}/goal`,
+		`/api/conversations/${encodePathId(conversationId)}/goal`,
 		{
 			method: "DELETE",
 		},
@@ -101,7 +102,7 @@ export function pauseGoal(
 ): Promise<GoalState> {
 	return request(
 		target,
-		`/api/conversations/${conversationId}/goal/pause`,
+		`/api/conversations/${encodePathId(conversationId)}/goal/pause`,
 		{ method: "POST" },
 		goalStateResponseSchema
 	);
@@ -114,7 +115,7 @@ export function resumeGoal(
 ): Promise<GoalState> {
 	return request(
 		target,
-		`/api/conversations/${conversationId}/goal/resume`,
+		`/api/conversations/${encodePathId(conversationId)}/goal/resume`,
 		{ method: "POST" },
 		goalStateResponseSchema
 	);

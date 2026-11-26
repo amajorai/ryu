@@ -22,7 +22,8 @@ const useStore = create<{ node: Node; getActiveNode: () => Node }>(
 );
 mock.module("@/src/store/useNodeStore.ts", () => ({ useNodeStore: useStore }));
 mock.module("@/src/lib/node-compat.ts", () => ({
-	isNodeCompatible: () => true,
+	CLIENT_ACCEPTED_RANGE: { max: 1, min: 0 },
+	negotiateProtocol: () => ({ compatible: true, protocol: 1 }),
 }));
 const reads: Array<{ url: string; signal: AbortSignal }> = [];
 mock.module("@/src/lib/api/system.ts", () => ({

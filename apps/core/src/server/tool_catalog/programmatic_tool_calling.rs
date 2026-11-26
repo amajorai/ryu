@@ -137,6 +137,7 @@ pub(in crate::server) async fn tools_exec(
         .flatten()
         .map(|rec| rec.identity_profile_ids)
         .unwrap_or_default();
+    let conversation_named = host_conversation_id.is_some();
     let caller: std::sync::Arc<dyn crate::tool_exec::ToolCaller> = state.mcp.clone();
     let invoker = std::sync::Arc::new(
         crate::tool_exec::SandboxToolInvoker::registry_with_identity_and_conversation(
@@ -148,7 +149,16 @@ pub(in crate::server) async fn tools_exec(
             host_conversation_id,
         ),
     );
-    let outcome = crate::tool_exec::execute_code(body.code, invoker, &agent_id).await;
+    let run = crate::tool_exec::execute_code(body.code, invoker, &agent_id);
+    // The caller was checked above to own the host conversation it named, so
+    // that caller is the sender of what this program runs in it. A tool that
+    // asks who a call acts for sees the sender; the principal is unchanged.
+    let outcome = match verified_caller.as_ref().filter(|_| conversation_named) {
+        Some(sender) => {
+            crate::sidecar::mcp::search_conversations::with_turn_sender(sender, run).await
+        }
+        None => run.await,
+    };
     Json(serde_json::to_value(&outcome).unwrap_or_default()).into_response()
 }
 

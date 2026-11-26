@@ -9,6 +9,14 @@ use super::*;
 /// the host cannot sandbox. Account access never does: a limited agent's
 /// engine that cannot be confined is refused, except Ryu's own engine running
 /// with only its brokered tools (see [`spawn_acp_task`]).
+///
+/// `bounded` is whether the node bounds this turn (a shared node,
+/// `turn_folders::node_bounds_turn_folders`). A bounded turn is never started
+/// without the sandbox: the folder's trust lifts nothing, a host that cannot
+/// sandbox refuses the launch ([`LaunchRefusal::SharedNode`]), Ryu's own
+/// engine included, and the Keychain is denied. `support` asks whether this
+/// host has the sandbox runner, only where the answer is needed.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn confine_for_agent(
     stdio: McpServerStdio,
     is_managed_pi: bool,
@@ -17,14 +25,18 @@ pub(super) async fn confine_for_agent(
     account: crate::agent_access::AccountConfinement,
     cwd: &Path,
     additional_directories: &[PathBuf],
+    bounded: bool,
+    support: impl FnOnce() -> Result<(), String>,
 ) -> Result<(McpServerStdio, Option<String>), LaunchRefusal> {
+    let trusted = trusted && !bounded;
     if trusted && !account.is_confined() {
         return Ok((stdio, None));
     }
     let keep = sandbox_keep_paths(&stdio, cwd, additional_directories, is_claude_code);
-    let deny_keychain = account_denies_keychain(
+    let deny_keychain = turn_denies_keychain(
         account,
         is_claude_code && crate::acp_agent_settings::stdio_launches_claude_code_acp(&stdio),
+        bounded,
     );
     let account_masks =
         account_confinement_masks(account, dirs::home_dir().as_deref(), deny_keychain);
@@ -33,8 +45,11 @@ pub(super) async fn confine_for_agent(
     // `is_managed_pi` is a substring test on the spawn command, so also require
     // the config dir to be one Core manages (its own, or a limited agent's): a
     // user's own Pi never loads the extension that narrows the tools.
-    let account_fallback_allowed =
-        is_managed_pi && pi_config_dir_is_managed(&stdio) && pi_runs_brokered_tools_only(&stdio);
+    // A bounded turn gets no such exception.
+    let account_fallback_allowed = !bounded
+        && is_managed_pi
+        && pi_config_dir_is_managed(&stdio)
+        && pi_runs_brokered_tools_only(&stdio);
     if !trusted {
         return confine_for_untrusted_workspace(
             stdio,
@@ -43,6 +58,8 @@ pub(super) async fn confine_for_agent(
             account_masks,
             deny_keychain,
             account_fallback_allowed,
+            bounded,
+            support,
         )
         .await
         .map(|(stdio, notice)| (stdio, Some(notice)));
@@ -52,7 +69,7 @@ pub(super) async fn confine_for_agent(
         stdio,
         masks,
         deny_keychain,
-        crate::agent_sandbox::untrusted_support(),
+        support(),
         account_fallback_allowed,
     )
     .map(|stdio| (stdio, None))
@@ -74,6 +91,17 @@ pub(super) fn account_denies_keychain(
     is_claude_code: bool,
 ) -> bool {
     account.is_confined() && !is_claude_code
+}
+
+/// [`account_denies_keychain`] for one turn. A `bounded` turn (a shared node)
+/// is always denied the Keychain, Claude Code included: it is the Core user's
+/// Keychain, not the member's, so Claude Code is signed out there.
+pub(super) fn turn_denies_keychain(
+    account: crate::agent_access::AccountConfinement,
+    is_claude_code: bool,
+    bounded: bool,
+) -> bool {
+    bounded || account_denies_keychain(account, is_claude_code)
 }
 
 /// Rebuild a limited agent's own managed Pi config right before its Pi starts
@@ -177,7 +205,12 @@ pub(super) fn confine_account_access(
 /// brokered tools only (`account_fallback_allowed`), run with that notice.
 /// `deny_keychain` ([`account_denies_keychain`]) denies the Keychain too.
 /// `Err(refusal)` when the agent must not start here
-/// ([`untrusted_launch_refusal`]).
+/// ([`untrusted_launch_refusal`]). A `bounded` turn (a shared node) never
+/// runs unconfined: each of those cases refuses it instead, with no exception
+/// for Ryu's own engine. Its refusal carries the probe's reason and nothing
+/// of a later step, whose error stays in the log. `support` is asked once,
+/// first.
+#[allow(clippy::too_many_arguments)]
 async fn confine_for_untrusted_workspace(
     stdio: McpServerStdio,
     is_managed_pi: bool,
@@ -185,6 +218,8 @@ async fn confine_for_untrusted_workspace(
     account_masks: Option<Vec<PathBuf>>,
     deny_keychain: bool,
     account_fallback_allowed: bool,
+    bounded: bool,
+    support: impl FnOnce() -> Result<(), String>,
 ) -> Result<(McpServerStdio, String), LaunchRefusal> {
     const PREFIX: &str =
         "This folder is not trusted, so Ryu keeps the agent asking before it runs \
@@ -193,16 +228,29 @@ async fn confine_for_untrusted_workspace(
     // The host could not sandbox: an untrusted folder alone runs unconfined
     // with `notice`; a limited agent's engine is refused unless it is Ryu's
     // own engine on brokered tools only.
+    // A bounded turn is refused instead. For it this closure answers only
+    // the steps after the probe (the loopback relay, the wrap), where `reason`
+    // is an error chain that can name paths of the host: the chain goes to the
+    // log, and the member gets a fixed sentence (`SharedNode(None)`).
     let unconfined = |stdio: McpServerStdio, reason: String, notice: String| {
-        if account_limited && !account_fallback_allowed {
+        if bounded {
+            tracing::warn!(%reason, "shared node: refusing an engine Ryu could not sandbox");
+            Err(LaunchRefusal::SharedNode(None))
+        } else if account_limited && !account_fallback_allowed {
             tracing::warn!(%reason, "limited agent: refusing an engine Ryu cannot sandbox");
             Err(LaunchRefusal::AccountAccess(reason))
         } else {
             Ok((stdio, notice))
         }
     };
-    if let Err(reason) = crate::agent_sandbox::untrusted_support() {
+    if let Err(reason) = support() {
         tracing::warn!(%reason, "untrusted workspace: agent sandbox unavailable on this host");
+        if bounded {
+            // The probe's own reason is the one text of the host a member of
+            // a shared node is shown.
+            tracing::warn!(%reason, "shared node: refusing an engine, this host cannot sandbox");
+            return Err(LaunchRefusal::SharedNode(Some(reason)));
+        }
         let notice = format!(
             "{PREFIX} Ryu could not sandbox the agent on this computer ({reason}), so it can \
              read your files and use the network as you. Trust the folder only if you trust its code."
@@ -213,16 +261,7 @@ async fn confine_for_untrusted_workspace(
         tracing::warn!("untrusted workspace: refusing a package-runner agent launch");
         return Err(LaunchRefusal::Untrusted(refusal));
     }
-    let home = dirs::home_dir();
-    let mut masks = crate::agent_sandbox::home_credential_masks(home.as_deref());
-    masks.extend(crate::agent_sandbox::ryu_app_data_masks(
-        &crate::agent_sandbox::ryu_app_data_roots(home.as_deref()),
-    ));
-    let mut core = crate::agent_sandbox::untrusted_core_masks(&crate::paths::ryu_dir());
-    core.extend(account_masks.unwrap_or_default());
-    masks.extend(crate::agent_sandbox::keep_visible(core, keep));
-    masks.sort();
-    masks.dedup();
+    let masks = untrusted_profile_masks(dirs::home_dir().as_deref(), account_masks, keep, bounded);
     let (loopback_ports, network_note) = if !stdio_targets_local_gateway(&stdio) {
         (
             None,
@@ -276,6 +315,15 @@ async fn confine_for_untrusted_workspace(
     let relay_dir: Option<PathBuf> = None;
 
     match crate::agent_sandbox::confine_stdio(stdio.clone(), &profile, relay_dir.as_deref()) {
+        Ok(confined) if bounded => Ok((
+            confined,
+            format!(
+                "This node is shared, so Ryu keeps the agent asking before it runs commands, \
+                 refuses modes that skip those prompts, and runs the agent in a sandbox that \
+                 hides SSH keys, cloud and package credentials, browser profiles, the Keychain \
+                 and Ryu's own data.{network_note}"
+            ),
+        )),
         Ok(confined) => Ok((
             confined,
             format!(
@@ -294,6 +342,31 @@ async fn confine_for_untrusted_workspace(
     }
 }
 
+/// What the untrusted-workspace profile hides: the home credential stores
+/// under `home`, the Ryu Desktop's and Ryu Browser's data, and Core's own data
+/// with `account_masks`, both narrowed so the `keep` paths stay visible.
+/// For a `bounded` turn (a shared node) also the Keychain files under `home`.
+pub(super) fn untrusted_profile_masks(
+    home: Option<&Path>,
+    account_masks: Option<Vec<PathBuf>>,
+    keep: &[PathBuf],
+    bounded: bool,
+) -> Vec<PathBuf> {
+    let mut masks = crate::agent_sandbox::home_credential_masks(home);
+    masks.extend(crate::agent_sandbox::ryu_app_data_masks(
+        &crate::agent_sandbox::ryu_app_data_roots(home),
+    ));
+    let mut core = crate::agent_sandbox::untrusted_core_masks(&crate::paths::ryu_dir());
+    core.extend(account_masks.unwrap_or_default());
+    if bounded {
+        core.extend(crate::agent_sandbox::keychain_masks(home));
+    }
+    masks.extend(crate::agent_sandbox::keep_visible(core, keep));
+    masks.sort();
+    masks.dedup();
+    masks
+}
+
 /// The loopback ports an untrusted workspace's cut network relays: the
 /// Gateway, and Core for the managed Pi or the inference proxy. The
 /// credential broker is never relayed: an untrusted run is not brokered
@@ -304,3 +377,6 @@ pub(super) fn untrusted_loopback_ports(gateway: Option<u16>, core: Option<u16>) 
     ports.dedup();
     ports
 }
+
+#[cfg(test)]
+mod shared_node_tests;

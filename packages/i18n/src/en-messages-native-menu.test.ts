@@ -4,8 +4,8 @@ import {
 	OFFICIAL_NATIVE_MENU_MESSAGES,
 	withNativeMenuMessages,
 } from "./en-messages-native-menu.ts";
-import { OFFICIAL_LANGUAGE_PACKS } from "./locales.ts";
 import { BUILT_IN_LANGUAGE_PACKS } from "./messages.ts";
+import { ALL_OFFICIAL_LANGUAGE_PACKS } from "./official-language-packs.ts";
 import type { LanguagePack } from "./pack.ts";
 
 const ids = Object.keys(EN_NATIVE_MENU_MESSAGES).sort();
@@ -20,7 +20,7 @@ function builtIn(locale: string): LanguagePack {
 
 describe("native menu messages", () => {
 	test("every official non-English pack carries both menu ids", () => {
-		for (const pack of OFFICIAL_LANGUAGE_PACKS) {
+		for (const pack of ALL_OFFICIAL_LANGUAGE_PACKS) {
 			const terms = OFFICIAL_NATIVE_MENU_MESSAGES[pack.locale];
 			expect(terms && Object.keys(terms).sort()).toEqual(ids);
 			for (const id of ids) {

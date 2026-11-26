@@ -26,6 +26,7 @@ import {
 	DESKTOP_LICENSE_LAUNCH_USD,
 	PLAN_CAPABILITIES,
 	RUNNING_BOXES_BY_PLAN,
+	recommendedComparisonPlan,
 	SPACE_STORAGE_GB_BY_PLAN,
 } from "./pricing-comparison.ts";
 import { PricingComparisonTable } from "./pricing-comparison-table.tsx";
@@ -292,7 +293,108 @@ describe("plan comparison columns", () => {
 		expect(html).toContain('scope="colgroup"');
 		expect(html).toContain('<span class="sr-only">Included</span>');
 		expect(html).toContain('<span class="sr-only">Not included</span>');
-		expect(html).toContain("sticky start-0");
+	});
+
+	it("gives the phone's one plan column the width for any plan", () => {
+		// Business is shown first for organizations, but its hidden neighbours
+		// leave the grid, so it sits in the first plan column on a phone.
+		const html = renderToStaticMarkup(
+			createElement(PricingComparisonTable, { audience: "business", seats: 5 })
+		);
+		const cols = html
+			.slice(html.indexOf("<colgroup"), html.indexOf("</colgroup>"))
+			.match(/<col\b[^>]*>/gu);
+		expect(cols).toHaveLength(4);
+		expect(cols?.[1]).not.toContain("max-md:w-0");
+		expect(cols?.[2]).toContain("max-md:w-0");
+		expect(cols?.[3]).toContain("max-md:w-0");
+	});
+
+	it("keeps plan names and prices in a sticky header row", () => {
+		const html = renderToStaticMarkup(
+			createElement(PricingComparisonTable, {
+				audience: "business",
+				isYearly: false,
+				seats: 10,
+			})
+		);
+		const head = html.slice(html.indexOf("<thead"), html.indexOf("</thead>"));
+		expect(
+			head.match(/sticky top-\[var\(--pricing-sticky-top,0px\)\]/gu)
+		).toHaveLength(4);
+		const price = (plan: PlanId) =>
+			`${usd(catalogPriceUsd(plan, 10))}/mo for 10 seats`;
+		expect(head).toContain(price("teams"));
+		expect(head).toContain(price("business"));
+		expect(head).toContain("Custom");
+		// The page never scrolls sideways: no horizontal scroller around the table.
+		expect(html).toContain('<div class="overflow-clip rounded-2xl');
+		expect(html.slice(html.indexOf("<table"))).not.toContain("overflow-x-auto");
+	});
+
+	it("marks the column the shelf highlights as recommended, once", () => {
+		expect(recommendedComparisonPlan({ audience: "individual" })).toBe("pro");
+		expect(
+			recommendedComparisonPlan({
+				audience: "business",
+				seats: TEAMS_MAX_SEATS,
+			})
+		).toBe("business");
+		expect(
+			recommendedComparisonPlan({
+				audience: "business",
+				seats: TEAMS_MAX_SEATS + 1,
+			})
+		).toBe("enterprise");
+		for (const options of [
+			ALL_COLUMNS,
+			{ ...ALL_COLUMNS, audience: "business" },
+		] as const) {
+			const html = renderToStaticMarkup(
+				createElement(PricingComparisonTable, options)
+			);
+			expect(html.match(/>Recommended</gu)).toHaveLength(1);
+		}
+	});
+
+	it("folds each group behind a button and offers a plan switcher for phones", () => {
+		const html = renderToStaticMarkup(
+			createElement(PricingComparisonTable, ALL_COLUMNS)
+		);
+		const sections = comparisonSections(ALL_COLUMNS);
+		// Server render: every group open, so the table is complete without JavaScript.
+		expect(html.match(/aria-expanded="true"/gu)).toHaveLength(sections.length);
+		expect(html).not.toContain('aria-expanded="false"');
+		for (const section of sections) {
+			expect(html).toContain(`data-comparison-section="${section.id}"`);
+		}
+		expect(html).toContain('data-testid="pricing-comparison-plan-switcher"');
+		for (const plan of comparisonPlans(ALL_COLUMNS)) {
+			expect(html).toContain(`data-plan="${plan.id}"`);
+		}
+		// One plan at a time below `md`: the other columns are hidden there only.
+		expect(html).toContain("max-md:hidden");
+	});
+
+	it("explains unclear rows in one line and ends with a call to action", () => {
+		const html = renderToStaticMarkup(
+			createElement(PricingComparisonTable, {
+				...ALL_COLUMNS,
+				audience: "business",
+			})
+		);
+		const hints = comparisonSections(ALL_COLUMNS)
+			.flatMap((section) => section.rows)
+			.filter((row) => row.hint);
+		expect(hints.map((row) => row.id)).toEqual(
+			expect.arrayContaining(["always-on-server", "bring-your-own-keys"])
+		);
+		const cta = html.slice(html.indexOf('data-testid="pricing-compare-cta"'));
+		expect(cta).toContain('href="#plans"');
+		expect(cta).toContain('href="/contact"');
+		expect(
+			renderToStaticMarkup(createElement(PricingComparisonTable, ALL_COLUMNS))
+		).not.toContain('href="/contact"');
 	});
 
 	it("passes the billing terms through the translator", () => {

@@ -35,6 +35,15 @@ pub(in crate::server) async fn install_app_handler(
             format!("no manifest found for app '{id}'; ensure the ryu.json is loaded"),
         );
     };
+    // A provider binding must not name a credential-bearing preference in a `pref:`
+    // token. Core never resolves such a token (capability_tools/defaults.rs is the
+    // authority for every manifest, however it arrived); this is the visible error
+    // for an install by id, and it comes before the preview so a dry run says it too.
+    if let Err(refusal) =
+        crate::sidecar::mcp::capability_tools::refuse_secret_pref_tokens(&manifest)
+    {
+        return json_error(StatusCode::UNPROCESSABLE_ENTITY, refusal);
+    }
     let dry_run = body.is_some_and(|body| body.0.dry_run);
     if dry_run {
         let installed = match state.app_store.get(&id).await {

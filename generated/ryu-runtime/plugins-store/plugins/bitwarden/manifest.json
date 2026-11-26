@@ -74,6 +74,7 @@
       "kind": "tool",
       "config": {
         "slug": "bitwarden.list",
+        "returns_credential": true,
         "backend": "command",
         "bin": "bws",
         "timeout_secs": 60,
@@ -104,6 +105,7 @@
       "kind": "tool",
       "config": {
         "slug": "bitwarden.get",
+        "returns_credential": true,
         "backend": "command",
         "bin": "bws",
         "timeout_secs": 60,

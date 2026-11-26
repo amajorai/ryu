@@ -4,7 +4,7 @@ use super::*;
 // Module-private items, reached through the module that owns them.
 use crate::self_api::denylist::{
     is_credential_write, DENIED_AGENT_ACCESS_WRITES, DENIED_CREDENTIAL_WRITE_EXACT,
-    DENIED_CREDENTIAL_WRITE_PREFIXES, DENIED_EXACT, DENIED_PREFIXES,
+    DENIED_CREDENTIAL_WRITE_PREFIXES, DENIED_EXACT, DENIED_PREFIXES, DENIED_READ_PREFIXES,
 };
 use crate::self_api::gates::gateway_config_settings_only_section;
 use crate::self_api::routes::slug;
@@ -109,6 +109,50 @@ fn query_param_becomes_arg_not_path() {
     assert!(mem.path_params.is_empty());
 }
 
+/// Git and workspace reads are not agent tools: they take a folder and show no
+/// approval card. The writes stay, because each one shows the card first.
+#[test]
+fn git_and_workspace_reads_are_denied_and_their_writes_stay() {
+    for prefix in DENIED_READ_PREFIXES {
+        assert!(is_denied(&format!("{prefix}whatever"), "get"), "{prefix}");
+        assert!(is_denied(&format!("{prefix}whatever"), "GET"), "{prefix}");
+        assert!(!is_denied(&format!("{prefix}whatever"), "post"), "{prefix}");
+    }
+    for path in [
+        "/api/git/status",
+        "/api/git/branches",
+        "/api/git/history",
+        "/api/git/history/{checkpoint_id}",
+        "/api/workspace/list",
+    ] {
+        assert!(is_denied(path, "get"), "{path}");
+    }
+    assert!(!is_denied("/api/git/commit-push", "post"));
+    assert!(!is_denied("/api/workspace/new-folder", "post"));
+    // The rule ends at the segment, so other routes are untouched.
+    assert!(!is_denied("/api/gateway/governance/git", "get"));
+    assert!(!is_denied("/api/workspaces", "get"));
+    // The real catalog offers no such read, and the tools are gone.
+    for r in routes() {
+        let guarded = DENIED_READ_PREFIXES
+            .iter()
+            .any(|p| r.path_template.starts_with(p));
+        assert!(
+            !(guarded && r.method == "GET"),
+            "read offered: {}",
+            r.path_template
+        );
+    }
+    for id in [
+        "ryu_api.get_api_git_status",
+        "ryu_api.get_api_git_branches",
+        "ryu_api.get_api_workspace_list",
+    ] {
+        assert!(route_for(id).is_none(), "{id} is still in the catalog");
+    }
+    assert!(route_for("ryu_api.post_api_workspace_new_folder").is_some());
+}
+
 /// EVERY denylist entry must be absent from the generated catalog, at every
 /// verb — this is the security contract.
 #[test]
@@ -207,6 +251,15 @@ fn denylist_is_enforced_for_every_entry() {
         ("delete", "/api/pi-config/providers/model-enabled"),
         ("put", "/api/pi-config/providers/model-enabled"),
         ("put", "/api/pi-config/providers/{id}/account-pool"),
+        // Custom account pools and the pool an agent is limited to: an
+        // agent must not edit pools or move itself to another pool.
+        ("post", "/api/pi-config/providers/account-pools"),
+        ("put", "/api/pi-config/providers/account-pools/{pool_id}"),
+        ("delete", "/api/pi-config/providers/account-pools/{pool_id}"),
+        (
+            "put",
+            "/api/pi-config/providers/account-pools/agents/{agent_id}",
+        ),
         ("post", "/api/pi-config/providers/openai/accounts/switch"),
         ("post", "/api/pi-config/providers/{id}/login"),
         ("post", "/api/pi-config/login/s1/complete"),
@@ -239,6 +292,8 @@ fn denylist_is_enforced_for_every_entry() {
         "/api/plugins/{id}/secrets",
         "/api/pi-config",
         "/api/pi-config/providers/{id}/accounts",
+        "/api/pi-config/providers/account-pools",
+        "/api/pi-config/providers/account-pools/agents/{agent_id}",
         "/api/agents/{id}/accounts",
         "/api/agents/{id}/native-accounts",
         "/api/cloud-environments",
@@ -267,6 +322,89 @@ fn denylist_is_enforced_for_every_entry() {
     // Sanity: an ordinary route is allowed.
     assert!(!is_denied("/api/quests", "get"));
     assert!(!is_denied("/api/quests", "post"));
+}
+
+/// Folder import takes a filesystem path and writes agent setup (MCP servers
+/// included) into the node, so both of its routes are denied for every verb.
+/// The other import routes are different paths and keep their own rules.
+#[test]
+fn folder_import_routes_are_denied() {
+    assert!(DENIED_PREFIXES.contains(&"/api/import/"));
+    for path in ["/api/import/scan", "/api/import/run"] {
+        for m in METHODS {
+            assert!(is_denied(path, m), "{path} {m}");
+        }
+    }
+    for path in [
+        "/api/spaces/import",
+        "/api/language-packs/import",
+        "/api/git/history/import",
+        "/api/usage/history/import",
+        "/api/agents/{id}/threads/import",
+        "/api/cloud-environments/shared/{id}/import",
+    ] {
+        assert!(!is_denied(path, "post"), "{path} post");
+    }
+    assert!(!is_denied("/api/agents/import", "get"));
+}
+
+/// Both folder import routes are in the OpenAPI document, so only the denylist
+/// keeps them out of the catalog an agent searches and calls.
+#[test]
+fn folder_import_tools_are_absent_from_the_catalog() {
+    let spec = serde_json::to_value(crate::server::openapi::api_doc()).unwrap();
+    for path in ["/api/import/scan", "/api/import/run"] {
+        assert!(
+            spec["paths"][path]["post"].is_object(),
+            "{path} is not in the spec"
+        );
+    }
+    for id in [
+        "ryu_api.post_api_import_scan",
+        "ryu_api.post_api_import_run",
+    ] {
+        assert!(route_for(id).is_none(), "{id} is in the catalog");
+        assert!(describe(id).is_none(), "{id} can be described");
+    }
+    assert!(
+        !routes()
+            .iter()
+            .any(|r| r.path_template.starts_with("/api/import/")),
+        "a folder import route is in the catalog"
+    );
+    // An import route outside the prefix is still offered.
+    assert!(route_for("ryu_api.post_api_spaces_import").is_some());
+}
+
+/// A folder import route handed to the sender directly is refused before any
+/// request is made.
+#[tokio::test]
+async fn send_request_refuses_a_folder_import_call() {
+    for path in ["/api/import/scan", "/api/import/run"] {
+        let route = CoreApiRoute {
+            id: format!("ryu_api.post_{}", slug(path)),
+            method: "POST".to_owned(),
+            path_template: path.to_owned(),
+            summary: String::new(),
+            path_params: Vec::new(),
+            query_params: Vec::new(),
+            has_body: true,
+            input_schema: json!({ "type": "object" }),
+        };
+        let error = send_request(
+            &reqwest::Client::new(),
+            "http://127.0.0.1:9",
+            None,
+            &route,
+            &json!({ "body": { "path": "/tmp/project", "items": [] } }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("resolved to a denied path"),
+            "{path}: {error}"
+        );
+    }
 }
 
 /// No agent, restricted or not, can connect, re-key or remove one of the

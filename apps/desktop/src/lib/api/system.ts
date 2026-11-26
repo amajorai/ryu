@@ -1,4 +1,8 @@
 import {
+	type ProtocolRange,
+	reportedProtocolRange,
+} from "@ryuhq/core-client/node-protocol.ts";
+import {
 	type SystemInfo,
 	sidecarRunningMap,
 	sidecarStatusResponseSchema,
@@ -25,6 +29,8 @@ import {
 export interface HealthResult {
 	/** Feature flags the node advertises, for capability-based feature gating. */
 	capabilities: string[];
+	/** The protocol range the node reports; protocol 0 when it reports none. */
+	protocol: ProtocolRange;
 	status: string;
 	/** Core's version (CARGO_PKG_VERSION). Null on older nodes that don't report it. */
 	version: string | null;
@@ -95,6 +101,7 @@ export async function fetchHealth(
 		status?: string;
 		version?: string;
 		capabilities?: string[];
+		protocol?: unknown;
 	}>(
 		target,
 		"/api/health",
@@ -109,6 +116,7 @@ export async function fetchHealth(
 		status: json.status ?? "ok",
 		version: json.version ?? null,
 		capabilities: json.capabilities ?? [],
+		protocol: reportedProtocolRange(json.protocol),
 	};
 }
 

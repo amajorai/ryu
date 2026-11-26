@@ -2,7 +2,14 @@ import { useModelContextStore } from "@ryu/app-host/model-context";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 
-/** App-supplied context stays removable until the user sends the next turn. */
+/**
+ * App-supplied context of one scope, as removable chips above the composer.
+ * An owner the host named gets one chip "Context from <app>" whatever audience
+ * its items carry, so nothing an app adds to a turn is hidden from the person.
+ * The chips never clear anything themselves: the Ask Ryu transport drops an
+ * entry after the turn that carried it, and in a chat an entry stays until the
+ * person removes it or its widget goes away.
+ */
 export function ModelContextAttachments({ scope }: { scope: string }) {
 	const tl = useLiteralMessages();
 	const entries = useModelContextStore((store) => store.entries);
@@ -17,6 +24,32 @@ export function ModelContextAttachments({ scope }: { scope: string }) {
 			className="flex flex-wrap gap-2 px-3 py-2"
 			data-testid="model-context-attachments"
 		>
+			{visible.flatMap(([owner, entry]) => {
+				if (!entry.label) {
+					return [];
+				}
+				// The name comes from the host's entry, never from the items.
+				const title = tl("Context from {appName}", { appName: entry.label });
+				return [
+					<div
+						className="flex max-w-64 items-center gap-2 rounded-lg border bg-muted/40 ps-2"
+						data-testid="model-context-owner"
+						key={`${owner}:owner`}
+					>
+						<span className="truncate text-xs" title={title}>
+							{title}
+						</span>
+						<Button
+							aria-label={tl("Remove {title}", { title })}
+							onClick={() => useModelContextStore.getState().clear(owner)}
+							size="icon-sm"
+							variant="ghost"
+						>
+							×
+						</Button>
+					</div>,
+				];
+			})}
 			{visible.flatMap(([owner, entry]) =>
 				(entry.state.content ?? []).map((item, index) => {
 					if (

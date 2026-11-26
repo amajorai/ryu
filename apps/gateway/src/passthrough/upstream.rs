@@ -2,6 +2,8 @@
 //! forwarded-header policy, and the HTTP client each wire format uses (the
 //! provider egress proxy while the Claude route is in effect).
 
+use std::time::Duration;
+
 use serde_json::Value;
 
 use super::WireFormat;
@@ -28,13 +30,46 @@ pub(super) const STRIPPED_REQUEST_HEADERS: &[&str] = &[
     "transfer-encoding",
 ];
 
-// Provider credentials and prompt bodies must never follow an upstream redirect.
+/// Total deadline of a call on an inert route (model listing, batch status).
+/// It is the client default; prompt routes lift it per request.
+const INERT_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// A dial that takes longer than this is an unreachable upstream.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The builder both passthrough clients start from. Provider credentials and
+/// prompt bodies must never follow an upstream redirect. `total` bounds a whole
+/// call unless the request lifts it ([`with_route_deadline`]); the read timeout
+/// bounds the wait for the response head and between body reads, so a stalled
+/// upstream still fails once the total is lifted.
+fn client_builder(total: Duration) -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(ryu_gw_providers::STREAM_READ_TIMEOUT)
+        .timeout(total)
+}
+
+/// Apply the deadline of the route to one upstream request. A prompt route
+/// carries a generation that can run for many minutes (thinking, large file
+/// writes), so it gets the provider path's stream total
+/// (`ryu_gw_providers::STREAM_TOTAL_TIMEOUT`) instead of the client's 60 s,
+/// which cut the response body mid-stream. Inert routes keep the 60 s total.
+pub(super) fn with_route_deadline(
+    request: reqwest::RequestBuilder,
+    prompt_route: bool,
+) -> reqwest::RequestBuilder {
+    if prompt_route {
+        ryu_gw_providers::streaming_request(request)
+    } else {
+        request
+    }
+}
+
 pub(super) fn passthrough_http_client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(std::time::Duration::from_secs(60))
+        client_builder(INERT_TOTAL_TIMEOUT)
             .build()
             .expect("failed to build passthrough HTTP client")
     })
@@ -148,9 +183,7 @@ pub(super) async fn passthrough_client_for(
         }
     }
     let proxy = provider_proxy(Some(url.clone())).ok_or(CLAUDE_ROUTE_UNAVAILABLE)?;
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(60))
+    let client = client_builder(INERT_TOTAL_TIMEOUT)
         .proxy(proxy)
         .build()
         .map_err(|_| CLAUDE_ROUTE_UNAVAILABLE)?;

@@ -411,7 +411,12 @@ export function BrowserSidecarPanel({
 				</form>
 			</div>
 			{view === "agents" ? (
-				<BrowserBotLiveView active={active} base={base} call={call} />
+				<BrowserBotLiveView
+					active={active}
+					base={base}
+					call={call}
+					headers={headers}
+				/>
 			) : (
 				<div className="flex min-h-0 flex-1">
 					<ul className="w-48 shrink-0 overflow-y-auto border-border border-e text-xs">

@@ -14,6 +14,7 @@ import { Input } from "@ryu/ui/components/input.tsx";
 import { Item, ItemContent, ItemTitle } from "@ryu/ui/components/item.tsx";
 import { parseRyuDeepLink } from "@ryuhq/protocol/deep-link";
 import { useState } from "react";
+import { clearLinkAddedNode } from "@/src/lib/link-added-nodes.ts";
 import {
 	invalidNodeNameSentence,
 	isValidNodeName,
@@ -103,6 +104,9 @@ export function AddNodeDialog({
 		}
 		try {
 			await addNode(name.trim(), url.trim(), token.trim() || undefined);
+			// Added by hand: the user vouches for this server, so a mark left by
+			// an earlier `ryu://nodes/connect` link no longer applies.
+			clearLinkAddedNode(url.trim());
 			setName("");
 			setUrl("");
 			setToken("");

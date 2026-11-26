@@ -22,6 +22,7 @@ import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
 import { useLlmProviders } from "@/src/hooks/useLlmProviders.ts";
 import { unrestrictedCreditBalanceMicroUsd } from "@/src/lib/api/credits.ts";
 import type { PiCatalog, PiProvider } from "@/src/lib/api/pi-config.ts";
+import { AccountPoolsSettings } from "./AccountPoolsSettings.tsx";
 import { AgentModelsSettings } from "./AgentModelsSettings.tsx";
 import { CustomProviderForm } from "./LlmProvidersSettings-custom-provider-form.tsx";
 import { ProviderCard } from "./LlmProvidersSettings-provider-card.tsx";
@@ -226,6 +227,8 @@ export function LlmProvidersSettings({
 					</section>
 				</div>
 			</SettingsSection>
+
+			<AccountPoolsSettings providers={ordered} />
 
 			<AgentModelsSettings
 				agentModelOverrides={cat.agentModelOverrides}

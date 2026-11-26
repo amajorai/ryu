@@ -41,6 +41,7 @@
       "dependencies": {
         "@opentui/core": "^0.4.2",
         "@opentui/react": "^0.4.2",
+        "@ryu/app-host": "workspace:*",
         "@ryu/i18n": "workspace:*",
         "@ryu/portable-packages": "workspace:*",
         "@ryu/workbench": "workspace:*",

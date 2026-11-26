@@ -258,6 +258,14 @@ impl DiscordChannel {
         host: Arc<dyn ChannelHost>,
         _me_id: &str,
     ) {
+        // A button press is never a slash command. An approval button goes
+        // to its own handler; any other component is ignored.
+        if super::approvals::is_component(&value) {
+            if let Some(press) = super::approvals::parse_press(&value) {
+                self.handle_approval_press(press).await;
+            }
+            return;
+        }
         if value["type"].as_u64() != Some(2) {
             return;
         }

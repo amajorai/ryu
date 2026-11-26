@@ -3,7 +3,33 @@ import {
 	emailDomain,
 	isAcademicEmail,
 	normalizePartnerCode,
+	programWindowLapsed,
 } from "./programs.ts";
+
+describe("programWindowLapsed", () => {
+	const now = Date.UTC(2027, 10, 23, 12);
+
+	it("is true from the end date on, for a Date or an ISO string", () => {
+		expect(programWindowLapsed(new Date(now), now)).toBe(true);
+		expect(programWindowLapsed(new Date(now - 1), now)).toBe(true);
+		expect(programWindowLapsed(new Date(now - 1).toISOString(), now)).toBe(
+			true
+		);
+	});
+
+	it("is false before the end date", () => {
+		expect(programWindowLapsed(new Date(now + 1), now)).toBe(false);
+		expect(programWindowLapsed(new Date(now + 1).toISOString(), now)).toBe(
+			false
+		);
+	});
+
+	it("is false without a readable end date", () => {
+		expect(programWindowLapsed(null, now)).toBe(false);
+		expect(programWindowLapsed(undefined, now)).toBe(false);
+		expect(programWindowLapsed("not a date", now)).toBe(false);
+	});
+});
 
 describe("isAcademicEmail", () => {
 	it("accepts US .edu and country edu/ac school domains", () => {

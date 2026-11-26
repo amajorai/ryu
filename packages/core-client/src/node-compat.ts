@@ -9,33 +9,35 @@
 // way that particular mismatch happened to fail. `packages/core-client` is the
 // one module all seven already import, so the check belongs here.
 //
-// Two rules govern everything below, and both are deliberate:
+// Two rules govern the version and channel verdicts below, and both are
+// deliberate:
 //
-//   1. WARN, NEVER BLOCK. A mismatch is always advisory. Refusing to connect can
-//      lock someone out of their own node mid-upgrade, and driving a newer node
-//      from an older client is a legitimate thing to do — it is how you test a
-//      canary node from a stable app.
+//   1. WARN, NEVER BLOCK. A version or channel mismatch is always advisory.
+//      Refusing to connect can lock someone out of their own node mid-upgrade,
+//      and driving a newer node from an older client is a legitimate thing to
+//      do: it is how you test a canary node from a stable app.
 //   2. FAIL SOFT. Anything unknown (absent version, unparseable version, no
-//      capability list) resolves to "fine". A node that predates a field must not
-//      be reported as broken because it did not answer a question nobody used to
-//      ask.
+//      capability list, no protocol range) resolves to "fine". A node that
+//      predates a field must not be reported as broken because it did not answer
+//      a question nobody used to ask.
 //
-// Feature gating is a SEPARATE question and is answered by `capabilities`, not by
-// version arithmetic — see `hasCapability`. That is what lets a client whose
+// Whether the two can talk AT ALL is a separate question with a real answer:
+// the protocol range in `node-protocol.ts`. Release versions never decide it.
+// The old version floor (`MIN_CORE_VERSION`, which only ever warned) is gone;
+// `NodeCompatibility.protocol` replaces it and names the side to update.
+//
+// Feature gating is a third question and is answered by `capabilities`, not by
+// version arithmetic (see `hasCapability`). That is what lets a client whose
 // update window has lapsed keep working against a newer node: it asks what the
 // node can do rather than deciding from a version number.
 
 import type { ApiTarget } from "./client.ts";
 import { request } from "./client.ts";
+import { assessNodeProtocol, type ProtocolVerdict } from "./node-protocol.ts";
 import { systemHealthResponseSchema } from "./system.ts";
 
 /** The channel name for a build with no prerelease suffix. */
 export const STABLE_CHANNEL = "stable";
-
-/** The oldest Core version a client fully supports. Bump ONLY on a breaking API
- *  change — capability flags, not this floor, are how ordinary features are
- *  gated. */
-export const MIN_CORE_VERSION = "0.0.1";
 
 /** What `/api/health` reports about the node on the other end. */
 export interface NodeIdentity {
@@ -44,6 +46,10 @@ export interface NodeIdentity {
 	/** Release channel (`stable` / `beta` / `nightly` / `canary`). Absent on nodes
 	 *  predating the field — derive it from `version` instead. */
 	channel?: string | null;
+	/** The protocol range the node reports (`{ min, max }`). Absent on nodes
+	 *  predating the protocol number, which count as protocol 0. Kept as the raw
+	 *  value: `assessNodeProtocol` reads it and fails soft on anything else. */
+	protocol?: unknown;
 	status: string;
 	/** Core's version. Null on older nodes that do not report one. */
 	version?: string | null;
@@ -102,21 +108,11 @@ export function channelOf(version: string | null | undefined): string {
 }
 
 /**
- * Whether a node's version clears the client's floor. Unknown ⇒ compatible.
- */
-export function isNodeCompatible(version: string | null | undefined): boolean {
-	if (!version) {
-		return true;
-	}
-	return compareSemver(version, MIN_CORE_VERSION) >= 0;
-}
-
-/**
  * Whether a node advertises a capability.
  *
  * A node reporting NO capability list predates advertisement, and is treated as
  * having everything — otherwise upgrading the client would silently hide features
- * that actually work. The version floor warns about such nodes separately.
+ * that actually work.
  */
 export function hasCapability(
 	capabilities: string[] | undefined,
@@ -128,10 +124,9 @@ export function hasCapability(
 	return capabilities.includes(cap);
 }
 
-/** A verdict about the client↔node pairing. Every field is advisory. */
+/** A verdict about the client↔node pairing. `protocol` says whether the two can
+ *  talk; every other field is advisory. */
 export interface NodeCompatibility {
-	/** Node reports a version OLDER than the client's floor. */
-	belowFloor: boolean;
 	/** Node is on a different release channel than the client. */
 	channelMismatch: { client: string; node: string } | null;
 	/** Node is NEWER than the client. The interesting direction for a client whose
@@ -140,6 +135,9 @@ export interface NodeCompatibility {
 	nodeIsNewer: boolean;
 	/** True when nothing is wrong. */
 	ok: boolean;
+	/** The highest protocol both sides speak, or the side that has to update
+	 *  when they share none. */
+	protocol: ProtocolVerdict;
 }
 
 /**
@@ -153,17 +151,15 @@ export function assessNode(
 	clientVersion: string | null | undefined,
 	node: NodeIdentity | null | undefined
 ): NodeCompatibility {
-	const ok: NodeCompatibility = {
-		belowFloor: false,
-		channelMismatch: null,
-		nodeIsNewer: false,
-		ok: true,
-	};
+	const protocol = assessNodeProtocol(node?.protocol);
 	if (!node?.version) {
-		return ok;
+		return {
+			channelMismatch: null,
+			nodeIsNewer: false,
+			ok: protocol.compatible,
+			protocol,
+		};
 	}
-
-	const belowFloor = !isNodeCompatible(node.version);
 
 	// Prefer the channel the node reports; fall back to deriving it, so a node
 	// predating the `channel` field still participates.
@@ -179,10 +175,10 @@ export function assessNode(
 	}
 
 	return {
-		belowFloor,
 		channelMismatch,
 		nodeIsNewer,
-		ok: !(belowFloor || channelMismatch || nodeIsNewer),
+		ok: protocol.compatible && !(channelMismatch || nodeIsNewer),
+		protocol,
 	};
 }
 
@@ -204,6 +200,7 @@ export async function fetchNodeIdentity(
 	return {
 		capabilities: json.capabilities,
 		channel: json.channel ?? null,
+		protocol: json.protocol,
 		status: json.status ?? "ok",
 		version: json.version ?? null,
 	};

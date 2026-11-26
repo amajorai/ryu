@@ -93,6 +93,18 @@ pub(crate) async fn connect_with_fallback(
             // fallback provider may not support the same slots; the gateway's own
             // fallback chain and modality_map take over from here.
             let fallback = &fallback_chain[0];
+            // No provider credential goes around the Gateway (CE-37): a keyed
+            // fallback entry is not tried, a keyless one (the local engine) is.
+            if let Some(refusal) =
+                keyed_direct_hop_refusal(&fallback.base_url, fallback.api_key.as_deref())
+            {
+                tracing::warn!(
+                    primary_base_url = %primary_base_url,
+                    cause = %primary_err,
+                    "ryu-agent: primary provider failed; the fallback entry carries a credential and is not the Gateway, so it is not tried"
+                );
+                return Err(refusal.to_owned().into());
+            }
             // A raw provider offers no tools, so the memory guide that named
             // the primary hop's tools does not go with the turn.
             let fallback_messages = messages_without_memory_usage_hint(messages);

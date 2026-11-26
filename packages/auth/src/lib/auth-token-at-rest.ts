@@ -13,6 +13,10 @@ import {
 	tokenLookupCandidates,
 } from "@ryu/db/crypto";
 import { z } from "zod";
+import {
+	type AuthRequestScope,
+	currentAuthRequestScope,
+} from "./auth-request-scope.ts";
 
 /**
  * At-rest protection for the Better Auth rows that hold credentials, applied
@@ -34,12 +38,19 @@ import { z } from "zod";
  * Session rows found by something other than their token (listSessions,
  * admin listings) cannot return the raw token any more. They return an opaque
  * handle `rsh1.<digest>.<mac>` instead, where the MAC is keyed from the Better
- * Auth secret: a handle works wherever a token is accepted (revoke, multi
- * session) but cannot be forged from a database dump, which holds only the
- * digest. A short in-memory memo maps a digest back to the token a caller
- * presented within the last few minutes, so the current session in a listing
- * still compares equal to `ctx.context.session.session.token` (Better Auth's
- * revoke-other-sessions filter relies on that).
+ * Auth secret: the adapter accepts a handle wherever it accepts a token
+ * (revoke, multi session) but a handle cannot be forged from a database dump,
+ * which holds only the digest, and it is no credential: the bearer plugin
+ * refuses it and a cookie needs the server's signature.
+ *
+ * A raw token is handed back only to the request that presented it. The memo
+ * that maps a digest back to its token hangs on the scope of the Better Auth
+ * call in progress (`auth-request-scope.ts`), so the caller's own session in
+ * a listing still compares equal to `ctx.context.session.session.token`
+ * (Better Auth's revoke-other-sessions filter relies on that), while every
+ * other session of the account, however recently used, reads as a handle.
+ * It was one map for the whole process once, and any session of an account
+ * could then list the live bearer tokens of the others.
  */
 
 type AuthRecord = Record<string, unknown>;
@@ -57,8 +68,8 @@ const OAUTH_TOKEN_FIELDS = ["accessToken", "refreshToken", "idToken"] as const;
 const SESSION_HANDLE_PREFIX = "rsh1.";
 const SESSION_HANDLE_RE = /^rsh1\.([0-9a-f]{64})\.([A-Za-z0-9_-]{43})$/;
 const HANDLE_INFO = "ryu-session-handle-v1";
-const MEMO_TTL_MS = 5 * 60 * 1000;
-const MEMO_MAX_ENTRIES = 10_000;
+/** Tokens one request may present; a browser holds at most a few sessions. */
+const REQUEST_MEMO_MAX_ENTRIES = 64;
 
 function asRecord(value: unknown): AuthRecord | null {
 	const parsed = recordSchema.safeParse(value);
@@ -78,17 +89,43 @@ export interface SessionTokenCodec {
 	candidates(presented: string): string[];
 	/** Opaque handle for a stored digest. */
 	handleFor(digest: string): string;
-	/** Token to return for a stored row (memo hit, handle, or legacy raw). */
+	/**
+	 * Token to return for a stored row: the token this request presented for
+	 * it, else a handle (or the stored value of a legacy raw row).
+	 */
 	presentable(stored: string): string;
-	/** Remember a token a caller presented, so its row reads back unchanged. */
+	/**
+	 * Remember a token the current request presented, so its row reads back
+	 * unchanged for the rest of that request and for nobody else.
+	 */
 	remember(presented: string): void;
 }
 
 export function createSessionTokenCodec(
-	secret: string | undefined
+	secret: string | undefined,
+	requestScope: () => AuthRequestScope | undefined = currentAuthRequestScope
 ): SessionTokenCodec {
 	const key = handleKeyFrom(secret);
-	const memo = new Map<string, { at: number; token: string }>();
+	// Digest to presented token, per request scope. The entry goes away with
+	// the scope object, and two auth instances never share a codec.
+	const presentedByRequest = new WeakMap<
+		AuthRequestScope,
+		Map<string, string>
+	>();
+
+	function presentedInRequest(create: boolean): Map<string, string> | null {
+		const scope = requestScope();
+		if (!scope) {
+			return null;
+		}
+		const existing = presentedByRequest.get(scope);
+		if (existing || !create) {
+			return existing ?? null;
+		}
+		const created = new Map<string, string>();
+		presentedByRequest.set(scope, created);
+		return created;
+	}
 
 	function mac(hex: string): string {
 		return createHmac("sha256", key).update(hex).digest("base64url");
@@ -124,25 +161,19 @@ export function createSessionTokenCodec(
 				// Legacy raw row (until the boot migration digests it).
 				return stored;
 			}
-			const hit = memo.get(stored);
-			if (hit && Date.now() - hit.at < MEMO_TTL_MS) {
-				return hit.token;
-			}
-			return this.handleFor(stored);
+			return presentedInRequest(false)?.get(stored) ?? this.handleFor(stored);
 		},
 		remember(presented) {
 			if (digestFromHandle(presented)) {
 				return;
 			}
+			const memo = presentedInRequest(true);
+			if (!memo) {
+				return;
+			}
 			const digest = digestToken(presented);
-			memo.delete(digest);
-			memo.set(digest, { at: Date.now(), token: presented });
-			while (memo.size > MEMO_MAX_ENTRIES) {
-				const oldest = memo.keys().next().value;
-				if (oldest === undefined) {
-					break;
-				}
-				memo.delete(oldest);
+			if (memo.has(digest) || memo.size < REQUEST_MEMO_MAX_ENTRIES) {
+				memo.set(digest, presented);
 			}
 		},
 	};

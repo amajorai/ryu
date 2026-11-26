@@ -1,3 +1,7 @@
+import {
+	type ChatListRow,
+	chatListRowsSchema,
+} from "@ryu/app-host/chat-list-rows";
 import { modelContextParts } from "@ryu/app-host/model-context";
 import { z } from "zod";
 import {
@@ -10,20 +14,8 @@ import {
 } from "./client.ts";
 import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 
-/** The summary the Chat Broadcast companion is allowed to render. */
-export interface ChatBroadcastConversation {
-	agent_id: string | null;
-	archived?: boolean;
-	created_at: number;
-	id: string;
-	last_message?: string;
-	last_message_at?: number;
-	last_message_role?: string;
-	message_count: number;
-	run_status: string | null;
-	title: string | null;
-	updated_at: number;
-}
+/** The picker row an app with the ask-to-send grant is allowed to render. */
+export type ChatBroadcastConversation = ChatListRow;
 
 export interface ChatBroadcastSendInput {
 	conversationId: string;
@@ -36,23 +28,12 @@ export interface ChatBroadcastSendResult {
 	status: "accepted";
 }
 
-const conversationSummarySchema = z
-	.object({
-		agent_id: z.string().nullable(),
-		archived: z.boolean().optional(),
-		created_at: z.number(),
-		id: z.string(),
-		last_message: z.string().optional(),
-		last_message_at: z.number().optional(),
-		last_message_role: z.string().optional(),
-		message_count: z.number(),
-		run_status: z.string().nullable(),
-		title: z.string().nullable(),
-		updated_at: z.number(),
-	})
-	.passthrough();
+// Core's summary also holds the newest message's first line, folder and
+// worktree paths, the branch, participants and linked pull requests. The rows
+// go to an app frame, so chatListRowsSchema copies the picker fields into new
+// objects and nothing else leaves this function.
 const conversationListSchema = z
-	.object({ conversations: z.array(conversationSummarySchema).optional() })
+	.object({ conversations: chatListRowsSchema.optional() })
 	.passthrough();
 const conversationDetailSchema = z
 	.object({
@@ -72,7 +53,10 @@ const conversationDetailSchema = z
 	.passthrough();
 const CHAT_STREAM_PATH = "/api/chat/stream";
 
-/** List every conversation visible to the signed-in user, including idle chats. */
+/**
+ * List every conversation visible to the signed-in user, including idle chats,
+ * as picker rows (id, title, agent, state and times; no message text, no paths).
+ */
 export async function listChatBroadcastConversations(
 	target: ApiTarget
 ): Promise<ChatBroadcastConversation[]> {

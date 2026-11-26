@@ -242,13 +242,18 @@ pub(in crate::server) async fn update_app_handler(
     }
 
     // 4. Resolve + install any NEW dependencies the new version declares.
-    let installed_dependencies =
-        match install_new_dependencies_for_update(&state, &manifest, buyer_token, body.dry_run)
-            .await
-        {
-            Ok(deps) => deps,
-            Err(response) => return response,
-        };
+    let installed_dependencies = match install_new_dependencies_for_update(
+        &state,
+        &caller,
+        &manifest,
+        buyer_token,
+        body.dry_run,
+    )
+    .await
+    {
+        Ok(deps) => deps,
+        Err(response) => return response,
+    };
 
     if body.dry_run {
         return Json(json!({
@@ -353,6 +358,7 @@ pub(in crate::server) async fn update_app_handler(
             // new version's new deps were installed disabled above.
             let dependency_enable = plugin_update_deps::enable_dependencies_after_update(
                 &state,
+                &caller,
                 &manifest,
                 updated.enabled,
             )

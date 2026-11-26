@@ -324,10 +324,7 @@ pub(in crate::server) async fn gateway_set_provider(
             body.sdk_context.as_ref(),
             body.allow_environment,
         ) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "success": false, "error": error })),
-            );
+            return account_edit_refusal(error);
         }
     } else if let Some(action) = body.account_action.as_deref() {
         if let Err(error) = patch_gateway_provider_accounts(
@@ -338,10 +335,7 @@ pub(in crate::server) async fn gateway_set_provider(
             body.api_key.as_deref(),
             account_index,
         ) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "success": false, "error": error })),
-            );
+            return account_edit_refusal(error);
         }
     } else if let Some(base_url) = compatible_url {
         let compatible = providers_table

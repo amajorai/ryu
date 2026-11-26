@@ -34,6 +34,8 @@ pub const RESERVED_TOOL_SERVERS: &[&str] = &[
     "consent",
     "delegate",
     "device",
+    "diagnostics",
+    "feedback",
     "marketplace",
     "notify",
     "orchestrator",

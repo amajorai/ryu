@@ -20,6 +20,16 @@ pub(in crate::server) fn approvals_routes(app_store: &PluginStore) -> Router<Ser
             "/api/approvals/mode",
             get(approvals_api::get_mode).put(approvals_api::set_mode),
         )
+        // Chat app approval buttons: the per-connection setting and the route
+        // a channel adapter decides a button press through.
+        .route(
+            "/api/approvals/channel-deciders/:connection",
+            get(get_channel_deciders).put(put_channel_deciders),
+        )
+        .route(
+            "/api/channels/approvals/decide",
+            post(channel_approval_decide),
+        )
         .route("/api/approvals", get(approvals_api::list_approvals))
         .route("/api/approvals/:id", get(approvals_api::get_approval))
         .route(

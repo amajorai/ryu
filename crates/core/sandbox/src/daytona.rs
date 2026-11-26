@@ -14,9 +14,11 @@
 //!
 //! ## Lifecycle (mirrors [`super::docker`], HTTP instead of a CLI)
 //!
-//! - `create_workspace` → `POST {base}/sandbox` sized by the configured
-//!   [`SandboxSpec`]; the returned sandbox id is the [`WorkspaceId`].
-//! - `exec_in_workspace` → `POST {base}/sandbox/{id}/toolbox/process/execute`.
+//! - `create_workspace` → `POST {base}/sandbox`, sized by the snapshot; the
+//!   returned sandbox id is the [`WorkspaceId`].
+//! - `exec_in_workspace` → `POST {toolbox}/{id}/process/execute`, where
+//!   `{toolbox}` is the sandbox's toolbox proxy URL. Daytona serves the toolbox
+//!   from its own host, so the URL is read from the API, never assumed.
 //! - `destroy_workspace` → `DELETE {base}/sandbox/{id}` (the SIGKILL/stop hook
 //!   the heartbeat ticker calls on a `kill_*` budget verdict).
 //! - `exec` → create a workspace, run once, destroy it (ephemeral one-shot).
@@ -27,6 +29,12 @@
 //! heartbeat ticker (`super::heartbeat`) reads it when it registers a run so the
 //! Gateway can price the elapsed second-delta against the Daytona rate table.
 //! Core never computes cost itself — it only reports the spec.
+//!
+//! The spec is not sent to Daytona. Daytona boots a sandbox from a snapshot
+//! (the configured one, or the organization default) and refuses a create
+//! request that also names a size, so the snapshot decides the real size. Set
+//! the `Spec:` knobs below to the size of the snapshot in use, or the billed
+//! shape is wrong. A difference is logged as a warning on every create.
 //!
 //! ## Config
 //!
@@ -46,12 +54,17 @@
 
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
-use serde_json::json;
+use anyhow::Result;
 
 use super::spec::{GpuKind, OsKind, SandboxSpec};
 use super::{ExecOutput, ExecSpec, Sandbox, SandboxCapabilities, WorkspaceId};
 use crate::BoxFuture;
+
+mod client;
+#[cfg(test)]
+pub(crate) mod tests;
+
+use client::DaytonaClient;
 
 // ── Configuration knobs (all swappable, nothing hardcoded) ───────────────────
 
@@ -78,69 +91,6 @@ pub const ENV_DAYTONA_OS: &str = "RYU_SANDBOX_DAYTONA_OS";
 
 const DEFAULT_DAYTONA_URL: &str = "https://app.daytona.io/api";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
-// Covers two 4 MiB output streams plus their JSON envelope while bounding the
-// provider response before deserialization.
-const MAX_DAYTONA_RESPONSE_BYTES: usize = 12 * 1024 * 1024;
-const MAX_DAYTONA_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
-const MAX_DAYTONA_ERROR_EXCERPT_BYTES: usize = 1024;
-
-fn append_response_chunk(body: &mut Vec<u8>, chunk: &[u8], operation: &str) -> Result<()> {
-    if chunk.len() > MAX_DAYTONA_RESPONSE_BYTES.saturating_sub(body.len()) {
-        return Err(anyhow!(
-            "daytona {operation} response exceeded the 12 MiB body limit"
-        ));
-    }
-    body.extend_from_slice(chunk);
-    Ok(())
-}
-
-async fn read_response_capped(mut response: reqwest::Response, operation: &str) -> Result<Vec<u8>> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_DAYTONA_RESPONSE_BYTES as u64)
-    {
-        return Err(anyhow!(
-            "daytona {operation} response exceeded the 12 MiB body limit"
-        ));
-    }
-
-    let mut body = Vec::with_capacity(
-        response
-            .content_length()
-            .unwrap_or_default()
-            .min(MAX_DAYTONA_RESPONSE_BYTES as u64) as usize,
-    );
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| anyhow!("daytona {operation} response read failed: {error}"))?
-    {
-        append_response_chunk(&mut body, &chunk, operation)?;
-    }
-    Ok(body)
-}
-
-fn response_excerpt(body: &[u8]) -> String {
-    String::from_utf8_lossy(&body[..body.len().min(MAX_DAYTONA_ERROR_EXCERPT_BYTES)]).into_owned()
-}
-
-fn output_bytes(value: &serde_json::Value, fields: &[&str], stream: &str) -> Result<Vec<u8>> {
-    let mut selected = None;
-    for field in fields {
-        if let Some(value) = value.get(*field) {
-            selected = Some(value);
-            break;
-        }
-    }
-    let output = selected
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    if output.len() > MAX_DAYTONA_OUTPUT_BYTES {
-        return Err(anyhow!("daytona {stream} exceeded the 4 MiB output limit"));
-    }
-    Ok(output.as_bytes().to_vec())
-}
-
 fn daytona_base_url() -> String {
     std::env::var(ENV_DAYTONA_URL)
         .ok()
@@ -250,197 +200,6 @@ pub async fn detect() -> DetectResult {
     }
 }
 
-// ── Minimal Daytona API client ───────────────────────────────────────────────
-
-/// A tiny typed client over the Daytona REST API. Holds only resolved config;
-/// construction does no I/O.
-struct DaytonaClient {
-    base: String,
-    token: String,
-    target: Option<String>,
-    snapshot: Option<String>,
-    timeout: Duration,
-    http: reqwest::Client,
-}
-
-impl DaytonaClient {
-    /// Build the client from env config, erroring when no token is configured.
-    fn from_env() -> Result<Self> {
-        let token = daytona_token().ok_or_else(|| {
-            anyhow!("Daytona backend requires an API token ({ENV_DAYTONA_TOKEN})")
-        })?;
-        Ok(Self {
-            base: daytona_base_url(),
-            token,
-            target: std::env::var(ENV_DAYTONA_TARGET)
-                .ok()
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty()),
-            snapshot: std::env::var(ENV_DAYTONA_SNAPSHOT)
-                .ok()
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty()),
-            timeout: request_timeout(),
-            http: reqwest::Client::new(),
-        })
-    }
-
-    /// Create a remote sandbox sized by `spec`, returning its id.
-    async fn create(&self, spec: &SandboxSpec, network: bool) -> Result<String> {
-        let mut body = json!({
-            "cpu": spec.vcpu,
-            "memory": spec.mem_gib,
-            "disk": spec.storage_gib,
-            "gpuCount": spec.gpu_count,
-            "os": os_wire(spec.os),
-            "public": network,
-        });
-        if !matches!(spec.gpu, GpuKind::None) {
-            body["gpuClass"] = json!(gpu_wire(spec.gpu));
-        }
-        if let Some(target) = &self.target {
-            body["target"] = json!(target);
-        }
-        if let Some(snapshot) = &self.snapshot {
-            body["snapshot"] = json!(snapshot);
-        }
-
-        let resp = self
-            .http
-            .post(format!("{}/sandbox", self.base))
-            .bearer_auth(&self.token)
-            .timeout(self.timeout)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| anyhow!("daytona create request failed: {e}"))?;
-
-        let status = resp.status();
-        let body = read_response_capped(resp, "create").await?;
-        if !status.is_success() {
-            return Err(anyhow!(
-                "daytona create failed (HTTP {status}): {}",
-                response_excerpt(&body)
-            ));
-        }
-        let value: serde_json::Value = serde_json::from_slice(&body)
-            .map_err(|e| anyhow!("daytona create returned unparseable body: {e}"))?;
-        // Accept `id` or `sandboxId` for forward-compat with the provider.
-        value
-            .get("id")
-            .or_else(|| value.get("sandboxId"))
-            .and_then(|v| v.as_str())
-            .map(str::to_owned)
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| {
-                anyhow!(
-                    "daytona create response had no sandbox id: {}",
-                    response_excerpt(&body)
-                )
-            })
-    }
-
-    /// Execute a command inside an existing sandbox.
-    async fn exec(&self, id: &str, spec: &ExecSpec) -> Result<ExecOutput> {
-        // Join argv into a single shell command line; the toolbox executes it.
-        let mut command = spec.command.clone();
-        for arg in &spec.args {
-            command.push(' ');
-            command.push_str(arg);
-        }
-        let mut body = json!({ "command": command });
-        if let Some(secs) = spec.timeout_secs {
-            body["timeout"] = json!(secs);
-        }
-
-        let timeout = spec
-            .timeout_secs
-            .map(|s| Duration::from_secs(s).max(self.timeout))
-            .unwrap_or(self.timeout);
-
-        let resp = self
-            .http
-            .post(format!(
-                "{}/sandbox/{id}/toolbox/process/execute",
-                self.base
-            ))
-            .bearer_auth(&self.token)
-            .timeout(timeout)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| anyhow!("daytona exec request failed: {e}"))?;
-
-        let status = resp.status();
-        let body = read_response_capped(resp, "exec").await?;
-        if !status.is_success() {
-            return Err(anyhow!(
-                "daytona exec failed (HTTP {status}): {}",
-                response_excerpt(&body)
-            ));
-        }
-        let value: serde_json::Value = serde_json::from_slice(&body)
-            .map_err(|e| anyhow!("daytona exec returned unparseable body: {e}"))?;
-        let exit_code = value
-            .get("exitCode")
-            .or_else(|| value.get("code"))
-            .and_then(serde_json::Value::as_i64)
-            .unwrap_or(0) as i32;
-        // The toolbox returns combined output under `result`/`output`/`stdout`.
-        // Match the local process backend's per-stream cap after bounding the
-        // serialized provider body above.
-        let stdout = output_bytes(&value, &["result", "output", "stdout"], "stdout")?;
-        let stderr = output_bytes(&value, &["stderr"], "stderr")?;
-        Ok(ExecOutput {
-            exit_code,
-            stdout,
-            stderr,
-        })
-    }
-
-    /// Destroy a sandbox by id.
-    async fn destroy(&self, id: &str) -> Result<()> {
-        let resp = self
-            .http
-            .delete(format!("{}/sandbox/{id}", self.base))
-            .bearer_auth(&self.token)
-            .timeout(self.timeout)
-            .send()
-            .await
-            .map_err(|e| anyhow!("daytona destroy request failed: {e}"))?;
-        let status = resp.status();
-        // A 404 means the sandbox is already gone — treat as success (idempotent).
-        if status.is_success() || status.as_u16() == 404 {
-            return Ok(());
-        }
-        let body = read_response_capped(resp, "destroy").await?;
-        Err(anyhow!(
-            "daytona destroy failed (HTTP {status}): {}",
-            response_excerpt(&body)
-        ))
-    }
-}
-
-/// Wire string for a GPU class in the Daytona create body.
-fn gpu_wire(gpu: GpuKind) -> &'static str {
-    match gpu {
-        GpuKind::None => "none",
-        GpuKind::H200 => "h200",
-        GpuKind::H100 => "h100",
-        GpuKind::RtxPro6000 => "rtx_pro_6000",
-        GpuKind::Rtx5090 => "rtx_5090",
-        GpuKind::Rtx4090 => "rtx_4090",
-    }
-}
-
-/// Wire string for the OS in the Daytona create body.
-fn os_wire(os: OsKind) -> &'static str {
-    match os {
-        OsKind::Linux => "linux",
-        OsKind::Windows => "windows",
-    }
-}
-
 // ── DaytonaSandbox ───────────────────────────────────────────────────────────
 
 /// Daytona remote-sandbox backend. Cheap to construct (no I/O); all requests
@@ -478,12 +237,14 @@ impl Sandbox for DaytonaSandbox {
             let client = DaytonaClient::from_env()?;
             let sandbox_spec = configured_spec();
             let network = spec.capabilities.network;
-            let id = client.create(&sandbox_spec, network).await?;
-            // Always destroy, even when the exec errors — an ephemeral run must
+            let created = client.create(&sandbox_spec, network).await?;
+            // Always destroy, even when the exec errors: an ephemeral run must
             // not leak a remote (billable) sandbox.
-            let result = client.exec(&id, &spec).await;
-            if let Err(e) = client.destroy(&id).await {
-                tracing::warn!(sandbox_id = %id, error = %e, "daytona: ephemeral cleanup failed");
+            let result = client
+                .exec(&created.id, created.toolbox.as_deref(), &spec)
+                .await;
+            if let Err(e) = client.destroy(&created.id).await {
+                tracing::warn!(sandbox_id = %created.id, error = %e, "daytona: ephemeral cleanup failed");
             }
             result
         })
@@ -496,8 +257,8 @@ impl Sandbox for DaytonaSandbox {
         Box::pin(async move {
             let client = DaytonaClient::from_env()?;
             let sandbox_spec = configured_spec();
-            let id = client.create(&sandbox_spec, capabilities.network).await?;
-            Ok(WorkspaceId(id))
+            let created = client.create(&sandbox_spec, capabilities.network).await?;
+            Ok(WorkspaceId(created.id))
         })
     }
 
@@ -505,7 +266,7 @@ impl Sandbox for DaytonaSandbox {
         let sandbox_id = id.0.clone();
         Box::pin(async move {
             let client = DaytonaClient::from_env()?;
-            client.exec(&sandbox_id, &spec).await
+            client.exec(&sandbox_id, None, &spec).await
         })
     }
 
@@ -515,107 +276,5 @@ impl Sandbox for DaytonaSandbox {
             let client = DaytonaClient::from_env()?;
             client.destroy(&sandbox_id).await
         })
-    }
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    /// Serializes tests that mutate the process-global Daytona env vars,
-    /// including the heartbeat kill tests that point Daytona at a mock server.
-    static DAYTONA_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    pub(crate) fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        DAYTONA_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    #[test]
-    fn backend_name_is_daytona() {
-        assert_eq!(DaytonaSandbox::new().name(), "daytona");
-    }
-
-    #[tokio::test]
-    async fn detect_reflects_token_presence() {
-        let _lock = lock_env();
-        unsafe {
-            std::env::remove_var(ENV_DAYTONA_TOKEN);
-            std::env::remove_var(ENV_DAYTONA_TOKEN_ALT);
-        }
-        assert!(matches!(detect().await, DetectResult::Unavailable(_)));
-        unsafe { std::env::set_var(ENV_DAYTONA_TOKEN, "tok_test") };
-        assert_eq!(detect().await, DetectResult::Available);
-        unsafe { std::env::remove_var(ENV_DAYTONA_TOKEN) };
-    }
-
-    #[test]
-    fn gpu_count_normalized_to_one_when_gpu_selected() {
-        let _lock = lock_env();
-        unsafe {
-            std::env::set_var(ENV_DAYTONA_GPU, "h100");
-            std::env::remove_var(ENV_DAYTONA_GPU_COUNT);
-        }
-        let spec = configured_spec();
-        assert_eq!(spec.gpu, GpuKind::H100);
-        assert_eq!(spec.gpu_count, 1, "a selected GPU must bill at least one");
-        unsafe {
-            std::env::remove_var(ENV_DAYTONA_GPU);
-        }
-    }
-
-    #[test]
-    fn cpu_only_spec_has_zero_gpu_count() {
-        let _lock = lock_env();
-        unsafe {
-            std::env::remove_var(ENV_DAYTONA_GPU);
-            std::env::set_var(ENV_DAYTONA_GPU_COUNT, "4");
-        }
-        let spec = configured_spec();
-        assert_eq!(spec.gpu, GpuKind::None);
-        assert_eq!(spec.gpu_count, 0, "no GPU class means zero billable GPUs");
-        unsafe { std::env::remove_var(ENV_DAYTONA_GPU_COUNT) };
-    }
-
-    #[test]
-    fn provider_response_chunks_are_bounded_before_buffer_growth() {
-        let mut body = Vec::new();
-        let at_limit = vec![b'x'; MAX_DAYTONA_RESPONSE_BYTES];
-        append_response_chunk(&mut body, &at_limit, "test").expect("limit is accepted");
-        assert_eq!(body.len(), MAX_DAYTONA_RESPONSE_BYTES);
-
-        assert!(append_response_chunk(&mut body, b"x", "test").is_err());
-        assert_eq!(body.len(), MAX_DAYTONA_RESPONSE_BYTES);
-    }
-
-    #[test]
-    fn provider_output_fields_match_the_local_stream_cap() {
-        let at_limit = serde_json::json!({
-            "stdout": "x".repeat(MAX_DAYTONA_OUTPUT_BYTES),
-        });
-        assert_eq!(
-            output_bytes(&at_limit, &["stdout"], "stdout")
-                .expect("output at the cap is accepted")
-                .len(),
-            MAX_DAYTONA_OUTPUT_BYTES
-        );
-
-        let oversized = serde_json::json!({
-            "stdout": "x".repeat(MAX_DAYTONA_OUTPUT_BYTES + 1),
-        });
-        assert!(output_bytes(&oversized, &["stdout"], "stdout").is_err());
-    }
-
-    #[tokio::test]
-    async fn client_from_env_requires_token() {
-        let _lock = lock_env();
-        unsafe {
-            std::env::remove_var(ENV_DAYTONA_TOKEN);
-            std::env::remove_var(ENV_DAYTONA_TOKEN_ALT);
-        }
-        assert!(DaytonaClient::from_env().is_err());
-        unsafe { std::env::set_var(ENV_DAYTONA_TOKEN, "tok_test") };
-        assert!(DaytonaClient::from_env().is_ok());
-        unsafe { std::env::remove_var(ENV_DAYTONA_TOKEN) };
     }
 }

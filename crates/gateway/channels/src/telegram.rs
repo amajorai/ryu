@@ -69,6 +69,7 @@ use crate::{
 };
 use ryu_channel_contracts::{decode_callback_data, encode_callback_data};
 
+mod approvals;
 mod channel;
 mod payloads;
 mod updates;

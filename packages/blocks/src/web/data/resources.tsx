@@ -76,6 +76,25 @@ export function readTheDocsCta(path = "/docs"): {
  */
 export const DEMO_HREF = "https://cal.com/amajor/ryu-demo";
 
+/**
+ * The "Get early access" call to action of the product pages and of /pro.
+ *
+ * ONE constant for the same reason as `DEMO_HREF`: it was declared four times
+ * (two data files here, two files of the site), each with its own copy of a
+ * link to a hosted sign-up form. That form was unpublished later, so every
+ * early-access button led to a "page not found". It now opens the download
+ * page of this site at its list of installers.
+ *
+ * The `#platforms` part is load-bearing: `Cta` (../sections.tsx) draws a link
+ * to exactly /download as the Download button and drops the label, and the
+ * pages that carry this call to action must not show a Download button (their
+ * products are not in the release yet).
+ */
+export const EARLY_ACCESS_CTA = {
+	href: "/download#platforms",
+	label: "Get early access",
+} as const;
+
 /** Public markdown playbook that lets another agent set up Ryu for the user. */
 export const SETUP_RYU_HREF = "/setup-ryu.md";
 export const SETUP_RYU_LABEL = "Set up Ryu for me";

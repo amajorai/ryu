@@ -23,6 +23,8 @@ use crate::provider_pins::{
 };
 use crate::sidecar::{deferred_authorization, ext_proxy::authenticate_sidecar, gateway};
 
+mod read_only;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderStatusBody {
@@ -289,34 +291,52 @@ pub(crate) async fn host_provider_authorize(
     }
 }
 
+/// Everything Core decides about a provider call before any of it may leave
+/// for Gateway: the call's shape, which app is asking, the calling agent's
+/// account access and the read-only rule. Returns the authenticated app id, or
+/// the response that refuses the call. Nothing here talks to Gateway.
+async fn admit_provider_call(
+    state: &ServerState,
+    headers: &axum::http::HeaderMap,
+    body: &mut ManagedProviderCall,
+) -> Result<String, Response> {
+    if let Err(error) = body.validate() {
+        return Err(failed(error));
+    }
+    // The pin is decided on, and the call forwarded with, the id exactly as
+    // Gateway will read it, so padding cannot dodge the brand lookup.
+    match normalized_tool_id(&body.tool_id) {
+        Some(tool_id) => body.tool_id = tool_id,
+        None => return Err(invalid("tool_id is not a valid tool id")),
+    }
+    // The authenticated app id, never one the app supplies: Gateway scopes the
+    // provider-side idempotency key by it, so two apps in one org never replay
+    // each other's results.
+    let plugin_id = match authenticate_sidecar(state, headers).await {
+        Ok((plugin_id, _)) => plugin_id,
+        Err((status, message)) => {
+            return Err((status, Json(json!({ "error": message }))).into_response());
+        }
+    };
+    authorize_agent_provider_call(state, &plugin_id, headers, body).await?;
+    // An app whose stored sources refresh on a timer (dashboard widgets) may
+    // only read: nobody approves each run, so a write never leaves Core.
+    if let Some(refusal) = read_only::refusal(state, &plugin_id, body).await {
+        return Err(refusal);
+    }
+    Ok(plugin_id)
+}
+
 /// `POST /api/host/capability/providers.call`.
 pub(crate) async fn host_provider_call(
     State(state): State<ServerState>,
     headers: axum::http::HeaderMap,
     Json(mut body): Json<ManagedProviderCall>,
 ) -> Response {
-    if let Err(error) = body.validate() {
-        return failed(error);
-    }
-    // The pin is decided on, and the call forwarded with, the id exactly as
-    // Gateway will read it, so padding cannot dodge the brand lookup.
-    match normalized_tool_id(&body.tool_id) {
-        Some(tool_id) => body.tool_id = tool_id,
-        None => return invalid("tool_id is not a valid tool id"),
-    }
-    // The authenticated app id, never one the app supplies: Gateway scopes the
-    // provider-side idempotency key by it, so two apps in one org never replay
-    // each other's results.
-    let plugin_id = match authenticate_sidecar(&state, &headers).await {
-        Ok((plugin_id, _)) => plugin_id,
-        Err((status, message)) => {
-            return (status, Json(json!({ "error": message }))).into_response();
-        }
+    let plugin_id = match admit_provider_call(&state, &headers, &mut body).await {
+        Ok(plugin_id) => plugin_id,
+        Err(refusal) => return refusal,
     };
-    if let Err(response) = authorize_agent_provider_call(&state, &plugin_id, &headers, &body).await
-    {
-        return response;
-    }
 
     // The user's provider pin for this call's brand, decided here and never
     // taken from the app: a Composio pin keeps the call off Treg.
@@ -377,3 +397,6 @@ fn refuse_pinned(call: &ManagedProviderCall, pin: Option<ProviderPin>) -> Option
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod read_only_tests;
