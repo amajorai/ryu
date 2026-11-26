@@ -1,6 +1,6 @@
 # Hub workflow scripts
 
-The release, canary and nightly workflows in `.github/workflows/` call these
+The release, canary, nightly and images workflows in `.github/workflows/` call these
 scripts instead of carrying long inline `run:` blocks. Each script's header
 explains what it does, the environment it reads, and why. Steps call them as
 `bash .github/scripts/<name>.sh` from the repository root after checkout, so
@@ -22,6 +22,8 @@ they do not depend on the executable bit.
 | `upload-release-assets.sh` | all three | Upload a directory through the assets endpoint. |
 | `stable-updater-feed.sh` | release | Publish `latest.json` and `latest-beta.json`. |
 | `release-signing-key-gate.mjs` | release | Stop the Core and Desktop builds while no release signing public key is set. |
+| `assert-glibc-ceiling.mjs` | all three, images | Fail when a Linux binary needs a newer glibc than the systems or the image it runs on. |
+| `smoke-start-image.sh` | images | Start each binary of a built image once before any tag is pushed or deploy hook is called. |
 
 ## Workflow notes
 
@@ -61,6 +63,32 @@ repositories. Asset names match Core's updater and installer contract
 `<asset>.sha256` that the installers verify. The public mirror ships no root
 `Cargo.toml`, so every manifest builds as its own workspace and its binary lands
 in `<manifest-dir>/target/release/`.
+
+### Fixed Linux runner labels and the glibc ceiling
+
+A binary linked on a runner starts only where glibc is at least as new as the
+runner's. `ubuntu-latest` moves without a commit: in November 2026 it went from
+Ubuntu 24.04 (glibc 2.39) to 26.04 (glibc 2.43). On 26 Nov `images.yml` then
+pushed a `ryu-core` image that exited at start, because its runtime base
+debian:trixie-slim has glibc 2.41, and the canary published a
+`ryu-core-linux-x86_64` that needs glibc 2.43.
+
+- The jobs that publish a Linux `ryu-core` or `ryu-gateway` run on the fixed
+  label `ubuntu-24.04`. These are the `build` job of release, canary and
+  nightly, and `images.yml`. 24.04 is the floor as well, because the prebuilt
+  ONNX Runtime that `voice-parakeet` links needs glibc 2.38.
+- `assert-glibc-ceiling.mjs` reads the requirement out of each built binary and
+  fails above the stated ceiling: 2.39 for release assets (what v0.5.1 needs),
+  called by `package-binary.sh` before it copies a Linux binary, and 2.41 for
+  the images, called by `images.yml`.
+- `images.yml` also builds both images locally, starts every binary in them once
+  with `smoke-start-image.sh`, and only then pushes tags and calls the deploy
+  hooks, on main only. A manual run on another branch is a dry run.
+- The cargo cache key carries the runner label on Linux, because the cache
+  action's own key does not tell Ubuntu releases apart.
+
+Move the label only on purpose, together with the ceiling, and for the images
+together with the runtime base of both Dockerfiles.
 
 ### Release signing key gate
 

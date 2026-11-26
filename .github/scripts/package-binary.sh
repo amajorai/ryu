@@ -14,6 +14,12 @@
 # `macos-latest` and pass `macos-aarch64`); otherwise it follows `uname -m`, so
 # the stable release's macos-15 (Apple Silicon) and macos-15-intel legs are each
 # labelled accurately.
+#
+# A Linux binary is packaged only when it starts on glibc 2.39 (Ubuntu 24.04,
+# what v0.5.1 needs). The canary of 26 Nov 2026 was linked on ubuntu-latest
+# after it moved to Ubuntu 26.04 and published a ryu-core that needs glibc 2.43.
+# Running the binary here cannot show that, so its requirement is read from the
+# file. See assert-glibc-ceiling.mjs and "Fixed Linux runner labels" in README.md.
 set -eo pipefail
 
 ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
@@ -26,6 +32,9 @@ case "$RUNNER_OS" in
 esac
 src="$TARGET_DIR/target/release/$TARGET_BIN${ext}"
 asset="$TARGET_ASSET-${plat}${ext}"
+if [ "$RUNNER_OS" = "Linux" ]; then
+  node .github/scripts/assert-glibc-ceiling.mjs 2.39 "$src"
+fi
 mkdir -p dist
 cp "$src" "dist/$asset"
 # Portable sha256 (Linux/Windows-git ship sha256sum; macOS ships shasum) in the

@@ -12,6 +12,12 @@ name: images
 # of the ~34-minute cold in-Docker compile the default target does. Gateway is
 # compiled once and goes into both images.
 #
+# Each image is built locally first and every binary in it is started once. Only
+# then are the tags pushed and the deploy hooks called, so `latest` never points
+# at an image that cannot start. Pushing and redeploying happen only on main: a
+# manual run on any other branch is a dry run that builds and starts the images
+# and publishes nothing.
+#
 # Published:
 #   ghcr.io/<owner>/ryu-core:latest     and :<commit sha>
 #   ghcr.io/<owner>/ryu-gateway:latest  and :<commit sha>
@@ -50,8 +56,19 @@ jobs:
     name: Build and push Core + Gateway images
     # Never from a fork: this job pushes images and may trigger a redeploy.
     if: github.repository_owner == 'amajorai'
-    runs-on: ubuntu-latest
+    # A FIXED label, never ubuntu-latest. The binaries are linked on this runner
+    # and run in debian:trixie-slim (glibc 2.41), so the runner's glibc must not
+    # be newer than 2.41, and it must be at least 2.38 for the prebuilt ONNX
+    # Runtime that `voice-parakeet` links (see the root Dockerfile). Ubuntu 24.04
+    # has 2.39. On 26 Nov 2026 ubuntu-latest had moved to 26.04 (glibc 2.43) and
+    # the Core image built here could not start. Change this label only together
+    # with the runtime base of both Dockerfiles, RUNTIME_GLIBC and the cache key
+    # below.
+    runs-on: ubuntu-24.04
     env:
+      # glibc of debian:trixie-slim, the runtime base of the root Dockerfile and
+      # apps/gateway/Dockerfile. No binary may need a newer one.
+      RUNTIME_GLIBC: "2.41"
       # Same guard as canary.yml for vendored CMake builds on CMake >= 4.0.
       CMAKE_POLICY_VERSION_MINIMUM: "3.5"
       # Keep in step with the root Dockerfile's `builder` stage and canary.yml.
@@ -61,8 +78,6 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      # ubuntu-latest's glibc is older than debian:trixie-slim's (2.41), which the
-      # runtime images use, so these binaries start there.
       - name: Linux build deps
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
 
@@ -77,6 +92,11 @@ jobs:
           workspaces: |
             apps/core
             apps/gateway
+          # The action's own key names the OS family only ("Linux"), not the
+          # runner image. Without this, a target directory compiled on another
+          # Ubuntu release (C objects built against its glibc headers) would be
+          # restored here. Keep it equal to runs-on.
+          key: ubuntu-24.04
           cache-on-failure: true
 
       - name: Build Gateway
@@ -100,10 +120,55 @@ jobs:
           cp apps/core/target/release/ryu-core .docker-prebuilt/ryu-core
           cp apps/gateway/target/release/ryu-gateway .docker-prebuilt/ryu-gateway
 
+      # Fast and readable: fails in a second, with the library and version named,
+      # when a binary was bound to a newer glibc than the runtime image has.
+      - name: Assert the binaries start on the runtime image's glibc
+        run: node .github/scripts/assert-glibc-ceiling.mjs "$RUNTIME_GLIBC" .docker-prebuilt/ryu-core .docker-prebuilt/ryu-gateway
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
+      # Build both images into the local Docker engine WITHOUT pushing, then start
+      # every binary in them once. The push steps further down rebuild from this
+      # builder's cache and the same staged binaries, so they publish the layers
+      # that were started here.
+      - name: Build ryu-core image (not pushed)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          target: prebuilt
+          load: true
+          provenance: false
+          tags: ryu-core:smoke
+          cache-from: type=gha,scope=image-core
+
+      - name: Build ryu-gateway image (not pushed)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/gateway/Dockerfile
+          target: prebuilt
+          load: true
+          provenance: false
+          tags: ryu-gateway:smoke
+          cache-from: type=gha,scope=image-gateway
+
+      # The Core image carries both binaries (Core spawns its own Gateway), so
+      # both are started in it. See .github/scripts/smoke-start-image.sh for what
+      # this does and does not prove.
+      - name: Start every binary of both images once
+        run: |
+          bash .github/scripts/smoke-start-image.sh ryu-core:smoke ryu-core
+          bash .github/scripts/smoke-start-image.sh ryu-core:smoke ryu-gateway --entrypoint ryu-gateway
+          bash .github/scripts/smoke-start-image.sh ryu-gateway:smoke ryu-gateway
+
+      - name: Dry run, nothing is pushed or redeployed
+        if: github.ref != 'refs/heads/main'
+        run: echo "::notice::Not on main ($GITHUB_REF), so the images were built and started but no tag is pushed and no deploy hook is called."
+
       - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -111,6 +176,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push ryu-core
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -124,6 +190,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=image-core
 
       - name: Build and push ryu-gateway
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -137,6 +204,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=image-gateway
 
       - name: Redeploy Core and Gateway
+        if: github.ref == 'refs/heads/main'
         env:
           CORE_DEPLOY_HOOK_URL: ${{ secrets.CORE_DEPLOY_HOOK_URL }}
           GATEWAY_DEPLOY_HOOK_URL: ${{ secrets.GATEWAY_DEPLOY_HOOK_URL }}

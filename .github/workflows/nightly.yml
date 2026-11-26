@@ -267,7 +267,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Fixed Linux label, see .github/scripts/README.md.
+        os: [ubuntu-24.04, macos-latest, windows-latest]
         target:
           # core + gateway only. The TUI (shipped as ryu-cli) is Bun, not cargo;
           # app backends build in their own satellite repos.
@@ -306,6 +307,7 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: ${{ matrix.target.dir }}
+          key: ${{ runner.os == 'Linux' && matrix.os || '' }}
 
       # Core MUST carry its shipped-but-not-default features (`sandbox-wasmtime`,
       # `voice-parakeet`, `voice-vad`); the flag lives on the matrix row because
