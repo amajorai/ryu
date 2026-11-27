@@ -12,6 +12,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@ryu/ui/components/card";
+import { planCardConicGradient } from "@ryu/ui/components/plan-badge";
 import { cn } from "@ryu/ui/lib/utils";
 import type { Route } from "next";
 import Link from "next/link";
@@ -31,6 +32,7 @@ import {
 	landingSubheadlineBodyClass,
 } from "./landing-typography.ts";
 import { LinkArrow } from "./link-arrow.tsx";
+import motionStyles from "./pricing-motion.module.css";
 import { SectionHeading } from "./sections.tsx";
 
 // A long price line keeps only its first clause as the lead; the rest moves
@@ -119,7 +121,10 @@ function StandaloneProductPricingCard({
 	const realm = PRODUCT_REALMS.find((candidate) => candidate.id === entry.slug);
 	const points = standalonePricePoints(entry.slug, tl, locale);
 	const card = (
-		<Card className="h-full" data-standalone-product={entry.slug}>
+		<Card
+			className={isGatewayPayg ? "relative h-full" : "h-full"}
+			data-standalone-product={entry.slug}
+		>
 			<CardHeader>
 				<div className="flex min-h-8 items-center justify-between gap-3">
 					<div className="flex min-w-0 items-center gap-2.5">
@@ -184,9 +189,18 @@ function StandaloneProductPricingCard({
 		return card;
 	}
 
-	// Flat like the rest of the catalog: the Gateway card has no hover ring.
+	// No plain border, like the rest of the catalog. The Gateway card shows
+	// its gradient ring on hover.
 	return (
-		<div className="h-full" data-testid="standalone-pricing-card-gateway">
+		<div
+			className="group relative h-full rounded-[calc(var(--radius-xl)+2px)] p-[2px]"
+			data-testid="standalone-pricing-card-gateway"
+		>
+			<div
+				aria-hidden="true"
+				className={`t-card-border-spin pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover:opacity-100 motion-reduce:animate-none ${motionStyles.idleRing}`}
+				style={{ backgroundImage: planCardConicGradient("gateway-payg") }}
+			/>
 			{card}
 		</div>
 	);

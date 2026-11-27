@@ -185,10 +185,11 @@ export function PriceBlock({
  * while it is hidden, and every loop in the card (rings and the plan badge)
  * pauses while the card is off screen.
  *
- * The public `/pricing` page is flat: no border and no ring, at rest or on
- * hover. Every card sits on the card shade and the highlighted one on the
- * raised (`muted`) shade, so shade alone marks it. The tier badge keeps the
- * plan's palette.
+ * The public `/pricing` page has no plain border: a card at rest is told
+ * apart by shade alone, so the static default border is left out there. The
+ * gradient ring is the one border it keeps, always on for the highlighted
+ * card and on hover for the others. The highlighted card also sits on the
+ * raised (`muted`) shade.
  */
 export function PricingCardBorder({
 	isRecommended = false,
@@ -203,25 +204,11 @@ export function PricingCardBorder({
 	const frameRef = useRef<HTMLDivElement>(null);
 	usePauseMotionOffscreen(frameRef);
 	const isPublic = useIsPublicPricing();
-	if (isPublic) {
-		return (
-			<div
-				className={cn("relative", motionStyles.offscreenAware)}
-				data-plan-emphasis={showHighlightedBorder ? "raised" : "resting"}
-				ref={frameRef}
-			>
-				<Card
-					borderTone="transparent"
-					className={cn(
-						"relative flex h-full flex-col",
-						showHighlightedBorder && "bg-muted"
-					)}
-				>
-					{children}
-				</Card>
-			</div>
-		);
-	}
+	const emphasis = showHighlightedBorder ? "raised" : "resting";
+	const cardClassName = cn(
+		"relative flex h-full flex-col",
+		isPublic && showHighlightedBorder && "bg-muted"
+	);
 	if (variant === "pro" && showHighlightedBorder) {
 		return (
 			<div
@@ -229,13 +216,11 @@ export function PricingCardBorder({
 					`t-pro-card-border relative ${styles.frame} p-0.5`,
 					motionStyles.offscreenAware
 				)}
+				data-plan-emphasis={emphasis}
 				ref={frameRef}
 				style={{ backgroundImage: planCardConicGradient(variant) }}
 			>
-				<Card
-					borderTone="transparent"
-					className="relative flex h-full flex-col"
-				>
+				<Card borderTone="transparent" className={cardClassName}>
 					{children}
 				</Card>
 			</div>
@@ -245,9 +230,11 @@ export function PricingCardBorder({
 	return (
 		<div
 			className={cn(
-				`group relative ${styles.frame} bg-border p-0.5 dark:bg-transparent`,
+				`group relative ${styles.frame} p-0.5`,
+				!isPublic && "bg-border dark:bg-transparent",
 				motionStyles.offscreenAware
 			)}
+			data-plan-emphasis={emphasis}
 			ref={frameRef}
 		>
 			<div
@@ -264,7 +251,7 @@ export function PricingCardBorder({
 					} satisfies PlanBorderStyle as PlanBorderStyle
 				}
 			/>
-			<Card borderTone="transparent" className="relative flex h-full flex-col">
+			<Card borderTone="transparent" className={cardClassName}>
 				{children}
 			</Card>
 		</div>

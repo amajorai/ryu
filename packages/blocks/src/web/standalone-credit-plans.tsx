@@ -19,6 +19,7 @@ import {
 import { Checkbox } from "@ryu/ui/components/checkbox";
 import { Input } from "@ryu/ui/components/input";
 import PageHeader from "@ryu/ui/components/page-header.tsx";
+import { planCardConicGradient } from "@ryu/ui/components/plan-badge";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	Ban,
@@ -34,6 +35,7 @@ import {
 import { useState } from "react";
 import { creditPlanKeyTarget } from "./credit-plan-keys.ts";
 import { depositFeeAmounts } from "./pricing-deposit-fee-format.ts";
+import motionStyles from "./pricing-motion.module.css";
 
 export type StandaloneFundingChoice =
 	| { kind: "topup"; amountCents: number }
@@ -126,15 +128,29 @@ export function StandaloneCreditPlans({
 								? FlaskConical
 								: Zap;
 					return (
-						// Flat, like every card on the pricing page: no border and no
-						// ring. The picked option sits on the raised shade.
+						// No plain border, like every card on the pricing page. The
+						// gradient ring shows on the picked option and on hover, and the
+						// picked option also sits on the raised shade.
 						<div
+							className="group relative rounded-[calc(var(--radius-4xl)+2px)] p-[2px]"
 							data-funding-option={choice === option.id ? "picked" : "resting"}
 							key={option.id}
 						>
+							<div
+								aria-hidden
+								className={cn(
+									"t-card-border-spin pointer-events-none absolute inset-0 rounded-[inherit] transition-opacity duration-500 ease-out",
+									choice === option.id
+										? "opacity-100"
+										: `opacity-0 group-hover:opacity-100 ${motionStyles.idleRing}`
+								)}
+								style={{
+									backgroundImage: planCardConicGradient("gateway-payg"),
+								}}
+							/>
 							<Card
 								className={cn(
-									"flex h-full flex-col transition-colors motion-reduce:transition-none",
+									"relative flex h-full flex-col transition-colors motion-reduce:transition-none",
 									choice === option.id && "bg-muted"
 								)}
 							>
