@@ -8,6 +8,11 @@ import layout from "./chat-layout.module.css";
 // "Open in tab" (a workspace window tab) — so a user can keep one artifact on
 // screen while the conversation moves on. No limit on how many render at once:
 // each one is an independent card, and each Open call mints its own dock tab.
+// Download saves the artifact as a file (see ArtifactDownloadButton).
+//
+// A created file the chat cannot draw as text (a PDF, an image, an office
+// file, an archive) is not drawn here at all: it gets the file card
+// (InlineFileArtifact).
 //
 // A created artifact (`url` set, no inline content) is lazily fetched through
 // the host's node target; until it resolves the preview shows a placeholder.
@@ -31,12 +36,15 @@ import {
 } from "@ryu/ui/components/button-group.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { ArtifactDownloadButton } from "@/src/components/chat/ArtifactDownloadButton.tsx";
 import {
 	ArtifactContentView,
 	ArtifactHeader,
 	FRAMED_ARTIFACT_KINDS,
 } from "@/src/components/chat/ArtifactRenderer.tsx";
+import { InlineFileArtifact } from "@/src/components/chat/InlineFileArtifact.tsx";
 import { useArtifactPageState } from "@/src/hooks/useArtifactPageState.ts";
+import { isFileCardArtifact, spaceFileRef } from "@/src/lib/artifact-files.ts";
 import { artifactFromSdkObservation } from "@/src/lib/live-artifacts.ts";
 
 /** Height before the frame has reported its content size. */
@@ -53,13 +61,25 @@ function clampFrameHeight(height: number): number {
 	return Math.min(MAX_FRAME_HEIGHT, Math.max(MIN_FRAME_HEIGHT, height));
 }
 
-export function InlineArtifact({
-	artifact: payload,
-	id,
-}: {
+interface InlineArtifactProps {
 	artifact: NativeArtifactObservation;
 	id: string;
-}) {
+}
+
+export function InlineArtifact({ artifact, id }: InlineArtifactProps) {
+	return isFileCardArtifact(artifact) ? (
+		<InlineFileArtifact artifact={artifact} id={id} />
+	) : (
+		<InlineContentArtifact artifact={artifact} id={id} />
+	);
+}
+
+/** The artifact card. Exported for the file cards story, whose before page
+ *  draws a created file the way the chat drew it before the file card. */
+export function InlineContentArtifact({
+	artifact: payload,
+	id,
+}: InlineArtifactProps) {
 	const host = useArtifactHost();
 	const [fetchedContent, setFetchedContent] = useState<string | null>(null);
 	const [fetching, setFetching] = useState(false);
@@ -96,6 +116,9 @@ export function InlineArtifact({
 	);
 
 	const pageState = useArtifactPageState(id, artifact.title);
+	// A created artifact is downloaded from its stored bytes, not from the text
+	// the preview decoded.
+	const fetchBlob = spaceFileRef(payload) ? host?.fetchBlob : undefined;
 	const framed = FRAMED_ARTIFACT_KINDS.has(artifact.kind);
 	const geometry: InlineArtifactGeometryStyle | undefined = framed
 		? { "--inline-artifact-height": `${clampFrameHeight(frameHeight)}px` }
@@ -130,7 +153,11 @@ export function InlineArtifact({
 					/>
 				)}
 			</div>
-			<div className="flex h-10 shrink-0 items-center justify-end border-border border-t px-2">
+			<div className="flex h-10 shrink-0 items-center justify-end gap-1 border-border border-t px-2">
+				<ArtifactDownloadButton
+					artifact={artifact}
+					loadBlob={fetchBlob ? () => fetchBlob(payload, id) : undefined}
+				/>
 				<ButtonGroup aria-label="Artifact actions">
 					<Button
 						onClick={() => host?.openInPanel(payload, id)}

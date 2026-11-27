@@ -13,14 +13,7 @@ test("shows usage for ACP and Ryu subscription providers in one dialog", async (
 	await page.addInitScript(() => {
 		localStorage.setItem(
 			"ryu:usage-bar-prefs",
-			JSON.stringify({
-				barStyle: "ring",
-				mode: "remaining",
-				showBar: true,
-				showPercent: false,
-				sidebar: true,
-				visible: true,
-			})
+			JSON.stringify({ mode: "remaining", sidebar: true })
 		);
 	});
 	// Core's per-agent usage read, answered from its wire schema.

@@ -264,8 +264,28 @@ async function mount() {
 		)
 	);
 	await until(
-		() => document.querySelector("#custom-id") !== null,
+		() => document.querySelector("[data-provider-list]") !== null,
 		"providers page never loaded"
+	);
+}
+
+/** Open the page of the list row whose text holds `name`. */
+async function openRow(name: string) {
+	const row = Array.from(
+		document.querySelectorAll<HTMLElement>("[data-provider-page-row]")
+	).find((candidate) => candidate.textContent?.includes(name));
+	if (!row) {
+		throw new Error(`Missing row ${name}`);
+	}
+	await click(row);
+}
+
+/** The custom provider form sits on a page of its own. */
+async function openCustomForm() {
+	await openRow("Custom OpenAI-compatible provider");
+	await until(
+		() => document.querySelector("#custom-id") !== null,
+		"custom provider form never opened"
 	);
 }
 
@@ -319,15 +339,14 @@ function titles(spy: { mock: { calls: unknown[][] } }): unknown[] {
 	);
 }
 
-function sectionLabels(headingId: string): string[] {
-	const section = document
-		.getElementById(headingId)
-		?.closest<HTMLElement>("section");
-	if (!section) {
-		throw new Error(`Missing section ${headingId}`);
+/** The provider names on the list, top to bottom (Connected, then Other). */
+function listLabels(): string[] {
+	const list = document.querySelector<HTMLElement>("[data-provider-list]");
+	if (!list) {
+		throw new Error("Missing provider list");
 	}
 	return Array.from(
-		section.querySelectorAll<HTMLElement>('[data-slot="provider-label"]')
+		list.querySelectorAll<HTMLElement>('[data-slot="provider-label"]')
 	).map((label) => label.textContent ?? "");
 }
 
@@ -340,16 +359,12 @@ test("configured API-key providers are listed before unconfigured ones", async (
 	];
 	await mount();
 
-	expect(sectionLabels("api-key-provider-heading")).toEqual([
-		"Alpha AI",
-		"Beta AI",
-		"Zeta AI",
-		"Mid AI",
-	]);
+	expect(listLabels()).toEqual(["Alpha AI", "Beta AI", "Zeta AI", "Mid AI"]);
 });
 
 test("the custom provider form requires an id and base URL, and a key requires the spend-limit confirmation", async () => {
 	await mount();
+	await openCustomForm();
 	const add = () => button("Add provider");
 	expect(add().disabled).toBe(true);
 
@@ -381,18 +396,27 @@ test("the custom provider form requires an id and base URL, and a key requires t
 		},
 	]);
 	expect(titles(successToast)).toContain("Custom provider added");
+	// The new provider joined the list: the list is back, on its row.
+	await until(
+		() =>
+			document.querySelector("[data-provider-list]") !== null &&
+			listLabels().includes("ollama"),
+		"created provider never joined the list"
+	);
+	expect(document.activeElement?.getAttribute("data-provider-page-row")).toBe(
+		"provider:ollama"
+	);
+	// A second visit starts from an empty form.
+	await openCustomForm();
 	expect(input("#custom-id").value).toBe("");
 	expect(input("#custom-url").value).toBe("");
 	expect(add().disabled).toBe(true);
-	await until(
-		() => sectionLabels("api-key-provider-heading").includes("ollama"),
-		"created provider never joined the list"
-	);
 });
 
 test("a rejected custom provider keeps the form and reports Core's error", async () => {
 	createStatus = 400;
 	await mount();
+	await openCustomForm();
 	await type("#custom-id", "vllm");
 	await type("#custom-url", "http://localhost:8000/v1");
 	await click(button("Add provider"));

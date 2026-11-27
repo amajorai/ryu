@@ -1,44 +1,42 @@
 // apps/desktop/src/components/settings/LlmProvidersSettings.tsx
 //
-// The standalone "LLM Providers" surface — a Zed-style page that lists every
-// provider Core's managed Pi can reach, lets the user store BYOK credentials for
-// many at once, pick ONE active provider, toggle per-provider routing
-// (Gateway ⇄ direct), and discover models dynamically. It is backed by
-// `useLlmProviders`, which reuses the same query cache as the agent-scoped
-// editor (`RyuPiConfig`), so the two stay in sync. Every decision lives in Core
-// (`/api/pi-config/*`); nothing here is hardcoded — the provider list, api
-// types, and thinking levels all come from the catalog endpoint.
+// The "AI providers" surface: every provider Core's managed Pi can reach, as
+// one list that opens one page per provider (`provider-pages/`). The user
+// stores BYOK credentials for many at once, picks ONE active provider, toggles
+// per-provider routing (Gateway or direct), and discovers models dynamically.
+// It is backed by `useLlmProviders`, which reuses the same query cache as the
+// agent-scoped editor (`RyuPiConfig`), so the two stay in sync. Every decision
+// lives in Core (`/api/pi-config/*`); nothing here is hardcoded: the provider
+// list, api types, and thinking levels all come from the catalog endpoint.
 //
-// Hosted by the Gateway dialog (Gateway → LLM Providers), NOT the account
-// SettingsDialog: provider *selection* is strictly Core ("what runs" — which
+// Hosted by the Gateway dialog (Gateway → AI providers), NOT the account
+// SettingsDialog: provider *selection* is strictly Core ("what runs": which
 // model/keys/routing the local agent uses), a node/infra concern that belongs on
 // the model-routing surface, not account/org data.
 
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import type { ReactNode } from "react";
 import { OrgBillingContext } from "@/src/components/billing/OrgBillingContext.tsx";
 import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
 import { useLlmProviders } from "@/src/hooks/useLlmProviders.ts";
 import { unrestrictedCreditBalanceMicroUsd } from "@/src/lib/api/credits.ts";
-import type { PiCatalog, PiProvider } from "@/src/lib/api/pi-config.ts";
-import { AccountPoolsSettings } from "./AccountPoolsSettings.tsx";
-import { AgentModelsSettings } from "./AgentModelsSettings.tsx";
-import { CustomProviderForm } from "./LlmProvidersSettings-custom-provider-form.tsx";
-import { ProviderCard } from "./LlmProvidersSettings-provider-card.tsx";
-import {
-	DEFAULT_API,
-	orderProviders,
-	supportsOAuth,
-} from "./LlmProvidersSettings-shared.ts";
-import { ModelParametersSettings } from "./ModelParametersSettings.tsx";
-import { ProviderKeySafetyNotice } from "./shared/provider-key-safety.tsx";
-import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
+import type { PiCatalog } from "@/src/lib/api/pi-config.ts";
+import { DEFAULT_API, orderProviders } from "./LlmProvidersSettings-shared.ts";
+import { ProviderPages } from "./provider-pages/ProviderPages.tsx";
+import type { LinkedSection } from "./provider-pages/provider-pages-model.ts";
 
 export function LlmProvidersSettings({
 	canSetGatewayAccount = true,
+	gatewayKeys,
+	onOpenSection,
 }: {
 	canSetGatewayAccount?: boolean;
+	/** The gateway's own keys, read only, as a page of the list. */
+	gatewayKeys?: ReactNode;
+	/** Jump to another pane of the settings window, when hosted in one. */
+	onOpenSection?: (section: LinkedSection) => void;
 } = {}) {
 	const {
 		catalog,
@@ -90,15 +88,6 @@ export function LlmProvidersSettings({
 		thinkingLevels: [],
 	};
 	const ordered = orderProviders(cat.providers);
-	const managedProviders = ordered.filter(
-		(provider) => provider.managed || provider.authKind === "none"
-	);
-	const oauthProviders = ordered.filter(
-		(provider) => !provider.managed && supportsOAuth(provider)
-	);
-	const apiKeyProviders = ordered.filter(
-		(provider) => provider.authKind === "api-key" && !supportsOAuth(provider)
-	);
 
 	const handleActivate = async (input: {
 		api?: string | null;
@@ -143,109 +132,42 @@ export function LlmProvidersSettings({
 		await configure(input);
 	};
 
-	// One grouped card per list; each provider is a hairline-separated row on it.
-	const renderProviderCards = (providers: PiProvider[]) =>
-		providers.length === 0 ? null : (
-			<SettingsCard className="py-0">
-				{providers.map((provider) => (
-					<ProviderCard
-						activeConfig={config}
-						canSetGatewayAccount={canSetGatewayAccount}
-						check={check}
-						discover={discover}
-						hasPrepaidManagedBalance={hasPrepaidManagedBalance}
-						key={provider.id}
-						onActivate={handleActivate}
-						onConfigure={handleConfigure}
-						onReload={reload}
-						onRemove={handleRemove}
-						onRemoveAccount={async (providerId, accountId) => {
-							return await removeAccount(providerId, accountId);
-						}}
-						onRenameAccount={async (providerId, accountId, label) => {
-							await renameAccount(providerId, accountId, label);
-						}}
-						onSwitchAccount={async (providerId, accountId, target) => {
-							await switchAccount(providerId, accountId, target);
-						}}
-						onToggleModel={handleToggleModel}
-						provider={provider}
-						thinkingLevels={cat.thinkingLevels}
-					/>
-				))}
-			</SettingsCard>
-		);
-
 	return (
-		<div className="flex flex-col gap-8">
-			<OrgBillingContext
-				compact
-				description="Ryu managed inference uses this organization's shared credits; BYOK providers use keys stored on this node."
-				label="Managed provider billing"
-			/>
-			<SettingsSection
-				caption="Providers that answer chat. Configure any number, then pick one to power the Ryu agent."
-				title="Chat"
-			>
-				<div className="flex flex-col gap-6">
-					<section
-						aria-labelledby="managed-provider-heading"
-						className="flex flex-col"
-					>
-						<h4
-							className="text-detail text-muted-foreground"
-							id="managed-provider-heading"
-						>
-							Ryu managed
-						</h4>
-						{renderProviderCards(managedProviders)}
-					</section>
-					<section
-						aria-labelledby="oauth-provider-heading"
-						className="flex flex-col"
-					>
-						<h4
-							className="text-detail text-muted-foreground"
-							id="oauth-provider-heading"
-						>
-							OAuth accounts
-						</h4>
-						{renderProviderCards(oauthProviders)}
-					</section>
-					<section
-						aria-labelledby="api-key-provider-heading"
-						className="flex flex-col"
-					>
-						<h4
-							className="text-detail text-muted-foreground"
-							id="api-key-provider-heading"
-						>
-							API keys
-						</h4>
-						<ProviderKeySafetyNotice storage="vault" />
-						{renderProviderCards(apiKeyProviders)}
-					</section>
-				</div>
-			</SettingsSection>
-
-			<AccountPoolsSettings providers={ordered} />
-
-			<AgentModelsSettings
-				agentModelOverrides={cat.agentModelOverrides}
-				onToggleModel={handleToggleModel}
-			/>
-
-			<ModelParametersSettings />
-
-			<SettingsSection
-				caption="Any OpenAI-compatible endpoint, local or hosted. It joins the list above."
-				title="Custom OpenAI-compatible provider"
-			>
-				<CustomProviderForm
-					apiTypes={cat.apiTypes}
-					onCreate={handleCreateCustom}
+		<ProviderPages
+			activeConfig={config}
+			agentModelOverrides={cat.agentModelOverrides}
+			apiTypes={cat.apiTypes}
+			cardProps={{
+				canSetGatewayAccount,
+				check,
+				discover,
+				hasPrepaidManagedBalance,
+				onActivate: handleActivate,
+				onConfigure: handleConfigure,
+				onReload: reload,
+				onRemove: handleRemove,
+				onRemoveAccount: async (providerId, accountId) =>
+					await removeAccount(providerId, accountId),
+				onRenameAccount: async (providerId, accountId, label) => {
+					await renameAccount(providerId, accountId, label);
+				},
+				onSwitchAccount: async (providerId, accountId, target) => {
+					await switchAccount(providerId, accountId, target);
+				},
+				onToggleModel: handleToggleModel,
+				thinkingLevels: cat.thinkingLevels,
+			}}
+			gatewayKeys={gatewayKeys}
+			intro={
+				<OrgBillingContext
+					compact
+					description="Ryu managed inference uses this organization's shared credits; BYOK providers use keys stored on this node."
+					label="Managed provider billing"
 				/>
-			</SettingsSection>
-		</div>
+			}
+			onCreateCustom={handleCreateCustom}
+			onOpenSection={onOpenSection}
+			providers={ordered}
+		/>
 	);
 }

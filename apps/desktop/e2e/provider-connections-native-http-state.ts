@@ -213,9 +213,18 @@ export class ProviderState {
 				),
 			]),
 		];
+		// Routes of a newer Core that this fake Core does not have. The settings
+		// page reads both by itself (the node's account pools since 09fab4bb05,
+		// the credential hints of a provider with account routing since
+		// f158cc4d97) and takes 404 as "this node has no such route". A read is
+		// answered that way; any other method on them stays unexpected.
+		const absent = [
+			"/api/pi-config/providers/account-pools",
+			"/api/pi-config/providers/chatgpt/credentials",
+		];
 		if (
 			method === "OPTIONS" &&
-			known.includes(path) &&
+			(known.includes(path) || absent.includes(path)) &&
 			request.headers.get("origin") === this.origin
 		) {
 			return new Response(null, { status: 204, headers: this.headers() });
@@ -242,6 +251,9 @@ export class ProviderState {
 		};
 		if (entry.token !== `Bearer ${this.token}` || entry.jwt !== null) {
 			return reject("Wrong fixture authority");
+		}
+		if (method === "GET" && absent.includes(path)) {
+			return respond({ error: { message: "No such route" } }, 404);
 		}
 		if (!known.includes(path)) {
 			return reject("Unknown endpoint");

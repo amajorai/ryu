@@ -9,7 +9,7 @@ import { COUNTDOWN_EXPIRED, formatCountdown } from "@/src/lib/expiry.ts";
 import { usagePercentText } from "./usage-percent.ts";
 
 /**
- * How many of each row kind the non-compact bar shows inline before the rest move
+ * How many of each row kind the bar shows inline before the rest move
  * into the "+N" overflow chip. Two windows is the canonical Session/Weekly pair
  * every vendor reports (Core emits them first); one meter covers the single row
  * that is usually worth watching — a credit balance, or banked resets that are
@@ -18,38 +18,8 @@ import { usagePercentText } from "./usage-percent.ts";
 export const INLINE_WINDOW_LIMIT = 2;
 export const INLINE_METER_LIMIT = 1;
 
-/**
- * How many segments the compact pill draws. Purely visual — its tooltip lists
- * every window and meter regardless of this cap.
- */
-export const COMPACT_SEGMENT_LIMIT = 3;
-
-/** Threshold colors for the filled portion: calm → amber → red as it fills. */
-export function fillClass(usedPercent: number): string {
-	if (usedPercent >= 90) {
-		return "bg-destructive";
-	}
-	if (usedPercent >= 70) {
-		return "bg-warning";
-	}
-	return "bg-success";
-}
-
-/** Same threshold hue as the fill, dimmed to /20 for the unfilled track — barely
- *  tinted so it reads against the muted composer without the fill's brightness
- *  bleeding into the empty space. */
-export function trackClass(usedPercent: number): string {
-	if (usedPercent >= 90) {
-		return "bg-destructive/20";
-	}
-	if (usedPercent >= 70) {
-		return "bg-warning/20";
-	}
-	return "bg-success/20";
-}
-
-/** Ring equivalent of `fillClass`: the same calm → amber → red danger hue, but as
- *  an SVG stroke color for the circular meter. */
+/** The danger hue of the filled arc: calm, then amber from 70%, then red from
+ *  90%, as an SVG stroke color for the circular meter. */
 function fillStrokeClass(usedPercent: number): string {
 	if (usedPercent >= 90) {
 		return "stroke-destructive";
@@ -60,7 +30,7 @@ function fillStrokeClass(usedPercent: number): string {
 	return "stroke-success";
 }
 
-/** Ring equivalent of `trackClass`: the dimmed unfilled track as an SVG stroke. */
+/** The same hue dimmed to /20 for the unfilled track, as an SVG stroke. */
 function trackStrokeClass(usedPercent: number): string {
 	if (usedPercent >= 90) {
 		return "stroke-destructive/20";
@@ -77,8 +47,8 @@ const RING_RADIUS = 6;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /**
- * A tiny circular progress ring — the "ring" counterpart of the linear bar. `used`
- * drives the danger color (high usage → red); `shown` drives the swept arc, so it
+ * A tiny circular progress ring. `used`
+ * drives the danger color (high usage is red); `shown` drives the swept arc, so it
  * matches whichever number (used / remaining) the meter displays. Starts at 12
  * o'clock and sweeps clockwise via the -90° rotation.
  */

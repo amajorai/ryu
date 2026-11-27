@@ -10,12 +10,8 @@ export const THEME_EDITOR_EVIDENCE_PATH = "desktop-appearance-theme-editor.png";
 export const RESET_EVIDENCE_PATH = "desktop-appearance-reset.png";
 
 export interface UsageBarPrefsProof {
-	barStyle: "bar" | "ring";
 	mode: "used" | "remaining";
-	showBar: boolean;
-	showPercent: boolean;
 	sidebar: boolean;
-	visible: boolean;
 }
 
 export async function readStoredAppearanceDocument(

@@ -9,6 +9,7 @@ import {
 	choose,
 	comboIn,
 	consumer,
+	hasRow,
 	isDisabled,
 	isOn,
 	mountConsumers,
@@ -30,24 +31,23 @@ import {
 	undeclared,
 } from "./appearance-coverage.harness.tsx";
 import {
-	composerMeter,
 	consumerDiff,
 	diffPreview,
+	pickerMeter,
 	previewPre,
 	rendered,
-	sidebarMeter,
+	sidebarRing,
 	themeCss,
 	tokenColor,
 } from "./appearance-coverage.helpers.tsx";
 
 registerAppearanceCoverageLifecycle();
 
-test("each Usage meter switch reshapes the real composer and sidebar meters fed by Core, enforces its dependencies, persists, and is read back by a fresh store load", async () => {
+test("the two Usage meter switches gate the usage ring and flip every number between used and left, persist, and are read back by a fresh store load", async () => {
 	await mountConsumers(["usage"]);
 	await mountTab();
 	await openPage("Usage meter");
-	await settle(() => composerMeter() !== null, "composer meter from Core");
-	await settle(() => sidebarMeter() !== null, "sidebar meter from Core");
+	await settle(() => pickerMeter() !== null, "picker meter from Core");
 	const usageCalls = exchanges.filter(
 		(e) => e.path === `/api/agents/${USAGE_AGENT}/usage`
 	);
@@ -56,71 +56,40 @@ test("each Usage meter switch reshapes the real composer and sidebar meters fed 
 		usageCalls.every((e) => e.authorization === `Bearer ${CORE_TOKEN}`)
 	).toBe(true);
 
-	// Defaults: visible, sidebar, ring, no inline percent, percent used.
-	expect(composerMeter()!.getAttribute("aria-label")).toBe("Session: 40% used");
-	expect(present(composerMeter()!.querySelector("svg circle"))).toBe(true);
-	expect(composerMeter()!.textContent).not.toContain("40%");
+	// Defaults: the rings show, and a percentage reads as used.
+	// The switches of the per bot and composer meters are gone with them.
 	for (const title of [
 		"Show usage meter",
 		"Show in sidebar",
 		"Show progress bar",
 		"Circular progress ring",
+		"Show percentage",
 	]) {
-		expect(isOn(switchIn(title))).toBe(true);
+		expect(hasRow(title)).toBe(false);
 	}
-	expect(isOn(switchIn("Show percentage"))).toBe(false);
+	expect(isOn(switchIn("Show usage in the sidebar"))).toBe(true);
 	expect(isOn(switchIn("Show remaining instead of used"))).toBe(false);
-
-	await toggle(switchIn("Show percentage"));
-	expect(composerMeter()!.textContent).toContain("40%");
-	expect(sidebarMeter()!.textContent).toContain("40%");
+	expect(pickerMeter()!.getAttribute("aria-label")).toBe("Session: 40% used");
+	expect(present(pickerMeter()!.querySelector("svg circle"))).toBe(true);
+	expect(sidebarRing()!.getAttribute("aria-label")).toBe(
+		"Usage of Claude Code: 5h: 40% used and 7d: 75% used"
+	);
 
 	await toggle(switchIn("Show remaining instead of used"));
-	expect(composerMeter()!.getAttribute("aria-label")).toBe("Session: 60% left");
-	expect(composerMeter()!.textContent).toContain("60%");
-	expect(sidebarMeter()!.getAttribute("aria-label")).toBe("Session: 60% left");
-
-	await toggle(switchIn("Circular progress ring"));
-	expect(present(composerMeter()!.querySelector("svg circle"))).toBe(false);
-	const bar = composerMeter()!.querySelector<HTMLElement>(
-		"span.rounded-full > span"
+	expect(pickerMeter()!.getAttribute("aria-label")).toBe("Session: 60% left");
+	expect(sidebarRing()!.getAttribute("aria-label")).toBe(
+		"Usage of Claude Code: 5h: 60% left and 7d: 25% left"
 	);
-	// The fill's width is the `--usage-fill` custom property its stylesheet reads.
-	expect(bar?.style.getPropertyValue("--usage-fill")).toBe("60%");
 
-	await toggle(switchIn("Show progress bar"));
-	expect(present(composerMeter()!.querySelector("svg circle"))).toBe(false);
-	expect(
-		present(composerMeter()!.querySelector("span.rounded-full > span"))
-	).toBe(false);
-	// The ring choice only means something while a bar is drawn.
-	expect(isDisabled(switchIn("Circular progress ring"))).toBe(true);
-	expect(composerMeter()!.textContent).toContain("60%");
-
-	await toggle(switchIn("Show in sidebar"));
+	// The rings go; the picker's provider meter is not theirs to hide.
+	await toggle(switchIn("Show usage in the sidebar"));
 	expect(consumer("usage-sidebar").textContent).toBe("");
-	expect(present(composerMeter())).toBe(true);
+	expect(present(sidebarRing())).toBe(false);
+	expect(present(pickerMeter())).toBe(true);
+	// Used or left stays a choice with the rings off: the picker reads it too.
+	expect(isDisabled(switchIn("Show remaining instead of used"))).toBe(false);
 
-	await toggle(switchIn("Show usage meter"));
-	expect(consumer("usage-composer").textContent).toBe("");
-	for (const title of [
-		"Show progress bar",
-		"Circular progress ring",
-		"Show percentage",
-		"Show remaining instead of used",
-	]) {
-		expect(isDisabled(switchIn(title))).toBe(true);
-	}
-	expect(isDisabled(switchIn("Show in sidebar"))).toBe(false);
-
-	const expected = {
-		barStyle: "bar",
-		mode: "remaining",
-		showBar: false,
-		showPercent: true,
-		sidebar: false,
-		visible: false,
-	};
+	const expected = { mode: "remaining", sidebar: false };
 	expect(storedJson("ryu:usage-bar-prefs")).toEqual(expected);
 
 	// An independent load of the store module reads the same choices back.
@@ -141,15 +110,14 @@ test("each Usage meter switch reshapes the real composer and sidebar meters fed 
 	await unmountTab();
 	await mountTab();
 	await openPage("Usage meter");
-	expect(isOn(switchIn("Show usage meter"))).toBe(false);
-	expect(isOn(switchIn("Show in sidebar"))).toBe(false);
-	expect(isOn(switchIn("Show percentage"))).toBe(true);
+	expect(isOn(switchIn("Show usage in the sidebar"))).toBe(false);
 	expect(isOn(switchIn("Show remaining instead of used"))).toBe(true);
-	// Turning the composer meter back on restores the remembered shape.
-	await toggle(switchIn("Show usage meter"));
-	await settle(() => composerMeter() !== null, "composer meter returns");
-	expect(composerMeter()!.getAttribute("aria-label")).toBe("Session: 60% left");
-	expect(present(composerMeter()!.querySelector("svg circle"))).toBe(false);
+	// Turning the rings back on restores the remembered reading.
+	await toggle(switchIn("Show usage in the sidebar"));
+	await settle(() => sidebarRing() !== null, "usage ring returns");
+	expect(sidebarRing()!.getAttribute("aria-label")).toBe(
+		"Usage of Claude Code: 5h: 60% left and 7d: 25% left"
+	);
 	expect(localStorage.getItem("appearance-coverage-unrelated")).toBe("keep-me");
 	expect(undeclared).toEqual([]);
 });

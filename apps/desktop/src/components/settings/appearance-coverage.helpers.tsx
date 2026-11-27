@@ -29,15 +29,15 @@ export function previewButton() {
 }
 
 // ── Usage meter ────────────────────────────────────────────────────────────
-export function composerMeter() {
-	return consumer("usage-composer").querySelector<HTMLElement>(
+export function pickerMeter() {
+	return consumer("usage-picker").querySelector<HTMLElement>(
 		'[aria-label^="Session:"]'
 	);
 }
 
-export function sidebarMeter() {
+export function sidebarRing() {
 	return consumer("usage-sidebar").querySelector<HTMLElement>(
-		'[aria-label^="Session:"]'
+		'[data-testid="usage-ring"]'
 	);
 }
 

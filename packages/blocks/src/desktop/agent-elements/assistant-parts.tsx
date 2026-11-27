@@ -10,6 +10,8 @@ import { BubbleContent } from "@ryu/ui/components/bubble";
 import { Marker, MarkerContent, MarkerIcon } from "@ryu/ui/components/marker";
 import type React from "react";
 import { useMemo } from "react";
+import { AssistantFileCard } from "./assistant-file-card.tsx";
+import { assistantFileCardMeta } from "./assistant-file-meta.ts";
 import {
 	AssistantGeneratedImage,
 	AssistantGeneratedVideo,
@@ -23,7 +25,6 @@ import {
 } from "./assistant-tool-parts.tsx";
 import { useChatDisplayPrefs } from "./chat-display-prefs.tsx";
 import { ErrorMessage } from "./error-message.tsx";
-import { FileAttachment } from "./input/file-attachment.tsx";
 import { Markdown } from "./markdown.tsx";
 import { hostnameOfCitation } from "./message-list-helpers.ts";
 import { messageSelectableProps } from "./quote.tsx";
@@ -37,10 +38,7 @@ import type { CustomToolRendererProps } from "./types.ts";
 import { localizeCloudTaskParts } from "./utils/cloud-task-event-text.ts";
 import { localizeCoreError } from "./utils/core-error-text.ts";
 import { failoverMarkerText } from "./utils/failover-note-text.ts";
-import {
-	getAssistantFileMeta,
-	getAssistantVideoUrl,
-} from "./utils/live-file-media.ts";
+import { getAssistantVideoUrl } from "./utils/live-file-media.ts";
 import {
 	getAssistantImageMeta,
 	getImageGenerationPart,
@@ -335,7 +333,7 @@ export function AssistantParts({
 				continue;
 			}
 
-			const fileMeta = getAssistantFileMeta(part);
+			const fileMeta = assistantFileCardMeta(part);
 			if (fileMeta) {
 				pushPart(
 					fileMeta.media.startsWith("audio/") ? (
@@ -348,12 +346,10 @@ export function AssistantParts({
 							<a href={fileMeta.url}>Download audio</a>
 						</audio>
 					) : (
-						<FileAttachment
-							filename={fileMeta.filename}
+						<AssistantFileCard
+							file={fileMeta}
 							id={`${msg.id}-file-${i}`}
 							key={`${msg.id}-file-${i}`}
-							size={fileMeta.size}
-							url={fileMeta.url}
 						/>
 					)
 				);

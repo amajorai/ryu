@@ -3,10 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { AgentTitleBadge } from "@ryu/ui/components/agent-title-badge.tsx";
 import { CommandItem } from "@ryu/ui/components/command.tsx";
 import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu.tsx";
-import {
-	ProviderCreditsBadge,
-	UsageBar,
-} from "@/components/agent-elements/input/usage-bar.tsx";
+import { ProviderCreditsBadge } from "@/components/agent-elements/input/usage-bar.tsx";
 import { AgentAvatar, AgentLogo } from "@/src/lib/agent-logos.tsx";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import type { PickerRef } from "@/src/lib/picker-favorites.ts";
@@ -129,11 +126,6 @@ export function getUniversalPickerRows({
 				key={agent.id}
 				label={agent.name}
 				title={agent.title}
-				// Installed subscription harnesses only. The not-installed catalog rows
-				// (`AvailableAgentRow`) deliberately get none: their ids match the same
-				// engine substrings, so a meter there would read a credential for a CLI
-				// that isn't on this machine and answer "not logged in" every time.
-				trailing={<UsageBar agentId={agent.id} className="shrink-0" />}
 			>
 				{isActive && activeSections.length > 0 ? (
 					<>

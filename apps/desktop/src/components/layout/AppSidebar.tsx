@@ -16,6 +16,11 @@ import { ImportSetupDialog } from "@/src/components/chat/ImportSetupDialog.tsx";
 import { ImportThreadsDialog } from "@/src/components/chat/ImportThreadsDialog.tsx";
 import { ResourceVisibilityConfirmationDialog } from "@/src/components/layout/ResourceVisibilityConfirmationDialog.tsx";
 import { LiveActivitiesSection } from "@/src/components/live/LiveActivitiesSection.tsx";
+import {
+	SidebarUsageFooterRing,
+	SidebarUsageRow,
+	useSidebarUsageRail,
+} from "@/src/components/usage-rail/SidebarUsageRail.tsx";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -106,6 +111,9 @@ export const SidebarPanelContent = memo(function SidebarPanelContent({
 	const { t } = useI18n();
 	const botProduct = productMode === "bot";
 	const listRef = useRef<HTMLDivElement | null>(null);
+	// The usage rings: a row above the account footer, or one ring beside the
+	// account button when the list is too short to give the row its height.
+	const usageRail = useSidebarUsageRail(listRef);
 	const { conversations, setConversationVisibility, refresh } =
 		useChatHistoryContext();
 	const { canMakePrivate } = useVisibilityAdminAccess();
@@ -356,12 +364,19 @@ export const SidebarPanelContent = memo(function SidebarPanelContent({
 					notificationLayout === "split" &&
 					!hiddenChrome.has("announcements") && <AnnouncementsSection />}
 
+				<SidebarUsageRow rail={usageRail} />
+
 				<SidebarFooter>
-					<NavUser
-						hiddenChrome={hiddenChrome}
-						notificationLayout={notificationLayout}
-						onHideChrome={(key) => setChromeHidden(key, true)}
-					/>
+					<div className="flex min-w-0 items-center gap-1">
+						<div className="min-w-0 flex-1">
+							<NavUser
+								hiddenChrome={hiddenChrome}
+								notificationLayout={notificationLayout}
+								onHideChrome={(key) => setChromeHidden(key, true)}
+							/>
+						</div>
+						<SidebarUsageFooterRing rail={usageRail} />
+					</div>
 				</SidebarFooter>
 			</SidebarProjectRailFrame>
 

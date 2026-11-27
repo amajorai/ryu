@@ -47,7 +47,7 @@ export interface UseSubscriptionUsageResult {
 }
 
 /** Whether the catalog holds any saved login a subscription row could show. */
-function hasSubscriptionAccounts(catalog: PiCatalog | null): boolean {
+export function hasSubscriptionAccounts(catalog: PiCatalog | null): boolean {
 	return (
 		catalog?.providers.some(
 			(provider) =>

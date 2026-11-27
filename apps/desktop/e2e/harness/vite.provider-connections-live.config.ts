@@ -47,6 +47,9 @@ export default defineConfig({
 			},
 			{ find: "./AgentModelsSettings.tsx", replacement: seams },
 			{ find: "./CapabilityProvidersSettings.tsx", replacement: seams },
+			// The provider pages import the two from their own folder.
+			{ find: "../AgentModelsSettings.tsx", replacement: seams },
+			{ find: "../CapabilityProvidersSettings.tsx", replacement: seams },
 			{ find: "@", replacement: desktopRoot },
 		],
 	},

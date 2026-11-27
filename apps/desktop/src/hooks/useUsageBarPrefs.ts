@@ -1,82 +1,68 @@
 import { z } from "zod";
 // apps/desktop/src/hooks/useUsageBarPrefs.ts
 //
-// Display preferences for the composer's subscription usage meters (the little
-// "agent usage left" bars beside the input, à la Codex). These are pure UI
-// choices — how the meter looks, not what the numbers are — so they live in
-// localStorage and sync across every mounted surface (the composer + the
-// Appearance settings tab) through a tiny external store. The underlying usage
-// data still comes from Core via `useAgentUsage`.
+// Display preferences for subscription usage: the rings at the side of the
+// window (`components/usage-rail`) and the meter on a provider row of the
+// picker. These are pure UI choices, so they live in localStorage and sync
+// across every mounted surface through a tiny external store. The usage data
+// itself comes from Core.
 //
-// Six knobs:
-//   - visible:     show the usage meter in the composer, or hide it entirely.
-//   - sidebar:     also show the meters next to each agent's name in the app
-//                  sidebar (independent of `visible`; only supported agents like
-//                  Claude Code / Codex ever render one — the rest stay clean).
-//   - showBar:     show the progress indicator (turn off for a text-only meter).
-//   - barStyle:    render the progress indicator as a linear "bar" or a compact
-//                  circular "ring". Only matters when `showBar` is on.
-//   - showPercent: show the numeric percentage inline next to the label.
-//   - mode:        whether the percentage means how much is USED or how much is
-//                  LEFT ("remaining"). Core only reports percent-used, so
-//                  "remaining" is computed as 100 - used.
+// Two knobs:
+//   - sidebar: show the usage rings in the sidebar and in the narrow rail.
+//   - mode:    whether a percentage means how much is USED or how much is
+//              LEFT ("remaining"). Core only reports percent-used, so
+//              "remaining" is computed as 100 - used.
+//
+// The storage key is older than the rings. It once also held `visible` (the
+// composer meter), `showBar`, `barStyle` and `showPercent`, which no surface
+// reads any more. A stored value from then still loads: `sidebar` keeps what
+// the user chose, so a sidebar meter that was turned off stays off. The old
+// fields are written back untouched, because the key is synced between
+// devices and an older app on another device still reads them.
 
 import { useSyncExternalStore } from "react";
 
 export type UsageBarMode = "used" | "remaining";
-export type UsageBarStyle = "bar" | "ring";
 
 export interface UsageBarPrefs {
-	barStyle: UsageBarStyle;
 	mode: UsageBarMode;
-	showBar: boolean;
-	showPercent: boolean;
 	sidebar: boolean;
-	visible: boolean;
 }
 
-const storedPreferences = z.object({
-	barStyle: z.string().optional(),
+const storedPreferences = z.looseObject({
 	mode: z.string().optional(),
-	showBar: z.boolean().nullish(),
-	showPercent: z.boolean().nullish(),
 	sidebar: z.boolean().nullish(),
-	visible: z.boolean().nullish(),
 });
 
 const STORAGE_KEY = "ryu:usage-bar-prefs";
 
-/** Sensible defaults: the meter shows a bar of percent-used, no inline number,
- *  and — on by default — repeats beside each supported agent in the sidebar. */
+/** The rings show, and a percentage reads as how much is used. */
 export const DEFAULT_USAGE_BAR_PREFS: UsageBarPrefs = {
-	visible: true,
-	showBar: true,
-	barStyle: "ring",
-	showPercent: false,
 	mode: "used",
 	sidebar: true,
 };
 
 const listeners = new Set<() => void>();
 
-function readFromStorage(): UsageBarPrefs {
+/** The stored object with every field it holds, or nothing when unreadable. */
+function readStoredRecord(): z.infer<typeof storedPreferences> {
 	try {
 		const stored = localStorage.getItem(STORAGE_KEY);
-		if (!stored) {
-			return DEFAULT_USAGE_BAR_PREFS;
-		}
-		const parsed = storedPreferences.parse(JSON.parse(stored));
-		return {
-			visible: parsed.visible ?? DEFAULT_USAGE_BAR_PREFS.visible,
-			showBar: parsed.showBar ?? DEFAULT_USAGE_BAR_PREFS.showBar,
-			barStyle: parsed.barStyle === "ring" ? "ring" : "bar",
-			showPercent: parsed.showPercent ?? DEFAULT_USAGE_BAR_PREFS.showPercent,
-			mode: parsed.mode === "remaining" ? "remaining" : "used",
-			sidebar: parsed.sidebar ?? DEFAULT_USAGE_BAR_PREFS.sidebar,
-		};
+		const parsed = stored
+			? storedPreferences.safeParse(JSON.parse(stored))
+			: null;
+		return parsed?.success ? parsed.data : {};
 	} catch {
-		return DEFAULT_USAGE_BAR_PREFS;
+		return {};
 	}
+}
+
+function readFromStorage(): UsageBarPrefs {
+	const stored = readStoredRecord();
+	return {
+		mode: stored.mode === "remaining" ? "remaining" : "used",
+		sidebar: stored.sidebar ?? DEFAULT_USAGE_BAR_PREFS.sidebar,
+	};
 }
 
 // Cache the parsed object so `useSyncExternalStore` gets a stable reference
@@ -111,7 +97,10 @@ function subscribe(cb: () => void): () => void {
 export function setUsageBarPrefs(partial: Partial<UsageBarPrefs>) {
 	cache = { ...cache, ...partial };
 	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({ ...readStoredRecord(), ...cache })
+		);
 	} catch {
 		// Best-effort persistence; in-memory state still updates.
 	}
@@ -120,12 +109,12 @@ export function setUsageBarPrefs(partial: Partial<UsageBarPrefs>) {
 	}
 }
 
-/** Restore every usage-meter display preference to its default. */
+/** Restore every usage display preference to its default. */
 export function resetUsageBarPrefs() {
 	setUsageBarPrefs(DEFAULT_USAGE_BAR_PREFS);
 }
 
-/** Subscribe to the usage-meter display preferences. Shared across surfaces. */
+/** Subscribe to the usage display preferences. Shared across surfaces. */
 export function useUsageBarPrefs(): UsageBarPrefs {
 	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

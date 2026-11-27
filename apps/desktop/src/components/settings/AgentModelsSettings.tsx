@@ -232,9 +232,12 @@ function AgentCard({
 
 export function AgentModelsSettings({
 	agentModelOverrides,
+	heading = true,
 	onToggleModel,
 }: {
 	agentModelOverrides: Record<string, Record<string, boolean>> | undefined;
+	/** False on a page whose own title already names this block. */
+	heading?: boolean;
 	onToggleModel: (
 		provider: string,
 		model: string,
@@ -264,7 +267,7 @@ export function AgentModelsSettings({
 	return (
 		<SettingsSection
 			caption="Hide models you never use from an agent's picker. Separate from the provider lists above."
-			title="Agent models"
+			title={heading ? "Agent models" : undefined}
 		>
 			{agentsQuery.isPending ? (
 				<SkeletonRows label="Loading agents…" rows={2} />

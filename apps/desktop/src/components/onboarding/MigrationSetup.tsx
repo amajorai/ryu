@@ -18,7 +18,13 @@ import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ImportOperationStatus } from "@/src/components/chat/ImportOperationStatus.tsx";
+import {
+	importEndMessage,
+	summarizeImportOperations,
+} from "@/src/components/chat/import-operation-summary.ts";
 import { NodeFolderBrowser } from "@/src/components/chat/NodeFolderBrowser.tsx";
+import { useImportOperations } from "@/src/hooks/useImportOperations.ts";
 import {
 	detectMigrationSources,
 	MIGRATION_SOURCES,
@@ -30,13 +36,14 @@ import {
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type ImportOutcome,
-	runImport,
 	type ScanResult,
 	scanImportFolder,
 } from "@/src/lib/api/import.ts";
 import { scanWarnings } from "@/src/lib/import-scan-text.ts";
 import { formatLocalList } from "@/src/lib/locale-format.ts";
-import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+
+/** The key under which the operations store remembers this step's imports. */
+const MIGRATION_SURFACE = "onboarding-migration";
 
 interface MigrationTotals {
 	failed: number;
@@ -135,7 +142,11 @@ export function MigrationSetup({
 	target: ApiTarget;
 }) {
 	const tl = useLiteralMessages();
-	const addProjectFolder = useWorkspaceStore((s) => s.addProjectFolder);
+	// The imports run on the node as operations, one per source. This step
+	// keeps no progress or results of its own, so it shows the same import
+	// after the page was left or the app was reloaded.
+	const imports = useImportOperations(target, MIGRATION_SURFACE);
+	const startImports = imports.start;
 	const [scans, setScans] = useState<ScanResult[]>([]);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [detecting, setDetecting] = useState(true);
@@ -216,40 +227,61 @@ export function MigrationSetup({
 		0
 	);
 
+	// Set when this mounted step started the imports. Only then does a clean
+	// finish move on by itself; a step that is opened again on a finished
+	// import shows the result and waits for the user.
+	const startedHere = useRef(false);
+
 	const importChosen = useCallback(async () => {
 		setImporting(true);
 		setError(null);
-		const outcomes: ImportOutcome[] = [];
 		try {
-			for (const scan of chosen) {
-				const items = newMigrationItems(scan).map(({ kind, id }) => ({
-					kind,
-					id,
-				}));
-				if (items.length === 0) {
-					continue;
+			const batches = chosen
+				.map((scan) => ({
+					path: scan.root,
+					items: newMigrationItems(scan).map(({ kind, id }) => ({
+						kind,
+						id,
+					})),
+				}))
+				.filter((batch) => batch.items.length > 0);
+			startedHere.current = true;
+			// The node answers at once and runs one import per source; they then
+			// show up in `imports`. Only an older node answers with the results
+			// of each batch. Project folders are registered in both cases.
+			const plain = await startImports(batches);
+			if (plain.length > 0) {
+				const summary = totalsOf(plain);
+				setTotals(summary);
+				if (summary.failed === 0) {
+					onContinue();
 				}
-				const result = await runImport(target, scan.root, items);
-				outcomes.push(...result.results);
-			}
-			for (const outcome of outcomes) {
-				if (outcome.folderPath) {
-					addProjectFolder(outcome.folderPath);
-				}
-			}
-			const summary = totalsOf(outcomes);
-			setTotals(summary);
-			if (summary.failed === 0) {
-				onContinue();
 			}
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "Migration failed");
 		} finally {
 			setImporting(false);
 		}
-	}, [addProjectFolder, chosen, onContinue, target]);
+	}, [chosen, onContinue, startImports]);
 
-	const busy = detecting || scanning || importing;
+	const ended = imports.settled
+		? summarizeImportOperations(imports.operations)
+		: null;
+	const shownTotals =
+		totals ?? (imports.settled ? totalsOf(imports.outcomes) : null);
+	const endMessage = ended ? importEndMessage(ended.status, tl) : null;
+	const cleanFinish =
+		ended?.status === "succeeded" &&
+		imports.outcomes.every((outcome) => outcome.status !== "failed");
+	useEffect(() => {
+		if (cleanFinish && startedHere.current) {
+			startedHere.current = false;
+			onContinue();
+		}
+	}, [cleanFinish, onContinue]);
+
+	const importingNow = importing || imports.active;
+	const busy = detecting || scanning || importingNow;
 	const folderSources = MIGRATION_SOURCES.filter((source) => !source.homes);
 	const otherSources = formatLocalList(
 		folderSources.map((source) => source.label),
@@ -331,14 +363,22 @@ export function MigrationSetup({
 						{error}
 					</p>
 				) : null}
-				{totals ? (
+				{imports.active ? (
+					<ImportOperationStatus hint={false} view={imports} />
+				) : null}
+				{endMessage ? (
+					<p className="text-sm text-status-destructive" role="alert">
+						{endMessage}
+					</p>
+				) : null}
+				{shownTotals ? (
 					<p className="text-sm" role="status">
 						{tl(
 							"{imported} imported, {skipped} skipped, {failed} failed. Review failures in Gateway → Import agents, or continue.",
 							{
-								imported: String(totals.imported),
-								skipped: String(totals.skipped),
-								failed: String(totals.failed),
+								imported: String(shownTotals.imported),
+								skipped: String(shownTotals.skipped),
+								failed: String(shownTotals.failed),
 							}
 						)}
 					</p>
@@ -355,18 +395,24 @@ export function MigrationSetup({
 				/>
 			</div>
 			<OnboardingActions className="justify-between">
-				<OnboardingCta disabled={importing} onClick={onSkip} tone="secondary">
+				<OnboardingCta
+					disabled={importingNow}
+					onClick={onSkip}
+					tone="secondary"
+				>
 					Skip for now
 				</OnboardingCta>
 				<OnboardingCta
 					disabled={busy}
 					onClick={
-						pendingCount > 0 && !totals ? () => void importChosen() : onContinue
+						pendingCount > 0 && !shownTotals
+							? () => void importChosen()
+							: onContinue
 					}
 				>
-					{importing
+					{importingNow
 						? "Importing…"
-						: pendingCount > 0 && !totals
+						: pendingCount > 0 && !shownTotals
 							? tl(
 									"Import {pendingCount, plural, one {{pendingCountLabel} item} other {{pendingCountLabel} items}}",
 									{ pendingCount, pendingCountLabel: String(pendingCount) }

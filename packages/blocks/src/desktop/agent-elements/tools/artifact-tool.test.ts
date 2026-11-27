@@ -49,6 +49,31 @@ describe("artifactFromCreateResult", () => {
 		});
 	});
 
+	it("keeps the byte size Core reports for the created file", () => {
+		const created = {
+			ok: true,
+			id: "doc-2",
+			space_id: "sp-1",
+			url: "/api/spaces/sp-1/documents/doc-2/blob",
+			mime: "application/pdf",
+		};
+		expect(
+			artifactFromCreateResult(
+				{ title: "report.pdf" },
+				{ ...created, byte_size: 48_213 }
+			)?.byteSize
+		).toBe(48_213);
+		// A size that is not a count of bytes is dropped, not shown.
+		for (const byteSize of ["48213", -1, Number.NaN, null]) {
+			expect(
+				artifactFromCreateResult(
+					{ title: "report.pdf" },
+					{ ...created, byte_size: byteSize }
+				)?.byteSize
+			).toBeUndefined();
+		}
+	});
+
 	it("returns null before the result carries a url, or on a failed create", () => {
 		expect(artifactFromCreateResult({ title: "x" }, {})).toBeNull();
 		expect(

@@ -11,12 +11,14 @@
 //
 // Read-only + additive against the source: imports never modify the folder they
 // read from.
+//
+// The import itself runs on the node as an operation. The dialog keeps no
+// progress or results of its own: it shows what the node reports, so it can be
+// closed while the import runs and shows the same import when it is opened
+// again. A node without the operations service still runs the batch inside
+// the request, and those results are shown from component state as before.
 
-import {
-	Download01Icon,
-	FolderOpenIcon,
-	RefreshIcon,
-} from "@hugeicons/core-free-icons";
+import { FolderOpenIcon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
@@ -33,13 +35,13 @@ import {
 import { Empty, EmptyDescription } from "@ryu/ui/components/empty.tsx";
 import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useImportOperations } from "@/src/hooks/useImportOperations.ts";
 import { hermesHomeName, joinHome } from "@/src/lib/agent-migration.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	groupScanItems,
 	type ImportOutcome,
-	runImport,
 	type ScanItem,
 	type ScanResult,
 	scanImportFolder,
@@ -52,7 +54,11 @@ import {
 } from "@/src/lib/import-scan-text.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 import { GrokBotImportButton } from "./GrokBotImportDialog.tsx";
-import { importOutcomeLine } from "./import-outcome-text.ts";
+import {
+	ImportOperationActions,
+	ImportOperationStatus,
+	ImportOutcomeTotals,
+} from "./ImportOperationStatus.tsx";
 import { NodeFolderBrowser } from "./NodeFolderBrowser.tsx";
 
 /** Common agent config roots offered as one-click scan targets. */
@@ -65,6 +71,9 @@ const AGENT_CONFIG_ROOTS: { key: string; label: string }[] = [
 ];
 
 const PATH_SEP = /[\\/]/;
+
+/** The key under which the operations store remembers this dialog's import. */
+const IMPORT_SETUP_SURFACE = "import-setup";
 
 export function ImportSetupDialog({
 	open,
@@ -79,7 +88,14 @@ export function ImportSetupDialog({
 	onImported?: () => void;
 }) {
 	const tl = useLiteralMessages();
+	// Only the Grok Bot zip import registers its folders here; a folder import
+	// registers them in `useImportOperations`.
 	const addProjectFolder = useWorkspaceStore((s) => s.addProjectFolder);
+	const imports = useImportOperations(target, IMPORT_SETUP_SURFACE);
+	const startImports = imports.start;
+	// An import the node runs (or ran) for this dialog. While there is one the
+	// dialog shows it instead of the folder picker.
+	const showOperation = imports.operations.length > 0;
 	const [browseOpen, setBrowseOpen] = useState(false);
 	const [folder, setFolder] = useState<string | null>(null);
 	const [items, setItems] = useState<ScanItem[]>([]);
@@ -193,48 +209,49 @@ export function ImportSetupDialog({
 		setImporting(true);
 		setError(null);
 		try {
-			const result = await runImport(
-				target,
-				folder,
-				items
-					.filter((i) => selected.has(i.id))
-					.map((i) => ({ kind: i.kind, id: i.id }))
-			);
-			setOutcomes(result.results);
-			// Register any imported instruction folders as workspace projects so
-			// they group in the sidebar.
-			const folders = new Set<string>();
-			for (const r of result.results) {
-				if (r.folderPath) {
-					folders.add(r.folderPath);
+			// The node answers at once and runs the import as an operation; it
+			// then shows up in `imports`. Only an older node answers with the
+			// results of the whole batch. Imported instruction folders are
+			// registered as workspace projects in both cases.
+			const plain = await startImports([
+				{
+					path: folder,
+					items: items
+						.filter((i) => selected.has(i.id))
+						.map((i) => ({ kind: i.kind, id: i.id })),
+				},
+			]);
+			if (plain.length > 0) {
+				setOutcomes(plain);
+				if (plain.some((r) => r.folderPath)) {
+					onImported?.();
 				}
-			}
-			for (const f of folders) {
-				addProjectFolder(f);
-			}
-			if (folders.size > 0) {
-				onImported?.();
 			}
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Failed to import");
 		} finally {
 			setImporting(false);
 		}
-	}, [
-		folder,
-		importing,
-		selected,
-		items,
-		target,
-		addProjectFolder,
-		onImported,
-	]);
+	}, [folder, importing, selected, items, startImports, onImported]);
+
+	// Tell the owner once when an import that ran as an operation brought in a
+	// project folder. The folders themselves are registered by the hook.
+	const announced = useRef<string | null>(null);
+	useEffect(() => {
+		if (!imports.settled) {
+			return;
+		}
+		const key = imports.operations.map((o) => o.id).join("|");
+		if (announced.current === key) {
+			return;
+		}
+		announced.current = key;
+		if (imports.outcomes.some((o) => o.folderPath)) {
+			onImported?.();
+		}
+	}, [imports.settled, imports.operations, imports.outcomes, onImported]);
 
 	const groups = groupScanItems(items);
-	const importedCount =
-		outcomes?.filter((o) => o.status === "imported").length ?? 0;
-	const failedCount =
-		outcomes?.filter((o) => o.status === "failed").length ?? 0;
 	const folderName = folder ? folder.split(PATH_SEP).at(-1) || folder : null;
 
 	return (
@@ -251,7 +268,7 @@ export function ImportSetupDialog({
 				</DialogHeader>
 
 				{/* Pick a folder (one-click agent config roots, or browse). */}
-				{!(folder || scanning) && (
+				{!(folder || scanning || showOperation) && (
 					<div className="flex flex-col gap-2">
 						{quickTargets && (
 							<div className="flex flex-wrap items-center gap-2">
@@ -304,7 +321,16 @@ export function ImportSetupDialog({
 					</p>
 				)}
 
-				{!scanning && folder && (
+				{showOperation && (
+					<>
+						<p className="truncate font-medium text-sm">
+							{imports.operations.map((o) => o.title).join(", ")}
+						</p>
+						<ImportOperationStatus view={imports} />
+					</>
+				)}
+
+				{!(scanning || showOperation) && folder && (
 					<>
 						<div className="flex items-center justify-between gap-2">
 							<p className="truncate font-medium text-sm" title={folder}>
@@ -427,32 +453,7 @@ export function ImportSetupDialog({
 
 						{outcomes && (
 							<div className="flex flex-col gap-1 text-sm">
-								<p className="flex items-center gap-2 text-foreground">
-									<HugeiconsIcon
-										className="size-4 shrink-0"
-										icon={Download01Icon}
-									/>
-									{tl(
-										"Imported {importedCount}, skipped {skippedCount}, failed {failedCount}",
-										{
-											importedCount: String(importedCount),
-											skippedCount: String(
-												outcomes.length - importedCount - failedCount
-											),
-											failedCount: String(failedCount),
-										}
-									)}
-								</p>
-								{outcomes
-									.filter((o) => o.status === "failed" && o.detail)
-									.map((o) => (
-										<p
-											className="text-status-destructive text-xs"
-											key={`${o.kind}:${o.id}`}
-										>
-											{importOutcomeLine(o, tl)}
-										</p>
-									))}
+								<ImportOutcomeTotals outcomes={outcomes} />
 							</div>
 						)}
 					</>
@@ -466,17 +467,21 @@ export function ImportSetupDialog({
 					>
 						Close
 					</Button>
-					<Button
-						disabled={selected.size === 0 || scanning}
-						loading={importing}
-						onClick={handleImport}
-					>
-						{selected.size > 0
-							? tl("Import {selectedCount}", {
-									selectedCount: String(selected.size),
-								})
-							: "Import"}
-					</Button>
+					{showOperation ? (
+						<ImportOperationActions onError={setError} view={imports} />
+					) : (
+						<Button
+							disabled={selected.size === 0 || scanning}
+							loading={importing}
+							onClick={handleImport}
+						>
+							{selected.size > 0
+								? tl("Import {selectedCount}", {
+										selectedCount: String(selected.size),
+									})
+								: "Import"}
+						</Button>
+					)}
 				</DialogFooter>
 			</DialogContent>
 

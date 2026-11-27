@@ -38,9 +38,12 @@ function maskedKeyPrefix(name: string): string {
 }
 
 export function GatewayKeysCard({
+	heading = true,
 	target,
 	reachable,
 }: {
+	/** False on a page whose own title already names this card. */
+	heading?: boolean;
 	target: ApiTarget;
 	reachable: boolean;
 }) {
@@ -102,7 +105,7 @@ export function GatewayKeysCard({
 					Manage in web
 				</Button>
 			}
-			title="Gateway keys"
+			title={heading ? "Gateway keys" : undefined}
 		>
 			{reachable && loading ? (
 				<SettingsCard>

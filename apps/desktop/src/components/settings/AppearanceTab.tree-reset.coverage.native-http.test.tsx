@@ -217,12 +217,8 @@ test("Reset appearance confirms first; Cancel keeps every change, Confirm restor
 		searchMode: "expand-matches",
 	});
 	expect(storedJson("ryu:usage-bar-prefs")).toEqual({
-		barStyle: "ring",
 		mode: "used",
-		showBar: true,
-		showPercent: false,
 		sidebar: true,
-		visible: true,
 	});
 	expect(localStorage.getItem("theme")).toBe("system");
 	// Kept: the saved preset and storage Appearance does not own.

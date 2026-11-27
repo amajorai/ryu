@@ -16,6 +16,8 @@ export interface HostArtifactAction {
 
 export interface HostArtifact {
 	actions?: HostArtifactAction[];
+	/** Size of a created file in bytes, as `artifact.create` reports it. */
+	byteSize?: number;
 	content?: string;
 	docId?: string;
 	filePath?: string;
@@ -35,6 +37,14 @@ export interface HostArtifact {
  * blob). Without a host, an artifact part degrades to a plain tool row.
  */
 export interface ArtifactHostValue {
+	/** The bytes of a created file, fetched with the host's node target, for
+	 *  the file card's Download and preview. Null when the artifact names no
+	 *  stored file or the fetch failed. A host without it shows the card with
+	 *  Download off. */
+	fetchBlob?(
+		payload: NativeArtifactObservation,
+		id: string
+	): Promise<Blob | null>;
 	/** Resolve a created artifact's content by fetching its blob URL (uses the
 	 *  host's node target). Returns null when the artifact carries no URL or the
 	 *  fetch failed — the surface then shows the download/open affordance. */
@@ -42,6 +52,9 @@ export interface ArtifactHostValue {
 		payload: NativeArtifactObservation,
 		id: string
 	): Promise<string | null>;
+	/** Open a created file in the host's own file viewer. A host without it
+	 *  shows the file card with no Open button. */
+	openFile?(payload: NativeArtifactObservation, id: string): void;
 	/** Open the artifact in the workspace's right dock (a dedicated artifact tab). */
 	openInPanel(payload: NativeArtifactObservation, id: string): void;
 	/** Open the artifact as its own window (workspace) tab. */

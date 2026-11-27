@@ -149,8 +149,17 @@ export function ProviderSubscriptionSection({
 	);
 }
 
-/** The API key field, save/check/remove actions, and check result. */
-export function ProviderApiKeySection({ state }: { state: ProviderCardState }) {
+/**
+ * The API key field, save/check/remove actions, and check result. A host
+ * that offers Remove in a danger zone of its own passes `hideRemove`.
+ */
+export function ProviderApiKeySection({
+	hideRemove = false,
+	state,
+}: {
+	hideRemove?: boolean;
+	state: ProviderCardState;
+}) {
 	const tl = useLiteralMessages();
 	const {
 		apiKey,
@@ -205,7 +214,7 @@ export function ProviderApiKeySection({ state }: { state: ProviderCardState }) {
 						{checking ? "Checking…" : "Check"}
 					</Button>
 				)}
-				{provider.configured ? (
+				{provider.configured && !hideRemove ? (
 					<Button
 						loading={removing}
 						onClick={handleRemove}

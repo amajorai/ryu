@@ -187,7 +187,6 @@ function Story() {
 											}
 											threadCount={DIRECT_THREADS.length}
 											threadsExpanded={threadsExpanded}
-											usageBarVisible={false}
 										/>
 									</div>
 									{threadsExpanded ? (

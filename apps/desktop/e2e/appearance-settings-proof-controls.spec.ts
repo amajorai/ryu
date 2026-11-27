@@ -75,16 +75,12 @@ test("keeps dependent motion and usage-meter controls in sync", async ({
 	await goBackToAppearance(page);
 	await openPage(page, "Usage meter");
 	const usageSwitches = page.getByRole("switch");
-	await expect(usageSwitches).toHaveCount(6);
-	// The six controls expose the complete initial preference, including enum
-	// encodings; every write must preserve the other five values.
+	await expect(usageSwitches).toHaveCount(2);
+	// The two controls expose the complete initial preference, including the
+	// enum encoding; every write must preserve the other value.
 	let expectedUsage: UsageBarPrefsProof = {
-		visible: await usageSwitches.nth(0).isChecked(),
-		sidebar: await usageSwitches.nth(1).isChecked(),
-		showBar: await usageSwitches.nth(2).isChecked(),
-		barStyle: (await usageSwitches.nth(3).isChecked()) ? "ring" : "bar",
-		showPercent: await usageSwitches.nth(4).isChecked(),
-		mode: (await usageSwitches.nth(5).isChecked()) ? "remaining" : "used",
+		sidebar: await usageSwitches.nth(0).isChecked(),
+		mode: (await usageSwitches.nth(1).isChecked()) ? "remaining" : "used",
 	};
 	const toggleUsage = async (
 		index: number,
@@ -103,35 +99,21 @@ test("keeps dependent motion and usage-meter controls in sync", async ({
 			)
 			.toEqual(expectedUsage);
 	};
-	await toggleUsage(0, { visible: false });
-	for (const index of [2, 3, 4, 5]) {
-		await expect(usageSwitches.nth(index)).toBeDisabled();
-	}
-	// Sidebar visibility remains independent when composer meters are hidden.
+	await toggleUsage(0, { sidebar: !expectedUsage.sidebar });
+	// Used or left stays a choice whether the rings show or not: the picker
+	// reads it too.
 	await expect(usageSwitches.nth(1)).toBeEnabled();
-	await toggleUsage(1, { sidebar: !expectedUsage.sidebar });
-	await toggleUsage(0, { visible: true });
-	await expect(usageSwitches.nth(2)).toBeEnabled();
-	await toggleUsage(2, { showBar: false });
-	await expect(usageSwitches.nth(3)).toBeDisabled();
-	await toggleUsage(2, { showBar: true });
-	await expect(usageSwitches.nth(3)).toBeEnabled();
-	await toggleUsage(3, {
-		barStyle: expectedUsage.barStyle === "ring" ? "bar" : "ring",
-	});
-	await toggleUsage(4, { showPercent: !expectedUsage.showPercent });
-	await toggleUsage(5, {
+	await toggleUsage(1, {
 		mode: expectedUsage.mode === "used" ? "remaining" : "used",
 	});
+	await toggleUsage(0, { sidebar: !expectedUsage.sidebar });
+	await expect(usageSwitches.nth(1)).toBeEnabled();
+	await toggleUsage(0, { sidebar: !expectedUsage.sidebar });
 	await page.reload();
 	await openPage(page, "Usage meter");
 	const reloadedUsage = page.getByRole("switch");
 	const expectedChecks = [
-		expectedUsage.visible,
 		expectedUsage.sidebar,
-		expectedUsage.showBar,
-		expectedUsage.barStyle === "ring",
-		expectedUsage.showPercent,
 		expectedUsage.mode === "remaining",
 	];
 	for (const [index, checked] of expectedChecks.entries()) {

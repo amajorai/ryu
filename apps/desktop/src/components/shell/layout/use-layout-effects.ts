@@ -17,6 +17,7 @@ import { useMeetingStream } from "@/src/hooks/useMeetingStream.ts";
 import { useMonitorAlertsStream } from "@/src/hooks/useMonitorAlertsStream.ts";
 import { useNavigationEvents } from "@/src/hooks/useNavigationEvents.ts";
 import { useNotificationEvents } from "@/src/hooks/useNotificationEvents.ts";
+import { useOperationsStream } from "@/src/hooks/useOperationsStream.ts";
 import {
 	usePluginContributionRoutes,
 	usePluginContributionsLiveRefresh,
@@ -57,6 +58,9 @@ export function useLayoutAppSubscriptions() {
 	// One app-wide subscription to Core's download SSE stream → downloads store,
 	// powering the global DownloadCenter overlay below.
 	useDownloadsStream();
+	// One app-wide mirror of the node's operations (long work such as an import
+	// that keeps running after its dialog is closed) -> operations store.
+	useOperationsStream();
 
 	// One app-wide feed of live activities (agent runs / downloads / approvals /
 	// meetings / contributed) → the shared live-activity store that powers the

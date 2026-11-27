@@ -22,14 +22,12 @@ import {
 } from "@ryu/ui/components/tooltip.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useMemo, useState } from "react";
-import { UsageBar } from "@/components/agent-elements/input/usage-bar.tsx";
 import { OpenInNewWindowContextMenuItem } from "@/src/components/layout/OpenInNewWindowMenuItem.tsx";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgentRowStyle } from "@/src/hooks/useAgentRowStyle.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
-import { useUsageBarPrefs } from "@/src/hooks/useUsageBarPrefs.ts";
 import { groupDirectAgentThreads } from "@/src/lib/agent-conversation-groups.ts";
 import {
 	AgentAvatar,
@@ -155,7 +153,6 @@ export function AgentsSection({
 	// an agent TAB's menu — the one surface you have to already be on the agent to
 	// see. Same factory the tab menu uses, so the two cannot drift.
 	const agentContributedRows = useContributedRowsFor("agent", "agent_id");
-	const usageBarPrefs = useUsageBarPrefs();
 	const rowStyle = useAgentRowStyle();
 	const messaging = rowStyle === "messaging";
 	const { favorites, toggle: toggleFavorite } = useFavorites();
@@ -296,7 +293,6 @@ export function AgentsSection({
 										onToggleThreads={() => toggleAgentThreads(agent.id)}
 										threadCount={threads.length}
 										threadsExpanded={threadsExpanded}
-										usageBarVisible={usageBarPrefs.sidebar}
 									/>
 								) : (
 									<>
@@ -317,13 +313,6 @@ export function AgentsSection({
 												text={agent.name}
 											/>
 										</div>
-										{usageBarPrefs.sidebar ? (
-											<UsageBar
-												agentId={agent.id}
-												className="shrink-0"
-												visible={usageBarPrefs.sidebar}
-											/>
-										) : null}
 										<div aria-hidden="true" className="flex-1" />
 										<Tooltip>
 											<TooltipTrigger

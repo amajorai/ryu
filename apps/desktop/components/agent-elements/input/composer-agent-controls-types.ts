@@ -31,13 +31,12 @@ export interface ComposerAgentControlsConfig {
 	 * Responsive compact composer (used once a chat has history). The control
 	 * cluster stays on the leading side of the textarea while it fits on one line,
 	 * then becomes the left side of the normal controls row below when the textarea
-	 * wraps. The settings-menu trigger shortens to `[logo] agent [usage] ⌄` (it
-	 * implies {@link compactTrigger}) and the subscription usage meters fold INTO
-	 * that trigger rather than sitting beside it as a standalone chip.
+	 * wraps. The settings-menu trigger shortens to `[logo] agent ⌄` (it
+	 * implies {@link compactTrigger}).
 	 */
 	compact?: boolean;
 	/**
-	 * Compact the settings-menu trigger to `[logo] agent [usage] ⌄` without
+	 * Compact the settings-menu trigger to `[logo] agent ⌄` without
 	 * moving the cluster to the right. Used by narrow surfaces (Ask Ryu floating
 	 * / docked) that keep the roomy stacked textarea but still need the short
 	 * trigger. Ignored when {@link compact} is true (that already includes it).
@@ -96,12 +95,12 @@ export interface ComposerAgentControlsConfig {
  * into `InputBar`. This is the ONE definition of the chat bar's left cluster, so
  * ChatPage, the launchpad, and the Ask Ryu dock render an identical bar:
  *
- *   [ Agent · Model · … settings ]  [ capability badges ]  [ usage meters ]
+ *   [ Agent · Model · … settings ]  [ capability badges ]
  *
  * `leftActions` merges the agent/model/approval pickers into a single
  * `ComposerSettingsMenu` (Codex-style: one trigger, sections inside), followed by
- * the read-only `CapabilityBadges` and the subscription `UsageBar` — both derived
- * from `agentId`, so every surface that names an agent gets them for free.
+ * the read-only `CapabilityBadges`, derived from `agentId`, so every surface
+ * that names an agent gets them for free.
  * `rightActions` is `null`: model selection lives in the settings menu.
  */
 export interface ComposerAgentControls {
@@ -111,7 +110,7 @@ export interface ComposerAgentControls {
 	 * rule) — running this turn on gpt-5-mini."
 	 *
 	 * It lives HERE, next to the agent/model pickers, for the same reason the
-	 * `UsageBar` does: every composer surface derives it from this one hook, so
+	 * badges do: every composer surface derives it from this one hook, so
 	 * the dock and the launchpad cannot silently ship a composer that swaps a
 	 * model without saying so. `undefined` when there is nothing to report, which
 	 * is the case on any node with no rules configured.

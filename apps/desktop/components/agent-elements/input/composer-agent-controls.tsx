@@ -16,7 +16,6 @@ import {
 } from "@/components/agent-elements/input/mode-selector.tsx";
 import { ProviderCommandDialog } from "@/components/agent-elements/input/provider-command-dialog.tsx";
 import { AUTO_AGENT_ID } from "@/components/agent-elements/input/universal-picker-body.tsx";
-import { UsageBar } from "@/components/agent-elements/input/usage-bar.tsx";
 import { useUniversalPicker } from "@/components/agent-elements/input/use-universal-picker.ts";
 import type { InputBarInfoBar } from "@/components/agent-elements/input-bar.tsx";
 import { isComposerPluginSectionKey } from "@/src/components/composer/plugin-composer-controls.ts";
@@ -24,10 +23,10 @@ import { isComposerPluginSectionKey } from "@/src/components/composer/plugin-com
 //
 // ChatPage, the launchpad (empty-tabs home), and the Ask Ryu dock all render the
 // exact same bar — a single `ComposerSettingsMenu` (Agent · Model · … one trigger,
-// sections inside), then read-only `CapabilityBadges`, then the subscription
-// `UsageBar` — because every one of them gets it from this hook. Before this, each
+// sections inside), then read-only `CapabilityBadges`, because every one of them
+// gets it from this hook. Before this, each
 // surface re-derived the mode list and re-wired the ACP hide / team-prefix / create
-// sentinel by hand, and only ChatPage bolted on the badges + usage meters, so the
+// sentinel by hand, and only ChatPage bolted on the badges, so the
 // launchpad and dock silently drifted into a lighter, different-looking bar. This
 // module is that derivation once, so the three surfaces read identically and can
 // never drift apart again.
@@ -42,8 +41,10 @@ import { isComposerPluginSectionKey } from "@/src/components/composer/plugin-com
 // selection state (localStorage on the launchpad, a `BuilderRuntime` in the dock,
 // ChatPage's own state) — and surfaces with a richer picker (ChatPage's ACP model
 // chain + approval/config sections) feed those in via `modelSection`/`extraSections`.
-// The capability badges + usage meters are derived from `agentId` inside the hook, so
-// every surface that names an agent gets them for free.
+// The capability badges are derived from `agentId` inside the hook, so every
+// surface that names an agent gets them for free. The composer shows no usage
+// meter: a bot draws from an account pool, so usage lives in the rings at the
+// side of the window.
 import { useAgentCapabilities } from "@/src/hooks/useAgentCapabilities.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { usePiConfig } from "@/src/hooks/usePiConfig.ts";
@@ -111,7 +112,7 @@ export function useComposerAgentControls(
 		includeTeams: Boolean(onSelectTeam),
 		includeCreate: Boolean(onCreateAgent),
 	});
-	// Read-only capability badges + usage meters follow the active agent — the
+	// Read-only capability badges follow the active agent, through the
 	// same `agentId`-keyed hooks ChatPage uses, so all three surfaces match.
 	// Pass the selected model so GGUF detection (vision/mmproj, template tools)
 	// tracks the composer's model pick, not just the agent's bound slot.
@@ -363,7 +364,7 @@ export function useComposerAgentControls(
 		leading = <ActiveIcon className="size-4 shrink-0" />;
 	}
 
-	// Compact trigger: `[logo] agent [usage] ⌄` — model/approval stay inside the
+	// Compact trigger: `[logo] agent ⌄`. Model and approval stay inside the
 	// dropdown. Shared by the dense chat-with-history composer and the narrow-panel
 	// (Ask Ryu) one; both keep the cluster left-aligned in the stacked controls row.
 	const settingsMenu = managedProduct ? null : (
@@ -374,11 +375,6 @@ export function useComposerAgentControls(
 				leading={leading}
 				renderBody={(close) => renderBody(close, "agents")}
 				sections={triggerSections.filter((section) => section.key !== "model")}
-				trailing={
-					compact || compactTrigger ? (
-						<UsageBar agentId={agentId} className="ms-0.5" compact />
-					) : undefined
-				}
 			/>
 			{showModelSection && (
 				<ProviderCommandDialog
@@ -417,8 +413,7 @@ export function useComposerAgentControls(
 		</div>
 	);
 
-	// ONE leading cluster: the settings menu, badges and (full trigger only) usage
-	// chip. InputBar places it before a one-line compact textarea or at the left of
+	// ONE leading cluster: the settings menu and the badges. InputBar places it before a one-line compact textarea or at the left of
 	// the full controls row after that textarea wraps; this hook does not fork a
 	// second right-aligned arrangement.
 	const leftActions = managedProduct ? null : (
@@ -431,12 +426,6 @@ export function useComposerAgentControls(
 					capabilities={capabilities}
 					className="composer-capability-badges"
 				/>
-			)}
-			{/* Only the FULL trigger shows usage as a standalone chip: both compact
-			    modes already fold the same meters into the trigger's `trailing`, so
-			    rendering the chip too would show every meter twice. */}
-			{compact || compactTrigger ? null : (
-				<UsageBar adaptive agentId={agentId} />
 			)}
 		</div>
 	);

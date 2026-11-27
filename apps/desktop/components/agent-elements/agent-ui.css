@@ -202,10 +202,6 @@
 	display: none;
 }
 
-.composer-usage-compact {
-	display: none;
-}
-
 @container composer (max-width: 540px) {
 	/* The model still has a one-click affordance; its word is the first thing to
 	 * go because the active agent is the user's primary orientation cue. */
@@ -221,14 +217,6 @@
 
 	.composer-model-trigger .composer-model-icon {
 		display: block;
-	}
-
-	.composer-usage-adaptive .composer-usage-wide {
-		display: none;
-	}
-
-	.composer-usage-adaptive .composer-usage-compact {
-		display: flex;
 	}
 
 	[data-composer-settings-trigger="true"] [data-composer-agent-name="true"] {
@@ -261,12 +249,7 @@
 }
 
 @container composer (max-width: 330px) {
-	/* At the smallest useful split width, the model icon remains discoverable,
-	 * but optional usage is a tooltip-only affordance rather than a fourth pill. */
-	.composer-usage-adaptive {
-		display: none;
-	}
-
+	/* At the smallest useful split width the agent name gives up more room. */
 	[data-composer-settings-trigger="true"] [data-composer-agent-name="true"] {
 		max-width: 6.5rem;
 	}

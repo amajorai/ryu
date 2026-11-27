@@ -68,7 +68,6 @@ function ComposerSettingsMenuContent({
 	compact = false,
 	footer,
 	leading,
-	trailing,
 	trigger,
 	renderBody,
 	side = "top",
@@ -349,7 +348,6 @@ function ComposerSettingsMenuContent({
 								);
 							})
 						)}
-						{trailing}
 					</span>
 					<HugeiconsIcon
 						className="shrink-0 text-muted-foreground"

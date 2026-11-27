@@ -10,6 +10,7 @@ import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { setInterfaceLevel } from "../../src/lib/interface-level.ts";
 import { useProductModeStore } from "../../src/lib/product-mode.ts";
+import { useGatewayDialog } from "../../src/store/useGatewayDialog.ts";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import { installCoreFixture } from "./gateway-ai-providers-proof-fixture.ts";
 import { NODE } from "./gateway-ai-providers-proof-state.ts";
@@ -57,10 +58,11 @@ function ProofSurface() {
 									</header>
 									<ProviderControlCenter
 										canSetGatewayAccount={canSetGatewayAccount}
-										credentials={<p>Credential integration slot</p>}
-										integrations={<p>Provider integration slot</p>}
+										gatewayKeys={<p>Gateway keys slot</p>}
 										managed={managed}
-										routing={<p>Routing integration slot</p>}
+										onOpenSection={(section) =>
+											useGatewayDialog.getState().openGateway(section)
+										}
 									/>
 								</main>
 								<Toaster position="bottom-right" theme="system" />

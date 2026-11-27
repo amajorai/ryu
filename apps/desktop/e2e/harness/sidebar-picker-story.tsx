@@ -348,7 +348,6 @@ function ProjectsCase() {
 						showEdit={false}
 						threadCount={0}
 						threadsExpanded={false}
-						usageBarVisible={false}
 					/>
 				</div>
 			)}

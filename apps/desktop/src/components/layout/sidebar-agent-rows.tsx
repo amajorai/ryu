@@ -30,7 +30,6 @@ import {
 } from "@ryu/ui/components/tooltip.tsx";
 import { useDisplayDayRevision } from "@ryu/ui/lib/display-day.ts";
 import { useCallback } from "react";
-import { UsageBar } from "@/components/agent-elements/input/usage-bar.tsx";
 import { useModifierClickHold } from "@/src/hooks/useModifierClickHold.ts";
 import { useQuickPreviewModifier } from "@/src/hooks/useQuickPreviewModifier.ts";
 import {
@@ -146,7 +145,6 @@ export function MessagingAgentRowBody({
 	showEdit = true,
 	threadsExpanded,
 	threadCount,
-	usageBarVisible,
 }: {
 	agent: AgentSummary;
 	conversation: Conversation | undefined;
@@ -157,7 +155,6 @@ export function MessagingAgentRowBody({
 	showEdit?: boolean;
 	threadsExpanded: boolean;
 	threadCount: number;
-	usageBarVisible: boolean;
 }) {
 	// Subscribes to the display time zone so the stamp repaints the moment it
 	// changes; `messagingRowStamp` reads the zone at call time.
@@ -208,7 +205,7 @@ export function MessagingAgentRowBody({
 			{/* One line: the name. Title, latest message and run state live in the
 			    tooltip, so every agent row has the same 32px height. Agent name and
 			    title are user data, never UI copy, so the DOM localizer skips them;
-			    the preview, usage bar and stamp stay outside that zone. */}
+			    the preview and stamp stay outside that zone. */}
 			<Tooltip>
 				<TooltipTrigger
 					render={
@@ -235,13 +232,6 @@ export function MessagingAgentRowBody({
 					</span>
 				</TooltipContent>
 			</Tooltip>
-			{usageBarVisible ? (
-				<UsageBar
-					agentId={agent.id}
-					className="shrink-0"
-					visible={usageBarVisible}
-				/>
-			) : null}
 			{stamp ? (
 				<span className="shrink-0 text-muted-foreground/70 text-xs tabular-nums group-focus-within/row:hidden group-hover/row:hidden">
 					{stamp}

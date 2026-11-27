@@ -69,10 +69,9 @@ export interface ComposerSettingsMenuProps {
 	compact?: boolean;
 	/**
 	 * Extra content pinned to the bottom of the dropdown, below the setting
-	 * sections (e.g. the subscription usage meters in the composer's compact
-	 * mode, where they no longer fit as standalone toolbar chips). The wrapper
-	 * self-hides when the node renders nothing, so passing a component that may
-	 * return `null` (like `UsageBar`) never leaves an empty bordered strip.
+	 * sections (the picker's settings row). The wrapper self-hides when the node
+	 * renders nothing, so passing a component that may return `null` never
+	 * leaves an empty bordered strip.
 	 */
 	footer?: ReactNode | ((close: () => void) => ReactNode);
 	/**
@@ -97,13 +96,6 @@ export interface ComposerSettingsMenuProps {
 	sections: ComposerSettingsSection[];
 	/** Side the dropdown content opens toward. Defaults to `"top"` (composer). */
 	side?: "top" | "bottom" | "left" | "right";
-	/**
-	 * A node rendered at the END of the default trigger, after the summary — the
-	 * subscription usage meters in compact mode, sat beside the agent name. Like
-	 * `leading`, it must render non-button content (the `UsageBar`'s tooltip
-	 * triggers are `<span>`s) so it nests safely inside the trigger `<button>`.
-	 */
-	trailing?: ReactNode;
 	/**
 	 * A custom trigger element rendered in place of the default summary Button —
 	 * e.g. the empty-state agent logo. It receives the dropdown's open/close

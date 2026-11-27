@@ -217,6 +217,61 @@ export const GATEWAY_MORE_SETTINGS_ENTRIES: SettingsEntry[] = [
 		label: "AI providers",
 		keywords: "openai anthropic ollama llamacpp local models engine",
 	},
+	// The pages the provider list opens. `subpage` is the page id of
+	// provider-pages-model.ts, so a hit opens the page, not only the pane.
+	{
+		id: "gw.providers.account-pools",
+		dialog: "gateway",
+		section: "providers",
+		level: "computer",
+		group: "",
+		label: "Account pools",
+		subpage: "account-pools",
+		keywords:
+			"pool pools rotate rotation accounts subscription backup models agents",
+	},
+	{
+		id: "gw.providers.agent-models",
+		dialog: "gateway",
+		section: "providers",
+		level: "computer",
+		group: "",
+		label: "Agent models",
+		subpage: "agent-models",
+		keywords: "agent bot models visibility hide show picker",
+	},
+	{
+		id: "gw.providers.model-parameters",
+		dialog: "gateway",
+		section: "providers",
+		level: "computer",
+		group: "",
+		label: "Model parameters",
+		subpage: "model-parameters",
+		keywords: "temperature top p max tokens presets generation tune",
+	},
+	{
+		id: "gw.providers.custom",
+		dialog: "gateway",
+		section: "providers",
+		level: "computer",
+		group: "",
+		label: "Custom OpenAI-compatible provider",
+		subpage: "custom-provider",
+		keywords:
+			"custom endpoint base url local ollama vllm lm studio add provider",
+	},
+	{
+		id: "gw.providers.media",
+		dialog: "gateway",
+		section: "providers",
+		level: "computer",
+		group: "",
+		label: "Image, speech, video, and embeddings",
+		subpage: "capabilities",
+		keywords:
+			"media image speech voice video embeddings providers replicate fal",
+	},
 	{
 		id: "gw.defaults.agent-model",
 		dialog: "gateway",

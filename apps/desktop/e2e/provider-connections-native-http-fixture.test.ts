@@ -231,3 +231,51 @@ test("Core boolean preference fixture refuses JSON booleans; only string values 
 		host.stop();
 	}
 });
+test("fixture answers a read of a route it lacks as a Core without that route does; anything else there stays unexpected", async () => {
+	const pools = "/api/pi-config/providers/account-pools";
+	const credentials = "/api/pi-config/providers/chatgpt/credentials";
+	const preflight = (path: string, origin: string) =>
+		fetch(new URL(path, server.url), {
+			method: "OPTIONS",
+			headers: { origin },
+		});
+	for (const path of [pools, credentials]) {
+		expect((await preflight(path, state.origin)).status).toBe(204);
+		const read = await request(path);
+		expect(read.status).toBe(404);
+		expect(read.headers.get("access-control-allow-origin")).toBe(state.origin);
+	}
+	expect(
+		state.calls.map((c) => ({
+			method: c.method,
+			path: c.path,
+			status: c.status,
+		}))
+	).toEqual([
+		{ method: "GET", path: pools, status: 404 },
+		{ method: "GET", path: credentials, status: 404 },
+	]);
+	expect(state.unexpected).toEqual([]);
+
+	const other = "/api/pi-config/providers/openrouter/credentials";
+	expect((await request(pools, "PUT", { accounts: [] })).status).toBe(400);
+	expect(
+		(await request(credentials, "PUT", { apiKeyFallback: true })).status
+	).toBe(400);
+	expect((await request(other)).status).toBe(400);
+	expect((await preflight(pools, "http://foreign.example")).status).toBe(400);
+	expect(
+		(
+			await fetch(new URL(pools, server.url), {
+				headers: { authorization: "Bearer foreign" },
+			})
+		).status
+	).toBe(400);
+	expect(state.unexpected).toEqual([
+		`PUT ${pools}: Unknown endpoint`,
+		`PUT ${credentials}: Unknown endpoint`,
+		`GET ${other}: Unknown endpoint`,
+		`OPTIONS ${pools}: Wrong fixture authority`,
+		`GET ${pools}: Wrong fixture authority`,
+	]);
+});

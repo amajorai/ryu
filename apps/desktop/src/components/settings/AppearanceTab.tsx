@@ -115,7 +115,7 @@ export function AppearanceTab() {
 				{
 					id: "usage",
 					title: "Usage meter",
-					hint: "Whether and how the spend meter shows.",
+					hint: "Whether the usage rings show, and what they count.",
 					icon: ChartLineData01Icon,
 					content: usagePage,
 				},

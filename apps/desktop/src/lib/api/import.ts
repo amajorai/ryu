@@ -8,6 +8,7 @@ import { z } from "zod";
 // found, then import the selected items into Ryu's own stores.
 
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
+import { type Operation, parseOperation } from "./operations.ts";
 
 /**
  * Every item kind Core's scanner emits (`import::kind::*` in
@@ -235,6 +236,55 @@ export interface RunImportResult {
 	root: string;
 }
 
+const importOutcomeWireSchema = z.object({
+	already_exists: z.boolean().optional(),
+	content_revision: z.string().optional(),
+	detail: z.string().optional(),
+	detail_i18n: z.array(z.unknown()).optional(),
+	folder_path: z.string().optional(),
+	id: z.string(),
+	kind: importItemKindSchema,
+	status: z.enum(["imported", "skipped", "failed"]),
+	title: z.string(),
+	title_i18n: z.unknown().optional(),
+});
+
+const runImportWireSchema = z.object({
+	root: z.string().optional(),
+	results: z.array(importOutcomeWireSchema).optional(),
+});
+
+function toImportOutcome(
+	r: z.output<typeof importOutcomeWireSchema>
+): ImportOutcome {
+	return {
+		contentRevision:
+			typeof r.content_revision === "string" &&
+			/^[0-9a-f]{64}$/.test(r.content_revision)
+				? r.content_revision
+				: undefined,
+		kind: r.kind,
+		id: r.id,
+		title: r.title,
+		status: r.status,
+		alreadyExists: r.already_exists ?? false,
+		detail: r.detail,
+		detailI18n: r.detail_i18n,
+		folderPath: r.folder_path,
+		titleI18n: r.title_i18n,
+	};
+}
+
+function toRunImportResult(
+	body: z.output<typeof runImportWireSchema>,
+	path: string
+): RunImportResult {
+	return {
+		root: body.root ?? path,
+		results: (body.results ?? []).map(toImportOutcome),
+	};
+}
+
 /**
  * Import the selected scan items into Ryu's stores. Idempotent per item: things
  * already imported come back `skipped` with `alreadyExists: true`.
@@ -251,44 +301,76 @@ export async function runImport(
 	if (!resp.ok) {
 		throw new Error(`Failed to import: ${resp.status}`);
 	}
-	const body = z
-		.object({
-			root: z.string().optional(),
-			results: z
-				.array(
-					z.object({
-						already_exists: z.boolean().optional(),
-						content_revision: z.string().optional(),
-						detail: z.string().optional(),
-						detail_i18n: z.array(z.unknown()).optional(),
-						folder_path: z.string().optional(),
-						id: z.string(),
-						kind: importItemKindSchema,
-						status: z.enum(["imported", "skipped", "failed"]),
-						title: z.string(),
-						title_i18n: z.unknown().optional(),
-					})
-				)
-				.optional(),
-		})
-		.parse(await resp.json());
+	return toRunImportResult(runImportWireSchema.parse(await resp.json()), path);
+}
+
+/** The operation kind Core runs a setup or chat-export import as. */
+export const IMPORT_OPERATION_KIND = "import.setup";
+
+/**
+ * What a started import answered with. A node with the operations service
+ * answers at once with the operation that now runs the batch. An older node
+ * does not know the `async` flag, runs the whole batch in the request and
+ * answers with the results, as {@link runImport} does.
+ */
+export type StartedImport =
+	| { kind: "operation"; operation: Operation }
+	| { kind: "result"; result: RunImportResult };
+
+/** A fresh idempotency key for one click on Import. */
+export function newImportKey(): string {
+	return `import-${crypto.randomUUID()}`;
+}
+
+/**
+ * Start the import as an operation that keeps running when the caller goes
+ * away. `idempotencyKey` makes a repeated request return the operation the
+ * first one started.
+ */
+export async function startImport(
+	target: ApiTarget,
+	path: string,
+	items: ImportSelection[],
+	idempotencyKey: string
+): Promise<StartedImport> {
+	const resp = await authenticatedFetch(target, "/api/import/run", {
+		method: "POST",
+		body: JSON.stringify({ path, items, async: true, idempotencyKey }),
+	});
+	if (!resp.ok) {
+		throw new Error(`Failed to import: ${resp.status}`);
+	}
+	const body: unknown = await resp.json();
+	const started = z.object({ operation: z.unknown() }).safeParse(body);
+	const operation = started.success
+		? parseOperation(started.data.operation)
+		: null;
+	if (operation) {
+		return { kind: "operation", operation };
+	}
 	return {
-		root: body.root ?? path,
-		results: (body.results ?? []).map((r) => ({
-			contentRevision:
-				typeof r.content_revision === "string" &&
-				/^[0-9a-f]{64}$/.test(r.content_revision)
-					? r.content_revision
-					: undefined,
-			kind: r.kind,
-			id: r.id,
-			title: r.title,
-			status: r.status,
-			alreadyExists: r.already_exists ?? false,
-			detail: r.detail,
-			detailI18n: r.detail_i18n,
-			folderPath: r.folder_path,
-			titleI18n: r.title_i18n,
-		})),
+		kind: "result",
+		result: toRunImportResult(runImportWireSchema.parse(body), path),
 	};
+}
+
+const importResultsHolderSchema = z.object({
+	results: z.array(importOutcomeWireSchema),
+});
+
+/**
+ * The per-item outcomes an import operation holds: the final result once it
+ * succeeded, else the checkpoint (the items finished so far). `null` when the
+ * record carries neither, as in a list or stream summary.
+ */
+export function importOutcomesOf(
+	operation: Pick<Operation, "cursor" | "result">
+): ImportOutcome[] | null {
+	for (const holder of [operation.result, operation.cursor]) {
+		const parsed = importResultsHolderSchema.safeParse(holder);
+		if (parsed.success) {
+			return parsed.data.results.map(toImportOutcome);
+		}
+	}
+	return null;
 }

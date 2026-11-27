@@ -186,64 +186,18 @@ export function AppearanceUsagePage({ state }: { state: AppearanceTabState }) {
 				<SettingsItem
 					actions={
 						<Switch
-							checked={usageBarPrefs.visible}
-							id="usage-meter-visible-toggle"
-							onCheckedChange={(v) => setUsageBarPrefs({ visible: v })}
-						/>
-					}
-					title="Show usage meter"
-				/>
-				<SettingsItem
-					actions={
-						<Switch
 							checked={usageBarPrefs.sidebar}
 							id="usage-meter-sidebar-toggle"
 							onCheckedChange={(v) => setUsageBarPrefs({ sidebar: v })}
 						/>
 					}
-					description="Shown when Ryu can read that agent's provider credentials."
-					title="Show in sidebar"
-				/>
-				<SettingsItem
-					actions={
-						<Switch
-							checked={usageBarPrefs.showBar}
-							disabled={!usageBarPrefs.visible}
-							id="usage-meter-bar-toggle"
-							onCheckedChange={(v) => setUsageBarPrefs({ showBar: v })}
-						/>
-					}
-					title="Show progress bar"
-				/>
-				<SettingsItem
-					actions={
-						<Switch
-							checked={usageBarPrefs.barStyle === "ring"}
-							disabled={!(usageBarPrefs.visible && usageBarPrefs.showBar)}
-							id="usage-meter-ring-toggle"
-							onCheckedChange={(v) =>
-								setUsageBarPrefs({ barStyle: v ? "ring" : "bar" })
-							}
-						/>
-					}
-					title="Circular progress ring"
-				/>
-				<SettingsItem
-					actions={
-						<Switch
-							checked={usageBarPrefs.showPercent}
-							disabled={!usageBarPrefs.visible}
-							id="usage-meter-percent-toggle"
-							onCheckedChange={(v) => setUsageBarPrefs({ showPercent: v })}
-						/>
-					}
-					title="Show percentage"
+					description="One ring per account pool, provider or agent sign-in whose limits Ryu can read."
+					title="Show usage in the sidebar"
 				/>
 				<SettingsItem
 					actions={
 						<Switch
 							checked={usageBarPrefs.mode === "remaining"}
-							disabled={!usageBarPrefs.visible}
 							id="usage-meter-mode-toggle"
 							onCheckedChange={(v) =>
 								setUsageBarPrefs({ mode: v ? "remaining" : "used" })

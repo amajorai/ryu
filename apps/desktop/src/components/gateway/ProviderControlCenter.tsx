@@ -1,93 +1,35 @@
 "use client";
 
-import { CpuIcon } from "@hugeicons/core-free-icons";
-import { SettingsIconTile } from "@ryu/blocks/desktop/settings-nav.tsx";
-import { Button } from "@ryu/ui/components/button.tsx";
-import { CommandGroup, CommandSeparator } from "@ryu/ui/components/command.tsx";
 import type { ReactNode } from "react";
-import { ProviderCommandDialog } from "@/components/agent-elements/input/provider-command-dialog.tsx";
-import { CapabilityProvidersSettings } from "@/src/components/settings/CapabilityProvidersSettings.tsx";
 import { LlmProvidersSettings } from "@/src/components/settings/LlmProvidersSettings.tsx";
-import {
-	SettingsGroup,
-	SettingsItem,
-	SettingsSection,
-} from "@/src/components/settings/shared/settings-items.tsx";
+import type { LinkedSection } from "@/src/components/settings/provider-pages/provider-pages-model.ts";
 
 /**
- * Single entry point for node provider configuration. The capability editors
- * keep their own persistence contracts; this component owns discovery and
- * navigation so every provider surface opens from the same command dialog.
+ * The "AI providers" pane of the node settings: one list of providers that
+ * opens one page per provider. Credentials, integrations and model routing
+ * are panes of their own in the same window; the list links to them through
+ * `onOpenSection` instead of holding a second copy of each. The gateway's
+ * own keys (read only, managed on the web) have no pane on a self-managed
+ * node, so they are a page of this list.
  */
 export function ProviderControlCenter({
 	canSetGatewayAccount = true,
-	credentials,
-	integrations,
+	gatewayKeys,
 	managed = false,
-	routing,
+	onOpenSection,
 }: {
 	canSetGatewayAccount?: boolean;
-	credentials: ReactNode;
-	integrations: ReactNode;
+	/** The read-only list of the gateway's keys with its link to the web. */
+	gatewayKeys?: ReactNode;
 	managed?: boolean;
-	routing: ReactNode;
+	/** Open the keys, integrations or routing pane of the same window. */
+	onOpenSection?: (section: LinkedSection) => void;
 }) {
 	return (
-		<SettingsSection>
-			<SettingsGroup>
-				<SettingsItem
-					actions={
-						<ProviderCommandDialog
-							renderBody={() => (
-								<>
-									<CommandGroup heading="Chat providers and models">
-										<div className="p-2">
-											<LlmProvidersSettings
-												canSetGatewayAccount={canSetGatewayAccount && !managed}
-											/>
-										</div>
-									</CommandGroup>
-									<CommandSeparator />
-									<CommandGroup heading="Image, speech, video, and embeddings">
-										<div className="p-2">
-											<CapabilityProvidersSettings />
-										</div>
-									</CommandGroup>
-									<CommandSeparator />
-									<CommandGroup heading="Credentials and integrations">
-										<div className="p-2">{credentials}</div>
-										<div className="p-2">{integrations}</div>
-									</CommandGroup>
-									<CommandSeparator />
-									<CommandGroup heading="Routing and defaults">
-										<div className="p-2">{routing}</div>
-									</CommandGroup>
-								</>
-							)}
-							title="Provider command center"
-							trigger={
-								// The visible label is just "Open"; the accessible name keeps
-								// the full phrase the row's title gives it visually.
-								<Button
-									aria-label="Open provider command center"
-									size="sm"
-									type="button"
-									variant="secondary"
-								>
-									Open
-								</Button>
-							}
-						/>
-					}
-					description="Chat and media providers, credentials, integrations, and routing defaults, in one searchable place."
-					title={
-						<span className="flex items-center gap-2">
-							<SettingsIconTile icon={CpuIcon} />
-							<span className="min-w-0 truncate">Provider command center</span>
-						</span>
-					}
-				/>
-			</SettingsGroup>
-		</SettingsSection>
+		<LlmProvidersSettings
+			canSetGatewayAccount={canSetGatewayAccount && !managed}
+			gatewayKeys={gatewayKeys}
+			onOpenSection={onOpenSection}
+		/>
 	);
 }

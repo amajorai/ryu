@@ -7,35 +7,22 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import type { CSSProperties } from "react";
-import type {
-	UsageBarMode,
-	UsageBarStyle,
-} from "@/src/hooks/useUsageBarPrefs.ts";
+import type { UsageBarMode } from "@/src/hooks/useUsageBarPrefs.ts";
 import type { UsageMeter, UsageWindow } from "@/src/lib/api/usage.ts";
 import {
 	expiryClass,
 	formatCountdown,
 	formatExpiryDate,
 } from "@/src/lib/expiry.ts";
-import styles from "./usage-bar.module.css";
 import {
-	COMPACT_SEGMENT_LIMIT,
-	fillClass,
 	formatMeter,
 	formatReset,
 	paceDotClass,
 	paceStatus,
 	shortLabel,
-	trackClass,
 	UsageRing,
 	windowKey,
 } from "./usage-bar-helpers.tsx";
-import { usagePercentText } from "./usage-percent.ts";
-
-interface UsageFillStyle extends CSSProperties {
-	"--usage-fill": string;
-}
 
 /** "5h: 88% left" or "5h: 61% used", one whole sentence per mode. */
 function usageLine(
@@ -253,150 +240,27 @@ export function OverflowChip({
 }
 
 /**
- * All of an agent's usage windows collapsed into one short segmented pill — one
- * equal-width segment per window (5h, 7d), each filled and colored by its own
- * danger level, with no inline labels. Every number lives in a single shared
- * tooltip. This is the tight-space variant (the sidebar row) where the composer's
- * full labeled meters would be too wide.
+ * One limit window as its short label and a small ring. The number, the reset
+ * time, the pace and the plan live in the tooltip.
  */
-export function CompactUsageMeter({
-	windows,
-	meters,
-	plan,
-	mode,
-	barStyle,
-}: {
-	windows: UsageWindow[];
-	/** The non-percent rows, folded into this pill's shared tooltip. */
-	meters: UsageMeter[];
-	plan: string | null;
-	mode: UsageBarMode;
-	barStyle: UsageBarStyle;
-}) {
-	const tl = useLiteralMessages();
-	const isRing = barStyle === "ring";
-	// Screen-reader summary: "Usage — 5h: 88% left, 7d: 61% left".
-	const label = windows
-		.map((w) => {
-			const used = Math.max(0, Math.min(100, w.usedPercent));
-			const shown = mode === "remaining" ? 100 - used : used;
-			return usageLine(tl, mode, shortLabel(w), shown);
-		})
-		.join(", ");
-	// The pill is decorative — every number lives in the tooltip below, which
-	// always lists all of them. So cap the drawn segments: a fixed-width bar split
-	// six ways is unreadable, and in ring mode six 14px rings are wider than the
-	// sidebar row the compact variant exists to fit.
-	const segments = windows.slice(0, COMPACT_SEGMENT_LIMIT);
-	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<span
-						aria-label={tl("Usage — {label}", { label })}
-						className={cn(
-							"flex shrink-0 items-center",
-							isRing ? "gap-0.5" : "h-1.5 w-10 gap-px"
-						)}
-						role="img"
-					/>
-				}
-			>
-				{segments.map((usageWindow) => {
-					const used = Math.max(0, Math.min(100, usageWindow.usedPercent));
-					const shown = mode === "remaining" ? 100 - used : used;
-					const fillStyle: UsageFillStyle = { "--usage-fill": `${shown}%` };
-					if (isRing) {
-						return (
-							<UsageRing
-								key={windowKey(usageWindow)}
-								shown={shown}
-								used={used}
-							/>
-						);
-					}
-					return (
-						<span
-							className={cn(
-								"h-full flex-1 overflow-hidden rounded-full",
-								trackClass(used)
-							)}
-							key={windowKey(usageWindow)}
-						>
-							<span
-								className={cn(
-									styles.linearFill,
-									"block h-full rounded-full",
-									fillClass(used)
-								)}
-								style={fillStyle}
-							/>
-						</span>
-					);
-				})}
-			</TooltipTrigger>
-			<TooltipContent>
-				<div className="flex flex-col gap-0.5 text-xs">
-					{windows.map((usageWindow) => (
-						<WindowTooltipRow
-							key={windowKey(usageWindow)}
-							mode={mode}
-							window={usageWindow}
-						/>
-					))}
-					{meters.map((meter) => (
-						<MeterTooltipRow key={meter.label} meter={meter} />
-					))}
-					{plan ? (
-						<span className="text-muted-foreground">
-							{tl("Plan: {plan}", { plan })}
-						</span>
-					) : null}
-				</div>
-			</TooltipContent>
-		</Tooltip>
-	);
-}
-
 export function UsageWindowMeter({
 	window: usageWindow,
 	plan,
 	mode,
-	showBar,
-	barStyle,
-	showPercent,
 }: {
 	window: UsageWindow;
 	plan: string | null;
 	mode: UsageBarMode;
-	showBar: boolean;
-	barStyle: UsageBarStyle;
-	showPercent: boolean;
 }) {
 	const tl = useLiteralMessages();
 	const used = Math.max(0, Math.min(100, usageWindow.usedPercent));
 	// What the user chose to read off the meter: percent used, or percent left.
 	const shown = mode === "remaining" ? 100 - used : used;
-	const fillStyle: UsageFillStyle = { "--usage-fill": `${shown}%` };
-	// Color always reflects danger (high usage → red), regardless of which
-	// number is displayed; the bar fill matches the displayed number.
+	// Color always reflects danger (high usage is red), whichever number is
+	// displayed; the arc matches the displayed number.
 	const reset = formatReset(usageWindow.resetsAt, tl);
 	const pace = paceStatus(usageWindow, tl);
 	const paceClass = paceDotClass(usageWindow);
-	const linearBar = (
-		<span
-			className={cn("h-1 w-8 overflow-hidden rounded-full", trackClass(used))}
-		>
-			<span
-				className={cn(
-					styles.linearFill,
-					"block h-full rounded-full",
-					fillClass(used)
-				)}
-				style={fillStyle}
-			/>
-		</span>
-	);
 	return (
 		<Tooltip>
 			<TooltipTrigger
@@ -414,17 +278,7 @@ export function UsageWindowMeter({
 						className={cn("size-1 rounded-full", paceClass)}
 					/>
 				) : null}
-				{showBar &&
-					(barStyle === "ring" ? (
-						<UsageRing shown={shown} used={used} />
-					) : (
-						linearBar
-					))}
-				{showPercent ? (
-					<span className="text-xs tabular-nums">
-						{usagePercentText(shown)}
-					</span>
-				) : null}
+				<UsageRing shown={shown} used={used} />
 			</TooltipTrigger>
 			<TooltipContent>
 				<div className="flex flex-col gap-0.5 text-xs">

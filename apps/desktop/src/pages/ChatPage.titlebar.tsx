@@ -15,6 +15,8 @@ import { ChatTitlebarOverflow } from "@/src/components/chat/ChatTitlebarOverflow
 import { InlineArtifact } from "@/src/components/chat/InlineArtifact.tsx";
 import { PanelToggleButtons } from "@/src/components/panels/WorkspacePanels.tsx";
 import { useTitleBar } from "@/src/contexts/TitleBarContext.tsx";
+import { fetchSpaceFileBlob } from "@/src/lib/api/spaces.ts";
+import { artifactFileHost } from "@/src/lib/artifact-file-host.ts";
 import {
 	copyChatTranscript,
 	type TranscriptMessage,
@@ -177,6 +179,8 @@ export function useChatTitlebar({
 			openTabNow(artifact);
 		};
 		return {
+			// Download, preview and Open for a created file (the file card).
+			...artifactFileHost(chatTarget, openTab, fetchSpaceFileBlob),
 			openInPanel: (payload, id) =>
 				handleOpenArtifact(artifactFromSdkObservation(payload, id, "tool")),
 			openInTab: openArtifactTab,

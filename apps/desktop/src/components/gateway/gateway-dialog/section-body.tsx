@@ -15,6 +15,7 @@ import { HooksSection } from "@/src/components/gateway/HooksSection.tsx";
 import { McpSection } from "@/src/components/gateway/McpSection.tsx";
 import { ModelsDefaultsCard } from "@/src/components/gateway/ModelsDefaultsCard.tsx";
 import { NodeOnboardingSettings } from "@/src/components/gateway/NodeOnboardingSettings.tsx";
+import { ProviderControlCenter } from "@/src/components/gateway/ProviderControlCenter.tsx";
 import { WorkspaceSection } from "@/src/components/gateway/WorkspaceSection.tsx";
 import { WorktreesSection } from "@/src/components/gateway/WorktreesSection.tsx";
 import { ConnectionsTab } from "@/src/components/settings/ConnectionsTab.tsx";
@@ -40,11 +41,11 @@ import type {
 	GatewayStatus,
 } from "@/src/lib/api/gateway.ts";
 import { BudgetsCard } from "./budgets-card.tsx";
+import { GatewayKeysCard } from "./gateway-keys-card.tsx";
 import { GuardrailsSection } from "./guardrails-section.tsx";
 import { KeysSectionBody } from "./keys-section-body.tsx";
 import { LiveSpendCard } from "./live-spend-card.tsx";
 import { OverviewSection } from "./overview-section.tsx";
-import { ProvidersSectionBody } from "./providers-section-body.tsx";
 import { RoutingCard } from "./routing-card.tsx";
 import { PolicyReadOnlyBanner } from "./shared.tsx";
 import { SmartRoutingCard } from "./smart-routing-card.tsx";
@@ -203,20 +204,22 @@ function GatewaySectionPanes({
 			{/* LLM Providers. Provider *selection* (which model/keys/routing the
 			    local Pi agent uses) is strictly Core — "what runs" — NOT account/org
 			    data, so it lives here on the node/infra Gateway surface, next to
-			    model routing, rather than in the account SettingsDialog. The
-			    component is reused verbatim; only its host dialog moved. */}
+			    model routing, rather than in the account SettingsDialog. The pane
+			    is the provider list itself; its rows for keys, integrations and
+			    routing open those panes of this window. The read-only gateway keys
+			    card is a page of the list: on a self-managed node no pane shows it. */}
 			{section === "providers" ? (
-				<ProvidersSectionBody
-					canConfigure={canConfigure}
-					configProviders={configProviders}
-					configRevision={configRevision}
-					configuredProviders={health?.providers ?? []}
+				<ProviderControlCenter
+					canSetGatewayAccount={canConfigure}
+					gatewayKeys={
+						<GatewayKeysCard
+							heading={false}
+							reachable={reachable}
+							target={target}
+						/>
+					}
 					managed={managed}
-					nodeUrl={nodeUrl}
-					reachable={reachable}
-					refreshWithConfig={refreshWithConfig}
-					target={target}
-					webServiceSchema={webServiceSchema}
+					onOpenSection={setSection}
 				/>
 			) : null}
 			{section === "routing" ? (

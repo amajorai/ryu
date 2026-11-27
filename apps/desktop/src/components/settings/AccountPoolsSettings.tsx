@@ -67,8 +67,11 @@ function serverText<TError>(cause: TError, fallback: string): string {
 }
 
 export function AccountPoolsSettings({
+	heading = true,
 	providers,
 }: {
+	/** False on a page whose own title already names this block. */
+	heading?: boolean;
 	providers: PiProvider[];
 }) {
 	const tl = useLiteralMessages();
@@ -349,7 +352,7 @@ export function AccountPoolsSettings({
 	return (
 		<SettingsSection
 			caption="An agent with a pool rotates only over the accounts of that pool. Choose the pool of an agent in the agent's settings."
-			title="Account pools"
+			title={heading ? "Account pools" : undefined}
 		>
 			{renderBody()}
 		</SettingsSection>

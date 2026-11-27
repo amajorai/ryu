@@ -22,8 +22,9 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { type ReactNode, useLayoutEffect } from "react";
+import { type ReactNode, useLayoutEffect, useRef } from "react";
 import { useSession } from "@/lib/auth-client.ts";
+import { CompactRailUsage } from "@/src/components/usage-rail/CompactRailUsage.tsx";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import { compactRailNativeControls } from "@/src/lib/window-chrome-layout.ts";
 import { useAppStore } from "@/src/store/useAppStore.ts";
@@ -163,6 +164,9 @@ export function CompactRail({
 		return () => root.removeAttribute(COMPACT_RAIL_ATTRIBUTE);
 	}, [nativeControls]);
 
+	// The list of agents shares its height with the usage rings below it.
+	const rosterRef = useRef<HTMLDivElement | null>(null);
+
 	const searchLabel = t("shell.search", undefined, "Search");
 	const menuLabel = t("shell.open-menu", undefined, "Open menu");
 
@@ -181,9 +185,13 @@ export function CompactRail({
 					/>
 				}
 			>
-				<div className="scroll-fade flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto overscroll-contain py-1 [scrollbar-width:none]">
+				<div
+					className="scroll-fade flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto overscroll-contain py-1 [scrollbar-width:none]"
+					ref={rosterRef}
+				>
 					<CompactRailAgents />
 				</div>
+				<CompactRailUsage rosterRef={rosterRef} />
 				<RailDivider />
 				<div className="flex flex-col items-center gap-1 pt-1">
 					<RailActionButton label="New agent" onClick={openCreateAgent}>

@@ -8,6 +8,7 @@ import {
  * intentionally deferred until the actual field consumer reads them. */
 export interface NativeArtifactObservation {
 	actions?: NativeSdkValue;
+	byteSize?: NativeSdkValue;
 	content?: NativeSdkValue;
 	docId?: NativeSdkValue;
 	filePath?: NativeSdkValue;

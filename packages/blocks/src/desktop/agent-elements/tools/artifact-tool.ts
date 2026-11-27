@@ -7,6 +7,7 @@ import { turnEndValueSchema } from "../turn-end-wire.ts";
 import { nativeSdkSchemaAdmits } from "../utils/native-sdk-admission.ts";
 
 const nativeTextSchema = z.string();
+const nativeSizeSchema = z.number();
 
 import {
 	type NativeSdkValue,
@@ -17,6 +18,7 @@ import {
 interface NativeArtifactFields {
 	artifact?: NativeSdkValue;
 	available?: NativeSdkValue;
+	byte_size?: NativeSdkValue;
 	content?: NativeSdkValue;
 	id?: NativeSdkValue;
 	kind?: NativeSdkValue;
@@ -35,6 +37,12 @@ const artifactInputSchema = z.custom<NativeArtifactFields>((value) =>
 function isTurnEndText(value: NativeSdkValue): value is string {
 	return nativeSdkSchemaAdmits(nativeTextSchema, value);
 }
+/** The byte count Core reports for a created file; anything else is unknown. */
+function createdByteSize(value: NativeSdkValue): number | undefined {
+	return nativeSdkSchemaAdmits(nativeSizeSchema, value) && value >= 0
+		? value
+		: undefined;
+}
 
 const hostArtifactFieldsSchema = z.object({
 	actions: z
@@ -46,6 +54,7 @@ const hostArtifactFieldsSchema = z.object({
 			})
 		)
 		.optional(),
+	byteSize: z.number().optional(),
 	content: z.string().optional(),
 	docId: z.string().optional(),
 	filePath: z.string().optional(),
@@ -111,6 +120,7 @@ export function artifactFromCreateResult(
 		url,
 		spaceId: isTurnEndText(output.space_id) ? output.space_id : undefined,
 		docId: isTurnEndText(output.id) ? output.id : undefined,
+		byteSize: createdByteSize(output.byte_size),
 	};
 }
 

@@ -261,7 +261,7 @@ test("section navigation and settings search open the exact Gateway or App desti
 	);
 });
 
-test("provider command center renders the Gateway-hosted Integrations tab", async ({
+test("the AI providers pane is the provider list and links to the Gateway-hosted Integrations tab", async ({
 	page,
 }) => {
 	await openDialog(page);
@@ -272,36 +272,40 @@ test("provider command center renders the Gateway-hosted Integrations tab", asyn
 	await expect(
 		gatewayDialog.getByRole("heading", { name: "AI providers", exact: true })
 	).toBeVisible();
+	// The pane is the list itself: no second dialog is stacked on the window.
+	await expect(gatewayDialog.locator("[data-provider-list]")).toBeVisible();
+	await expect(page.locator('[data-slot="dialog-content"]')).toHaveCount(1);
+	await expect(
+		gatewayDialog.getByText("OpenAI", { exact: true }).first()
+	).toBeVisible();
+	await expect(gatewayDialog.getByText(/Failed to load providers/)).toHaveCount(
+		0
+	);
+	await page.screenshot({ fullPage: true, path: PROVIDER_EVIDENCE_PATH });
+	// Integrations is a pane of this window; the list's row opens the pane
+	// instead of holding a second copy of it.
 	await gatewayDialog
-		.getByRole("button", { name: "Open provider command center" })
+		.locator('[data-provider-page-row="section:integrations"]')
 		.click();
-	const providerCommand = page.locator('[data-slot="dialog-content"]').last();
 	await expect(
-		providerCommand.getByText("OpenAI", { exact: true }).first()
+		gatewayDialog.getByRole("button", { name: "Integrations", exact: true })
+	).toHaveAttribute("data-active", "");
+	await expect(
+		gatewayDialog.getByRole("heading", { name: "Hugging Face", exact: true })
 	).toBeVisible();
 	await expect(
-		providerCommand.getByText(/Failed to load providers/)
-	).toHaveCount(0);
-	await expect(
-		providerCommand.getByRole("heading", { name: "Hugging Face", exact: true })
-	).toBeVisible();
-	await expect(
-		providerCommand.getByRole("heading", {
+		gatewayDialog.getByRole("heading", {
 			name: "Artificial Analysis",
 			exact: true,
 		})
 	).toBeVisible();
-	await providerCommand
-		.getByRole("heading", { name: "Hugging Face", exact: true })
-		.scrollIntoViewIfNeeded();
 	await expect(page.getByTestId("gateway-state")).toHaveAttribute(
 		"data-open",
 		"true"
 	);
-	await page.screenshot({ fullPage: true, path: PROVIDER_EVIDENCE_PATH });
 });
 
-test("closing the nested provider command keeps the parent Gateway dialog open", async ({
+test("a provider page opens inside the AI providers pane and back returns to its row", async ({
 	page,
 }) => {
 	await openDialog(page);
@@ -309,26 +313,25 @@ test("closing the nested provider command keeps the parent Gateway dialog open",
 	await gatewayDialog
 		.getByRole("button", { name: "AI providers", exact: true })
 		.click();
-	await gatewayDialog
-		.getByRole("button", { name: "Open provider command center" })
-		.click();
-	// Address the nested dialog by its own name: it unmounts on close, so a
-	// positional `.last()` would re-resolve to the still-open parent dialog.
-	const providerCommand = page.getByRole("dialog", {
-		name: "Provider command center",
-	});
-	await expect(providerCommand).toHaveCount(1);
+	const row = gatewayDialog.locator(
+		'[data-provider-page-row="provider:openai"]'
+	);
+	await row.focus();
+	await page.keyboard.press("Enter");
+	// The page replaces the list inside the pane and takes focus on its title.
 	await expect(
-		providerCommand.getByRole("heading", { name: "Hugging Face", exact: true })
-	).toBeVisible();
-	await providerCommand.focus();
-	await providerCommand.press("Escape");
+		gatewayDialog.getByRole("heading", { name: "OpenAI", exact: true })
+	).toBeFocused();
+	await expect(gatewayDialog.locator("[data-provider-list]")).toHaveCount(0);
+	await expect(page.locator('[data-slot="dialog-content"]')).toHaveCount(1);
+	await gatewayDialog
+		.getByRole("button", { name: "Back to AI providers" })
+		.click();
+	await expect(row).toBeFocused();
 	await expect(page.getByTestId("gateway-state")).toHaveAttribute(
 		"data-open",
 		"true"
 	);
-	await expect(providerCommand).toHaveCount(0);
-	await expect(page.locator('[data-slot="dialog-content"]')).toHaveCount(1);
 	await expect(gatewayDialog).toBeVisible();
 	await expect(
 		gatewayDialog.getByRole("heading", { name: "AI providers", exact: true })
@@ -401,7 +404,7 @@ test("Gateway key cards show, save, clear, retry, and persist exact preference w
 	).toBeVisible();
 
 	// An unmanaged node manages its own client keys here; the read-only
-	// "Manage in web" card moved to the provider command center (checked below).
+	// "Manage in web" card is a page of the AI providers list (checked below).
 	await expect(
 		gatewayDialog.getByRole("heading", {
 			name: "Gateway client API keys",
@@ -564,12 +567,12 @@ test("Gateway key cards show, save, clear, retry, and persist exact preference w
 		.getByRole("button", { name: "AI providers", exact: true })
 		.click();
 	await reloadedDialog
-		.getByRole("button", { name: "Open provider command center" })
+		.locator('[data-provider-page-row="gateway-keys"]')
 		.click();
-	const providerCommand = page.getByRole("dialog", {
-		name: "Provider command center",
-	});
-	await providerCommand.getByRole("button", { name: "Manage in web" }).click();
+	await expect(
+		reloadedDialog.getByRole("heading", { name: "Gateway keys", exact: true })
+	).toBeFocused();
+	await reloadedDialog.getByRole("button", { name: "Manage in web" }).click();
 	await expect
 		.poll(async () => (await readSnapshot(page)).tauriCalls.at(-1) ?? null)
 		.toEqual({

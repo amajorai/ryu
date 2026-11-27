@@ -239,7 +239,6 @@ function Story() {
 												onToggleThreads={noOp}
 												threadCount={0}
 												threadsExpanded={false}
-												usageBarVisible={false}
 											/>
 										</div>
 									</section>

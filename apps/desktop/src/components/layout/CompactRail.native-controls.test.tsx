@@ -9,9 +9,10 @@ import type { Root } from "react-dom/client";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
-// The roster and the account avatar read live stores; the clearance under test
-// lives on the rail itself, so they render as nothing here. Bun's module mocks
-// are process-wide, so keep the real auth-client exports for sibling suites.
+// The roster, the usage rings and the account avatar read live stores; the
+// clearance under test lives on the rail itself, so they render as nothing
+// here. Bun's module mocks are process-wide, so keep the real auth-client
+// exports for sibling suites.
 const realAuthClient = { ...(await import("@/lib/auth-client.ts")) };
 mock.module("@/lib/auth-client.ts", () => ({
 	...realAuthClient,
@@ -20,6 +21,9 @@ mock.module("@/lib/auth-client.ts", () => ({
 mock.module("./compact-rail-agents.tsx", () => ({
 	CompactRailAgents: () => null,
 	RailDivider: () => null,
+}));
+mock.module("@/src/components/usage-rail/CompactRailUsage.tsx", () => ({
+	CompactRailUsage: () => null,
 }));
 
 // React DOM and Base UI read the DOM globals at import, so load them only after

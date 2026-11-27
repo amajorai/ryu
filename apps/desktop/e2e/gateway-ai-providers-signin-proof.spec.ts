@@ -1,8 +1,11 @@
 import { expect, test } from "@playwright/test";
 import {
 	armFailure,
+	backToList,
 	evidence,
 	failNextExternalLaunch,
+	openListPage,
+	openPage,
 	openProvider,
 	readState,
 } from "./gateway-ai-providers-proof-helpers.ts";
@@ -14,8 +17,11 @@ test("completes a subscription provider sign-in prompt and updates the catalog",
 }) => {
 	await page.goto("/gateway-ai-providers-proof.html?reset=true");
 	await openProvider(page, "Claude Code", "anthropic-messages");
-	const providerDialog = page.getByRole("dialog").first();
-	await providerDialog.getByRole("button", { name: "Login" }).click();
+	// A subscription without an account shows its first section as "Sign in".
+	await expect(
+		openPage(page).getByRole("heading", { name: "Sign in", exact: true })
+	).toBeVisible();
+	await openPage(page).getByRole("button", { name: "Login" }).click();
 	const loginDialog = page.getByRole("dialog", {
 		name: "Sign in to Claude Code",
 	});
@@ -58,7 +64,10 @@ test("completes a subscription provider sign-in prompt and updates the catalog",
 	await openProvider(page, "Claude Code", "anthropic-messages");
 	// A connected subscription provider keeps its saved account across reload
 	// and offers another sign-in as "Add account" (multi-account OAuth).
-	const reopened = page.getByRole("dialog").first();
+	const reopened = openPage(page);
+	await expect(
+		reopened.getByRole("heading", { name: "Connected accounts", exact: true })
+	).toBeVisible();
 	await expect(
 		reopened.getByText("OAuth connected", { exact: true })
 	).toBeVisible();
@@ -74,11 +83,7 @@ test("submits a text verification prompt with Enter, retries by button, and canc
 		"/gateway-ai-providers-proof.html?reset=true&loginPrompt=text"
 	);
 	await openProvider(page, "Claude Code", "anthropic-messages");
-	await page
-		.getByRole("dialog")
-		.first()
-		.getByRole("button", { name: "Login" })
-		.click();
+	await openPage(page).getByRole("button", { name: "Login" }).click();
 	let loginDialog = page.getByRole("dialog", {
 		name: "Sign in to Claude Code",
 	});
@@ -121,9 +126,7 @@ test("submits a text verification prompt with Enter, retries by button, and canc
 
 	await page.reload();
 	await openProvider(page, "Claude Code", "anthropic-messages");
-	await page
-		.getByRole("dialog")
-		.first()
+	await openPage(page)
 		.getByRole("button", { name: "Add account", exact: true })
 		.click();
 	loginDialog = page.getByRole("dialog", { name: "Sign in to Claude Code" });
@@ -150,11 +153,7 @@ test("opens a subscription authorization URL and lets the user retry a failed br
 	);
 	await openProvider(page, "Claude Code", "anthropic-messages");
 	await failNextExternalLaunch(page);
-	await page
-		.getByRole("dialog")
-		.first()
-		.getByRole("button", { name: "Login" })
-		.click();
+	await openPage(page).getByRole("button", { name: "Login" }).click();
 	const loginDialog = page.getByRole("dialog", {
 		name: "Sign in to Claude Code",
 	});
@@ -242,11 +241,7 @@ test("shows and launches the subscription device-code verification flow", async 
 		"/gateway-ai-providers-proof.html?reset=true&loginFlow=device-code"
 	);
 	await openProvider(page, "Claude Code", "anthropic-messages");
-	await page
-		.getByRole("dialog")
-		.first()
-		.getByRole("button", { name: "Login" })
-		.click();
+	await openPage(page).getByRole("button", { name: "Login" }).click();
 	const loginDialog = page.getByRole("dialog", {
 		name: "Sign in to Claude Code",
 	});
@@ -291,7 +286,7 @@ test("sends a managed-inference user without prepaid credits to the Credits view
 }) => {
 	await page.goto("/gateway-ai-providers-proof.html?reset=true");
 	await openProvider(page, "Ryu Managed", "openai-completions");
-	const dialog = page.getByRole("dialog").first();
+	const dialog = openPage(page);
 	await expect(
 		dialog.getByText("Use Ryu-managed models with prepaid credits")
 	).toBeVisible();
@@ -311,10 +306,8 @@ test("keeps external agent model visibility scoped and capability summary read-o
 	page,
 }) => {
 	await page.goto("/gateway-ai-providers-proof.html?reset=true");
-	await page
-		.getByRole("button", { name: "Open provider command center" })
-		.click();
-	const dialog = page.getByRole("dialog").first();
+	await openListPage(page, "capabilities");
+	const dialog = openPage(page);
 	await expect(
 		dialog.getByRole("heading", { name: "Other capabilities" })
 	).toHaveCount(1);
@@ -330,6 +323,15 @@ test("keeps external agent model visibility scoped and capability summary read-o
 	).toBeVisible();
 	await expect(dialog.getByText("Key set", { exact: true })).toHaveCount(1);
 	await expect(dialog.getByText("No key", { exact: true })).toHaveCount(1);
+	await page.screenshot({
+		fullPage: false,
+		path: evidence("gateway-ai-providers-capability-summary.png"),
+	});
+	await backToList(page);
+	await openListPage(page, "agent-models");
+	await expect(
+		page.getByRole("heading", { name: "Agent models", exact: true })
+	).toBeFocused();
 	await expect(dialog.getByRole("heading", { name: "Codex" })).toHaveCount(0);
 	await dialog
 		.getByRole("button", { name: /Codex.*All models visible/u })
@@ -367,25 +369,14 @@ test("keeps external agent model visibility scoped and capability summary read-o
 				request.method !== "GET"
 		)
 	).toEqual([]);
-	await dialog
-		.getByRole("heading", { name: "Other capabilities" })
-		.scrollIntoViewIfNeeded();
-	await page.screenshot({
-		fullPage: false,
-		path: evidence("gateway-ai-providers-capability-summary.png"),
-	});
 });
 
 test("opens the Gateway editors from capability and media-key summaries", async ({
 	page,
 }) => {
 	await page.goto("/gateway-ai-providers-proof.html?reset=true");
-	await page
-		.getByRole("button", { name: "Open provider command center" })
-		.click();
-	await page
-		.getByRole("dialog")
-		.first()
+	await openListPage(page, "capabilities");
+	await openPage(page)
 		.getByRole("button", { name: "Edit capability routing" })
 		.click();
 	await expect
@@ -393,15 +384,40 @@ test("opens the Gateway editors from capability and media-key summaries", async 
 		.toEqual({ open: true, section: "routing" });
 
 	await page.goto("/gateway-ai-providers-proof.html?reset=true");
-	await page
-		.getByRole("button", { name: "Open provider command center" })
-		.click();
-	await page
-		.getByRole("dialog")
-		.first()
+	await openListPage(page, "capabilities");
+	await openPage(page)
 		.getByRole("button", { name: "Manage media keys" })
 		.click();
 	await expect
 		.poll(async () => (await readState(page)).navigation.at(-1))
 		.toEqual({ open: true, section: "keys" });
+});
+
+test("the list links to the keys, integrations and routing panes and holds the gateway keys page", async ({
+	page,
+}) => {
+	await page.goto("/gateway-ai-providers-proof.html?reset=true");
+	// The old command dialog stacked a copy of these three panes under the
+	// providers. The list has one row for each, which opens the pane itself.
+	for (const section of ["keys", "integrations", "routing"]) {
+		const row = page.locator(`[data-provider-page-row="section:${section}"]`);
+		await row.focus();
+		await page.keyboard.press("Enter");
+		await expect
+			.poll(async () => (await readState(page)).navigation.at(-1))
+			.toEqual({ open: true, section });
+	}
+	await expect(openPage(page)).toHaveCount(0);
+	// The read-only gateway keys card has no pane of its own on a
+	// self-managed node, so it is a page of this list.
+	await openListPage(page, "gateway-keys");
+	await expect(
+		page.getByRole("heading", { name: "Gateway keys", exact: true })
+	).toBeFocused();
+	await expect(openPage(page).getByText("Gateway keys slot")).toBeVisible();
+	await page.keyboard.press("Shift+Tab");
+	await page.keyboard.press("Enter");
+	await expect(
+		page.locator('[data-provider-page-row="gateway-keys"]')
+	).toBeFocused();
 });

@@ -83,23 +83,50 @@ export async function failNextExternalLaunch(
 	});
 }
 
+/** The list row of one provider, found by the provider's exact name. */
+export function providerRow(
+	page: import("@playwright/test").Page,
+	provider: string
+) {
+	return page
+		.locator('[data-provider-page-row^="provider:"]')
+		.filter({ has: page.getByText(provider, { exact: true }) });
+}
+
+/** The page that is open: a provider's or one of the shared ones. */
+export function openPage(page: import("@playwright/test").Page) {
+	return page.locator("[data-provider-page]");
+}
+
+/**
+ * Open a provider's page from the list. The page takes focus on its title,
+ * and the line under the title names the provider's api type.
+ */
 export async function openProvider(
 	page: import("@playwright/test").Page,
 	provider: string,
 	api: string
 ): Promise<void> {
-	await page
-		.getByRole("button", { name: "Open provider command center" })
-		.click();
-	const dialog = page.getByRole("dialog").first();
+	await providerRow(page, provider).click();
 	await expect(
-		dialog.getByRole("option", { name: new RegExp(provider) })
-	).toBeVisible();
-	await dialog.getByRole("option", { name: new RegExp(provider) }).click();
-	await expect(
-		page.getByRole("button", { name: new RegExp(`${provider}.*${api}`) })
-	).toBeVisible();
-	await page
-		.getByRole("button", { name: new RegExp(`${provider}.*${api}`) })
-		.click();
+		page.getByRole("heading", { name: provider, exact: true })
+	).toBeFocused();
+	await expect(page.locator("[data-provider-page-meta]")).toContainText(api);
+}
+
+/** Open a shared page of the list (media, agent models, custom provider…). */
+export async function openListPage(
+	page: import("@playwright/test").Page,
+	rowId: string
+): Promise<void> {
+	await page.locator(`[data-provider-page-row="${rowId}"]`).click();
+	await expect(openPage(page)).toBeVisible();
+}
+
+/** Back to the list. The row that opened the page has the focus again. */
+export async function backToList(
+	page: import("@playwright/test").Page
+): Promise<void> {
+	await page.getByRole("button", { name: "Back to AI providers" }).click();
+	await expect(page.locator("[data-provider-list]")).toBeVisible();
 }

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { proofEvidencePath } from "./proof-evidence-path.ts";
 
 test.describe.configure({ timeout: 90_000 });
@@ -33,20 +33,32 @@ test.beforeEach(async ({ page }) => {
 	);
 });
 
-// 1ca1de7ee8 (Ryu Quiet) moved the Connected/Configured badge onto the row's
-// meta line after the API type, so a card's name reads
-// "<label> <api> · <status>".
-const CHATGPT_CONNECTED = /^ChatGPT openai-completions · Connected$/;
-const OPENROUTER_CONFIGURED = /^OpenRouter openai-completions · Configured$/;
-const LOCAL_SERVER_CONFIGURED =
-	/Local model server openai-responses · custom · Configured$/;
+// The providers are one list; a row opens that provider's page. A row is
+// found by the provider's catalog id, and its one quiet line says what kind
+// of provider it is and how it is connected.
+const row = (page: Page, id: string) =>
+	page.locator(`[data-provider-page-row="provider:${id}"]`);
+
+async function backToList(page: Page) {
+	await page.getByRole("button", { name: "Back to AI providers" }).click();
+	await expect(page.locator("[data-provider-list]")).toBeVisible();
+}
 
 test("ChatGPT OAuth account routing saves strategy and priority", async ({
 	page,
 }) => {
 	await page.goto("/provider-connections-proof.html");
-	await page.getByRole("button", { name: CHATGPT_CONNECTED }).click();
+	await expect(row(page, "chatgpt")).toContainText(
+		"Subscription · Accounts: 2"
+	);
+	await row(page, "chatgpt").click();
 	// The pool controls' heading is "Account routing" (already so at 07d403e33).
+	// They sit in the Accounts section, right under the accounts they order.
+	await expect(
+		page
+			.locator('[data-provider-page-section="accounts"]')
+			.getByRole("heading", { name: "Account routing", exact: true })
+	).toBeVisible();
 	await expect(
 		page.getByRole("heading", { name: "Account routing", exact: true })
 	).toBeVisible();
@@ -68,7 +80,7 @@ test("ChatGPT OAuth account routing saves strategy and priority", async ({
 		path: proofEvidencePath("provider-connections/chatgpt-oauth-routing.png"),
 	});
 	await page.reload();
-	await page.getByRole("button", { name: CHATGPT_CONNECTED }).click();
+	await row(page, "chatgpt").click();
 	await expect(page.getByLabel("Strategy")).toContainText("Round robin");
 	await expect(page.locator("#oauth-priority-chatgpt-b")).toHaveValue("2");
 });
@@ -80,15 +92,27 @@ test("provider connection groups and account actions render without errors", asy
 	page.on("pageerror", (error) => pageErrors.push(error.message));
 	await page.goto("/provider-connections-proof.html");
 
+	// Two groups, connected and not. The three kinds of provider are told
+	// apart by the row's line, not by three headings.
 	await expect(
-		page.getByRole("heading", { name: "Ryu managed" })
+		page.getByRole("heading", { name: "Connected", exact: true })
 	).toBeVisible();
 	await expect(
-		page.getByRole("heading", { name: "OAuth accounts" })
+		page.getByRole("heading", { name: "Other", exact: true })
 	).toBeVisible();
-	await expect(page.getByRole("heading", { name: "API keys" })).toBeVisible();
+	await expect(row(page, "managed-openrouter")).toContainText("Ryu managed");
+	await expect(row(page, "claude-pro-max")).toContainText(
+		"Subscription · Accounts: 2"
+	);
+	await expect(row(page, "openrouter")).toContainText(
+		"API key · OpenRouter API key"
+	);
+	await expect(row(page, "local-model-server")).toContainText(
+		"Custom · Configured"
+	);
+	await expect(row(page, "anthropic")).toContainText("API key · Not connected");
 
-	await page.getByRole("button", { name: /Claude \(Pro\/Max/ }).click();
+	await row(page, "claude-pro-max").click();
 	await expect(page.getByRole("button", { name: "Add account" })).toBeVisible();
 	await expect(
 		page.getByText("Models from the installed Pi engine.")
@@ -110,7 +134,9 @@ test("provider connection groups and account actions render without errors", asy
 		page.getByRole("button", { name: /Claude account 2 You/ })
 	).toBeVisible();
 
-	await page.getByRole("button", { name: OPENROUTER_CONFIGURED }).click();
+	await backToList(page);
+	await expect(row(page, "claude-pro-max")).toBeFocused();
+	await row(page, "openrouter").click();
 	await expect(
 		page.getByRole("button", { name: "Login", exact: true })
 	).toBeVisible();
@@ -138,7 +164,7 @@ test("custom provider shows saved model discovery after its endpoint goes offlin
 	page,
 }) => {
 	await page.goto("/provider-connections-proof.html");
-	await page.getByRole("button", { name: LOCAL_SERVER_CONFIGURED }).click();
+	await row(page, "local-model-server").click();
 	await expect(
 		page.getByText("Showing models saved from the last successful discovery.")
 	).toBeVisible();
@@ -154,7 +180,7 @@ test("custom provider saves a replacement key from its existing card", async ({
 	page,
 }) => {
 	await page.goto("/provider-connections-proof.html");
-	await page.getByRole("button", { name: LOCAL_SERVER_CONFIGURED }).click();
+	await row(page, "local-model-server").click();
 	const keyInput = page.locator("#key-local-model-server");
 	await keyInput.fill("synthetic-ui-replacement-key");
 	// Saving a key needs the spending-limit acknowledgement (SpendLimitConfirm,
@@ -205,9 +231,7 @@ test("official ChatGPT plan reuses a saved registration for explicit plan consen
 			})
 	);
 	await page.goto("/provider-connections-proof.html");
-	await page
-		.getByRole("button", { name: /ChatGPT plan \(self-hosted\)/ })
-		.click();
+	await row(page, "chatgpt-plan").click();
 	await expect(
 		page.getByText("Identity is saved. Plan use needs separate permission.")
 	).toBeVisible();
@@ -224,14 +248,9 @@ test("official ChatGPT plan reuses a saved registration for explicit plan consen
 	await expect(
 		page.getByText("Models discovered live from the provider.")
 	).toBeVisible();
-	await page
-		.getByRole("button", { name: /ChatGPT plan \(self-hosted\)/ })
-		.locator("xpath=../..")
-		.screenshot({
-			path: proofEvidencePath(
-				"provider-connections/chatgpt-plan-connected.png"
-			),
-		});
+	await page.locator("[data-provider-page]").screenshot({
+		path: proofEvidencePath("provider-connections/chatgpt-plan-connected.png"),
+	});
 });
 
 test("login failure shows the server's actionable explanation", async ({
@@ -252,7 +271,7 @@ test("login failure shows the server's actionable explanation", async ({
 		}
 	);
 	await page.goto("/provider-connections-proof.html");
-	await page.getByRole("button", { name: /Claude \(Pro\/Max/ }).click();
+	await row(page, "claude-pro-max").click();
 	await page.getByRole("button", { name: "Add account", exact: true }).click();
 	await expect(
 		page.getByRole("dialog", { name: "Sign in to Claude" })
@@ -283,7 +302,7 @@ test("browser OAuth offers a normal authorization link", async ({ page }) => {
 		})
 	);
 	await page.goto("/provider-connections-proof.html");
-	await page.getByRole("button", { name: /Claude \(Pro\/Max/ }).click();
+	await row(page, "claude-pro-max").click();
 	await page.getByRole("button", { name: "Add account", exact: true }).click();
 	const link = page.getByRole("link", { name: "Open the authorization page" });
 	await expect(link).toHaveAttribute(

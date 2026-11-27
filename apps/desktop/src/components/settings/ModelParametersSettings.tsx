@@ -168,7 +168,12 @@ export function ModelParameterEditor({
 	);
 }
 
-export function ModelParametersSettings() {
+export function ModelParametersSettings({
+	heading = true,
+}: {
+	/** False on a page whose own title already names this block. */
+	heading?: boolean;
+} = {}) {
 	const node = useActiveNode();
 	const target: ApiTarget = {
 		url: node.url,
@@ -182,7 +187,7 @@ export function ModelParametersSettings() {
 	return (
 		<SettingsSection
 			caption="Tune generation for any model on this node and save presets. Agents and requests can still override."
-			title="Model parameters"
+			title={heading ? "Model parameters" : undefined}
 		>
 			<SettingsCard className="flex flex-col gap-3 py-3">
 				<ToggleGroup

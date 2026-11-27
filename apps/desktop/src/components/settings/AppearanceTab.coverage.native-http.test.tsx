@@ -80,11 +80,14 @@ test("Customize lists every Appearance page, pushes the chosen page with Back, a
 
 	// A search hit for a row on a closed page opens that page while the pane
 	// is already mounted (the subscription path).
-	const percentEntry = SETTINGS_ENTRIES.find(
-		(entry) => entry.id === "appearance.usage-meter.show-percentage"
+	const ringsEntry = SETTINGS_ENTRIES.find(
+		(entry) => entry.id === "appearance.usage-meter.show-usage-in-the-sidebar"
 	)!;
-	await act(async () => requestSettingReveal(percentEntry));
-	await settle(() => hasRow("Show percentage"), "reveal opened Usage meter");
+	await act(async () => requestSettingReveal(ringsEntry));
+	await settle(
+		() => hasRow("Show usage in the sidebar"),
+		"reveal opened Usage meter"
+	);
 	expect(tabElement().querySelector("h3")?.textContent).toBe("Usage meter");
 	await unmountTab();
 

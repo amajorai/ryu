@@ -4,7 +4,7 @@ import { type ReactNode, useMemo } from "react";
 import { z } from "zod";
 
 // The REAL Appearance tab, mounted in happy-dom next to the REAL consumers its
-// preferences drive (the composer/sidebar UsageBar, the workspace RichPatchDiff,
+// preferences drive (the picker's UsageBar, a usage ring, the workspace RichPatchDiff,
 // the titlebar's seasonal particle layer). Core is a loopback Bun server reached
 // through the production SDK, so theme-preference publication and the usage
 // meter's data are real HTTP exchanges. Nothing under test is substituted.
@@ -35,6 +35,12 @@ export const { AppSurfaceProvider } = await import(
 );
 export const { UsageBar } = await import(
 	"@/components/agent-elements/input/usage-bar.tsx"
+);
+export const { UsageRing } = await import(
+	"@/src/components/usage-rail/usage-ring.tsx"
+);
+export const { buildUsageRailSources } = await import(
+	"@/src/lib/usage-rail/usage-rail-sources.ts"
 );
 export const { RichPatchDiff } = await import(
 	"@/src/components/diffs/RichPatchDiff.tsx"
@@ -217,17 +223,62 @@ export function ChatPickerConsumer() {
 	);
 }
 
-/** Composer (full meter) and AppSidebar's agent row (its own `sidebar` gate). */
+/** The reading of `usageWire` as the one source a usage ring stands for. */
+const [RAIL_SOURCE] = buildUsageRailSources({
+	agents: [
+		{
+			avatarUrl: null,
+			engine: usageWire.engine,
+			id: USAGE_AGENT,
+			name: "Claude Code",
+			snapshot: {
+				accountId: null,
+				agentId: USAGE_AGENT,
+				available: true,
+				engine: usageWire.engine,
+				extraUsageUsd: null,
+				meters: [],
+				plan: usageWire.plan,
+				reason: null,
+				retryAfterSeconds: null,
+				windows: usageWire.windows.map((entry) => ({
+					label: entry.label,
+					model: null,
+					resetsAt: entry.resets_at,
+					usedPercent: entry.used_percent,
+					windowSeconds: entry.window_seconds,
+				})),
+			},
+		},
+	],
+	pools: [],
+	providers: [],
+});
+
+function ignoreOpen() {
+	// The consumer only shows the ring; it opens no page.
+}
+
+/**
+ * The picker's provider meter fed by Core, and a usage ring behind the
+ * `sidebar` gate the two side strips apply (`useUsageRailSources`).
+ */
 export function UsageConsumers() {
 	const prefs = useUsageBarPrefs();
 	return (
 		<>
-			<div data-consumer="usage-composer">
+			<div data-consumer="usage-picker">
 				<UsageBar agentId={USAGE_AGENT} />
 			</div>
 			<div data-consumer="usage-sidebar">
-				{prefs.sidebar ? (
-					<UsageBar agentId={USAGE_AGENT} visible={prefs.sidebar} />
+				{prefs.sidebar && RAIL_SOURCE ? (
+					<UsageRing
+						mode={prefs.mode}
+						onOpen={ignoreOpen}
+						side="top"
+						size="row"
+						source={RAIL_SOURCE}
+					/>
 				) : null}
 			</div>
 		</>

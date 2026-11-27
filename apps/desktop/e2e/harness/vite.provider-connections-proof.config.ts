@@ -28,6 +28,9 @@ export default defineConfig({
 			},
 			{ find: "./AgentModelsSettings.tsx", replacement: mocks },
 			{ find: "./CapabilityProvidersSettings.tsx", replacement: mocks },
+			// The provider pages import the two from their own folder.
+			{ find: "../AgentModelsSettings.tsx", replacement: mocks },
+			{ find: "../CapabilityProvidersSettings.tsx", replacement: mocks },
 			{ find: "@", replacement: desktopRoot },
 		],
 	},

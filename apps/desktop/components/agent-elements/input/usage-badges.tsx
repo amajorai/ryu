@@ -25,7 +25,7 @@ import { usagePercentText } from "./usage-percent.ts";
  * agent's subscription headroom, for the row you are about to pick.
  *
  * Shows the single most-consumed window as `NN%` (the one that will bite first),
- * coloured by the same calm → amber → red danger scale as the composer bar, with
+ * coloured by the same calm → amber → red danger scale as the usage rings, with
  * the full breakdown — every window, every non-percent row, the plan — in its
  * tooltip. Deliberately not the full `UsageBar`: a picker row already carries a
  * logo, a name and a checkmark, and a meter per window would not fit.
@@ -36,7 +36,7 @@ import { usagePercentText } from "./usage-percent.ts";
  *
  * Cost note: one of these mounts per installed subscription-agent row, so opening
  * the picker can touch several vendor endpoints. They share `useAgentUsage`'s
- * query key and its 5-minute `staleTime` with the composer bar, and TanStack's
+ * query key and its 5-minute `staleTime` with the usage rings, and TanStack's
  * `refetchOnWindowFocus` is stale-gated (`shouldFetchOn` → `isStale`), so a focus
  * cannot fan out a burst — a given agent is polled at most once per 5 minutes no
  * matter how many badges are mounted.
@@ -336,7 +336,7 @@ function worstWindow(windows: UsageWindow[]): UsageWindow | null {
 	);
 }
 
-/** Text-colour counterpart of `fillClass`, for the picker badge's bare number. */
+/** The danger hue of a usage ring as a text colour, for the picker badge's bare number. */
 function usageTextClass(usedPercent: number): string {
 	if (usedPercent >= 90) {
 		return "text-status-destructive";
