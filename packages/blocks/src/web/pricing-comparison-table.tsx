@@ -31,11 +31,11 @@ const ONE_PLAN_QUERY = "(max-width: 767px)";
 /**
  * The header row stays under the site header while the table scrolls: the
  * section sets `--pricing-sticky-top` to the height of whatever is pinned to
- * the top of the window. A box shadow stands in for the row border, which
- * does not travel with a sticky cell.
+ * the top of the window. The table is flat, with no borders: the header row
+ * is a band on the raised (`muted`) shade, opaque so it hides the rows that
+ * scroll under it.
  */
-const STICKY_HEAD =
-	"sticky top-[var(--pricing-sticky-top,0px)] z-20 bg-background shadow-[0_1px_0_var(--color-border)]";
+const STICKY_HEAD = "sticky top-[var(--pricing-sticky-top,0px)] z-20 bg-muted";
 
 /**
  * The bottom edge of the bar pinned to the top of the window (the site
@@ -56,9 +56,8 @@ function pinnedTopHeight(table: Element): number {
 	return 0;
 }
 
-/** An opaque tint, so the recommended column's sticky header hides the rows under it. */
-const RECOMMENDED_COLUMN =
-	"bg-[color-mix(in_oklch,var(--color-muted)_60%,var(--color-background))]";
+/** The recommended column sits on the raised shade from the header band down. */
+const RECOMMENDED_COLUMN = "bg-muted";
 
 /** Groups whose fold state the reader has flipped. */
 const NO_TOGGLED: ReadonlySet<string> = new Set();
@@ -112,8 +111,8 @@ function ComparisonGroup({
 }) {
 	return (
 		<tbody data-comparison-section={section.id}>
-			<tr className="border-border/60 border-t bg-muted/40">
-				<th className="p-0" colSpan={columnCount} scope="colgroup">
+			<tr>
+				<th className="p-0 pt-3" colSpan={columnCount} scope="colgroup">
 					<button
 						aria-expanded={open}
 						className="flex min-h-11 w-full items-center justify-between gap-3 px-4 text-start font-medium text-muted-foreground text-xs uppercase tracking-wide transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
@@ -132,12 +131,7 @@ function ComparisonGroup({
 				</th>
 			</tr>
 			{section.rows.map((row) => (
-				<tr
-					className="border-border/60 border-t"
-					data-comparison-row={row.id}
-					hidden={!open}
-					key={row.id}
-				>
+				<tr data-comparison-row={row.id} hidden={!open} key={row.id}>
 					<th
 						className="px-4 py-3 text-start align-middle font-normal"
 						scope="row"
@@ -294,7 +288,7 @@ export function PricingComparisonTable(props: ComparisonOptions) {
 					</TabsList>
 				</Tabs>
 			</div>
-			<div className="overflow-clip rounded-2xl border border-border/60">
+			<div className="overflow-clip rounded-2xl bg-card">
 				<table className="w-full table-fixed border-collapse text-sm">
 					<caption className="sr-only">
 						{isOrganization
@@ -355,7 +349,7 @@ export function PricingComparisonTable(props: ComparisonOptions) {
 				</table>
 			</div>
 			<div
-				className="mt-6 flex flex-col items-center justify-between gap-4 rounded-2xl border border-border/60 bg-muted/20 px-6 py-6 text-center sm:flex-row sm:text-start"
+				className="mt-6 flex flex-col items-center justify-between gap-4 rounded-2xl bg-card px-6 py-6 text-center sm:flex-row sm:text-start"
 				data-testid="pricing-compare-cta"
 			>
 				<p className="text-balance font-heading font-medium text-xl tracking-tight">

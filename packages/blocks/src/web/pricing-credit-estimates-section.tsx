@@ -157,7 +157,7 @@ function UsageTile({
 	return (
 		<div
 			aria-labelledby={headingId}
-			className="flex flex-col p-5 md:p-6"
+			className="flex flex-col rounded-2xl bg-card p-5 md:p-6"
 			role="group"
 		>
 			<h3
@@ -223,7 +223,7 @@ function AllPlansTable({
 	const locale = useOptionalI18n()?.locale;
 	return (
 		<details
-			className="group mt-4 rounded-2xl border border-border/60 px-5 py-2"
+			className="group mt-4 rounded-2xl bg-card px-5 py-2"
 			data-testid="pricing-credit-estimates-all-plans"
 		>
 			<summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-4 rounded-sm font-medium text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
@@ -254,7 +254,7 @@ function AllPlansTable({
 					</thead>
 					<tbody>
 						{plans.map((plan) => (
-							<tr className="border-border/60 border-t" key={plan.id}>
+							<tr key={plan.id}>
 								<th className="py-2.5 pe-3 text-start font-normal" scope="row">
 									<span className="font-medium">{plan.name}</span>{" "}
 									<span className="text-muted-foreground text-xs">
@@ -318,8 +318,8 @@ export function PricingCreditEstimatesSection({
 				)}
 				title={tl("What your credits buy")}
 			/>
-			<div className="rounded-2xl border border-border/60 bg-card">
-				<div className="flex flex-col gap-4 border-border/60 border-b p-5 md:flex-row md:items-center md:justify-between md:px-6">
+			<div className="flex flex-col gap-3">
+				<div className="flex flex-col gap-4 rounded-2xl bg-card p-5 md:flex-row md:items-center md:justify-between md:px-6">
 					<Tabs
 						onValueChange={(value) =>
 							// SAFETY: the triggers below are exactly `plans`, whose ids are the estimate plan ids.
@@ -347,7 +347,7 @@ export function PricingCreditEstimatesSection({
 						</span>
 					</p>
 				</div>
-				<div className="grid divide-y divide-border/60 md:grid-cols-3 md:divide-x md:divide-y-0 rtl:md:divide-x-reverse">
+				<div className="grid gap-3 md:grid-cols-3">
 					{measures.map((measure) => (
 						<UsageTile
 							key={measure.id}

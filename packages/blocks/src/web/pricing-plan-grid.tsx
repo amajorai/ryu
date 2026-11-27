@@ -56,7 +56,7 @@ function OrganizationSeatSelector({
 
 	return (
 		<div
-			className="mx-auto mb-8 flex max-w-2xl flex-col gap-4 rounded-2xl border bg-muted/30 p-5 sm:flex-row sm:items-center sm:justify-between"
+			className="mx-auto mb-8 flex max-w-2xl flex-col gap-4 rounded-2xl bg-card p-5 sm:flex-row sm:items-center sm:justify-between"
 			data-pricing-seat-selector
 		>
 			<div>

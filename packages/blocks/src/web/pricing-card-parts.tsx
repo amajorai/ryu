@@ -184,6 +184,11 @@ export function PriceBlock({
  * Motion budget (pricing-motion.module.css): a hover-only ring stays paused
  * while it is hidden, and every loop in the card (rings and the plan badge)
  * pauses while the card is off screen.
+ *
+ * The public `/pricing` page is flat: no border and no ring, at rest or on
+ * hover. Every card sits on the card shade and the highlighted one on the
+ * raised (`muted`) shade, so shade alone marks it. The tier badge keeps the
+ * plan's palette.
  */
 export function PricingCardBorder({
 	isRecommended = false,
@@ -197,6 +202,26 @@ export function PricingCardBorder({
 	const showHighlightedBorder = isRecommended || variant === "pro";
 	const frameRef = useRef<HTMLDivElement>(null);
 	usePauseMotionOffscreen(frameRef);
+	const isPublic = useIsPublicPricing();
+	if (isPublic) {
+		return (
+			<div
+				className={cn("relative", motionStyles.offscreenAware)}
+				data-plan-emphasis={showHighlightedBorder ? "raised" : "resting"}
+				ref={frameRef}
+			>
+				<Card
+					borderTone="transparent"
+					className={cn(
+						"relative flex h-full flex-col",
+						showHighlightedBorder && "bg-muted"
+					)}
+				>
+					{children}
+				</Card>
+			</div>
+		);
+	}
 	if (variant === "pro" && showHighlightedBorder) {
 		return (
 			<div

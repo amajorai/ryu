@@ -90,8 +90,7 @@ function SplitBar({ parts }: { parts: readonly BarPart[] }) {
 	);
 }
 
-const cardClass =
-	"flex flex-col gap-5 rounded-2xl border border-border/60 bg-card p-5 md:p-6";
+const cardClass = "flex flex-col gap-5 rounded-2xl bg-card p-5 md:p-6";
 const cardTitleClass = "font-heading font-medium text-lg tracking-tight";
 const cardLeadClass = "text-muted-foreground text-sm leading-relaxed";
 const noteClass = "text-muted-foreground text-xs leading-relaxed";
@@ -194,11 +193,7 @@ export function PricingFeesSection() {
 						</thead>
 						<tbody>
 							{rates.map((rate) => (
-								<tr
-									className="border-border/60 border-t"
-									data-fee-rate={rate.id}
-									key={rate.id}
-								>
+								<tr data-fee-rate={rate.id} key={rate.id}>
 									<th
 										className="py-2.5 pe-3 text-start font-normal"
 										scope="row"
@@ -216,10 +211,7 @@ export function PricingFeesSection() {
 									</td>
 								</tr>
 							))}
-							<tr
-								className="border-border/60 border-t"
-								data-fee-rate="enterprise"
-							>
+							<tr data-fee-rate="enterprise">
 								<th className="py-2.5 pe-3 text-start font-normal" scope="row">
 									Enterprise
 								</th>

@@ -49,7 +49,7 @@ export function PricingSectionNav({
 			className={cn("flex justify-center", className)}
 			data-testid="pricing-section-nav"
 		>
-			<ul className="flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-border/60 bg-muted/30 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+			<ul className="flex max-w-full items-center gap-1 overflow-x-auto rounded-full bg-card p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 				{sections.map((section) => (
 					<li className="shrink-0" key={section}>
 						<a

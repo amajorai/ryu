@@ -12,7 +12,6 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@ryu/ui/components/card";
-import { planCardConicGradient } from "@ryu/ui/components/plan-badge";
 import { cn } from "@ryu/ui/lib/utils";
 import type { Route } from "next";
 import Link from "next/link";
@@ -32,7 +31,6 @@ import {
 	landingSubheadlineBodyClass,
 } from "./landing-typography.ts";
 import { LinkArrow } from "./link-arrow.tsx";
-import motionStyles from "./pricing-motion.module.css";
 import { SectionHeading } from "./sections.tsx";
 
 // A long price line keeps only its first clause as the lead; the rest moves
@@ -87,7 +85,7 @@ function PricePoints({ points }: { points: readonly StandalonePricePoint[] }) {
 	return (
 		<dl
 			className={cn(
-				"grid gap-x-4 gap-y-3 border-border/60 border-y py-4",
+				"grid gap-x-4 gap-y-3 rounded-xl bg-muted p-4",
 				points.length >= 3 && "grid-cols-3",
 				points.length === 2 && "grid-cols-2"
 			)}
@@ -121,12 +119,7 @@ function StandaloneProductPricingCard({
 	const realm = PRODUCT_REALMS.find((candidate) => candidate.id === entry.slug);
 	const points = standalonePricePoints(entry.slug, tl, locale);
 	const card = (
-		<Card
-			className={
-				isGatewayPayg ? "relative h-full border-transparent" : "h-full"
-			}
-			data-standalone-product={entry.slug}
-		>
+		<Card className="h-full" data-standalone-product={entry.slug}>
 			<CardHeader>
 				<div className="flex min-h-8 items-center justify-between gap-3">
 					<div className="flex min-w-0 items-center gap-2.5">
@@ -137,8 +130,14 @@ function StandaloneProductPricingCard({
 						) : null}
 						<CardTitle variant="subsection">{entry.name}</CardTitle>
 					</div>
+					{/* Flat like the card: an early access badge sits on the page shade,
+					    a released one on the raised shade. Neither has a border. */}
 					<Badge
-						className="shrink-0 text-[13px]"
+						className={cn(
+							"shrink-0 text-[13px]",
+							entry.status === "Early access" &&
+								"border-transparent bg-background"
+						)}
 						variant={entry.status === "Early access" ? "outline" : "secondary"}
 					>
 						{entry.status}
@@ -185,16 +184,9 @@ function StandaloneProductPricingCard({
 		return card;
 	}
 
+	// Flat like the rest of the catalog: the Gateway card has no hover ring.
 	return (
-		<div
-			className="group relative h-full rounded-[calc(var(--radius-xl)+2px)] p-[2px]"
-			data-testid="standalone-pricing-card-gateway"
-		>
-			<div
-				aria-hidden="true"
-				className={`t-card-border-spin pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover:opacity-100 motion-reduce:animate-none ${motionStyles.idleRing}`}
-				style={{ backgroundImage: planCardConicGradient("gateway-payg") }}
-			/>
+		<div className="h-full" data-testid="standalone-pricing-card-gateway">
 			{card}
 		</div>
 	);
@@ -349,7 +341,7 @@ export function StandaloneProductPricingCatalog({
 				</div>
 			) : (
 				<p
-					className="rounded-2xl border border-border/60 border-dashed px-5 py-4 text-muted-foreground text-sm"
+					className="rounded-2xl bg-card px-5 py-4 text-muted-foreground text-sm"
 					data-testid="standalone-pricing-early-access"
 				>
 					Standalone services are in early access and are not open for new

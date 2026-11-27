@@ -19,7 +19,7 @@ import {
 import { Checkbox } from "@ryu/ui/components/checkbox";
 import { Input } from "@ryu/ui/components/input";
 import PageHeader from "@ryu/ui/components/page-header.tsx";
-import { planCardConicGradient } from "@ryu/ui/components/plan-badge";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	Ban,
 	CalendarX,
@@ -34,7 +34,6 @@ import {
 import { useState } from "react";
 import { creditPlanKeyTarget } from "./credit-plan-keys.ts";
 import { depositFeeAmounts } from "./pricing-deposit-fee-format.ts";
-import motionStyles from "./pricing-motion.module.css";
 
 export type StandaloneFundingChoice =
 	| { kind: "topup"; amountCents: number }
@@ -127,18 +126,18 @@ export function StandaloneCreditPlans({
 								? FlaskConical
 								: Zap;
 					return (
+						// Flat, like every card on the pricing page: no border and no
+						// ring. The picked option sits on the raised shade.
 						<div
-							className="group relative rounded-[calc(var(--radius-4xl)+2px)] bg-border p-[2px] dark:bg-transparent"
+							data-funding-option={choice === option.id ? "picked" : "resting"}
 							key={option.id}
 						>
-							<div
-								aria-hidden
-								className={`t-card-border-spin pointer-events-none absolute inset-0 rounded-[inherit] transition-opacity duration-500 ease-out ${choice === option.id ? "opacity-100" : `opacity-0 group-hover:opacity-100 ${motionStyles.idleRing}`}`}
-								style={{
-									backgroundImage: planCardConicGradient("gateway-payg"),
-								}}
-							/>
-							<Card className="relative flex h-full flex-col border-transparent">
+							<Card
+								className={cn(
+									"flex h-full flex-col transition-colors motion-reduce:transition-none",
+									choice === option.id && "bg-muted"
+								)}
+							>
 								<CardHeader>
 									<button
 										aria-checked={choice === option.id}
@@ -323,7 +322,7 @@ export function StandaloneCreditPlans({
 						)}
 					</div>
 				) : null}
-				<dl className="space-y-2 rounded-xl border p-4 text-sm">
+				<dl className="space-y-2 rounded-xl bg-card p-4 text-sm">
 					<div className="flex justify-between">
 						<dt>Credits added</dt>
 						<dd>{money(quote.faceCents)}</dd>
@@ -380,7 +379,7 @@ export function StandaloneCreditPlans({
 				</Button>
 				{subscriptions.map((subscription) => (
 					<div
-						className="flex items-center justify-between gap-3 rounded-xl border p-4 text-sm"
+						className="flex items-center justify-between gap-3 rounded-xl bg-card p-4 text-sm"
 						key={subscription.id}
 					>
 						<span>
